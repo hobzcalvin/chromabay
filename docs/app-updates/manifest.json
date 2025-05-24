@@ -1,0 +1,7 @@
+{
+  "version": "1.0.0",
+  "bundleId": "1.0.0",
+  "fileUrl": "https://hobzcalvin.github.io/b2/app-updates/bundle.zip",
+  "shouldForceUpdate": false,
+  "releaseNotes": "Initial release"
+} 
