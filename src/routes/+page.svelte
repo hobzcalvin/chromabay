@@ -28,6 +28,13 @@
   let notifications: string[] = [];
   let writeData = '';
 
+  // Build information from environment variables
+  const buildInfo = {
+    commitHash: import.meta.env.VITE_COMMIT_HASH || 'dev',
+    buildDate: import.meta.env.VITE_BUILD_DATE || new Date().toISOString().slice(0, 19).replace('T', ' ') + ' UTC',
+    commitMessage: import.meta.env.VITE_COMMIT_MESSAGE || 'Development build'
+  };
+
   onMount(async () => {
     isWeb = Capacitor.getPlatform() === 'web';
     
@@ -36,7 +43,7 @@
       bleSupported = true;
       bleEnabled = await isBleEnabled();
       statusMessage = bleEnabled ? 'Bluetooth is ready!' : 'Bluetooth is not enabled';
-    } catch (error) {
+    } catch (error: any) {
       console.error('BLE initialization failed:', error);
       statusMessage = 'BLE not supported on this platform';
     }
@@ -47,7 +54,7 @@
       await enableBle();
       bleEnabled = await isBleEnabled();
       statusMessage = 'Bluetooth enabled successfully!';
-    } catch (error) {
+    } catch (error: any) {
       statusMessage = 'Failed to enable Bluetooth';
       console.error('Enable BLE error:', error);
     }
@@ -76,7 +83,7 @@
         scanning = false;
         statusMessage = `Device selected. Found ${devices.length} device(s).`;
       }
-    } catch (error) {
+    } catch (error: any) {
       scanning = false;
       if (error.name === 'NotFoundError') {
         statusMessage = 'No device selected or no devices found';
@@ -92,7 +99,7 @@
       await stopScan();
       scanning = false;
       statusMessage = `Scan stopped. Found ${devices.length} devices.`;
-    } catch (error) {
+    } catch (error: any) {
       scanning = false;
       statusMessage = 'Error stopping scan';
       console.error('Stop scan error:', error);
@@ -110,7 +117,7 @@
       const discoveredServices = await discoverServices(device.deviceId);
       services = discoveredServices;
       statusMessage = `Connected! Found ${services.length} service(s).`;
-    } catch (error) {
+    } catch (error: any) {
       statusMessage = `Failed to connect to ${device.name}`;
       console.error('Connect error:', error);
     }
@@ -125,7 +132,7 @@
       selectedDevice = null;
       services = [];
       notifications = [];
-    } catch (error) {
+    } catch (error: any) {
       statusMessage = 'Failed to disconnect';
       console.error('Disconnect error:', error);
     }
@@ -138,7 +145,7 @@
       const value = await readCharacteristic(selectedDevice.deviceId, serviceUuid, charUuid);
       statusMessage = `Read: "${value}"`;
       console.log('Read value:', value);
-    } catch (error) {
+    } catch (error: any) {
       statusMessage = 'Failed to read characteristic';
       console.error('Read error:', error);
     }
@@ -151,7 +158,7 @@
       await writeCharacteristic(selectedDevice.deviceId, serviceUuid, charUuid, writeData);
       statusMessage = `Wrote: "${writeData}"`;
       writeData = '';
-    } catch (error) {
+    } catch (error: any) {
       statusMessage = 'Failed to write characteristic';
       console.error('Write error:', error);
     }
@@ -165,7 +172,7 @@
         notifications = [`${new Date().toLocaleTimeString()}: ${data}`, ...notifications].slice(0, 20);
       });
       statusMessage = 'Notifications started';
-    } catch (error) {
+    } catch (error: any) {
       statusMessage = 'Failed to start notifications';
       console.error('Notifications error:', error);
     }
@@ -177,7 +184,7 @@
     try {
       await stopNotifications(selectedDevice.deviceId, serviceUuid, charUuid);
       statusMessage = 'Notifications stopped';
-    } catch (error) {
+    } catch (error: any) {
       statusMessage = 'Failed to stop notifications';
       console.error('Stop notifications error:', error);
     }
@@ -357,6 +364,12 @@
   <footer>
     <p>Built with SvelteKit + Capacitor + Bluetooth LE</p>
     <p>Ready for ESP32 communication on iOS, Android, and Web</p>
+    <div class="build-info">
+      <p><strong>Build Info:</strong></p>
+      <p>📦 Commit: <code>{buildInfo.commitHash}</code></p>
+      <p>🕒 Built: {buildInfo.buildDate}</p>
+      <p>💬 {buildInfo.commitMessage}</p>
+    </div>
   </footer>
 </main>
 
@@ -677,6 +690,21 @@
 
   footer p {
     margin: 0.5rem 0;
+  }
+
+  .build-info {
+    margin-top: 1.5rem;
+    padding: 1rem;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 8px;
+    font-size: 0.85rem;
+  }
+
+  .build-info code {
+    background: rgba(255, 255, 255, 0.2);
+    padding: 0.2rem 0.4rem;
+    border-radius: 4px;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
   }
 
   @media (max-width: 768px) {

@@ -2,7 +2,7 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: ['main']
+    branches: [ main ]
   workflow_dispatch:
 
 permissions:
@@ -11,8 +11,8 @@ permissions:
   id-token: write
 
 concurrency:
-  group: 'pages'
-  cancel-in-progress: true
+  group: "pages"
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -20,6 +20,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -30,8 +32,18 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Get build info
+        run: |
+          echo "VITE_COMMIT_HASH=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+          echo "VITE_BUILD_DATE=$(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_ENV
+          echo "VITE_COMMIT_MESSAGE=$(git log -1 --pretty=%B | head -1)" >> $GITHUB_ENV
+
       - name: Build
         run: npm run build
+        env:
+          VITE_COMMIT_HASH: ${{ env.VITE_COMMIT_HASH }}
+          VITE_BUILD_DATE: ${{ env.VITE_BUILD_DATE }}
+          VITE_COMMIT_MESSAGE: ${{ env.VITE_COMMIT_MESSAGE }}
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
@@ -39,7 +51,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: 'docs'
+          path: './docs'
 
   deploy:
     environment:
