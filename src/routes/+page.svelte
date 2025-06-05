@@ -13,7 +13,8 @@
     readCharacteristic,
     writeCharacteristic,
     startNotifications,
-    stopNotifications
+    stopNotifications,
+    addESP32Service
   } from '$lib/ble';
   import { Capacitor } from '@capacitor/core';
 
@@ -233,6 +234,25 @@
         <div class="web-info">
           <p><strong>Web Mode:</strong> Uses browser's device picker instead of continuous scanning.</p>
           <p>Requires HTTPS and works best in Chrome/Edge browsers.</p>
+          
+          {#if selectedDevice && services.length === 0}
+            <div class="troubleshooting">
+              <h4>🔧 Service Discovery Issues?</h4>
+              <p><strong>Common causes on web:</strong></p>
+              <ul>
+                <li>ESP32 firmware may need 2-3 seconds to initialize services after connection</li>
+                <li>Custom service UUIDs must be known in advance for Web Bluetooth</li>
+                <li>Some ESP32 devices require bonding/pairing first</li>
+                <li>Check browser console (F12) for detailed error messages</li>
+              </ul>
+              <p><strong>💡 Tips:</strong></p>
+              <ul>
+                <li>Try the "Retry Service Discovery" button after waiting a few seconds</li>
+                <li>If you know your ESP32's service UUIDs, contact the developer to add them</li>
+                <li>Test with a different ESP32 sketch that uses standard services</li>
+              </ul>
+            </div>
+          {/if}
         </div>
       {/if}
       <div class="indicators">
@@ -486,6 +506,29 @@
 
   .web-info p {
     margin: 0.5rem 0;
+  }
+
+  .troubleshooting {
+    background: rgba(245, 158, 11, 0.2);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    border-radius: 8px;
+    padding: 1rem;
+    margin-top: 1rem;
+  }
+
+  .troubleshooting h4 {
+    margin: 0 0 0.5rem 0;
+    color: #fbbf24;
+  }
+
+  .troubleshooting ul {
+    margin: 0.5rem 0;
+    padding-left: 1.5rem;
+  }
+
+  .troubleshooting li {
+    margin: 0.25rem 0;
+    font-size: 0.85rem;
   }
 
   .indicators {
