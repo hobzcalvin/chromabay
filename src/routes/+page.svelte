@@ -1,4 +1,5 @@
 <script lang="ts">
+  import '../app'; // Initialize web plugin registration
   import { onMount } from 'svelte';
   import { initBle, isBleEnabled, enableBle, startScan, stopScan } from '$lib/ble';
 
