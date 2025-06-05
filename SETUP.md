@@ -27,7 +27,7 @@ git push origin main
 4. Choose **main** branch and **/ (root)** folder
 5. Click **Save**
 
-Your site will be available at: `https://yourusername.github.io/b2/`
+Your site will be available at: `https://yourusername.github.io/blumon/`
 
 ### 3. **Development Workflow**
 ```bash
@@ -64,7 +64,7 @@ npm run build
 
 ## 🏢 **Project Structure:**
 ```
-b2/
+blumon/
 ├── src/routes/+page.svelte    # Main app UI
 ├── src/lib/ble.ts            # BLE helper functions
 ├── docs/                     # Built files (auto-generated)

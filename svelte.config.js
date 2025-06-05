@@ -17,7 +17,7 @@ const config = {
 			fallback: 'index.html'
 		}),
 		paths: {
-			base: dev ? '' : '/b2' // GitHub Pages base path for b2 repository
+			base: dev ? '' : '/blumon' // GitHub Pages base path for blumon repository
 		}
 	}
 };
