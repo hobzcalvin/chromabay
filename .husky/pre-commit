@@ -1,0 +1,12 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+# Build the project to docs/ folder
+echo "🔄 Building for GitHub Pages..."
+npm run build
+
+# Stage the built docs/ folder
+echo "📝 Staging docs/ folder..."
+git add docs/
+
+echo "✅ Pre-commit build complete!"

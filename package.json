@@ -1,0 +1,38 @@
+{
+	"name": "blumon",
+	"private": true,
+	"version": "0.0.1",
+	"type": "module",
+	"scripts": {
+		"dev": "vite dev --host 0.0.0.0",
+		"build": "vite build",
+		"preview": "vite preview",
+		"prepare": "husky",
+		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+		"sync": "npx cap sync",
+		"deploy:docs": "npm run build",
+		"ios": "npm run build && npm run sync && npx cap run ios -l --external",
+		"android": "npm run build && npm run sync && npx cap run android -l --external",
+		"deploy": "npm run deploy:docs"
+	},
+	"devDependencies": {
+		"@sveltejs/adapter-auto": "^6.0.0",
+		"@sveltejs/adapter-static": "^3.0.8",
+		"@sveltejs/kit": "^2.16.0",
+		"@sveltejs/vite-plugin-svelte": "^5.0.0",
+		"gh-pages": "^6.3.0",
+		"husky": "^9.1.7",
+		"svelte": "^5.0.0",
+		"svelte-check": "^4.0.0",
+		"typescript": "^5.0.0",
+		"vite": "^6.2.6"
+	},
+	"dependencies": {
+		"@capacitor-community/bluetooth-le": "^7.1.1",
+		"@capacitor/android": "^7.2.0",
+		"@capacitor/cli": "^7.2.0",
+		"@capacitor/core": "^7.2.0",
+		"@capacitor/ios": "^7.2.0"
+	}
+}
