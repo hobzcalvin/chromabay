@@ -1,6 +1,20 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { initBle, isBleEnabled, enableBle, startScan, stopScan } from '$lib/ble';
+  import { 
+    initBle, 
+    isBleEnabled, 
+    enableBle, 
+    startScan, 
+    stopScan,
+    connectToDevice,
+    disconnectFromDevice,
+    isDeviceConnected,
+    discoverServices,
+    readCharacteristic,
+    writeCharacteristic,
+    startNotifications,
+    stopNotifications
+  } from '$lib/ble';
   import { Capacitor } from '@capacitor/core';
 
   let bleSupported = false;
@@ -9,6 +23,10 @@
   let devices: any[] = [];
   let statusMessage = '';
   let isWeb = false;
+  let selectedDevice: any = null;
+  let services: any[] = [];
+  let notifications: string[] = [];
+  let writeData = '';
 
   onMount(async () => {
     isWeb = Capacitor.getPlatform() === 'web';
@@ -80,19 +98,103 @@
       console.error('Stop scan error:', error);
     }
   }
+
+  async function handleConnect(device: any) {
+    try {
+      statusMessage = `Connecting to ${device.name}...`;
+      await connectToDevice(device);
+      selectedDevice = device;
+      statusMessage = `Connected to ${device.name}. Discovering services...`;
+      
+      // Automatically discover services after connection
+      const discoveredServices = await discoverServices(device.deviceId);
+      services = discoveredServices;
+      statusMessage = `Connected! Found ${services.length} service(s).`;
+    } catch (error) {
+      statusMessage = `Failed to connect to ${device.name}`;
+      console.error('Connect error:', error);
+    }
+  }
+
+  async function handleDisconnect() {
+    if (!selectedDevice) return;
+    
+    try {
+      await disconnectFromDevice(selectedDevice.deviceId);
+      statusMessage = `Disconnected from ${selectedDevice.name}`;
+      selectedDevice = null;
+      services = [];
+      notifications = [];
+    } catch (error) {
+      statusMessage = 'Failed to disconnect';
+      console.error('Disconnect error:', error);
+    }
+  }
+
+  async function handleRead(serviceUuid: string, charUuid: string) {
+    if (!selectedDevice) return;
+    
+    try {
+      const value = await readCharacteristic(selectedDevice.deviceId, serviceUuid, charUuid);
+      statusMessage = `Read: "${value}"`;
+      console.log('Read value:', value);
+    } catch (error) {
+      statusMessage = 'Failed to read characteristic';
+      console.error('Read error:', error);
+    }
+  }
+
+  async function handleWrite(serviceUuid: string, charUuid: string) {
+    if (!selectedDevice || !writeData.trim()) return;
+    
+    try {
+      await writeCharacteristic(selectedDevice.deviceId, serviceUuid, charUuid, writeData);
+      statusMessage = `Wrote: "${writeData}"`;
+      writeData = '';
+    } catch (error) {
+      statusMessage = 'Failed to write characteristic';
+      console.error('Write error:', error);
+    }
+  }
+
+  async function handleStartNotifications(serviceUuid: string, charUuid: string) {
+    if (!selectedDevice) return;
+    
+    try {
+      await startNotifications(selectedDevice.deviceId, serviceUuid, charUuid, (data) => {
+        notifications = [`${new Date().toLocaleTimeString()}: ${data}`, ...notifications].slice(0, 20);
+      });
+      statusMessage = 'Notifications started';
+    } catch (error) {
+      statusMessage = 'Failed to start notifications';
+      console.error('Notifications error:', error);
+    }
+  }
+
+  async function handleStopNotifications(serviceUuid: string, charUuid: string) {
+    if (!selectedDevice) return;
+    
+    try {
+      await stopNotifications(selectedDevice.deviceId, serviceUuid, charUuid);
+      statusMessage = 'Notifications stopped';
+    } catch (error) {
+      statusMessage = 'Failed to stop notifications';
+      console.error('Stop notifications error:', error);
+    }
+  }
 </script>
 
 <main>
   <header>
     <h1>🔵 Blumon</h1>
-    <p class="subtitle">Bluetooth Low Energy Monitor</p>
+    <p class="subtitle">ESP32 Bluetooth Low Energy Monitor</p>
     <p class="company">by ReVolt Labs</p>
   </header>
 
   <section class="status">
     <div class="status-card">
       <h2>Status</h2>
-      <p class="status-message" class:error={!bleSupported} class:success={bleEnabled}>
+      <p class="status-message" class:error={!bleSupported} class:success={bleEnabled && selectedDevice}>
         {statusMessage}
       </p>
       {#if isWeb}
@@ -114,6 +216,10 @@
           <span class="icon">🔍</span>
           <span>{isWeb ? 'Selecting Device' : 'Scanning'}</span>
         </div>
+        <div class="indicator" class:active={selectedDevice}>
+          <span class="icon">🔗</span>
+          <span>Connected</span>
+        </div>
       </div>
     </div>
   </section>
@@ -126,10 +232,10 @@
         </button>
       {/if}
       
-      {#if bleEnabled}
+      {#if bleEnabled && !selectedDevice}
         {#if !scanning}
           <button class="btn primary" on:click={handleStartScan}>
-            {isWeb ? 'Select Device' : 'Start Scanning'}
+            {isWeb ? 'Select ESP32 Device' : 'Scan for ESP32s'}
           </button>
         {:else if !isWeb}
           <button class="btn secondary" on:click={handleStopScan}>
@@ -137,17 +243,28 @@
           </button>
         {/if}
       {/if}
+
+      {#if selectedDevice}
+        <button class="btn danger" on:click={handleDisconnect}>
+          Disconnect from {selectedDevice.name}
+        </button>
+      {/if}
     </div>
   </section>
 
-  {#if devices.length > 0}
+  {#if devices.length > 0 && !selectedDevice}
     <section class="devices">
-      <h2>{isWeb ? 'Selected Device' : 'Discovered Devices'} ({devices.length})</h2>
+      <h2>{isWeb ? 'Selected Devices' : 'Discovered Devices'} ({devices.length})</h2>
       <div class="device-list">
         {#each devices as device}
           <div class="device-card">
-            <div class="device-name">
-              {device.name || 'Unknown Device'}
+            <div class="device-header">
+              <div class="device-name">
+                {device.name || 'Unknown Device'}
+              </div>
+              <button class="btn primary small" on:click={() => handleConnect(device)}>
+                Connect
+              </button>
             </div>
             <div class="device-id">
               {device.deviceId}
@@ -163,9 +280,83 @@
     </section>
   {/if}
 
+  {#if selectedDevice && services.length > 0}
+    <section class="services">
+      <h2>ESP32 Services & Characteristics</h2>
+      <div class="write-section">
+        <input 
+          bind:value={writeData} 
+          placeholder="Enter data to send to ESP32" 
+          class="write-input"
+        />
+      </div>
+      
+      <div class="services-list">
+        {#each services as service}
+          <div class="service-card">
+            <h3>Service: {service.uuid}</h3>
+            <div class="characteristics">
+              {#each service.characteristics as characteristic}
+                <div class="characteristic-card">
+                  <div class="char-header">
+                    <span class="char-uuid">{characteristic.uuid}</span>
+                    <div class="char-properties">
+                      {#if characteristic.properties.read}
+                        <span class="property read">R</span>
+                      {/if}
+                      {#if characteristic.properties.write}
+                        <span class="property write">W</span>
+                      {/if}
+                      {#if characteristic.properties.notify}
+                        <span class="property notify">N</span>
+                      {/if}
+                    </div>
+                  </div>
+                  <div class="char-actions">
+                    {#if characteristic.properties.read}
+                      <button class="btn secondary small" on:click={() => handleRead(service.uuid, characteristic.uuid)}>
+                        Read
+                      </button>
+                    {/if}
+                    {#if characteristic.properties.write}
+                      <button class="btn primary small" on:click={() => handleWrite(service.uuid, characteristic.uuid)}>
+                        Write
+                      </button>
+                    {/if}
+                    {#if characteristic.properties.notify}
+                      <button class="btn info small" on:click={() => handleStartNotifications(service.uuid, characteristic.uuid)}>
+                        Notify
+                      </button>
+                      <button class="btn secondary small" on:click={() => handleStopNotifications(service.uuid, characteristic.uuid)}>
+                        Stop
+                      </button>
+                    {/if}
+                  </div>
+                </div>
+              {/each}
+            </div>
+          </div>
+        {/each}
+      </div>
+    </section>
+  {/if}
+
+  {#if notifications.length > 0}
+    <section class="notifications">
+      <h2>ESP32 Notifications</h2>
+      <div class="notifications-list">
+        {#each notifications as notification}
+          <div class="notification-item">
+            {notification}
+          </div>
+        {/each}
+      </div>
+    </section>
+  {/if}
+
   <footer>
     <p>Built with SvelteKit + Capacitor + Bluetooth LE</p>
-    <p>Ready for iOS, Android, and Web deployment</p>
+    <p>Ready for ESP32 communication on iOS, Android, and Web</p>
   </footer>
 </main>
 
@@ -179,7 +370,7 @@
   }
 
   main {
-    max-width: 800px;
+    max-width: 1000px;
     margin: 0 auto;
     padding: 2rem;
     color: white;
@@ -280,6 +471,7 @@
     gap: 1rem;
     justify-content: center;
     margin-bottom: 2rem;
+    flex-wrap: wrap;
   }
 
   .btn {
@@ -292,6 +484,11 @@
     transition: all 0.3s ease;
     text-transform: uppercase;
     letter-spacing: 0.5px;
+  }
+
+  .btn.small {
+    padding: 0.5rem 1rem;
+    font-size: 0.9rem;
   }
 
   .btn.primary {
@@ -314,17 +511,36 @@
     box-shadow: 0 8px 16px rgba(245, 158, 11, 0.3);
   }
 
-  .devices h2 {
+  .btn.danger {
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+    color: white;
+  }
+
+  .btn.danger:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 16px rgba(239, 68, 68, 0.3);
+  }
+
+  .btn.info {
+    background: linear-gradient(135deg, #3b82f6, #2563eb);
+    color: white;
+  }
+
+  .btn.info:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 16px rgba(59, 130, 246, 0.3);
+  }
+
+  .devices h2, .services h2, .notifications h2 {
     margin-bottom: 1rem;
   }
 
-  .device-list {
+  .device-list, .services-list {
     display: grid;
     gap: 1rem;
-    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   }
 
-  .device-card {
+  .device-card, .service-card {
     background: rgba(255, 255, 255, 0.1);
     backdrop-filter: blur(10px);
     border-radius: 12px;
@@ -332,10 +548,16 @@
     border: 1px solid rgba(255, 255, 255, 0.2);
   }
 
+  .device-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+  }
+
   .device-name {
     font-size: 1.2rem;
     font-weight: 600;
-    margin-bottom: 0.5rem;
   }
 
   .device-id {
@@ -350,6 +572,103 @@
     color: #22c55e;
   }
 
+  .write-section {
+    margin-bottom: 2rem;
+  }
+
+  .write-input {
+    width: 100%;
+    padding: 1rem;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+    font-size: 1rem;
+  }
+
+  .write-input::placeholder {
+    color: rgba(255, 255, 255, 0.7);
+  }
+
+  .service-card h3 {
+    margin: 0 0 1rem 0;
+    font-size: 1rem;
+    opacity: 0.9;
+  }
+
+  .characteristics {
+    display: grid;
+    gap: 1rem;
+  }
+
+  .characteristic-card {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    padding: 1rem;
+  }
+
+  .char-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+  }
+
+  .char-uuid {
+    font-family: monospace;
+    font-size: 0.8rem;
+    opacity: 0.8;
+  }
+
+  .char-properties {
+    display: flex;
+    gap: 0.25rem;
+  }
+
+  .property {
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: bold;
+  }
+
+  .property.read {
+    background: rgba(34, 197, 94, 0.3);
+  }
+
+  .property.write {
+    background: rgba(59, 130, 246, 0.3);
+  }
+
+  .property.notify {
+    background: rgba(245, 158, 11, 0.3);
+  }
+
+  .char-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .notifications-list {
+    max-height: 300px;
+    overflow-y: auto;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 8px;
+    padding: 1rem;
+  }
+
+  .notification-item {
+    padding: 0.5rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    font-family: monospace;
+    font-size: 0.9rem;
+  }
+
+  .notification-item:last-child {
+    border-bottom: none;
+  }
+
   footer {
     text-align: center;
     margin-top: 3rem;
@@ -360,7 +679,7 @@
     margin: 0.5rem 0;
   }
 
-  @media (max-width: 640px) {
+  @media (max-width: 768px) {
     main {
       padding: 1rem;
     }
@@ -377,6 +696,18 @@
     .btn {
       width: 100%;
       max-width: 300px;
+    }
+
+    .device-header {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 1rem;
+    }
+
+    .char-header {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.5rem;
     }
   }
 </style>
