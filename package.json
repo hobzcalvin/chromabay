@@ -12,7 +12,7 @@
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"sync": "npx cap sync",
 		"deploy:docs": "npm run build",
-		"ios": "npm run build && npm run sync && npx cap run ios -l --external",
+		"ios": "npm run build && npm run sync && npx cap run ios -l",
 		"android": "npm run build && npm run sync && npx cap run android -l --external",
 		"deploy": "npm run deploy:docs",
 		"bundle:create": "node scripts/deploy-live-update.js",
