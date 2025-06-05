@@ -63,8 +63,7 @@ jobs:
           # Create a zip bundle for live updates that can be served from GitHub Pages
           cd docs
           zip -r "live-update-${{ env.VERSION }}.zip" . -x "*.DS_Store"
-          # Move the zip back to docs for GitHub Pages serving
-          mv "live-update-${{ env.VERSION }}.zip" .
+          # The zip is already in the docs directory for GitHub Pages serving
           cd ..
           echo "Live update bundle created and placed in docs for GitHub Pages serving"
 
