@@ -52,9 +52,6 @@ if (browser && Capacitor.isNativePlatform()) {
               
               console.log('Downloading update bundle:', downloadUrl);
               
-              // Show progress to user
-              alert('Downloading update, please wait...');
-              
               await LiveUpdate.downloadBundle({
                 url: downloadUrl,
                 bundleId: bundleId
