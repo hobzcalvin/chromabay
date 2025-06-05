@@ -7,7 +7,7 @@ on:
   workflow_dispatch:  # Allow manual triggering
 
 permissions:
-  contents: write  # Need write access to push to gh-pages branch
+  contents: write  # Need write access to commit to docs folder
   pages: write
   id-token: write
 
@@ -23,6 +23,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -52,12 +53,14 @@ jobs:
           VITE_COMMIT_MESSAGE: ${{ env.VITE_COMMIT_MESSAGE }}
           VITE_VERSION: ${{ env.VITE_VERSION }}
 
-      - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v3
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./docs
-          publish_branch: gh-pages
-          user_name: 'github-actions[bot]'
-          user_email: 'github-actions[bot]@users.noreply.github.com'
-          commit_message: 'Deploy ${{ env.VITE_VERSION || github.sha }}' 
+      - name: Commit and push built files
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add docs/
+          if ! git diff --staged --quiet; then
+            git commit -m "Deploy ${{ env.VITE_VERSION || github.sha }} to docs/ folder"
+            git push origin HEAD:main
+          else
+            echo "No changes to commit"
+          fi 
