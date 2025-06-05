@@ -12,75 +12,90 @@ if (browser && Capacitor.isNativePlatform()) {
       try {
         // Don't ask again if user already declined this session
         if (hasAskedForUpdateThisSession) {
+          console.log('📱 UPDATE: Skipping update check - already asked this session');
           return;
         }
 
-        console.log('Checking for live updates from GitHub Pages...');
+        console.log('📱 UPDATE: Starting update check...');
         
         // Get current version info
+        console.log('📱 UPDATE: Getting current version...');
         const currentVersion = await LiveUpdate.getVersionName();
-        console.log('Current version:', currentVersion.versionName);
+        console.log('📱 UPDATE: Current version:', currentVersion.versionName);
         
         // Fetch version manifest from GitHub Pages
         const manifestUrl = 'https://hobzcalvin.github.io/blumon/version.json';
+        console.log('📱 UPDATE: Fetching manifest from:', manifestUrl);
+        
         const response = await fetch(manifestUrl);
+        console.log('📱 UPDATE: Manifest response status:', response.status);
+        console.log('📱 UPDATE: Manifest response ok:', response.ok);
         
         if (!response.ok) {
-          console.log('No version manifest found, skipping update check');
+          console.log('📱 UPDATE: No version manifest found, skipping update check');
           return;
         }
         
         const manifest = await response.json();
-        console.log('Remote version manifest:', manifest);
+        console.log('📱 UPDATE: Remote version manifest:', JSON.stringify(manifest, null, 2));
         
         // Check if there's a newer version available
         if (manifest.version && manifest.version !== currentVersion.versionName) {
-          console.log(`Update available: ${manifest.version} (current: ${currentVersion.versionName})`);
+          console.log(`📱 UPDATE: Update available! ${manifest.version} (current: ${currentVersion.versionName})`);
           
           // Mark that we've asked this session
           hasAskedForUpdateThisSession = true;
           
           // Ask user if they want to update
+          console.log('📱 UPDATE: Asking user for confirmation...');
           const userConfirmed = confirm(`A new version (${manifest.version}) is available. Would you like to update and restart the app now?`);
+          console.log('📱 UPDATE: User confirmed:', userConfirmed);
           
           if (userConfirmed) {
             // User wants to update
             try {
               // Download the update bundle
-              const downloadUrl = `https://hobzcalvin.github.io${manifest.downloadUrl}`;
+              const downloadUrl = manifest.downloadUrl;
               const bundleId = `github-pages-${manifest.version}`;
               
-              console.log('Downloading update bundle:', downloadUrl);
+              console.log('📱 UPDATE: Starting download...');
+              console.log('📱 UPDATE: Download URL:', downloadUrl);
+              console.log('📱 UPDATE: Bundle ID:', bundleId);
               
               await LiveUpdate.downloadBundle({
                 url: downloadUrl,
                 bundleId: bundleId
               });
               
+              console.log('📱 UPDATE: Download completed successfully');
+              
               // Set as next bundle and reload
+              console.log('📱 UPDATE: Setting next bundle...');
               await LiveUpdate.setNextBundle({
                 bundleId: bundleId
               });
               
-              console.log('Update downloaded, reloading app...');
+              console.log('📱 UPDATE: Next bundle set, reloading app...');
               
               // Reload the app to apply the update
               await LiveUpdate.reload();
               
             } catch (error) {
-              console.error('Update download/apply failed:', error);
+              console.error('📱 UPDATE: Update download/apply failed:', error);
+              console.error('📱 UPDATE: Error details:', JSON.stringify(error, null, 2));
               alert('Failed to download or apply the update. Please try again later.');
             }
           } else {
-            console.log('User declined update');
+            console.log('📱 UPDATE: User declined update');
           }
           
         } else {
-          console.log('App is up to date');
+          console.log('📱 UPDATE: App is up to date');
         }
         
       } catch (error) {
-        console.error('Live update check failed:', error);
+        console.error('📱 UPDATE: Live update check failed:', error);
+        console.error('📱 UPDATE: Error details:', JSON.stringify(error, null, 2));
       }
     };
 
@@ -89,10 +104,10 @@ if (browser && Capacitor.isNativePlatform()) {
 
     // Mark app as ready to prevent automatic rollback
     LiveUpdate.ready().catch((error) => {
-      console.error('Failed to mark app as ready:', error);
+      console.error('📱 UPDATE: Failed to mark app as ready:', error);
     });
   }).catch((error) => {
-    console.error('Failed to load LiveUpdate plugin:', error);
+    console.error('📱 UPDATE: Failed to load LiveUpdate plugin:', error);
   });
 }
 
