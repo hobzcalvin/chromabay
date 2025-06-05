@@ -25,7 +25,7 @@ A cross-platform Bluetooth LE scanning and monitoring application built with Sve
 ### Installation
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/hobzcalvin/blumon.git
 cd blumon
 npm install
 ```
@@ -137,7 +137,7 @@ The app automatically configures the required permissions:
 1. In your GitHub repository settings, go to **Pages**
 2. Set **Source** to "Deploy from a branch"
 3. Choose **main** branch and **/ (root)** folder
-4. The site will be available at `https://yourusername.github.io/blumon/`
+4. The site will be available at `https://hobzcalvin.github.io/blumon/`
 
 The pre-commit hook automatically builds to `docs/` and stages the files.
 

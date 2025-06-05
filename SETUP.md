@@ -27,7 +27,7 @@ git push origin main
 4. Choose **main** branch and **/ (root)** folder
 5. Click **Save**
 
-Your site will be available at: `https://yourusername.github.io/blumon/`
+Your site will be available at: `https://hobzcalvin.github.io/blumon/`
 
 ### 3. **Development Workflow**
 ```bash
