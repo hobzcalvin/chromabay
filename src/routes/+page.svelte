@@ -30,6 +30,7 @@
 
   // Build information from environment variables
   const buildInfo = {
+    version: import.meta.env.VITE_VERSION || 'dev',
     commitHash: import.meta.env.VITE_COMMIT_HASH || 'dev',
     buildDate: import.meta.env.VITE_BUILD_DATE || new Date().toISOString().slice(0, 19).replace('T', ' ') + ' UTC',
     commitMessage: import.meta.env.VITE_COMMIT_MESSAGE || 'Development build'
@@ -366,6 +367,7 @@
     <p>Ready for ESP32 communication on iOS, Android, and Web</p>
     <div class="build-info">
       <p><strong>Build Info:</strong></p>
+      <p>📦 Version: <code>{buildInfo.version}</code></p>
       <p>📦 Commit: <code>{buildInfo.commitHash}</code></p>
       <p>🕒 Built: {buildInfo.buildDate}</p>
       <p>💬 {buildInfo.commitMessage}</p>

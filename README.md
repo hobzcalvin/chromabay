@@ -1,215 +1,143 @@
 # 🔵 Blumon
 
-**Bluetooth Low Energy Monitor** by ReVolt Labs
+ESP32 Bluetooth Low Energy Monitor built with SvelteKit + Capacitor.
 
-A cross-platform Bluetooth LE scanning and monitoring application built with SvelteKit, Capacitor, and modern web technologies.
+## 🚀 Features
 
-## ✨ Features
+- **Universal BLE Client**: Connect to and interact with ESP32 devices
+- **Cross-Platform**: Web (Chrome/Edge), iOS, and Android support
+- **Real-time Communication**: Read, write, and receive notifications from ESP32
+- **Service Discovery**: Automatically discover all BLE services and characteristics
+- **Modern UI**: Beautiful, responsive interface with real-time status indicators
 
-- **Cross-Platform**: Runs on iOS, Android, and Web
-- **Bluetooth LE Scanning**: Discover and monitor nearby BLE devices
-- **Real-time Hot Reload**: Sub-second updates on device and in browser
-- **Modern UI**: Beautiful, responsive design with glassmorphism effects
-- **GitHub Pages Deployment**: Automatic deployment via docs/ folder with pre-commit hooks
-- **TypeScript**: Full type safety throughout the application
+## 📱 Deployment
 
-## 🚀 Quick Start
+The app is deployed to GitHub Pages at: https://hobzcalvin.github.io/blumon
+
+### Release Process
+
+This project uses **tag-based deployments** for production releases. Deployments are triggered only when you create version tags, not on every push to main.
+
+#### Creating a Release
+
+Use the release script for easy version management:
+
+```bash
+# Patch release (1.0.0 -> 1.0.1)
+./scripts/release.sh patch
+
+# Minor release (1.0.0 -> 1.1.0)
+./scripts/release.sh minor
+
+# Major release (1.0.0 -> 2.0.0)
+./scripts/release.sh major
+
+# Specific version
+./scripts/release.sh v1.2.3
+```
+
+#### Manual Release
+
+If you prefer to create tags manually:
+
+```bash
+# Create and push a version tag
+git tag -a v1.0.0 -m "Release v1.0.0"
+git push origin v1.0.0
+```
+
+#### Manual Deployment
+
+You can also trigger deployments manually from the GitHub Actions tab without creating a tag.
+
+### Build Information
+
+The deployed app displays build information in the footer:
+- **Version**: Git tag or "manual-deploy"
+- **Commit Hash**: Short git commit hash
+- **Build Date**: UTC timestamp when deployed
+- **Commit Message**: Latest commit message
+
+## 🛠️ Development
 
 ### Prerequisites
 
-- Node.js 18+ 
-- npm or pnpm
-- iOS: Xcode (for iOS development)
-- Android: Android Studio (for Android development)
+- Node.js 20+
+- npm
 
-### Installation
+### Local Development
 
 ```bash
-git clone https://github.com/hobzcalvin/blumon.git
-cd blumon
+# Install dependencies
 npm install
-```
 
-### Development
-
-#### Web Development
-```bash
+# Start development server
 npm run dev
-```
-Opens at `http://localhost:5173` with hot reload
 
-#### iOS Development
+# Build for production
+npm run build
+
+# Preview production build
+npm run preview
+```
+
+### Mobile Development
+
 ```bash
-npm run ios
-```
-Builds, syncs, and runs on iOS with live reload
+# iOS
+npm run build
+npx cap sync ios
+npx cap open ios
 
-#### Android Development  
-```bash
-npm run android
-```
-Builds, syncs, and runs on Android with live reload
-
-### Deployment
-
-#### GitHub Pages (Automatic)
-The project is set up with a pre-commit hook that automatically:
-1. Builds the project to the `docs/` folder
-2. Stages the built files for commit
-3. Commits will automatically update the GitHub Pages deployment
-
-Simply commit your changes:
-```bash
-git add .
-git commit -m "Your changes"
-git push
+# Android
+npm run build
+npx cap sync android
+npx cap open android
 ```
 
-#### Manual Build
-```bash
-npm run deploy:docs  # Builds to docs/ folder
-npm run sync         # Sync to native platforms
+## 🔌 ESP32 Integration
+
+This app can connect to any ESP32 device running BLE server code. The app will automatically discover and display all available services and characteristics.
+
+### Example ESP32 BLE Server
+
+The app works with standard ESP32 BLE libraries. Here's a minimal example:
+
+```cpp
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLE2902.h>
+
+// Create BLE service and characteristics
+BLEService *pService = pServer->createService("12345678-1234-1234-1234-123456789abc");
+BLECharacteristic *pCharacteristic = pService->createCharacteristic(
+  "87654321-4321-4321-4321-cba987654321",
+  BLECharacteristic::PROPERTY_READ |
+  BLECharacteristic::PROPERTY_WRITE |
+  BLECharacteristic::PROPERTY_NOTIFY
+);
+
+// Start advertising
+pService->start();
+pServer->getAdvertising()->start();
 ```
 
-## 📱 Platform Support
+## 📖 Tech Stack
 
-### Web Browser
-- Chrome/Edge: Full BLE support via Web Bluetooth API
-- Safari: Limited support (requires user gesture)
-- Firefox: Experimental support (flag required)
+- **Frontend**: SvelteKit, TypeScript, Vite
+- **Mobile**: Capacitor
+- **BLE**: Capacitor Community Bluetooth LE plugin + Web Bluetooth API
+- **Deployment**: GitHub Actions → GitHub Pages
+- **Styling**: Modern CSS with glassmorphism effects
 
-### iOS
-- iOS 13.0+
-- Full BLE scanning and connection capabilities
-- Native performance with Capacitor wrapper
+## 🎯 Use Cases
 
-### Android
-- Android 6.0+ (API level 23)
-- Full BLE scanning and connection capabilities  
-- Requires location permissions for BLE scanning
-
-## 🛠️ Architecture
-
-```
-blumon/
-├── src/
-│   ├── lib/
-│   │   └── ble.ts              # BLE helper functions
-│   └── routes/
-│       └── +page.svelte        # Main app interface
-├── android/                    # Android native project
-├── ios/                        # iOS native project
-├── docs/                       # Built files for GitHub Pages
-├── capacitor.config.ts         # Capacitor configuration
-├── svelte.config.js           # SvelteKit configuration
-└── .husky/                    # Git hooks for auto-deployment
-```
-
-### Key Technologies
-
-- **SvelteKit 2**: Modern web framework with TypeScript
-- **Capacitor 7**: Native app wrapper for iOS/Android
-- **@capacitor-community/bluetooth-le**: Cross-platform BLE plugin
-- **@sveltejs/adapter-static**: Static site generation for GitHub Pages
-- **Husky**: Git hooks for automated deployment
-
-## 🔧 Configuration
-
-### Bluetooth Permissions
-
-The app automatically configures the required permissions:
-
-**Android** (`android/app/src/main/AndroidManifest.xml`):
-```xml
-<uses-permission android:name="android.permission.BLUETOOTH_SCAN"/>
-<uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
-<uses-feature android:name="android.hardware.bluetooth_le" android:required="true"/>
-```
-
-**iOS** (`ios/App/App/Info.plist`):
-```xml
-<key>NSBluetoothAlwaysUsageDescription</key>
-<string>This app uses BLE to communicate with nearby devices</string>
-```
-
-### GitHub Pages Configuration
-
-1. In your GitHub repository settings, go to **Pages**
-2. Set **Source** to "Deploy from a branch"
-3. Choose **main** branch and **/ (root)** folder
-4. The site will be available at `https://hobzcalvin.github.io/blumon/`
-
-The pre-commit hook automatically builds to `docs/` and stages the files.
-
-## 🎯 Usage
-
-1. **Initialize**: App automatically initializes BLE on startup
-2. **Enable Bluetooth**: Click "Enable Bluetooth" if needed
-3. **Start Scanning**: Click "Start Scanning" to discover devices
-4. **View Devices**: Discovered devices appear in real-time
-5. **Stop Scanning**: Click "Stop Scanning" to conserve battery
-
-## 📋 Available Scripts
-
-| Script | Description |
-|--------|-------------|
-| `npm run dev` | Start development server with hot reload |
-| `npm run build` | Build production bundle to docs/ folder |
-| `npm run preview` | Preview production build |
-| `npm run sync` | Sync web assets to native platforms |
-| `npm run ios` | Build and run on iOS with live reload |
-| `npm run android` | Build and run on Android with live reload |
-| `npm run deploy:docs` | Build to docs/ folder |
-| `npm run deploy` | Alias for deploy:docs |
-
-## 🔄 Automated Deployment
-
-The project includes a pre-commit hook (`.husky/pre-commit`) that:
-
-1. Automatically builds the project when you commit
-2. Stages the updated `docs/` folder
-3. Ensures GitHub Pages always has the latest build
-
-No additional setup required - just commit and push!
-
-## 🐛 Troubleshooting
-
-### BLE Not Working in Browser
-- Ensure you're using HTTPS (required for Web Bluetooth)
-- Use Chrome/Edge for best compatibility
-- Check if Web Bluetooth is enabled in browser flags
-
-### iOS Build Issues
-- Ensure Xcode is installed and up to date
-- Check iOS deployment target in project settings
-- Verify Apple Developer account setup
-
-### Android Build Issues  
-- Ensure Android Studio and SDK are installed
-- Check Android API level requirements
-- Verify USB debugging is enabled on device
-
-### GitHub Pages Not Updating
-- Check that the `docs/` folder is committed
-- Verify GitHub Pages is set to deploy from main branch / (root)
-- Check the pre-commit hook is executable: `chmod +x .husky/pre-commit`
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (pre-commit hook will auto-build)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🏢 About ReVolt Labs
-
-Built with ⚡ by [ReVolt Labs](https://revoltlabs.com) - Powering the future of IoT and mobile applications.
+- **IoT Development**: Test and debug ESP32 BLE communication
+- **Sensor Monitoring**: Read real-time data from ESP32 sensors
+- **Device Control**: Send commands to ESP32-controlled devices
+- **Prototyping**: Rapid ESP32 BLE app development and testing
 
 ---
 
-**Need help?** Open an issue or contact us at [support@revoltlabs.com](mailto:support@revoltlabs.com)
+Built with ❤️ by ReVolt Labs

@@ -2,8 +2,9 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [ main ]
-  workflow_dispatch:
+    tags:
+      - 'v*.*.*'  # Deploy only on version tags like v1.0.0, v1.2.3, etc.
+  workflow_dispatch:  # Allow manual triggering
 
 permissions:
   contents: read
@@ -37,6 +38,11 @@ jobs:
           echo "VITE_COMMIT_HASH=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
           echo "VITE_BUILD_DATE=$(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_ENV
           echo "VITE_COMMIT_MESSAGE=$(git log -1 --pretty=%B | head -1)" >> $GITHUB_ENV
+          if [[ $GITHUB_REF == refs/tags/* ]]; then
+            echo "VITE_VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+          else
+            echo "VITE_VERSION=manual-deploy" >> $GITHUB_ENV
+          fi
 
       - name: Build
         run: npm run build
@@ -44,6 +50,7 @@ jobs:
           VITE_COMMIT_HASH: ${{ env.VITE_COMMIT_HASH }}
           VITE_BUILD_DATE: ${{ env.VITE_BUILD_DATE }}
           VITE_COMMIT_MESSAGE: ${{ env.VITE_COMMIT_MESSAGE }}
+          VITE_VERSION: ${{ env.VITE_VERSION }}
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
