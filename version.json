@@ -1,7 +1,7 @@
 {
-  "version": "v0.0.15",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.15.zip",
-  "buildDate": "2025-06-05 07:59:11 UTC",
-  "commitHash": "099140005834980d453c4dd3c7def9db9ae42dc7",
-  "commitMessage": "fix git tag detection in GitHub Actions workflow - Use fetch-depth: 0 to get full git history - Use git tag --points-at HEAD instead of git describe --exact-match - Add debugging output to troubleshoot tag detection issues"
+  "version": "v0.0.16",
+  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.16.zip",
+  "buildDate": "2025-06-05 08:23:52 UTC",
+  "commitHash": "ee285300d5f7de9c97ac9c7fe069b77ae346a7be",
+  "commitMessage": "implement proper live update version tracking - Track version from active bundle ID - Extract from currentBundleId - Fallback to base app version - Normalize version comparison - Fix bundle exists error - Scalable approach"
 }
