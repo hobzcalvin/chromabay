@@ -43,8 +43,10 @@ jobs:
             echo "VITE_VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
             echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
           else
-            echo "VITE_VERSION=manual-deploy" >> $GITHUB_ENV
-            echo "VERSION=manual-deploy" >> $GITHUB_ENV
+            # For manual triggers, use timestamp + commit hash for unique version
+            MANUAL_VERSION="manual-$(date -u +'%Y%m%d-%H%M%S')-$(git rev-parse --short HEAD)"
+            echo "VITE_VERSION=${MANUAL_VERSION}" >> $GITHUB_ENV
+            echo "VERSION=${MANUAL_VERSION}" >> $GITHUB_ENV
           fi
 
       - name: Build
