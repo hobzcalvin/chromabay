@@ -77,6 +77,9 @@ if (browser && Capacitor.isNativePlatform()) {
               
               console.log('📱 UPDATE: Next bundle set, reloading app...');
               
+              // NOTE: The downloaded bundle has /blumon base path while the installed app has no base path
+              // This may cause compatibility issues until we resolve base path handling
+              
               // Reload the app to apply the update
               await LiveUpdate.reload();
               
