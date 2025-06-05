@@ -1,7 +1,7 @@
 {
-  "version": "main-c3104a7",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-main-c3104a7.zip",
-  "buildDate": "2025-06-05 06:47:03 UTC",
-  "commitHash": "c3104a78ed3a7466a5c5c746a0dedb206e891750",
-  "commitMessage": "docs: add references to iOS setup documentation in README"
+  "version": "main-309f71c",
+  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-main-309f71c.zip",
+  "buildDate": "2025-06-05 07:15:32 UTC",
+  "commitHash": "309f71ce5e84b33d28706d886fc8e2f0b9684b3e",
+  "commitMessage": "Add Bluetooth usage description to iOS Info.plist - Required for iOS Bluetooth permission - Explains app uses BLE for device monitoring and control"
 }
