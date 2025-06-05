@@ -7,6 +7,15 @@ const config: CapacitorConfig = {
   server: {
     androidScheme: 'http',
     iosScheme: 'http'
+  },
+  plugins: {
+    LiveUpdate: {
+      // Use GitHub Pages as the live update source
+      serverDomain: 'https://hobzcalvin.github.io',
+      autoDeleteBundles: true,
+      readyTimeout: 10000,
+      httpTimeout: 60000
+    }
   }
 };
 

@@ -9,6 +9,7 @@ ESP32 Bluetooth Low Energy Monitor built with SvelteKit + Capacitor.
 - **Real-time Communication**: Read, write, and receive notifications from ESP32
 - **Service Discovery**: Automatically discover all BLE services and characteristics
 - **Modern UI**: Beautiful, responsive interface with real-time status indicators
+- **Live Updates** - Push updates to mobile apps without app store releases
 
 ## 📱 Deployment
 
@@ -137,6 +138,64 @@ pServer->getAdvertising()->start();
 - **Sensor Monitoring**: Read real-time data from ESP32 sensors
 - **Device Control**: Send commands to ESP32-controlled devices
 - **Prototyping**: Rapid ESP32 BLE app development and testing
+
+## Live Updates
+
+This app supports live updates for the mobile versions, allowing you to push updates directly to users' devices without going through app store reviews.
+
+### How it works
+
+1. **GitHub Pages Deployment**: The web app is built and deployed to GitHub Pages
+2. **Bundle Creation**: Each deployment creates a ZIP bundle of the web assets
+3. **Version Manifest**: A `version.json` file tracks the latest available version
+4. **Mobile Check**: Mobile apps periodically check for updates from GitHub Pages
+5. **Background Download**: When an update is available, it downloads in the background
+6. **Next Restart**: Updates are applied when the app is restarted
+
+### Technical Details
+
+- Uses [Capawesome Live Updates](https://capawesome.io/plugins/live-update/) plugin
+- Self-hosted on GitHub Pages (no external service required)
+- Updates are downloaded as ZIP bundles
+- Automatic rollback if updates fail
+- Only web layer updates (HTML/CSS/JS) - native changes still require app store
+
+### Update Process
+
+1. Make changes to your app
+2. Push a version tag: `git tag v1.0.1 && git push origin v1.0.1`
+3. GitHub Actions builds and deploys to Pages
+4. Mobile apps automatically detect and download the update
+5. Users get the update on next app restart
+
+### Development
+
+For live update testing:
+
+```bash
+# Create a test bundle
+npm run bundle:create
+
+# Build and create live update
+npm run bundle:live
+```
+
+### Configuration
+
+Live updates are configured in `capacitor.config.ts`:
+
+```typescript
+plugins: {
+  LiveUpdate: {
+    serverDomain: 'https://hobzcalvin.github.io',
+    autoDeleteBundles: true,
+    readyTimeout: 10000,
+    httpTimeout: 60000
+  }
+}
+```
+
+The system checks for updates by fetching `/blumon/version.json` from GitHub Pages and comparing versions.
 
 ---
 

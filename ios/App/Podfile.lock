@@ -1,14 +1,26 @@
 PODS:
+  - Alamofire (5.10.2)
   - Capacitor (7.2.0):
     - CapacitorCordova
   - CapacitorCommunityBluetoothLe (7.1.1):
     - Capacitor
   - CapacitorCordova (7.2.0)
+  - CapawesomeCapacitorLiveUpdate (7.2.0):
+    - Alamofire (~> 5.9)
+    - Capacitor
+    - SSZipArchive (~> 2.2.3)
+  - SSZipArchive (2.2.3)
 
 DEPENDENCIES:
   - "Capacitor (from `../../node_modules/@capacitor/ios`)"
   - "CapacitorCommunityBluetoothLe (from `../../node_modules/@capacitor-community/bluetooth-le`)"
   - "CapacitorCordova (from `../../node_modules/@capacitor/ios`)"
+  - "CapawesomeCapacitorLiveUpdate (from `../../node_modules/@capawesome/capacitor-live-update`)"
+
+SPEC REPOS:
+  trunk:
+    - Alamofire
+    - SSZipArchive
 
 EXTERNAL SOURCES:
   Capacitor:
@@ -17,12 +29,17 @@ EXTERNAL SOURCES:
     :path: "../../node_modules/@capacitor-community/bluetooth-le"
   CapacitorCordova:
     :path: "../../node_modules/@capacitor/ios"
+  CapawesomeCapacitorLiveUpdate:
+    :path: "../../node_modules/@capawesome/capacitor-live-update"
 
 SPEC CHECKSUMS:
+  Alamofire: 7193b3b92c74a07f85569e1a6c4f4237291e7496
   Capacitor: 03bc7cbdde6a629a8b910a9d7d78c3cc7ed09ea7
   CapacitorCommunityBluetoothLe: 3a65ed12464f16189772c1a8c247cb0b91186114
   CapacitorCordova: 5967b9ba03915ef1d585469d6e31f31dc49be96f
+  CapawesomeCapacitorLiveUpdate: 4589d25437c980a8be605523557097ad1118ba91
+  SSZipArchive: 62d4947b08730e4cda640473b0066d209ff033c9
 
-PODFILE CHECKSUM: 76fc7effa5ee8a59363cbeb5754b229c51a9b525
+PODFILE CHECKSUM: d88f9ce3620da4b22ed08be2ee2ec55bb0f7321e
 
 COCOAPODS: 1.16.2

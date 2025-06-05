@@ -14,7 +14,9 @@
 		"deploy:docs": "npm run build",
 		"ios": "npm run build && npm run sync && npx cap run ios -l --external",
 		"android": "npm run build && npm run sync && npx cap run android -l --external",
-		"deploy": "npm run deploy:docs"
+		"deploy": "npm run deploy:docs",
+		"bundle:create": "node scripts/deploy-live-update.js",
+		"bundle:live": "npm run build && node scripts/deploy-live-update.js"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-auto": "^6.0.0",
@@ -33,6 +35,7 @@
 		"@capacitor/android": "^7.2.0",
 		"@capacitor/cli": "^7.2.0",
 		"@capacitor/core": "^7.2.0",
-		"@capacitor/ios": "^7.2.0"
+		"@capacitor/ios": "^7.2.0",
+		"@capawesome/capacitor-live-update": "^7.2.0"
 	}
 }
