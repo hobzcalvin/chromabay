@@ -485,3 +485,16 @@ export async function stopNotifications(deviceId: string, serviceUuid: string, c
     throw error;
   }
 } 
+/**
+ * Get an array of currently connected device IDs
+ */
+export function getConnectedDevices(): string[] {
+  return Array.from(connectedDevices.keys());
+}
+
+/**
+ * Get the count of currently connected devices
+ */
+export function getConnectedDeviceCount(): number {
+  return connectedDevices.size;
+}
