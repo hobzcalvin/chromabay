@@ -4,7 +4,7 @@ import { Capacitor } from '@capacitor/core';
 // Track if we've already asked about updates this session
 let hasAskedForUpdateThisSession = false;
 
-// Initialize live updates when app loads
+// Initialize live updates when app loads (only for native platforms)
 if (browser && Capacitor.isNativePlatform()) {
   import('@capawesome/capacitor-live-update').then(({ LiveUpdate }) => {
     // Check for updates from GitHub Pages using version manifest
@@ -97,59 +97,6 @@ if (browser && Capacitor.isNativePlatform()) {
   }).catch((error) => {
     console.error('Failed to load LiveUpdate plugin:', error);
   });
-} else if (browser) {
-  // For web platform, use the same logic
-  const checkForUpdatesWeb = async () => {
-    try {
-      // Don't ask again if user already declined this session
-      if (hasAskedForUpdateThisSession) {
-        return;
-      }
-
-      console.log('Checking for updates (web platform)...');
-      
-      // Fetch version manifest from GitHub Pages
-      const manifestUrl = 'https://hobzcalvin.github.io/blumon/version.json';
-      const response = await fetch(manifestUrl);
-      
-      if (!response.ok) {
-        console.log('No version manifest found, skipping update check');
-        return;
-      }
-      
-      const manifest = await response.json();
-      console.log('Remote version manifest:', manifest);
-      
-      // For web, we'll compare against a stored version or assume current is different
-      const currentVersion = localStorage.getItem('app-version') || 'dev';
-      
-      if (manifest.version && manifest.version !== currentVersion) {
-        console.log(`Update available: ${manifest.version} (current: ${currentVersion})`);
-        
-        // Mark that we've asked this session
-        hasAskedForUpdateThisSession = true;
-        
-        // Ask user if they want to update
-        const userConfirmed = confirm(`A new version (${manifest.version}) is available. Would you like to reload the page to get the latest version?`);
-        
-        if (userConfirmed) {
-          // Store the new version and reload
-          localStorage.setItem('app-version', manifest.version);
-          window.location.reload();
-        } else {
-          console.log('User declined update');
-        }
-      } else {
-        console.log('App is up to date');
-      }
-      
-    } catch (error) {
-      console.error('Web update check failed:', error);
-    }
-  };
-
-  // Check for updates on web
-  checkForUpdatesWeb();
 }
 
 // Disable prerendering since the app uses browser-specific APIs
