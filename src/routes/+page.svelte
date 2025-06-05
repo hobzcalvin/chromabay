@@ -1,14 +1,18 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { initBle, isBleEnabled, enableBle, startScan, stopScan } from '$lib/ble';
+  import { Capacitor } from '@capacitor/core';
 
   let bleSupported = false;
   let bleEnabled = false;
   let scanning = false;
   let devices: any[] = [];
   let statusMessage = '';
+  let isWeb = false;
 
   onMount(async () => {
+    isWeb = Capacitor.getPlatform() === 'web';
+    
     try {
       await initBle();
       bleSupported = true;
@@ -40,7 +44,7 @@
     try {
       scanning = true;
       devices = [];
-      statusMessage = 'Scanning for devices...';
+      statusMessage = isWeb ? 'Opening device picker...' : 'Scanning for devices...';
       
       await startScan((result) => {
         // Add unique devices to the list
@@ -49,9 +53,18 @@
           devices = [...devices, result.device];
         }
       });
+      
+      if (isWeb) {
+        scanning = false;
+        statusMessage = `Device selected. Found ${devices.length} device(s).`;
+      }
     } catch (error) {
       scanning = false;
-      statusMessage = 'Failed to start scanning';
+      if (error.name === 'NotFoundError') {
+        statusMessage = 'No device selected or no devices found';
+      } else {
+        statusMessage = 'Failed to start scanning';
+      }
       console.error('Scan error:', error);
     }
   }
@@ -82,6 +95,12 @@
       <p class="status-message" class:error={!bleSupported} class:success={bleEnabled}>
         {statusMessage}
       </p>
+      {#if isWeb}
+        <div class="web-info">
+          <p><strong>Web Mode:</strong> Uses browser's device picker instead of continuous scanning.</p>
+          <p>Requires HTTPS and works best in Chrome/Edge browsers.</p>
+        </div>
+      {/if}
       <div class="indicators">
         <div class="indicator" class:active={bleSupported}>
           <span class="icon">📡</span>
@@ -93,7 +112,7 @@
         </div>
         <div class="indicator" class:active={scanning}>
           <span class="icon">🔍</span>
-          <span>Scanning</span>
+          <span>{isWeb ? 'Selecting Device' : 'Scanning'}</span>
         </div>
       </div>
     </div>
@@ -110,9 +129,9 @@
       {#if bleEnabled}
         {#if !scanning}
           <button class="btn primary" on:click={handleStartScan}>
-            Start Scanning
+            {isWeb ? 'Select Device' : 'Start Scanning'}
           </button>
-        {:else}
+        {:else if !isWeb}
           <button class="btn secondary" on:click={handleStopScan}>
             Stop Scanning
           </button>
@@ -123,7 +142,7 @@
 
   {#if devices.length > 0}
     <section class="devices">
-      <h2>Discovered Devices ({devices.length})</h2>
+      <h2>{isWeb ? 'Selected Device' : 'Discovered Devices'} ({devices.length})</h2>
       <div class="device-list">
         {#each devices as device}
           <div class="device-card">
@@ -219,6 +238,19 @@
   .status-message.error {
     background: rgba(239, 68, 68, 0.2);
     border: 1px solid rgba(239, 68, 68, 0.3);
+  }
+
+  .web-info {
+    background: rgba(59, 130, 246, 0.2);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1.5rem;
+    font-size: 0.9rem;
+  }
+
+  .web-info p {
+    margin: 0.5rem 0;
   }
 
   .indicators {
