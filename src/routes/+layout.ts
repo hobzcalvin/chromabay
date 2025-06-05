@@ -68,4 +68,6 @@ if (browser && Capacitor.isNativePlatform()) {
   });
 }
 
-export const prerender = true; 
+// Disable prerendering since the app uses browser-specific APIs
+export const prerender = false;
+export const ssr = false; 
