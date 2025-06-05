@@ -58,6 +58,10 @@ jobs:
           export VITE_BUILD_DATE="${{ steps.version.outputs.BUILD_DATE }}"
           export VITE_COMMIT_HASH="${{ steps.version.outputs.COMMIT_HASH }}"
           export VITE_COMMIT_MESSAGE="${{ steps.version.outputs.COMMIT_MESSAGE }}"
+          export NODE_ENV=production
+          # Temporarily modify svelte.config.js to build to docs folder
+          sed -i "s/pages: 'build'/pages: 'docs'/" svelte.config.js
+          sed -i "s/assets: 'build'/assets: 'docs'/" svelte.config.js
           npm run build
 
       - name: Create live update bundle
