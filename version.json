@@ -1,7 +1,7 @@
 {
-  "version": "main-68ee1b4",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-main-68ee1b4.zip",
-  "buildDate": "2025-06-05 07:35:52 UTC",
-  "commitHash": "68ee1b401ec2326f350ede04337486a23a32c718",
-  "commitMessage": "Fix live updates for mobile apps - Build separate mobile bundle without base path for live updates - Keep GitHub Pages build with base path for web deployment - Mobile live update bundles now match iOS app expectations"
+  "version": "main-e133098",
+  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-main-e133098.zip",
+  "buildDate": "2025-06-05 07:45:03 UTC",
+  "commitHash": "e1330984fa1b0fd7a80d39fb2050d84c10a16eb7",
+  "commitMessage": "cache-bust"
 }
