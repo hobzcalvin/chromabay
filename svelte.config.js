@@ -21,7 +21,9 @@ const config = {
 			strict: true
 		}),
 		paths: {
-			base: process.env.NODE_ENV === 'production' ? '/blumon' : ''
+			// Always use '/blumon' base path for consistency between dev and production
+			// This ensures live updates work properly since base paths always match
+			base: '/blumon'
 		}
 	}
 };
