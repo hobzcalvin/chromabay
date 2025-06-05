@@ -11,6 +11,37 @@ function isWeb(): boolean {
 // Store connected devices and their GATT servers
 const connectedDevices = new Map<string, any>();
 
+// Configuration for ESP32 service UUIDs
+let esp32ServiceUUIDs: string[] = [
+  // Generic services
+  '0000180f-0000-1000-8000-00805f9b34fb', // Battery Service
+  '0000180a-0000-1000-8000-00805f9b34fb', // Device Information Service
+  '00001800-0000-1000-8000-00805f9b34fb', // Generic Access
+  '00001801-0000-1000-8000-00805f9b34fb', // Generic Attribute
+  // Nordic UART Service (commonly used with ESP32)
+  '6e400001-b5a3-f393-e0a9-e50e24dcca9e',
+  // ESP32 specific services (examples)
+  '12345678-1234-1234-1234-123456789abc',
+  '87654321-4321-4321-4321-cba987654321',
+  // Custom service UUIDs that might be used
+  'ffffffff-ffff-ffff-ffff-ffffffffffff'
+];
+
+/**
+ * Configure ESP32 service UUIDs for Web Bluetooth
+ * Call this before scanning to add your custom service UUIDs
+ */
+export function configureESP32Services(serviceUUIDs: string[]): void {
+  esp32ServiceUUIDs = [...esp32ServiceUUIDs, ...serviceUUIDs];
+}
+
+/**
+ * Get current ESP32 service UUIDs
+ */
+export function getESP32Services(): string[] {
+  return [...esp32ServiceUUIDs];
+}
+
 /**
  * Initialize the Bluetooth Low Energy client
  * This should be called once when the app starts
@@ -70,11 +101,17 @@ export async function startScan(
 ): Promise<void> {
   try {
     if (isWeb()) {
+      // Common ESP32 and generic BLE service UUIDs
+      const commonServiceUUIDs = [
+        ...esp32ServiceUUIDs,
+        ...((options?.services || []) as string[])
+      ];
+
       // Use Web Bluetooth API's requestDevice for web browsers
       // This shows a device picker dialog instead of continuous scanning
       const device = await navigator.bluetooth.requestDevice({
         acceptAllDevices: true,
-        optionalServices: options?.services || []
+        optionalServices: commonServiceUUIDs
       });
       
       // Simulate the callback format for consistency with native apps
@@ -177,27 +214,74 @@ export async function discoverServices(deviceId: string): Promise<any[]> {
         throw new Error('Device not connected');
       }
       
-      const services = await deviceInfo.gattServer.getPrimaryServices();
-      const serviceList = await Promise.all(
-        services.map(async (service: any) => {
-          const characteristics = await service.getCharacteristics();
-          return {
-            uuid: service.uuid,
-            characteristics: characteristics.map((char: any) => ({
-              uuid: char.uuid,
-              properties: {
-                read: char.properties.read,
-                write: char.properties.write || char.properties.writeWithoutResponse,
-                notify: char.properties.notify,
-                indicate: char.properties.indicate
-              }
-            }))
-          };
-        })
-      );
+      // Add retry logic with delay for ESP32 service initialization
+      let services: any[] = [];
+      let retryCount = 0;
+      const maxRetries = 3;
+      const retryDelay = 1000; // 1 second
       
-      deviceInfo.services = serviceList;
-      return serviceList;
+      while (retryCount < maxRetries && services.length === 0) {
+        try {
+          if (retryCount > 0) {
+            console.log(`Retrying service discovery (attempt ${retryCount + 1}/${maxRetries})...`);
+            await new Promise(resolve => setTimeout(resolve, retryDelay));
+          }
+          
+          const primaryServices = await deviceInfo.gattServer.getPrimaryServices();
+          console.log(`Found ${primaryServices.length} primary services`);
+          
+          if (primaryServices.length === 0) {
+            retryCount++;
+            continue;
+          }
+          
+          const serviceList = await Promise.all(
+            primaryServices.map(async (service: any) => {
+              try {
+                const characteristics = await service.getCharacteristics();
+                console.log(`Service ${service.uuid} has ${characteristics.length} characteristics`);
+                return {
+                  uuid: service.uuid,
+                  characteristics: characteristics.map((char: any) => ({
+                    uuid: char.uuid,
+                    properties: {
+                      read: char.properties.read,
+                      write: char.properties.write || char.properties.writeWithoutResponse,
+                      notify: char.properties.notify,
+                      indicate: char.properties.indicate
+                    }
+                  }))
+                };
+              } catch (charError) {
+                console.warn(`Error getting characteristics for service ${service.uuid}:`, charError);
+                return {
+                  uuid: service.uuid,
+                  characteristics: []
+                };
+              }
+            })
+          );
+          
+          services = serviceList.filter(service => service !== null);
+          deviceInfo.services = services;
+          break;
+          
+        } catch (discoveryError) {
+          console.warn(`Service discovery attempt ${retryCount + 1} failed:`, discoveryError);
+          retryCount++;
+          if (retryCount >= maxRetries) {
+            throw discoveryError;
+          }
+        }
+      }
+      
+      if (services.length === 0) {
+        console.warn('No services found after all retry attempts. The ESP32 may not be advertising any services or may need more time to initialize.');
+        // Return empty array instead of throwing error to allow manual retry
+        return [];
+      }
+      
+      return services;
     } else {
       const services = await BleClient.getServices(deviceId);
       return services;

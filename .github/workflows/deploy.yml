@@ -1,13 +1,17 @@
-name: Deploy to GitHub Pages and Live Updates
+name: Deploy to GitHub Pages with Live Updates
 
 on:
   push:
-    tags:
-      - 'v*.*.*'  # Deploy only on version tags like v1.0.0, v1.2.3, etc.
-  workflow_dispatch:  # Allow manual triggering
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version for manual deployment'
+        required: false
+        default: ''
 
 permissions:
-  contents: write  # Need write access to commit to docs folder
+  contents: read
   pages: write
   id-token: write
 
@@ -21,83 +25,66 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '18'
           cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Get build info
+      - name: Generate version info
+        id: version
         run: |
-          echo "VITE_COMMIT_HASH=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
-          echo "VITE_BUILD_DATE=$(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_ENV
-          echo "VITE_COMMIT_MESSAGE=$(git log -1 --pretty=%B | head -1)" >> $GITHUB_ENV
-          if [[ $GITHUB_REF == refs/tags/* ]]; then
-            echo "VITE_VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
-            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+            SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
+            VERSION="manual-${TIMESTAMP}-${SHORT_SHA}"
           else
-            # For manual triggers, use timestamp + commit hash for unique version
-            MANUAL_VERSION="manual-$(date -u +'%Y%m%d-%H%M%S')-$(git rev-parse --short HEAD)"
-            echo "VITE_VERSION=${MANUAL_VERSION}" >> $GITHUB_ENV
-            echo "VERSION=${MANUAL_VERSION}" >> $GITHUB_ENV
+            VERSION="${{ github.ref_name }}-$(echo ${{ github.sha }} | cut -c1-7)"
           fi
+          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+          echo "BUILD_DATE=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_OUTPUT
+          echo "COMMIT_HASH=${{ github.sha }}" >> $GITHUB_OUTPUT
+          echo "COMMIT_MESSAGE=$(git log -1 --pretty=%B | head -1)" >> $GITHUB_OUTPUT
 
-      - name: Build
-        run: npm run build
-        env:
-          VITE_COMMIT_HASH: ${{ env.VITE_COMMIT_HASH }}
-          VITE_BUILD_DATE: ${{ env.VITE_BUILD_DATE }}
-          VITE_COMMIT_MESSAGE: ${{ env.VITE_COMMIT_MESSAGE }}
-          VITE_VERSION: ${{ env.VITE_VERSION }}
-
-      - name: Disable Jekyll
-        run: touch docs/.nojekyll
-
-      - name: Create Live Update Bundle
+      - name: Build with version info
         run: |
-          # Create a zip bundle for live updates that can be served from GitHub Pages
+          export VITE_VERSION="${{ steps.version.outputs.VERSION }}"
+          export VITE_BUILD_DATE="${{ steps.version.outputs.BUILD_DATE }}"
+          export VITE_COMMIT_HASH="${{ steps.version.outputs.COMMIT_HASH }}"
+          export VITE_COMMIT_MESSAGE="${{ steps.version.outputs.COMMIT_MESSAGE }}"
+          npm run build
+
+      - name: Create live update bundle
+        run: |
+          # Create ZIP bundle from docs folder for mobile live updates
           cd docs
-          zip -r "live-update-${{ env.VERSION }}.zip" . -x "*.DS_Store"
-          # The zip is already in the docs directory for GitHub Pages serving
+          zip -r "../live-update-${{ steps.version.outputs.VERSION }}.zip" . -x "*.zip" "version.json"
           cd ..
-          echo "Live update bundle created and placed in docs for GitHub Pages serving"
-
-      - name: Create version manifest
-        run: |
-          # Create a simple JSON manifest for version checking
+          
+          # Move ZIP to docs folder
+          mv "live-update-${{ steps.version.outputs.VERSION }}.zip" docs/
+          
+          # Create version manifest for live updates
           cat > docs/version.json << EOF
           {
-            "version": "${{ env.VERSION }}",
-            "downloadUrl": "/blumon/live-update-${{ env.VERSION }}.zip",
-            "buildDate": "${{ env.VITE_BUILD_DATE }}",
-            "commitHash": "${{ env.VITE_COMMIT_HASH }}"
+            "version": "${{ steps.version.outputs.VERSION }}",
+            "downloadUrl": "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/live-update-${{ steps.version.outputs.VERSION }}.zip",
+            "buildDate": "${{ steps.version.outputs.BUILD_DATE }}",
+            "commitHash": "${{ steps.version.outputs.COMMIT_HASH }}",
+            "commitMessage": "${{ steps.version.outputs.COMMIT_MESSAGE }}"
           }
           EOF
-          echo "Version manifest created"
 
-      - name: Upload Live Update Bundle as Artifact
-        uses: actions/upload-artifact@v4
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
         with:
-          name: live-update-bundle-${{ env.VERSION }}
-          path: docs/live-update-${{ env.VERSION }}.zip
-          retention-days: 90
-
-      - name: Commit and push built files
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add -f docs/
-          if ! git diff --staged --quiet; then
-            git commit -m "Deploy ${{ env.VITE_VERSION || github.sha }} to docs/ folder"
-            # Try to push, if it fails due to conflicts, force push
-            git push origin HEAD:main || git push origin HEAD:main --force
-          else
-            echo "No changes to commit"
-          fi 
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs
+          publish_branch: gh-pages
+          enable_jekyll: false 

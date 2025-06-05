@@ -117,10 +117,34 @@
       // Automatically discover services after connection
       const discoveredServices = await discoverServices(device.deviceId);
       services = discoveredServices;
-      statusMessage = `Connected! Found ${services.length} service(s).`;
+      
+      if (services.length === 0) {
+        statusMessage = `Connected to ${device.name}, but no services found. Try "Retry Service Discovery" or check if your ESP32 is advertising services.`;
+      } else {
+        statusMessage = `Connected! Found ${services.length} service(s).`;
+      }
     } catch (error: any) {
       statusMessage = `Failed to connect to ${device.name}`;
       console.error('Connect error:', error);
+    }
+  }
+
+  async function handleRetryServiceDiscovery() {
+    if (!selectedDevice) return;
+    
+    try {
+      statusMessage = 'Retrying service discovery...';
+      const discoveredServices = await discoverServices(selectedDevice.deviceId);
+      services = discoveredServices;
+      
+      if (services.length === 0) {
+        statusMessage = `Still no services found. Check your ESP32's service advertising.`;
+      } else {
+        statusMessage = `Success! Found ${services.length} service(s).`;
+      }
+    } catch (error: any) {
+      statusMessage = 'Service discovery failed again';
+      console.error('Service discovery error:', error);
     }
   }
 
@@ -256,6 +280,11 @@
         <button class="btn danger" on:click={handleDisconnect}>
           Disconnect from {selectedDevice.name}
         </button>
+        {#if services.length === 0}
+          <button class="btn primary" on:click={handleRetryServiceDiscovery}>
+            Retry Service Discovery
+          </button>
+        {/if}
       {/if}
     </div>
   </section>
