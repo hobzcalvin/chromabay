@@ -1,7 +1,7 @@
 {
-  "version": "main-0b16394",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-main-0b16394.zip",
-  "buildDate": "2025-06-05 07:53:23 UTC",
-  "commitHash": "0b16394086a984e58e68dbabc14b44a0fe72eeec",
-  "commitMessage": "use git tag for vesion"
+  "version": "v0.0.15",
+  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.15.zip",
+  "buildDate": "2025-06-05 07:59:11 UTC",
+  "commitHash": "099140005834980d453c4dd3c7def9db9ae42dc7",
+  "commitMessage": "fix git tag detection in GitHub Actions workflow - Use fetch-depth: 0 to get full git history - Use git tag --points-at HEAD instead of git describe --exact-match - Add debugging output to troubleshoot tag detection issues"
 }
