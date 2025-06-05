@@ -1,7 +1,7 @@
 {
-  "version": "main-e133098",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-main-e133098.zip",
-  "buildDate": "2025-06-05 07:45:03 UTC",
-  "commitHash": "e1330984fa1b0fd7a80d39fb2050d84c10a16eb7",
-  "commitMessage": "cache-bust"
+  "version": "main-0b16394",
+  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-main-0b16394.zip",
+  "buildDate": "2025-06-05 07:53:23 UTC",
+  "commitHash": "0b16394086a984e58e68dbabc14b44a0fe72eeec",
+  "commitMessage": "use git tag for vesion"
 }
