@@ -1,7 +1,7 @@
 {
-  "version": "main-51aa4dc",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-main-51aa4dc.zip",
-  "buildDate": "2025-06-05 05:29:34 UTC",
-  "commitHash": "51aa4dc712cce1b77b62337d2e1883b2010be38a",
-  "commitMessage": "fix: Add contents: write permission for peaceiris action to push to gh-pages branch"
+  "version": "main-c3104a7",
+  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-main-c3104a7.zip",
+  "buildDate": "2025-06-05 06:47:03 UTC",
+  "commitHash": "c3104a78ed3a7466a5c5c746a0dedb206e891750",
+  "commitMessage": "docs: add references to iOS setup documentation in README"
 }
