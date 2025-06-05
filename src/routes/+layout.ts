@@ -28,10 +28,26 @@ if (browser && Capacitor.isNativePlatform()) {
           isCheckingForUpdates = true;
           console.log('📱 UPDATE: Starting update check...');
           
-          // Get current version info
-          console.log('📱 UPDATE: Getting current version...');
-          const currentVersion = await LiveUpdate.getVersionName();
-          console.log('📱 UPDATE: Current version:', currentVersion.versionName);
+          // Get current version info - this gives us the live update version if available
+          console.log('📱 UPDATE: Getting current version info...');
+          const [versionInfo, readyInfo] = await Promise.all([
+            LiveUpdate.getVersionName(),
+            LiveUpdate.ready().catch(() => ({ currentBundleId: null }))
+          ]);
+          
+          let currentVersion: string;
+          
+          // If we have a live update bundle active, extract version from bundle ID
+          if (readyInfo.currentBundleId && readyInfo.currentBundleId.startsWith('github-pages-')) {
+            currentVersion = readyInfo.currentBundleId.replace('github-pages-', '');
+            console.log('📱 UPDATE: Using live update bundle version:', currentVersion);
+          } else {
+            // Fallback to app version for fresh installs
+            currentVersion = versionInfo.versionName;
+            console.log('📱 UPDATE: Using base app version:', currentVersion);
+          }
+          
+          console.log('📱 UPDATE: Current version:', currentVersion);
           
           // Fetch version manifest from GitHub Pages
           const manifestUrl = `https://hobzcalvin.github.io/blumon/version.json?t=${Date.now()}`;
@@ -49,9 +65,16 @@ if (browser && Capacitor.isNativePlatform()) {
           const manifest = await response.json();
           console.log('📱 UPDATE: Remote version manifest:', JSON.stringify(manifest, null, 2));
           
+          // Normalize versions for comparison (remove 'v' prefix if present)
+          const normalizeVersion = (version: string) => version.replace(/^v/, '');
+          const currentVersionNormalized = normalizeVersion(currentVersion);
+          const remoteVersionNormalized = normalizeVersion(manifest.version || '');
+          
+          console.log('📱 UPDATE: Normalized versions - current:', currentVersionNormalized, 'remote:', remoteVersionNormalized);
+          
           // Check if there's a newer version available
-          if (manifest.version && manifest.version !== currentVersion.versionName) {
-            console.log(`📱 UPDATE: Update available! ${manifest.version} (current: ${currentVersion.versionName})`);
+          if (remoteVersionNormalized && remoteVersionNormalized !== currentVersionNormalized) {
+            console.log(`📱 UPDATE: Update available! ${manifest.version} (current: ${currentVersion})`);
             
             // Mark that we've asked this session
             hasAskedForUpdateThisSession = true;
@@ -72,10 +95,29 @@ if (browser && Capacitor.isNativePlatform()) {
                 console.log('📱 UPDATE: Download URL:', downloadUrl);
                 console.log('📱 UPDATE: Bundle ID:', bundleId);
                 
-                await LiveUpdate.downloadBundle({
-                  url: downloadUrl,
-                  bundleId: bundleId
-                });
+                try {
+                  await LiveUpdate.downloadBundle({
+                    url: downloadUrl,
+                    bundleId: bundleId
+                  });
+                } catch (downloadError: any) {
+                  if (downloadError.errorMessage?.includes('bundle already exists')) {
+                    console.log('📱 UPDATE: Bundle already exists, deleting and retrying...');
+                    try {
+                      await LiveUpdate.deleteBundle({ bundleId });
+                      console.log('📱 UPDATE: Old bundle deleted, retrying download...');
+                      await LiveUpdate.downloadBundle({
+                        url: downloadUrl,
+                        bundleId: bundleId
+                      });
+                    } catch (retryError) {
+                      console.error('📱 UPDATE: Retry failed:', retryError);
+                      throw retryError;
+                    }
+                  } else {
+                    throw downloadError;
+                  }
+                }
                 
                 console.log('📱 UPDATE: Download completed successfully');
                 
