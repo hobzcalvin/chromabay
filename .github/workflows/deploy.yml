@@ -1,4 +1,4 @@
-name: Deploy to GitHub Pages
+name: Deploy to GitHub Pages and Live Updates
 
 on:
   push:
@@ -41,8 +41,10 @@ jobs:
           echo "VITE_COMMIT_MESSAGE=$(git log -1 --pretty=%B | head -1)" >> $GITHUB_ENV
           if [[ $GITHUB_REF == refs/tags/* ]]; then
             echo "VITE_VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
           else
             echo "VITE_VERSION=manual-deploy" >> $GITHUB_ENV
+            echo "VERSION=manual-deploy" >> $GITHUB_ENV
           fi
 
       - name: Build
@@ -52,6 +54,39 @@ jobs:
           VITE_BUILD_DATE: ${{ env.VITE_BUILD_DATE }}
           VITE_COMMIT_MESSAGE: ${{ env.VITE_COMMIT_MESSAGE }}
           VITE_VERSION: ${{ env.VITE_VERSION }}
+
+      - name: Disable Jekyll
+        run: touch docs/.nojekyll
+
+      - name: Create Live Update Bundle
+        run: |
+          # Create a zip bundle for live updates that can be served from GitHub Pages
+          cd docs
+          zip -r "live-update-${{ env.VERSION }}.zip" . -x "*.DS_Store"
+          # Move the zip back to docs for GitHub Pages serving
+          mv "live-update-${{ env.VERSION }}.zip" .
+          cd ..
+          echo "Live update bundle created and placed in docs for GitHub Pages serving"
+
+      - name: Create version manifest
+        run: |
+          # Create a simple JSON manifest for version checking
+          cat > docs/version.json << EOF
+          {
+            "version": "${{ env.VERSION }}",
+            "downloadUrl": "/blumon/live-update-${{ env.VERSION }}.zip",
+            "buildDate": "${{ env.VITE_BUILD_DATE }}",
+            "commitHash": "${{ env.VITE_COMMIT_HASH }}"
+          }
+          EOF
+          echo "Version manifest created"
+
+      - name: Upload Live Update Bundle as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-update-bundle-${{ env.VERSION }}
+          path: docs/live-update-${{ env.VERSION }}.zip
+          retention-days: 90
 
       - name: Commit and push built files
         run: |
