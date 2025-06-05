@@ -95,7 +95,8 @@ jobs:
           git add -f docs/
           if ! git diff --staged --quiet; then
             git commit -m "Deploy ${{ env.VITE_VERSION || github.sha }} to docs/ folder"
-            git push origin HEAD:main
+            # Try to push, if it fails due to conflicts, force push
+            git push origin HEAD:main || git push origin HEAD:main --force
           else
             echo "No changes to commit"
           fi 
