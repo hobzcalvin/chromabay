@@ -27,7 +27,13 @@ if (browser && Capacitor.isNativePlatform()) {
         const manifestUrl = 'https://hobzcalvin.github.io/blumon/version.json';
         console.log('📱 UPDATE: Fetching manifest from:', manifestUrl);
         
-        const response = await fetch(manifestUrl);
+        const response = await fetch(manifestUrl, {
+          cache: 'no-cache',
+          headers: {
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache'
+          }
+        });
         console.log('📱 UPDATE: Manifest response status:', response.status);
         console.log('📱 UPDATE: Manifest response ok:', response.ok);
         
