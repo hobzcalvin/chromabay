@@ -10,7 +10,7 @@ A cross-platform Bluetooth LE scanning and monitoring application built with Sve
 - **Bluetooth LE Scanning**: Discover and monitor nearby BLE devices
 - **Real-time Hot Reload**: Sub-second updates on device and in browser
 - **Modern UI**: Beautiful, responsive design with glassmorphism effects
-- **Zero Configuration**: One-command deployment to GitHub Pages
+- **GitHub Pages Deployment**: Automatic deployment via docs/ folder with pre-commit hooks
 - **TypeScript**: Full type safety throughout the application
 
 ## 🚀 Quick Start
@@ -26,7 +26,7 @@ A cross-platform Bluetooth LE scanning and monitoring application built with Sve
 
 ```bash
 git clone <your-repo-url>
-cd blumon
+cd b2
 npm install
 ```
 
@@ -52,16 +52,23 @@ Builds, syncs, and runs on Android with live reload
 
 ### Deployment
 
-#### GitHub Pages
+#### GitHub Pages (Automatic)
+The project is set up with a pre-commit hook that automatically:
+1. Builds the project to the `docs/` folder
+2. Stages the built files for commit
+3. Commits will automatically update the GitHub Pages deployment
+
+Simply commit your changes:
 ```bash
-npm run deploy
+git add .
+git commit -m "Your changes"
+git push
 ```
-Deploys static build to GitHub Pages
 
 #### Manual Build
 ```bash
-npm run build
-npm run sync
+npm run deploy:docs  # Builds to docs/ folder
+npm run sync         # Sync to native platforms
 ```
 
 ## 📱 Platform Support
@@ -84,7 +91,7 @@ npm run sync
 ## 🛠️ Architecture
 
 ```
-blumon/
+b2/
 ├── src/
 │   ├── lib/
 │   │   └── ble.ts              # BLE helper functions
@@ -92,9 +99,10 @@ blumon/
 │       └── +page.svelte        # Main app interface
 ├── android/                    # Android native project
 ├── ios/                        # iOS native project
+├── docs/                       # Built files for GitHub Pages
 ├── capacitor.config.ts         # Capacitor configuration
 ├── svelte.config.js           # SvelteKit configuration
-└── .github/workflows/          # GitHub Actions deployment
+└── .husky/                    # Git hooks for auto-deployment
 ```
 
 ### Key Technologies
@@ -103,6 +111,7 @@ blumon/
 - **Capacitor 7**: Native app wrapper for iOS/Android
 - **@capacitor-community/bluetooth-le**: Cross-platform BLE plugin
 - **@sveltejs/adapter-static**: Static site generation for GitHub Pages
+- **Husky**: Git hooks for automated deployment
 
 ## 🔧 Configuration
 
@@ -125,12 +134,12 @@ The app automatically configures the required permissions:
 
 ### GitHub Pages Configuration
 
-Update the base path in `svelte.config.js`:
-```javascript
-paths: {
-  base: dev ? '' : '/your-repo-name'
-}
-```
+1. In your GitHub repository settings, go to **Pages**
+2. Set **Source** to "Deploy from a branch"
+3. Choose **main** branch and **/ (root)** folder
+4. The site will be available at `https://yourusername.github.io/b2/`
+
+The pre-commit hook automatically builds to `docs/` and stages the files.
 
 ## 🎯 Usage
 
@@ -145,22 +154,23 @@ paths: {
 | Script | Description |
 |--------|-------------|
 | `npm run dev` | Start development server with hot reload |
-| `npm run build` | Build production bundle |
+| `npm run build` | Build production bundle to docs/ folder |
 | `npm run preview` | Preview production build |
 | `npm run sync` | Sync web assets to native platforms |
 | `npm run ios` | Build and run on iOS with live reload |
 | `npm run android` | Build and run on Android with live reload |
-| `npm run web` | Deploy to GitHub Pages |
-| `npm run deploy` | Alias for web deployment |
+| `npm run deploy:docs` | Build to docs/ folder |
+| `npm run deploy` | Alias for deploy:docs |
 
-## 🔄 Continuous Deployment
+## 🔄 Automated Deployment
 
-The project includes GitHub Actions workflow for automatic deployment:
+The project includes a pre-commit hook (`.husky/pre-commit`) that:
 
-1. Push to `main` branch
-2. GitHub Actions builds the project
-3. Deploys to GitHub Pages automatically
-4. Available at `https://yourusername.github.io/blumon`
+1. Automatically builds the project when you commit
+2. Stages the updated `docs/` folder
+3. Ensures GitHub Pages always has the latest build
+
+No additional setup required - just commit and push!
 
 ## 🐛 Troubleshooting
 
@@ -179,11 +189,16 @@ The project includes GitHub Actions workflow for automatic deployment:
 - Check Android API level requirements
 - Verify USB debugging is enabled on device
 
+### GitHub Pages Not Updating
+- Check that the `docs/` folder is committed
+- Verify GitHub Pages is set to deploy from main branch / (root)
+- Check the pre-commit hook is executable: `chmod +x .husky/pre-commit`
+
 ## 🤝 Contributing
 
 1. Fork the repository
 2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+3. Commit your changes (pre-commit hook will auto-build)
 4. Push to the branch (`git push origin feature/AmazingFeature`)
 5. Open a Pull Request
 
