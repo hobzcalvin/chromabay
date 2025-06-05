@@ -96,6 +96,10 @@ npx cap sync android
 npx cap open android
 ```
 
+**📱 iOS Setup**: See [IOS_SETUP.md](./IOS_SETUP.md) for detailed iOS development guide including corporate security workarounds.
+
+**📋 Full Setup**: See [SETUP.md](./SETUP.md) for complete project setup and deployment instructions.
+
 ## 🔌 ESP32 Integration
 
 This app can connect to any ESP32 device running BLE server code. The app will automatically discover and display all available services and characteristics.
