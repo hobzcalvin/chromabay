@@ -52,30 +52,44 @@ jobs:
           echo "COMMIT_HASH=${{ github.sha }}" >> $GITHUB_OUTPUT
           echo "COMMIT_MESSAGE=$(git log -1 --pretty=%B | head -1)" >> $GITHUB_OUTPUT
 
-      - name: Build with version info
+      - name: Build for GitHub Pages
         run: |
           export VITE_VERSION="${{ steps.version.outputs.VERSION }}"
           export VITE_BUILD_DATE="${{ steps.version.outputs.BUILD_DATE }}"
           export VITE_COMMIT_HASH="${{ steps.version.outputs.COMMIT_HASH }}"
           export VITE_COMMIT_MESSAGE="${{ steps.version.outputs.COMMIT_MESSAGE }}"
           export NODE_ENV=production
-          export GITHUB_PAGES=true
           # Temporarily modify svelte.config.js to build to docs folder
           sed -i "s/pages: 'build'/pages: 'docs'/" svelte.config.js
           sed -i "s/assets: 'build'/assets: 'docs'/" svelte.config.js
           npm run build
 
+      - name: Build mobile live update bundle (no base path)
+        run: |
+          export VITE_VERSION="${{ steps.version.outputs.VERSION }}"
+          export VITE_BUILD_DATE="${{ steps.version.outputs.BUILD_DATE }}"
+          export VITE_COMMIT_HASH="${{ steps.version.outputs.COMMIT_HASH }}"
+          export VITE_COMMIT_MESSAGE="${{ steps.version.outputs.COMMIT_MESSAGE }}"
+          export NODE_ENV=development
+          # Reset svelte.config.js to original state
+          git checkout svelte.config.js
+          # Build for mobile (no base path)
+          npm run build
+          # Create mobile bundle directory
+          mkdir -p mobile-bundle
+          cp -r build/* mobile-bundle/
+
       - name: Create live update bundle
         run: |
-          # Create ZIP bundle from docs folder for mobile live updates
-          cd docs
+          # Create ZIP bundle from mobile-bundle folder (no base path)
+          cd mobile-bundle
           zip -r "../live-update-${{ steps.version.outputs.VERSION }}.zip" . -x "*.zip" "version.json"
           cd ..
           
           # Move ZIP to docs folder
           mv "live-update-${{ steps.version.outputs.VERSION }}.zip" docs/
           
-          # Create version manifest for live updates
+          # Create version manifest for live updates (use GitHub Pages URL for download)
           cat > docs/version.json << EOF
           {
             "version": "${{ steps.version.outputs.VERSION }}",

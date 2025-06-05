@@ -21,9 +21,7 @@ const config = {
 			strict: true
 		}),
 		paths: {
-			// Use '/blumon' base path only for GitHub Pages deployment
-			// Use empty base path for mobile app builds to work with Capacitor
-			base: process.env.GITHUB_PAGES ? '/blumon' : ''
+			base: process.env.NODE_ENV === 'production' ? '/blumon' : ''
 		}
 	}
 };
