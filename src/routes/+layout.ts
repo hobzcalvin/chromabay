@@ -1,12 +1,20 @@
 import { browser } from '$app/environment';
 import { Capacitor } from '@capacitor/core';
 
+// Track if we've already asked about updates this session
+let hasAskedForUpdateThisSession = false;
+
 // Initialize live updates when app loads
 if (browser && Capacitor.isNativePlatform()) {
   import('@capawesome/capacitor-live-update').then(({ LiveUpdate }) => {
     // Check for updates from GitHub Pages using version manifest
     const checkForUpdates = async () => {
       try {
+        // Don't ask again if user already declined this session
+        if (hasAskedForUpdateThisSession) {
+          return;
+        }
+
         console.log('Checking for live updates from GitHub Pages...');
         
         // Get current version info
@@ -29,23 +37,46 @@ if (browser && Capacitor.isNativePlatform()) {
         if (manifest.version && manifest.version !== currentVersion.versionName) {
           console.log(`Update available: ${manifest.version} (current: ${currentVersion.versionName})`);
           
-          // Download the update bundle
-          const downloadUrl = `https://hobzcalvin.github.io${manifest.downloadUrl}`;
-          const bundleId = `github-pages-${manifest.version}`;
+          // Mark that we've asked this session
+          hasAskedForUpdateThisSession = true;
           
-          console.log('Downloading update bundle:', downloadUrl);
+          // Ask user if they want to update
+          const userConfirmed = confirm(`A new version (${manifest.version}) is available. Would you like to update and restart the app now?`);
           
-          await LiveUpdate.downloadBundle({
-            url: downloadUrl,
-            bundleId: bundleId
-          });
-          
-          // Set as next bundle (will be applied on next app restart)
-          await LiveUpdate.setNextBundle({
-            bundleId: bundleId
-          });
-          
-          console.log('Live update downloaded and queued for next restart:', bundleId);
+          if (userConfirmed) {
+            // User wants to update
+            try {
+              // Download the update bundle
+              const downloadUrl = `https://hobzcalvin.github.io${manifest.downloadUrl}`;
+              const bundleId = `github-pages-${manifest.version}`;
+              
+              console.log('Downloading update bundle:', downloadUrl);
+              
+              // Show progress to user
+              alert('Downloading update, please wait...');
+              
+              await LiveUpdate.downloadBundle({
+                url: downloadUrl,
+                bundleId: bundleId
+              });
+              
+              // Set as next bundle and reload
+              await LiveUpdate.setNextBundle({
+                bundleId: bundleId
+              });
+              
+              console.log('Update downloaded, reloading app...');
+              
+              // Reload the app to apply the update
+              await LiveUpdate.reload();
+              
+            } catch (error) {
+              console.error('Update download/apply failed:', error);
+              alert('Failed to download or apply the update. Please try again later.');
+            }
+          } else {
+            console.log('User declined update');
+          }
           
         } else {
           console.log('App is up to date');
@@ -66,6 +97,59 @@ if (browser && Capacitor.isNativePlatform()) {
   }).catch((error) => {
     console.error('Failed to load LiveUpdate plugin:', error);
   });
+} else if (browser) {
+  // For web platform, use the same logic
+  const checkForUpdatesWeb = async () => {
+    try {
+      // Don't ask again if user already declined this session
+      if (hasAskedForUpdateThisSession) {
+        return;
+      }
+
+      console.log('Checking for updates (web platform)...');
+      
+      // Fetch version manifest from GitHub Pages
+      const manifestUrl = 'https://hobzcalvin.github.io/blumon/version.json';
+      const response = await fetch(manifestUrl);
+      
+      if (!response.ok) {
+        console.log('No version manifest found, skipping update check');
+        return;
+      }
+      
+      const manifest = await response.json();
+      console.log('Remote version manifest:', manifest);
+      
+      // For web, we'll compare against a stored version or assume current is different
+      const currentVersion = localStorage.getItem('app-version') || 'dev';
+      
+      if (manifest.version && manifest.version !== currentVersion) {
+        console.log(`Update available: ${manifest.version} (current: ${currentVersion})`);
+        
+        // Mark that we've asked this session
+        hasAskedForUpdateThisSession = true;
+        
+        // Ask user if they want to update
+        const userConfirmed = confirm(`A new version (${manifest.version}) is available. Would you like to reload the page to get the latest version?`);
+        
+        if (userConfirmed) {
+          // Store the new version and reload
+          localStorage.setItem('app-version', manifest.version);
+          window.location.reload();
+        } else {
+          console.log('User declined update');
+        }
+      } else {
+        console.log('App is up to date');
+      }
+      
+    } catch (error) {
+      console.error('Web update check failed:', error);
+    }
+  };
+
+  // Check for updates on web
+  checkForUpdatesWeb();
 }
 
 // Disable prerendering since the app uses browser-specific APIs
