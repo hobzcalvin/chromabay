@@ -1,7 +1,7 @@
 {
-  "version": "main-309f71c",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-main-309f71c.zip",
-  "buildDate": "2025-06-05 07:15:32 UTC",
-  "commitHash": "309f71ce5e84b33d28706d886fc8e2f0b9684b3e",
-  "commitMessage": "Add Bluetooth usage description to iOS Info.plist - Required for iOS Bluetooth permission - Explains app uses BLE for device monitoring and control"
+  "version": "main-68ee1b4",
+  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-main-68ee1b4.zip",
+  "buildDate": "2025-06-05 07:35:52 UTC",
+  "commitHash": "68ee1b401ec2326f350ede04337486a23a32c718",
+  "commitMessage": "Fix live updates for mobile apps - Build separate mobile bundle without base path for live updates - Keep GitHub Pages build with base path for web deployment - Mobile live update bundles now match iOS app expectations"
 }
