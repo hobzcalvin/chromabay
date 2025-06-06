@@ -83,9 +83,10 @@
       elementsSelectable={false}
       selectNodesOnDrag={false}
       panOnDrag={true}
-      translateExtent={[[0, 0], [400, Infinity]]}
+      translateExtent={[[0, 0], [450, Infinity]]}
+      colorMode="dark"
     >
-      <Background variant={'dots' as any} gap={20} size={1} />
+      <Background variant={'none' as any} />
     </SvelteFlow>
   </div>
 </main>
@@ -129,36 +130,6 @@
     box-sizing: border-box;
   }
   
-  /* Custom Svelte Flow styling */
-  :global(.svelte-flow__node) {
-    font-size: 14px;
-    border-radius: 8px;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-    cursor: grab;
-  }
-  
-  :global(.svelte-flow__node:active) {
-    cursor: grabbing;
-  }
-  
-  :global(.svelte-flow__node.dragging) {
-    cursor: grabbing;
-    box-shadow: 0 8px 16px rgba(0,0,0,0.2);
-  }
-  
-  /* Only apply hover effects when not dragging */
-  :global(.svelte-flow__node:hover:not(.dragging)) {
-    box-shadow: 0 6px 12px rgba(0,0,0,0.15);
-  }
-  
-  :global(.svelte-flow__edge) {
-    stroke-width: 2px;
-  }
-  
-  :global(.svelte-flow__background) {
-    background-color: #fafafa;
-  }
-
   /* Mobile responsive adjustments */
   @media (max-width: 768px) {
     .header h1 {
