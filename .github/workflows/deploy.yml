@@ -79,6 +79,7 @@ jobs:
           export VITE_COMMIT_HASH="${{ steps.version.outputs.COMMIT_HASH }}"
           export VITE_COMMIT_MESSAGE="${{ steps.version.outputs.COMMIT_MESSAGE }}"
           export NODE_ENV=production
+          export GITHUB_PAGES=true
           # Temporarily modify svelte.config.js to build to docs folder
           sed -i "s/pages: 'build'/pages: 'docs'/" svelte.config.js
           sed -i "s/assets: 'build'/assets: 'docs'/" svelte.config.js
@@ -90,7 +91,9 @@ jobs:
           export VITE_BUILD_DATE="${{ steps.version.outputs.BUILD_DATE }}"
           export VITE_COMMIT_HASH="${{ steps.version.outputs.COMMIT_HASH }}"
           export VITE_COMMIT_MESSAGE="${{ steps.version.outputs.COMMIT_MESSAGE }}"
-          export NODE_ENV=development
+          export NODE_ENV=production
+          # Ensure GITHUB_PAGES is not set for mobile build
+          unset GITHUB_PAGES
           # Reset svelte.config.js to original state
           git checkout svelte.config.js
           # Build for mobile (no base path)

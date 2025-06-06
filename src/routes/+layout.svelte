@@ -1,5 +1,6 @@
 <script lang="ts">
   import { page } from '$app/stores';
+  import { base } from '$app/paths';
   import { onMount } from 'svelte';
   import { getConnectedDeviceCount } from '$lib/ble';
 
@@ -17,7 +18,7 @@
 <slot />
 
 <nav class="bottom-nav">
-  <a href="/devices" class:active={$page.url.pathname.startsWith('/devices')}
+  <a href="{base}/devices" class:active={$page.url.pathname.startsWith(`${base}/devices`)}
     >Devices
     <span 
       class="badge" 
@@ -26,10 +27,10 @@
       data-single-digit={connected >= 0 && connected <= 9 ? 'true' : 'false'}
     >{connected}</span>
   </a>
-  <a href="/patterns" class:active={$page.url.pathname.startsWith('/patterns')}>Patterns</a>
-  <a href="/editor" class:active={$page.url.pathname.startsWith('/editor')}>Editor</a>
-  <a href="/interact" class:active={$page.url.pathname.startsWith('/interact')}>Interact</a>
-  <a href="/settings" class:active={$page.url.pathname.startsWith('/settings')}>Settings</a>
+  <a href="{base}/patterns" class:active={$page.url.pathname.startsWith(`${base}/patterns`)}>Patterns</a>
+  <a href="{base}/editor" class:active={$page.url.pathname.startsWith(`${base}/editor`)}>Editor</a>
+  <a href="{base}/interact" class:active={$page.url.pathname.startsWith(`${base}/interact`)}>Interact</a>
+  <a href="{base}/settings" class:active={$page.url.pathname.startsWith(`${base}/settings`)}>Settings</a>
 </nav>
 
 <style>
