@@ -93,8 +93,7 @@
   main {
     display: flex;
     flex-direction: column;
-    height: calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
-    overflow: hidden; /* Prevent any scrolling */
+    height: 100%;
     box-sizing: border-box;
   }
   
