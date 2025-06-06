@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { SvelteFlow, Controls, Background, type Node, type Edge } from '@xyflow/svelte';
+  import { SvelteFlow, Controls, Background, type Node, type Edge, type Connection } from '@xyflow/svelte';
   import '@xyflow/svelte/dist/style.css';
   
   // Define the 3 vertical lanes for node snapping
@@ -82,10 +82,51 @@
     const node = event.targetNode;
     if (!node) return;
     
+    // Check if node is dragged outside the editor bounds for deletion
+    if (node.position.x < -50 || node.position.x > 500 || node.position.y < -50) {
+      // Remove node and connected edges
+      nodes = nodes.filter(n => n.id !== node.id);
+      edges = edges.filter(e => e.source !== node.id && e.target !== node.id);
+      return;
+    }
+    
     const snappedX = snapToLane(node.position.x);
     
     // Directly update the node's position
     node.position.x = snappedX;
+  }
+  
+  // Handle new connections
+  function onConnect(connection: Connection) {
+    const newEdge: Edge = {
+      id: `e${connection.source}-${connection.target}`,
+      source: connection.source!,
+      target: connection.target!,
+      type: 'smoothstep',
+      style: 'stroke: #6b7280; stroke-width: 2;',
+      animated: true
+    };
+    edges = [...edges, newEdge];
+  }
+  
+  // Create a new node
+  function createNode() {
+    const nodeTypes = ['default', 'input', 'output'];
+    const nodeLabels = ['⚡ Action', '🎯 Trigger', '🏁 Output'];
+    const nodeColors = ['#3b82f6', '#10b981', '#ef4444'];
+    
+    const randomType = Math.floor(Math.random() * nodeTypes.length);
+    const newId = (nodes.length + 1).toString();
+    
+    const newNode: Node = {
+      id: newId,
+      type: nodeTypes[randomType],
+      position: { x: LANES.CENTER, y: 100 + (nodes.length * 60) },
+      data: { label: nodeLabels[randomType] },
+      style: `background: ${nodeColors[randomType]}; color: white; border: none; font-weight: bold; width: 100px;`
+    };
+    
+    nodes = [...nodes, newNode];
   }
   
   // Reactive variables for the flow - using $state for better reactivity
@@ -97,6 +138,9 @@
   <div class="header">
     <h1>🎯 Pattern Editor</h1>
     <p>Design your LED patterns visually</p>
+    <button class="create-node-btn" onclick={createNode}>
+      ➕ Add Node
+    </button>
   </div>
   
   <div class="flow-container">
@@ -112,8 +156,11 @@
       translateExtent={[[0, 0], [450, Infinity]]}
       colorMode="dark"
       onnodedragstop={onNodeDragStop}
+      onconnect={onConnect}
+      nodesConnectable={true}
     >
       <Background variant={'none' as any} />
+      <Controls />
     </SvelteFlow>
   </div>
 </main>
@@ -131,6 +178,7 @@
     color: white;
     flex-shrink: 0;
     margin-bottom: 1rem;
+    position: relative;
   }
   
   .header h1 {
@@ -144,6 +192,26 @@
     margin: 0.5rem 0 0 0;
     font-size: 1.1rem;
     opacity: 0.9;
+  }
+  
+  .create-node-btn {
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    background: #10b981;
+    color: white;
+    border: none;
+    padding: 0.75rem 1.5rem;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: background-color 0.2s;
+  }
+  
+  .create-node-btn:hover {
+    background: #059669;
   }
   
   .flow-container {
@@ -165,6 +233,12 @@
     
     .header p {
       font-size: 1rem;
+    }
+    
+    .create-node-btn {
+      position: static;
+      transform: none;
+      margin-top: 1rem;
     }
   }
   
