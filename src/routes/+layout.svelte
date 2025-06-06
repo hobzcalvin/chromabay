@@ -188,7 +188,7 @@
   :global(main) {
     /* Reset any previous global styles */
     margin: 0 !important;
-    padding: 1rem !important;
+    padding: 0 1rem 1rem 1rem !important; /* top: 0, right: 1rem, bottom: 1rem, left: 1rem */
     max-width: none !important;
     min-height: auto !important;
     color: inherit !important;
