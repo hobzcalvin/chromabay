@@ -1,12 +1,13 @@
 import { browser } from '$app/environment';
 import { Capacitor } from '@capacitor/core';
+import { dev } from '$app/environment';
 
 // Track if we've already asked about updates this session
 let hasAskedForUpdateThisSession = false;
 let isCheckingForUpdates = false;
 
-// Initialize live updates when app loads (only for native platforms)
-if (browser && Capacitor.isNativePlatform()) {
+// Initialize live updates when app loads (only for native platforms and NOT in development)
+if (browser && Capacitor.isNativePlatform() && !dev) {
   import('@capawesome/capacitor-live-update').then(({ LiveUpdate }) => {
     // Import App plugin for foreground detection
     import('@capacitor/app').then(({ App }) => {
@@ -178,6 +179,8 @@ if (browser && Capacitor.isNativePlatform()) {
   }).catch((error) => {
     console.error('📱 UPDATE: Failed to load LiveUpdate plugin:', error);
   });
+} else if (dev) {
+  console.log('📱 UPDATE: Live updates disabled in development mode');
 }
 
 // Disable prerendering since the app uses browser-specific APIs
