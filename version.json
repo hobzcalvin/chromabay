@@ -1,7 +1,7 @@
 {
-  "version": "main-e30aad4",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-main-e30aad4.zip",
-  "buildDate": "2025-06-06 03:08:45 UTC",
-  "commitHash": "e30aad43e46eb38d0e3313f63f33359db8902db4",
-  "commitMessage": "Fix notch padding, maybe"
+  "version": "main-040259c",
+  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-main-040259c.zip",
+  "buildDate": "2025-06-06 06:11:48 UTC",
+  "commitHash": "040259c35650b7a8b326a6b546327ff41467221b",
+  "commitMessage": "Tweaks"
 }
