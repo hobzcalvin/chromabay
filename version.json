@@ -1,7 +1,7 @@
 {
-  "version": "main-b2c0222",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-main-b2c0222.zip",
-  "buildDate": "2025-06-06 20:53:02 UTC",
-  "commitHash": "b2c0222e7c8ff68d0c85aae65f2cd7156aedb253",
-  "commitMessage": "remove top padding"
+  "version": "main-552de64",
+  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-main-552de64.zip",
+  "buildDate": "2025-06-06 22:18:19 UTC",
+  "commitHash": "552de6438649e975d47d734e0df297bc7c040bca",
+  "commitMessage": "hide attribution"
 }
