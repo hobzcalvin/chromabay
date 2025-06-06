@@ -425,20 +425,9 @@
 </main>
 
 <style>
-  :global(body) {
-    margin: 0;
-    padding: 0;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    min-height: 100vh;
-  }
-
-  main {
-    max-width: 1000px;
-    margin: 0 auto;
-    padding: 2rem;
-    color: white;
-  }
+  /* Remove global body styling since it's now in layout */
+  
+  /* Remove main styling - now handled globally in layout */
 
   header {
     text-align: center;
@@ -782,9 +771,7 @@
   }
 
   @media (max-width: 768px) {
-    main {
-      padding: 1rem;
-    }
+    /* Removed main padding override to be consistent with global layout */
     
     h1 {
       font-size: 2rem;
