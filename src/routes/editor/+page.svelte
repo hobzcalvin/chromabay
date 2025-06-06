@@ -77,12 +77,13 @@
     <SvelteFlow 
       {nodes} 
       {edges}
-      fitView
+      initialViewport={{x: 0, y: 0, zoom: 1}}
       attributionPosition="bottom-left"
       nodesDraggable={true}
       elementsSelectable={false}
       selectNodesOnDrag={false}
       panOnDrag={true}
+      translateExtent={[[0, 0], [400, Infinity]]}
     >
       <Background variant={'dots' as any} gap={20} size={1} />
     </SvelteFlow>
