@@ -67,7 +67,7 @@
   let edges = $state(initialEdges);
 </script>
 
-<main class="editor-container">
+<main>
   <div class="header">
     <h1>🎯 Pattern Editor</h1>
     <p>Design your LED patterns visually</p>
@@ -90,27 +90,19 @@
 </main>
 
 <style>
-  :global(body) {
-    margin: 0;
-    padding: 0;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  }
-  
-  .editor-container {
-    width: 100%;
-    height: 100vh;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    background-attachment: fixed;
+  main {
     display: flex;
     flex-direction: column;
-    position: relative;
+    height: calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    overflow: hidden; /* Prevent any scrolling */
+    box-sizing: border-box;
   }
   
   .header {
-    padding: 2rem 2rem 1rem 2rem;
     text-align: center;
     color: white;
     flex-shrink: 0;
+    margin-bottom: 1rem;
   }
   
   .header h1 {
@@ -128,12 +120,13 @@
   
   .flow-container {
     flex: 1;
-    margin: 0 2rem 2rem 2rem;
     border-radius: 12px;
     background: white;
     box-shadow: 0 10px 25px rgba(0,0,0,0.1);
     overflow: hidden;
-    min-height: 0;
+    min-height: 0; /* Important for flex child to shrink */
+    width: 100%;
+    box-sizing: border-box;
   }
   
   /* Custom Svelte Flow styling */
@@ -164,5 +157,26 @@
   
   :global(.svelte-flow__background) {
     background-color: #fafafa;
+  }
+
+  /* Mobile responsive adjustments */
+  @media (max-width: 768px) {
+    .header h1 {
+      font-size: 2rem;
+    }
+    
+    .header p {
+      font-size: 1rem;
+    }
+  }
+  
+  @media (max-width: 480px) {
+    .header h1 {
+      font-size: 1.75rem;
+    }
+    
+    .header p {
+      font-size: 0.9rem;
+    }
   }
 </style>
