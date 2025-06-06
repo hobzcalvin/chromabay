@@ -9,8 +9,8 @@
 		"build:dev": "NODE_ENV=development vite build",
 		"preview": "vite preview",
 		"prepare": "husky",
-			"check": "npx svelte-kit sync && npx svelte-check --tsconfig ./tsconfig.json",
-			"check:watch": "npx svelte-kit sync && npx svelte-check --tsconfig ./tsconfig.json --watch",
+		"check": "npx svelte-kit sync && npx svelte-check --tsconfig ./tsconfig.json",
+		"check:watch": "npx svelte-kit sync && npx svelte-check --tsconfig ./tsconfig.json --watch",
 		"sync": "npx cap sync",
 		"deploy:docs": "npm run build",
 		"ios": "npm run build:dev && npm run sync && npx cap run ios",
@@ -41,6 +41,7 @@
 		"@capacitor/cli": "^7.2.0",
 		"@capacitor/core": "^7.2.0",
 		"@capacitor/ios": "^7.2.0",
-		"@capawesome/capacitor-live-update": "^7.2.0"
+		"@capawesome/capacitor-live-update": "^7.2.0",
+		"@xyflow/svelte": "^1.0.2"
 	}
 }

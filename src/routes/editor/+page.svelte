@@ -1,8 +1,168 @@
 <script lang="ts">
-  // TODO: pattern editor interface
+  import { SvelteFlow, Controls, Background, type Node, type Edge } from '@xyflow/svelte';
+  import '@xyflow/svelte/dist/style.css';
+  
+  // Define initial nodes for the pattern editor with better positioning
+  const initialNodes: Node[] = [
+    {
+      id: '1',
+      type: 'input',
+      position: { x: 50, y: 50 },
+      data: { label: '🚀 Start Pattern' },
+      style: 'background: #10b981; color: white; border: none; font-weight: bold;'
+    },
+    {
+      id: '2',
+      type: 'default',
+      position: { x: 300, y: 50 },
+      data: { label: '💡 LED Strip' },
+      style: 'background: #3b82f6; color: white; border: none; font-weight: bold;'
+    },
+    {
+      id: '3',
+      type: 'default',
+      position: { x: 550, y: 50 },
+      data: { label: '🎨 Color Effect' },
+      style: 'background: #8b5cf6; color: white; border: none; font-weight: bold;'
+    },
+    {
+      id: '4',
+      type: 'output',
+      position: { x: 300, y: 200 },
+      data: { label: '🏁 End Pattern' },
+      style: 'background: #ef4444; color: white; border: none; font-weight: bold;'
+    }
+  ];
+  
+  // Define initial edges with better styling
+  const initialEdges: Edge[] = [
+    { 
+      id: 'e1-2', 
+      source: '1', 
+      target: '2', 
+      type: 'smoothstep',
+      style: 'stroke: #10b981; stroke-width: 2;',
+      animated: true
+    },
+    { 
+      id: 'e2-3', 
+      source: '2', 
+      target: '3', 
+      type: 'smoothstep',
+      style: 'stroke: #3b82f6; stroke-width: 2;',
+      animated: true
+    },
+    { 
+      id: 'e3-4', 
+      source: '3', 
+      target: '4', 
+      type: 'smoothstep',
+      style: 'stroke: #8b5cf6; stroke-width: 2;',
+      animated: true
+    }
+  ];
+  
+  // Reactive variables for the flow - using $state for better reactivity
+  let nodes = $state(initialNodes);
+  let edges = $state(initialEdges);
 </script>
 
-<main>
-  <h1>Editor</h1>
-  <p>Coming soon: edit current pattern.</p>
+<main class="editor-container">
+  <div class="header">
+    <h1>🎯 Pattern Editor</h1>
+    <p>Design your LED patterns visually</p>
+  </div>
+  
+  <div class="flow-container">
+    <SvelteFlow 
+      {nodes} 
+      {edges}
+      fitView
+      attributionPosition="bottom-left"
+      nodesDraggable={true}
+      elementsSelectable={false}
+      selectNodesOnDrag={false}
+      panOnDrag={true}
+    >
+      <Background variant={'dots' as any} gap={20} size={1} />
+    </SvelteFlow>
+  </div>
 </main>
+
+<style>
+  :global(body) {
+    margin: 0;
+    padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+  
+  .editor-container {
+    width: 100%;
+    height: 100vh;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background-attachment: fixed;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+  }
+  
+  .header {
+    padding: 2rem 2rem 1rem 2rem;
+    text-align: center;
+    color: white;
+    flex-shrink: 0;
+  }
+  
+  .header h1 {
+    margin: 0;
+    font-size: 2.5rem;
+    font-weight: 700;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+  }
+  
+  .header p {
+    margin: 0.5rem 0 0 0;
+    font-size: 1.1rem;
+    opacity: 0.9;
+  }
+  
+  .flow-container {
+    flex: 1;
+    margin: 0 2rem 2rem 2rem;
+    border-radius: 12px;
+    background: white;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+    overflow: hidden;
+    min-height: 0;
+  }
+  
+  /* Custom Svelte Flow styling */
+  :global(.svelte-flow__node) {
+    font-size: 14px;
+    border-radius: 8px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    cursor: grab;
+  }
+  
+  :global(.svelte-flow__node:active) {
+    cursor: grabbing;
+  }
+  
+  :global(.svelte-flow__node.dragging) {
+    cursor: grabbing;
+    box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+  }
+  
+  /* Only apply hover effects when not dragging */
+  :global(.svelte-flow__node:hover:not(.dragging)) {
+    box-shadow: 0 6px 12px rgba(0,0,0,0.15);
+  }
+  
+  :global(.svelte-flow__edge) {
+    stroke-width: 2px;
+  }
+  
+  :global(.svelte-flow__background) {
+    background-color: #fafafa;
+  }
+</style>
