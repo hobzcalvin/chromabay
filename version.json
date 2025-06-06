@@ -1,7 +1,7 @@
 {
-  "version": "main-040259c",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-main-040259c.zip",
-  "buildDate": "2025-06-06 06:11:48 UTC",
-  "commitHash": "040259c35650b7a8b326a6b546327ff41467221b",
-  "commitMessage": "Tweaks"
+  "version": "v0.0.19",
+  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.19.zip",
+  "buildDate": "2025-06-06 19:50:34 UTC",
+  "commitHash": "a1459a80c0011411ca2f724293b94d2902a01b5b",
+  "commitMessage": "Maybe fix paths at least for gh pages"
 }

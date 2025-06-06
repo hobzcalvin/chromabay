@@ -1,1 +1,0 @@
-import{f as n,a as r}from"../chunks/atzgukrw.js";import"../chunks/MZWNJ7V-.js";var t=n("<main><h1>Editor</h1> <p>Coming soon: edit current pattern.</p></main>");function i(o){var a=t();r(o,a)}export{i as component};
