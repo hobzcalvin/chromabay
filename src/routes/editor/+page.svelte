@@ -78,7 +78,7 @@
       {nodes} 
       {edges}
       initialViewport={{x: 0, y: 0, zoom: 1}}
-      attributionPosition="bottom-left"
+      proOptions={{ hideAttribution: true }}
       nodesDraggable={true}
       elementsSelectable={false}
       selectNodesOnDrag={false}
