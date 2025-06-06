@@ -2,35 +2,42 @@
   import { SvelteFlow, Controls, Background, type Node, type Edge } from '@xyflow/svelte';
   import '@xyflow/svelte/dist/style.css';
   
-  // Define initial nodes for the pattern editor with better positioning
+  // Define the 3 vertical lanes for node snapping
+  const LANES = {
+    LEFT: 25,
+    CENTER: 175, 
+    RIGHT: 325
+  };
+  
+  // Define initial nodes for the pattern editor with lane positioning and fixed width
   const initialNodes: Node[] = [
     {
       id: '1',
       type: 'input',
-      position: { x: 50, y: 50 },
+      position: { x: LANES.LEFT, y: 50 },
       data: { label: '🚀 Start Pattern' },
-      style: 'background: #10b981; color: white; border: none; font-weight: bold;'
+      style: 'background: #10b981; color: white; border: none; font-weight: bold; width: 100px;'
     },
     {
       id: '2',
       type: 'default',
-      position: { x: 300, y: 50 },
+      position: { x: LANES.CENTER, y: 50 },
       data: { label: '💡 LED Strip' },
-      style: 'background: #3b82f6; color: white; border: none; font-weight: bold;'
+      style: 'background: #3b82f6; color: white; border: none; font-weight: bold; width: 100px;'
     },
     {
       id: '3',
       type: 'default',
-      position: { x: 550, y: 50 },
+      position: { x: LANES.RIGHT, y: 50 },
       data: { label: '🎨 Color Effect' },
-      style: 'background: #8b5cf6; color: white; border: none; font-weight: bold;'
+      style: 'background: #8b5cf6; color: white; border: none; font-weight: bold; width: 100px;'
     },
     {
       id: '4',
       type: 'output',
-      position: { x: 300, y: 200 },
+      position: { x: LANES.CENTER, y: 200 },
       data: { label: '🏁 End Pattern' },
-      style: 'background: #ef4444; color: white; border: none; font-weight: bold;'
+      style: 'background: #ef4444; color: white; border: none; font-weight: bold; width: 100px;'
     }
   ];
   
@@ -62,6 +69,25 @@
     }
   ];
   
+  // Function to snap nodes to the nearest lane
+  function snapToLane(x: number): number {
+    const lanes = [LANES.LEFT, LANES.CENTER, LANES.RIGHT];
+    return lanes.reduce((closest, lane) => 
+      Math.abs(x - lane) < Math.abs(x - closest) ? lane : closest
+    );
+  }
+  
+  // Handle node drag stop to implement snapping
+  function onNodeDragStop(event: any) {
+    const node = event.targetNode;
+    if (!node) return;
+    
+    const snappedX = snapToLane(node.position.x);
+    
+    // Directly update the node's position
+    node.position.x = snappedX;
+  }
+  
   // Reactive variables for the flow - using $state for better reactivity
   let nodes = $state(initialNodes);
   let edges = $state(initialEdges);
@@ -85,6 +111,7 @@
       panOnDrag={true}
       translateExtent={[[0, 0], [450, Infinity]]}
       colorMode="dark"
+      onnodedragstop={onNodeDragStop}
     >
       <Background variant={'none' as any} />
     </SvelteFlow>
