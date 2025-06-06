@@ -6,17 +6,21 @@
 	"scripts": {
 		"dev": "vite dev --host 0.0.0.0",
 		"build": "vite build",
+		"build:dev": "NODE_ENV=development vite build",
 		"preview": "vite preview",
 		"prepare": "husky",
 			"check": "npx svelte-kit sync && npx svelte-check --tsconfig ./tsconfig.json",
 			"check:watch": "npx svelte-kit sync && npx svelte-check --tsconfig ./tsconfig.json --watch",
 		"sync": "npx cap sync",
 		"deploy:docs": "npm run build",
-		"ios": "npm run build && npm run sync && npx cap run ios -l",
-		"android": "npm run build && npm run sync && npx cap run android -l --external",
+		"ios": "npm run build:dev && npm run sync && npx cap run ios",
+		"ios:phone": "npm run build:dev && npm run sync && npx cap open ios",
+		"ios:sim": "npm run build:dev && npm run sync && npx cap run ios --target=7CFDC71F-C7F2-4755-B460-278906924787",
+		"android": "npm run build:dev && npm run sync && npx cap run android -l --external",
 		"deploy": "npm run deploy:docs",
 		"bundle:create": "node scripts/deploy-live-update.js",
-		"bundle:live": "npm run build && node scripts/deploy-live-update.js"
+		"bundle:live": "npm run build && node scripts/deploy-live-update.js",
+		"clear-cache": "rm -rf .svelte-kit node_modules/.vite build docs && echo '✅ All caches cleared!'"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-auto": "^6.0.0",
