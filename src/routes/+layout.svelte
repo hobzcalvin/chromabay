@@ -6,12 +6,34 @@
 
   let connected = 0;
   let interval: any;
+  
   onMount(() => {
     connected = getConnectedDeviceCount();
     interval = setInterval(() => {
       connected = getConnectedDeviceCount();
     }, 1000);
-    return () => clearInterval(interval);
+    
+    // iOS Safari viewport height fix
+    function setVHProperty() {
+      let vh = window.innerHeight * 0.01;
+      document.documentElement.style.setProperty('--vh', `${vh}px`);
+    }
+    
+    // Set initial value
+    setVHProperty();
+    
+    // Update on resize and orientation change
+    window.addEventListener('resize', setVHProperty);
+    window.addEventListener('orientationchange', () => {
+      // Delay to account for browser UI changes
+      setTimeout(setVHProperty, 100);
+    });
+    
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('resize', setVHProperty);
+      window.removeEventListener('orientationchange', setVHProperty);
+    };
   });
 </script>
 
@@ -31,8 +53,8 @@
       >{connected}</span>
     </a>
     <a href="{base}/patterns" class:active={$page.url.pathname.startsWith(`${base}/patterns`)}>Patterns</a>
-    <a href="{base}/editor" class:active={$page.url.pathname.startsWith(`${base}/editor`)}>Editor</a>
     <a href="{base}/interact" class:active={$page.url.pathname.startsWith(`${base}/interact`)}>Interact</a>
+    <a href="{base}/editor" class:active={$page.url.pathname.startsWith(`${base}/editor`)}>Editor</a>
     <a href="{base}/settings" class:active={$page.url.pathname.startsWith(`${base}/settings`)}>Settings</a>
   </nav>
 </div>
@@ -45,8 +67,17 @@
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     min-height: 100vh;
     padding: 0;
-    /* Prevent iOS bounce scroll */
-    overflow: hidden;
+    /* Allow scrolling on iOS Safari but prevent bounce */
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* iOS Safari specific body adjustments */
+  @supports (-webkit-touch-callout: none) {
+    :global(body) {
+      /* Fix for iOS Safari - use fill-available when supported */
+      min-height: -webkit-fill-available;
+    }
   }
 
   /* App container using CSS Grid - this is the bulletproof layout */
@@ -64,6 +95,16 @@
     padding-right: env(safe-area-inset-right, 0px);
     padding-bottom: env(safe-area-inset-bottom, 0px);
     box-sizing: border-box;
+    /* Ensure proper stacking on iOS */
+    position: relative;
+    z-index: 0;
+  }
+
+  /* iOS Safari specific fixes for app container */
+  @supports (-webkit-touch-callout: none) {
+    .app-container {
+      height: calc(var(--vh, 1vh) * 100);
+    }
   }
 
   /* Content area - this will naturally size to fill available space */
