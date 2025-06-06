@@ -427,24 +427,78 @@
 <style>
   :global(body) {
     margin: 0;
-    padding-top: constant(safe-area-inset-top);
-    padding-top: env(safe-area-inset-top);
-    padding-right: constant(safe-area-inset-right);
-    padding-right: env(safe-area-inset-right);
-    padding-bottom: constant(safe-area-inset-bottom);
-    padding-bottom: env(safe-area-inset-bottom);
-    padding-left: constant(safe-area-inset-left);
-    padding-left: env(safe-area-inset-left);
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     min-height: 100vh;
+    /* Ensure the viewport extends into safe areas */
+    padding: 0;
+  }
+
+  :global(html) {
+    /* Support older iOS versions */
+    padding-top: constant(safe-area-inset-top);
+    padding-top: env(safe-area-inset-top);
   }
 
   main {
     max-width: 1000px;
     margin: 0 auto;
+    /* Base padding with safe area support */
     padding: 2rem;
+    
+    /* AGGRESSIVE NOTCH FIX - Use much larger top padding */
+    padding-top: max(4rem, env(safe-area-inset-top, 4rem));
+    
+    padding-right: max(2rem, env(safe-area-inset-right, 2rem));
+    padding-bottom: max(2rem, env(safe-area-inset-bottom, 2rem));
+    padding-left: max(2rem, env(safe-area-inset-left, 2rem));
+    
     color: white;
+    
+    /* Ensure minimum top padding for notched devices */
+    min-height: calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  }
+
+  /* Additional safe area support for mobile devices */
+  @supports (padding: max(0px)) {
+    main {
+      /* iOS 11.0+ with aggressive top padding */
+      padding-top: max(4rem, env(safe-area-inset-top));
+      padding-right: max(2rem, env(safe-area-inset-right));
+      padding-bottom: max(2rem, env(safe-area-inset-bottom));
+      padding-left: max(2rem, env(safe-area-inset-left));
+    }
+  }
+
+  /* Even more aggressive fallbacks for notched devices */
+  @media screen and (device-aspect-ratio: 375/812) {
+    /* iPhone X, XS */
+    main { padding-top: max(5rem, env(safe-area-inset-top, 5rem)); }
+  }
+  
+  @media screen and (device-aspect-ratio: 414/896) {
+    /* iPhone XR, XS Max, 11, 11 Pro Max */
+    main { padding-top: max(5rem, env(safe-area-inset-top, 5rem)); }
+  }
+  
+  @media screen and (device-aspect-ratio: 390/844) {
+    /* iPhone 12, 12 Pro, 13, 13 Pro, 14 */
+    main { padding-top: max(5rem, env(safe-area-inset-top, 5rem)); }
+  }
+  
+  @media screen and (device-aspect-ratio: 428/926) {
+    /* iPhone 12 Pro Max, 13 Pro Max, 14 Plus */
+    main { padding-top: max(5rem, env(safe-area-inset-top, 5rem)); }
+  }
+  
+  @media screen and (device-aspect-ratio: 393/852) {
+    /* iPhone 14 Pro */
+    main { padding-top: max(5rem, env(safe-area-inset-top, 5rem)); }
+  }
+  
+  @media screen and (device-aspect-ratio: 430/932) {
+    /* iPhone 14 Pro Max, 15 Pro Max */
+    main { padding-top: max(5rem, env(safe-area-inset-top, 5rem)); }
   }
 
   header {
