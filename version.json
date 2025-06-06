@@ -1,7 +1,7 @@
 {
-  "version": "v0.0.19",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.19.zip",
-  "buildDate": "2025-06-06 19:50:34 UTC",
-  "commitHash": "a1459a80c0011411ca2f724293b94d2902a01b5b",
-  "commitMessage": "Maybe fix paths at least for gh pages"
+  "version": "main-b2c0222",
+  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-main-b2c0222.zip",
+  "buildDate": "2025-06-06 20:53:02 UTC",
+  "commitHash": "b2c0222e7c8ff68d0c85aae65f2cd7156aedb253",
+  "commitMessage": "remove top padding"
 }
