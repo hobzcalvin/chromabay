@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { SvelteFlow, Controls, Background, type Node, type Edge, type Connection } from '@xyflow/svelte';
+  import { SvelteFlow, Controls, Background, BaseEdge, MarkerType, type Node, type Edge, type Connection } from '@xyflow/svelte';
   import '@xyflow/svelte/dist/style.css';
   
   // Define the 3 vertical lanes for node snapping
@@ -47,25 +47,16 @@
       id: 'e1-2', 
       source: '1', 
       target: '2', 
-      type: 'smoothstep',
-      style: 'stroke: #10b981; stroke-width: 2;',
-      animated: true
     },
     { 
       id: 'e2-3', 
       source: '2', 
       target: '3', 
-      type: 'smoothstep',
-      style: 'stroke: #3b82f6; stroke-width: 2;',
-      animated: true
     },
     { 
       id: 'e3-4', 
       source: '3', 
       target: '4', 
-      type: 'smoothstep',
-      style: 'stroke: #8b5cf6; stroke-width: 2;',
-      animated: true
     }
   ];
   
@@ -96,22 +87,11 @@
     node.position.x = snappedX;
   }
   
-  // Handle new connections
-  function onConnect(connection: Connection) {
-    const newEdge: Edge = {
-      id: `e${connection.source}-${connection.target}`,
-      source: connection.source!,
-      target: connection.target!,
-      type: 'smoothstep',
-      style: 'stroke: #6b7280; stroke-width: 2;',
-      animated: true
-    };
-    edges = [...edges, newEdge];
-  }
+
   
   // Create a new node
   function createNode() {
-    const nodeTypes = ['default', 'input', 'output'];
+    const nodeTypes = ['default'];
     const nodeLabels = ['⚡ Action', '🎯 Trigger', '🏁 Output'];
     const nodeColors = ['#3b82f6', '#10b981', '#ef4444'];
     
@@ -156,9 +136,16 @@
       translateExtent={[[0, 0], [450, Infinity]]}
       colorMode="dark"
       onnodedragstop={onNodeDragStop}
-      onconnect={onConnect}
       nodesConnectable={true}
       zoomOnDoubleClick={false}
+      defaultEdgeOptions={{
+        type: 'smoothstep',
+        style: 'stroke-width: 3; stroke: #666;',
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          color: '#666'
+        }
+      }}
     >
       <Background variant={'none' as any} />
     </SvelteFlow>
