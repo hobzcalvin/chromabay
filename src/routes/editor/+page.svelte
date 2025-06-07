@@ -251,4 +251,19 @@
       font-size: 0.9rem;
     }
   }
+
+  :global(.svelte-flow__handle-bottom) {
+    width: 16px !important;
+    height: 16px !important;
+  }
+
+  /* Disable mouse events on top handles to prevent dragging from them */
+  :global(.svelte-flow__handle-top) {
+    pointer-events: none !important;
+  }
+
+  /* Re-enable pointer events during connection mode when hovering over target */
+  :global(.svelte-flow__handle-top.connecting) {
+    pointer-events: all !important;
+  }
 </style>
