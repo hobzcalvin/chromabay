@@ -158,9 +158,9 @@
       onnodedragstop={onNodeDragStop}
       onconnect={onConnect}
       nodesConnectable={true}
+      zoomOnDoubleClick={false}
     >
       <Background variant={'none' as any} />
-      <Controls />
     </SvelteFlow>
   </div>
 </main>

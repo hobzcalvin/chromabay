@@ -70,6 +70,11 @@
     /* Allow scrolling on iOS Safari but prevent bounce */
     overflow-x: hidden;
     -webkit-overflow-scrolling: touch;
+    /* Disable Safari double-tap zoom and touch behaviors */
+    touch-action: manipulation;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
   }
 
   /* iOS Safari specific body adjustments */
