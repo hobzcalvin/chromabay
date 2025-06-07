@@ -109,6 +109,25 @@
     nodes = [...nodes, newNode];
   }
   
+  // Handle new connections to ensure unique edge IDs
+  function onConnect(connection: Connection) {
+    const newEdgeId = `e${connection.source}-${connection.target}-${Date.now()}`;
+    const newEdge: Edge = {
+      id: newEdgeId,
+      source: connection.source!,
+      target: connection.target!,
+    };
+    edges = [...edges, newEdge];
+  }
+
+  // Handle edge click to delete edge
+  function onEdgeClick(event: any) {
+    const edge = event.edge;
+    if (!edge) return;
+    // Remove the clicked edge
+    edges = edges.filter(e => e.id !== edge.id);
+  }
+  
   // Reactive variables for the flow - using $state for better reactivity
   let nodes = $state(initialNodes);
   let edges = $state(initialEdges);
@@ -136,6 +155,8 @@
       translateExtent={[[0, 0], [450, Infinity]]}
       colorMode="dark"
       onnodedragstop={onNodeDragStop}
+      onedgeclick={onEdgeClick}
+      onconnect={onConnect}
       nodesConnectable={true}
       zoomOnDoubleClick={false}
       defaultEdgeOptions={{
