@@ -1,7 +1,7 @@
 {
-  "version": "v0.0.20",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.20.zip",
-  "buildDate": "2025-06-06 23:22:19 UTC",
-  "commitHash": "88642ed68b077bcd57b1a13b5abd78880658baac",
-  "commitMessage": "quick try with connections etc"
+  "version": "v0.0.22",
+  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.22.zip",
+  "buildDate": "2025-06-07 07:16:07 UTC",
+  "commitHash": "565462f9f6cc5f44731a6ae004e46f768e1d7ab3",
+  "commitMessage": "Click to delete edges"
 }
