@@ -89,6 +89,9 @@
   
 
   
+  // Keep track of next available ID
+  let nextNodeId = $state(5);
+  
   // Create a new node
   function createNode() {
     const nodeTypes = ['default'];
@@ -96,7 +99,8 @@
     const nodeColors = ['#3b82f6', '#10b981', '#ef4444'];
     
     const randomType = Math.floor(Math.random() * nodeTypes.length);
-    const newId = (nodes.length + 1).toString();
+    const newId = nextNodeId.toString();
+    nextNodeId++;
     
     const newNode: Node = {
       id: newId,
