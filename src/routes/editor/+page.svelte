@@ -83,8 +83,12 @@
     
     const snappedX = snapToLane(node.position.x);
     
-    // Directly update the node's position
-    node.position.x = snappedX;
+    // Update the node's position by reassigning the entire nodes array
+    nodes = nodes.map(n => 
+      n.id === node.id 
+        ? { ...n, position: { ...n.position, x: snappedX } }
+        : n
+    );
   }
   
 
@@ -132,9 +136,9 @@
     edges = edges.filter(e => e.id !== edge.id);
   }
   
-  // Reactive variables for the flow - using $state for better reactivity
-  let nodes = $state(initialNodes);
-  let edges = $state(initialEdges);
+  // Reactive variables for the flow - using $state.raw for better reactivity
+  let nodes = $state.raw(initialNodes);
+  let edges = $state.raw(initialEdges);
 </script>
 
 <main>
