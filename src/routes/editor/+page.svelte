@@ -116,17 +116,6 @@
     
     nodes = [...nodes, newNode];
   }
-  
-  // Handle new connections to ensure unique edge IDs
-  function onConnect(connection: Connection) {
-    const newEdgeId = `e${connection.source}-${connection.target}-${Date.now()}`;
-    const newEdge: Edge = {
-      id: newEdgeId,
-      source: connection.source!,
-      target: connection.target!,
-    };
-    edges = [...edges, newEdge];
-  }
 
   // Handle edge click to delete edge
   function onEdgeClick(event: any) {
@@ -152,8 +141,8 @@
   
   <div class="flow-container">
     <SvelteFlow 
-      {nodes} 
-      {edges}
+      bind:nodes 
+      bind:edges
       initialViewport={{x: 0, y: 0, zoom: 1}}
       proOptions={{ hideAttribution: true }}
       nodesDraggable={true}
@@ -164,7 +153,6 @@
       colorMode="dark"
       onnodedragstop={onNodeDragStop}
       onedgeclick={onEdgeClick}
-      onconnect={onConnect}
       nodesConnectable={true}
       zoomOnDoubleClick={false}
       defaultEdgeOptions={{
