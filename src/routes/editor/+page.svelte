@@ -86,7 +86,7 @@
     // Update the node's position by reassigning the entire nodes array
     nodes = nodes.map(n => 
       n.id === node.id 
-        ? { ...n, position: { ...n.position, x: snappedX } }
+        ? { ...n, position: { x: snappedX, y: node.position.y } }
         : n
     );
   }
