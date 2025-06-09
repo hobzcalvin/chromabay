@@ -3,6 +3,7 @@
   import { base } from '$app/paths';
   import { onMount } from 'svelte';
   import { getConnectedDeviceCount } from '$lib/ble';
+  import { SvelteFlowProvider } from '@xyflow/svelte';
 
   let connected = 0;
   let interval: any;
@@ -37,27 +38,29 @@
   });
 </script>
 
-<div class="app-container">
-  <div class="content-area">
-    <slot />
+<SvelteFlowProvider>
+  <div class="app-container">
+    <div class="content-area">
+      <slot />
+    </div>
+    
+    <nav class="bottom-nav">
+      <a href="{base}/devices" class:active={$page.url.pathname.startsWith(`${base}/devices`)}
+        >Devices
+        <span 
+          class="badge" 
+          class:green={connected>0} 
+          class:red={connected===0}
+          data-single-digit={connected >= 0 && connected <= 9 ? 'true' : 'false'}
+        >{connected}</span>
+      </a>
+      <a href="{base}/patterns" class:active={$page.url.pathname.startsWith(`${base}/patterns`)}>Patterns</a>
+      <a href="{base}/interact" class:active={$page.url.pathname.startsWith(`${base}/interact`)}>Interact</a>
+      <a href="{base}/editor" class:active={$page.url.pathname.startsWith(`${base}/editor`)}>Editor</a>
+      <a href="{base}/settings" class:active={$page.url.pathname.startsWith(`${base}/settings`)}>Settings</a>
+    </nav>
   </div>
-  
-  <nav class="bottom-nav">
-    <a href="{base}/devices" class:active={$page.url.pathname.startsWith(`${base}/devices`)}
-      >Devices
-      <span 
-        class="badge" 
-        class:green={connected>0} 
-        class:red={connected===0}
-        data-single-digit={connected >= 0 && connected <= 9 ? 'true' : 'false'}
-      >{connected}</span>
-    </a>
-    <a href="{base}/patterns" class:active={$page.url.pathname.startsWith(`${base}/patterns`)}>Patterns</a>
-    <a href="{base}/interact" class:active={$page.url.pathname.startsWith(`${base}/interact`)}>Interact</a>
-    <a href="{base}/editor" class:active={$page.url.pathname.startsWith(`${base}/editor`)}>Editor</a>
-    <a href="{base}/settings" class:active={$page.url.pathname.startsWith(`${base}/settings`)}>Settings</a>
-  </nav>
-</div>
+</SvelteFlowProvider>
 
 <style>
   /* Reset and base styles */

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { SvelteFlow, Controls, Background, BaseEdge, MarkerType, type Node, type Edge, type Connection, useSvelteFlow, useViewport } from '@xyflow/svelte';
   import '@xyflow/svelte/dist/style.css';
+  import { flowNodes, flowEdges, nextNodeId, LANES } from '$lib/flowStore';
   
   // Define LED pattern node types
   const NODE_TYPES = [
@@ -14,64 +15,6 @@
     { name: 'Fade', emoji: '🌅', color: '#84cc16' },
     { name: 'Chase', emoji: '🏃', color: '#f97316' },
     { name: 'Twinkle', emoji: '⭐', color: '#6366f1' }
-  ];
-  
-  // Define the 3 vertical lanes for node snapping
-  const LANES = {
-    LEFT: 25,
-    CENTER: 175,
-    RIGHT: 325
-  };
-  
-  // Define initial nodes for the pattern editor with lane positioning and fixed width
-  const initialNodes: Node[] = [
-    {
-      id: '1',
-      type: 'input',
-      position: { x: LANES.LEFT, y: 50 },
-      data: { label: '🚀 Start Pattern' },
-      style: 'background: #10b981; color: white; border: none; font-weight: bold; width: 100px;'
-    },
-    {
-      id: '2',
-      type: 'default',
-      position: { x: LANES.CENTER, y: 50 },
-      data: { label: '💡 LED Strip' },
-      style: 'background: #3b82f6; color: white; border: none; font-weight: bold; width: 100px;'
-    },
-    {
-      id: '3',
-      type: 'default',
-      position: { x: LANES.RIGHT, y: 50 },
-      data: { label: '🎨 Color Effect' },
-      style: 'background: #8b5cf6; color: white; border: none; font-weight: bold; width: 100px;'
-    },
-    {
-      id: '4',
-      type: 'output',
-      position: { x: LANES.CENTER, y: 200 },
-      data: { label: '🏁 End Pattern' },
-      style: 'background: #ef4444; color: white; border: none; font-weight: bold; width: 100px;'
-    }
-  ];
-  
-  // Define initial edges with better styling
-  const initialEdges: Edge[] = [
-    { 
-      id: 'e1-2', 
-      source: '1', 
-      target: '2', 
-    },
-    { 
-      id: 'e2-3', 
-      source: '2', 
-      target: '3', 
-    },
-    { 
-      id: 'e3-4', 
-      source: '3', 
-      target: '4', 
-    }
   ];
   
   // Get SvelteFlow hooks
@@ -94,65 +37,64 @@
     // Check if node is dragged outside the editor bounds for deletion
     if (node.position.x < -50 || node.position.x > 500 || node.position.y < -50) {
       // Remove node and connected edges
-      nodes = nodes.filter(n => n.id !== node.id);
-      edges = edges.filter(e => e.source !== node.id && e.target !== node.id);
+      flowNodes.update(nodes => nodes.filter(n => n.id !== node.id));
+      flowEdges.update(edges => edges.filter(e => e.source !== node.id && e.target !== node.id));
       return;
     }
     
     const snappedX = snapToLane(node.position.x);
     
-    // Update the node's position by reassigning the entire nodes array
-    nodes = nodes.map(n => 
-      n.id === node.id 
-        ? { ...n, position: { x: snappedX, y: node.position.y } }
-        : n
+    // Update the node's position in the store
+    flowNodes.update(nodes => 
+      nodes.map(n => 
+        n.id === node.id 
+          ? { ...n, position: { x: snappedX, y: node.position.y } }
+          : n
+      )
     );
   }
   
-  // Keep track of next available ID
-  let nextNodeId = $state(5);
-  
   // Create a new node of specified type
   function createNode(nodeType: typeof NODE_TYPES[0]) {
-    const newId = nextNodeId.toString();
-    nextNodeId++;
-    
-    // Calculate the center of the current viewport
-    const flowContainerWidth = 450; // From translateExtent
-    const flowContainerHeight = 600; // Estimated height
-    
-    // Get the center of the viewport in flow coordinates
-    const viewportCenterX = -viewport.current.x / viewport.current.zoom + (flowContainerWidth / 2) / viewport.current.zoom;
-    const viewportCenterY = -viewport.current.y / viewport.current.zoom + (flowContainerHeight / 2) / viewport.current.zoom;
-    
-    // Snap X coordinate to the nearest lane
-    const nodeX = snapToLane(viewportCenterX);
-    
-    // Use viewport center Y with slight random offset to avoid overlap
-    const nodeY = viewportCenterY + (Math.random() * 100 - 50); // ±50px random offset
-    
-    const newNode: Node = {
-      id: newId,
-      type: 'default',
-      position: { x: nodeX, y: nodeY },
-      data: { label: `${nodeType.emoji} ${nodeType.name}` },
-      style: `background: ${nodeType.color}; color: white; border: none; font-weight: bold; width: 100px;`
-    };
-    
-    nodes = [...nodes, newNode];
+    nextNodeId.update(id => {
+      const newId = id.toString();
+      
+      // Calculate the center of the current viewport
+      const flowContainerWidth = 450; // From translateExtent
+      const flowContainerHeight = 600; // Estimated height
+      
+      // Get the center of the viewport in flow coordinates
+      const viewportCenterX = -viewport.current.x / viewport.current.zoom + (flowContainerWidth / 2) / viewport.current.zoom;
+      const viewportCenterY = -viewport.current.y / viewport.current.zoom + (flowContainerHeight / 2) / viewport.current.zoom;
+      
+      // Snap X coordinate to the nearest lane
+      const nodeX = snapToLane(viewportCenterX);
+      
+      // Use viewport center Y with slight random offset to avoid overlap
+      const nodeY = viewportCenterY + (Math.random() * 100 - 50); // ±50px random offset
+      
+      const newNode: Node = {
+        id: newId,
+        type: 'default',
+        position: { x: nodeX, y: nodeY },
+        data: { label: `${nodeType.emoji} ${nodeType.name}` },
+        style: `background: ${nodeType.color}; color: white; border: none; font-weight: bold; width: 100px;`
+      };
+      
+      // Add new node to the store
+      flowNodes.update(nodes => [...nodes, newNode]);
+      
+      return id + 1; // Increment for next node
+    });
   }
 
   // Handle edge click to delete edge
   function onEdgeClick(event: any) {
     const edge = event.edge;
     if (!edge) return;
-    // Remove the clicked edge
-    edges = edges.filter(e => e.id !== edge.id);
+    // Remove the clicked edge from the store
+    flowEdges.update(edges => edges.filter(e => e.id !== edge.id));
   }
-  
-  // Reactive variables for the flow - using $state.raw for better reactivity
-  let nodes = $state.raw(initialNodes);
-  let edges = $state.raw(initialEdges);
 </script>
 
 <main>
@@ -185,8 +127,8 @@
   
   <div class="flow-container">
     <SvelteFlow 
-      bind:nodes 
-      bind:edges
+      nodes={$flowNodes}
+      edges={$flowEdges}
       initialViewport={{x: 0, y: 0, zoom: 1}}
       proOptions={{ hideAttribution: true }}
       nodesDraggable={true}
