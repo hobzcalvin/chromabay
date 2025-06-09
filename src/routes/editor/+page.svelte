@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { SvelteFlow, Controls, Background, BaseEdge, MarkerType, type Node, type Edge, type Connection } from '@xyflow/svelte';
+  import { SvelteFlow, Controls, Background, BaseEdge, MarkerType, type Node, type Edge, type Connection, useSvelteFlow, useViewport } from '@xyflow/svelte';
   import '@xyflow/svelte/dist/style.css';
   
   // Define LED pattern node types
@@ -74,6 +74,10 @@
     }
   ];
   
+  // Get SvelteFlow hooks
+  const { screenToFlowPosition } = useSvelteFlow();
+  const viewport = useViewport();
+  
   // Function to snap nodes to the nearest lane
   function snapToLane(x: number): number {
     const lanes = [LANES.LEFT, LANES.CENTER, LANES.RIGHT];
@@ -105,24 +109,32 @@
     );
   }
   
-
-  
   // Keep track of next available ID
   let nextNodeId = $state(5);
   
-    // Create a new node of specified type
+  // Create a new node of specified type
   function createNode(nodeType: typeof NODE_TYPES[0]) {
     const newId = nextNodeId.toString();
     nextNodeId++;
     
-    // Simple approach: place at center of flow area with some Y offset
-    const centerY = 300 + (Math.random() * 200); // Random Y to avoid overlap
-    const snappedX = LANES.LEFT; // Default to center lane
+    // Calculate the center of the current viewport
+    const flowContainerWidth = 450; // From translateExtent
+    const flowContainerHeight = 600; // Estimated height
+    
+    // Get the center of the viewport in flow coordinates
+    const viewportCenterX = -viewport.current.x / viewport.current.zoom + (flowContainerWidth / 2) / viewport.current.zoom;
+    const viewportCenterY = -viewport.current.y / viewport.current.zoom + (flowContainerHeight / 2) / viewport.current.zoom;
+    
+    // Snap X coordinate to the nearest lane
+    const nodeX = snapToLane(viewportCenterX);
+    
+    // Use viewport center Y with slight random offset to avoid overlap
+    const nodeY = viewportCenterY + (Math.random() * 100 - 50); // ±50px random offset
     
     const newNode: Node = {
       id: newId,
       type: 'default',
-      position: { x: snappedX, y: centerY },
+      position: { x: nodeX, y: nodeY },
       data: { label: `${nodeType.emoji} ${nodeType.name}` },
       style: `background: ${nodeType.color}; color: white; border: none; font-weight: bold; width: 100px;`
     };
