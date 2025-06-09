@@ -2,10 +2,24 @@
   import { SvelteFlow, Controls, Background, BaseEdge, MarkerType, type Node, type Edge, type Connection } from '@xyflow/svelte';
   import '@xyflow/svelte/dist/style.css';
   
+  // Define LED pattern node types
+  const NODE_TYPES = [
+    { name: 'Gradient', emoji: '🌈', color: '#3b82f6' },
+    { name: 'Rainbow', emoji: '🌙', color: '#10b981' },
+    { name: 'Perlin Noise', emoji: '🌊', color: '#8b5cf6' },
+    { name: 'Moving Blob', emoji: '💧', color: '#f59e0b' },
+    { name: 'Raindrops', emoji: '🌧️', color: '#06b6d4' },
+    { name: 'Strobe', emoji: '⚡', color: '#ef4444' },
+    { name: 'Sparkle', emoji: '✨', color: '#ec4899' },
+    { name: 'Fade', emoji: '🌅', color: '#84cc16' },
+    { name: 'Chase', emoji: '🏃', color: '#f97316' },
+    { name: 'Twinkle', emoji: '⭐', color: '#6366f1' }
+  ];
+  
   // Define the 3 vertical lanes for node snapping
   const LANES = {
     LEFT: 25,
-    CENTER: 175, 
+    CENTER: 175,
     RIGHT: 325
   };
   
@@ -96,22 +110,21 @@
   // Keep track of next available ID
   let nextNodeId = $state(5);
   
-  // Create a new node
-  function createNode() {
-    const nodeTypes = ['default'];
-    const nodeLabels = ['⚡ Action', '🎯 Trigger', '🏁 Output'];
-    const nodeColors = ['#3b82f6', '#10b981', '#ef4444'];
-    
-    const randomType = Math.floor(Math.random() * nodeTypes.length);
+    // Create a new node of specified type
+  function createNode(nodeType: typeof NODE_TYPES[0]) {
     const newId = nextNodeId.toString();
     nextNodeId++;
     
+    // Simple approach: place at center of flow area with some Y offset
+    const centerY = 300 + (Math.random() * 200); // Random Y to avoid overlap
+    const snappedX = LANES.LEFT; // Default to center lane
+    
     const newNode: Node = {
       id: newId,
-      type: nodeTypes[randomType],
-      position: { x: LANES.CENTER, y: 100 + (nodes.length * 60) },
-      data: { label: nodeLabels[randomType] },
-      style: `background: ${nodeColors[randomType]}; color: white; border: none; font-weight: bold; width: 100px;`
+      type: 'default',
+      position: { x: snappedX, y: centerY },
+      data: { label: `${nodeType.emoji} ${nodeType.name}` },
+      style: `background: ${nodeType.color}; color: white; border: none; font-weight: bold; width: 100px;`
     };
     
     nodes = [...nodes, newNode];
@@ -134,9 +147,28 @@
   <div class="header">
     <h1>🎯 Pattern Editor</h1>
     <p>Design your LED patterns visually</p>
-    <button class="create-node-btn" onclick={createNode}>
-      ➕ Add Node
-    </button>
+    
+    <div class="dropdown-container">
+      <select 
+        class="dropdown-select"
+        onchange={(e) => {
+          const target = e.target as HTMLSelectElement;
+          if (!target) return;
+          const selectedIndex = target.selectedIndex - 1; // -1 because first option is placeholder
+          if (selectedIndex >= 0) {
+            createNode(NODE_TYPES[selectedIndex]);
+            target.selectedIndex = 0; // Reset to placeholder
+          }
+        }}
+      >
+        <option value="">➕ Add Pattern Node</option>
+        {#each NODE_TYPES as nodeType}
+          <option value={nodeType.name}>
+            {nodeType.emoji} {nodeType.name}
+          </option>
+        {/each}
+      </select>
+    </div>
   </div>
   
   <div class="flow-container">
@@ -198,24 +230,44 @@
     opacity: 0.9;
   }
   
-  .create-node-btn {
+  .dropdown-container {
     position: absolute;
     right: 0;
     top: 50%;
     transform: translateY(-50%);
-    background: #10b981;
-    color: white;
-    border: none;
-    padding: 0.75rem 1.5rem;
-    border-radius: 8px;
-    font-weight: 600;
-    cursor: pointer;
-    font-size: 0.9rem;
-    transition: background-color 0.2s;
+    z-index: 10000; /* High z-index to ensure it's above SvelteFlow */
   }
   
-  .create-node-btn:hover {
-    background: #059669;
+  .dropdown-select {
+    background: white;
+    color: #374151;
+    border: 2px solid #d1d5db;
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    min-width: 180px;
+    position: relative;
+    z-index: 10001;
+    font-family: inherit;
+    appearance: menulist; /* Standard dropdown appearance */
+  }
+  
+  .dropdown-select:hover {
+    border-color: #9ca3af;
+  }
+  
+  .dropdown-select:focus {
+    outline: none;
+    border-color: #10b981;
+    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
+  }
+  
+  .dropdown-select option {
+    background: white;
+    color: #374151;
+    padding: 0.5rem;
+    font-weight: normal;
   }
   
   .flow-container {
@@ -239,10 +291,17 @@
       font-size: 1rem;
     }
     
-    .create-node-btn {
+    .dropdown-container {
       position: static;
       transform: none;
       margin-top: 1rem;
+    }
+    
+    .dropdown-menu {
+      position: relative;
+      top: 0.5rem;
+      right: auto;
+      left: 0;
     }
   }
   
