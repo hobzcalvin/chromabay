@@ -1,21 +1,7 @@
 <script lang="ts">
   import { SvelteFlow, Controls, Background, BaseEdge, MarkerType, type Node, type Edge, type Connection, useSvelteFlow, useViewport, getOutgoers } from '@xyflow/svelte';
   import '@xyflow/svelte/dist/style.css';
-  import { flowNodes, flowEdges, nextNodeId, LANES } from '$lib/flowStore';
-  
-  // Define LED pattern node types
-  const NODE_TYPES = [
-    { name: 'Gradient', emoji: '🌈', color: '#3b82f6' },
-    { name: 'Rainbow', emoji: '🌙', color: '#10b981' },
-    { name: 'Perlin Noise', emoji: '🌊', color: '#8b5cf6' },
-    { name: 'Moving Blob', emoji: '💧', color: '#f59e0b' },
-    { name: 'Raindrops', emoji: '🌧️', color: '#06b6d4' },
-    { name: 'Strobe', emoji: '⚡', color: '#ef4444' },
-    { name: 'Sparkle', emoji: '✨', color: '#ec4899' },
-    { name: 'Fade', emoji: '🌅', color: '#84cc16' },
-    { name: 'Chase', emoji: '🏃', color: '#f97316' },
-    { name: 'Twinkle', emoji: '⭐', color: '#6366f1' }
-  ];
+  import { flowNodes, flowEdges, nextNodeId, LANES, NODE_TYPES } from '$lib/flowStore';
   
   // Get SvelteFlow hooks
   const { screenToFlowPosition } = useSvelteFlow();
@@ -173,7 +159,7 @@
       zoomOnDoubleClick={false}
       isValidConnection={isValidConnection}
       defaultEdgeOptions={{
-        type: 'smoothstep',
+        type: 'default',
         style: 'stroke-width: 3; stroke: #666;',
         markerEnd: {
           type: MarkerType.ArrowClosed,
