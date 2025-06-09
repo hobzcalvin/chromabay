@@ -150,7 +150,10 @@
         }
       }}
     >
-      <Background variant={'none' as any} />
+      <Background 
+        variant={'dots' as any} 
+        gap={[150, 5]} 
+      />
     </SvelteFlow>
   </div>
 </main>
