@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { SvelteFlow, Controls, Background, BaseEdge, MarkerType, type Node, type Edge, type Connection, useSvelteFlow, useViewport } from '@xyflow/svelte';
+  import { SvelteFlow, Controls, Background, BaseEdge, MarkerType, type Node, type Edge, type Connection, useSvelteFlow, useViewport, getOutgoers } from '@xyflow/svelte';
   import '@xyflow/svelte/dist/style.css';
   import { flowNodes, flowEdges, nextNodeId, LANES } from '$lib/flowStore';
   
@@ -95,6 +95,36 @@
     // Remove the clicked edge from the store
     flowEdges.update(edges => edges.filter(e => e.id !== edge.id));
   }
+
+  // Function to validate connections and prevent cycles
+  function isValidConnection(connection: Edge | Connection): boolean {
+    // Extract source and target from connection (could be Edge or Connection)
+    const source = connection.source;
+    const target = $flowNodes.find((node) => node.id === connection.target);
+    if (!target || !source) return false;
+    
+    // Check for cycles by traversing from target to see if we reach source
+    const hasCycle = (node: Node, visited = new Set<string>()): boolean => {
+      if (visited.has(node.id)) return false;
+      
+      visited.add(node.id);
+      
+      for (const outgoer of getOutgoers(node, $flowNodes, $flowEdges)) {
+        if (outgoer.id === source) return true;
+        if (hasCycle(outgoer, visited)) return true;
+      }
+      
+      return false;
+    };
+    
+    // Prevent self-loops
+    if (target.id === source) return false;
+    
+    // Check for cycles
+    return !hasCycle(target);
+  }
+
+
 </script>
 
 <main>
@@ -127,8 +157,8 @@
   
   <div class="flow-container">
     <SvelteFlow 
-      nodes={$flowNodes}
-      edges={$flowEdges}
+      bind:nodes={$flowNodes}
+      bind:edges={$flowEdges}
       initialViewport={{x: 0, y: 0, zoom: 1}}
       proOptions={{ hideAttribution: true }}
       nodesDraggable={true}
@@ -141,6 +171,7 @@
       onedgeclick={onEdgeClick}
       nodesConnectable={true}
       zoomOnDoubleClick={false}
+      isValidConnection={isValidConnection}
       defaultEdgeOptions={{
         type: 'smoothstep',
         style: 'stroke-width: 3; stroke: #666;',
