@@ -1,13 +1,25 @@
 <script lang="ts">
   import { SvelteFlow, Controls, Background, BaseEdge, MarkerType, type Node, type Edge, type Connection } from '@xyflow/svelte';
   import '@xyflow/svelte/dist/style.css';
+  import { RemovableNode } from '$lib';
   
   // Define the 3 vertical lanes for node snapping
   const LANES = {
     LEFT: 25,
-    CENTER: 175, 
+    CENTER: 175,
     RIGHT: 325
   };
+
+  const nodeTypes = {
+    default: RemovableNode,
+    input: RemovableNode,
+    output: RemovableNode
+  };
+
+  function deleteNode(id: string) {
+    nodes = nodes.filter(n => n.id !== id);
+    edges = edges.filter(e => e.source !== id && e.target !== id);
+  }
   
   // Define initial nodes for the pattern editor with lane positioning and fixed width
   const initialNodes: Node[] = [
@@ -15,29 +27,29 @@
       id: '1',
       type: 'input',
       position: { x: LANES.LEFT, y: 50 },
-      data: { label: '🚀 Start Pattern' },
-      style: 'background: #10b981; color: white; border: none; font-weight: bold; width: 100px;'
+      data: { label: '🚀 Start Pattern', onDelete: () => deleteNode('1') },
+      style: 'background: #10b981; color: white; border: none; font-weight: bold; width: 100px; position: relative;'
     },
     {
       id: '2',
       type: 'default',
       position: { x: LANES.CENTER, y: 50 },
-      data: { label: '💡 LED Strip' },
-      style: 'background: #3b82f6; color: white; border: none; font-weight: bold; width: 100px;'
+      data: { label: '💡 LED Strip', onDelete: () => deleteNode('2') },
+      style: 'background: #3b82f6; color: white; border: none; font-weight: bold; width: 100px; position: relative;'
     },
     {
       id: '3',
       type: 'default',
       position: { x: LANES.RIGHT, y: 50 },
-      data: { label: '🎨 Color Effect' },
-      style: 'background: #8b5cf6; color: white; border: none; font-weight: bold; width: 100px;'
+      data: { label: '🎨 Color Effect', onDelete: () => deleteNode('3') },
+      style: 'background: #8b5cf6; color: white; border: none; font-weight: bold; width: 100px; position: relative;'
     },
     {
       id: '4',
       type: 'output',
       position: { x: LANES.CENTER, y: 200 },
-      data: { label: '🏁 End Pattern' },
-      style: 'background: #ef4444; color: white; border: none; font-weight: bold; width: 100px;'
+      data: { label: '🏁 End Pattern', onDelete: () => deleteNode('4') },
+      style: 'background: #ef4444; color: white; border: none; font-weight: bold; width: 100px; position: relative;'
     }
   ];
   
@@ -75,9 +87,7 @@
     
     // Check if node is dragged outside the editor bounds for deletion
     if (node.position.x < -50 || node.position.x > 500 || node.position.y < -50) {
-      // Remove node and connected edges
-      nodes = nodes.filter(n => n.id !== node.id);
-      edges = edges.filter(e => e.source !== node.id && e.target !== node.id);
+      deleteNode(node.id);
       return;
     }
     
@@ -102,8 +112,8 @@
       id: newId,
       type: nodeTypes[randomType],
       position: { x: LANES.CENTER, y: 100 + (nodes.length * 60) },
-      data: { label: nodeLabels[randomType] },
-      style: `background: ${nodeColors[randomType]}; color: white; border: none; font-weight: bold; width: 100px;`
+      data: { label: nodeLabels[randomType], onDelete: () => deleteNode(newId) },
+      style: `background: ${nodeColors[randomType]}; color: white; border: none; font-weight: bold; width: 100px; position: relative;`
     };
     
     nodes = [...nodes, newNode];
@@ -143,9 +153,10 @@
   </div>
   
   <div class="flow-container">
-    <SvelteFlow 
-      {nodes} 
+    <SvelteFlow
+      {nodes}
       {edges}
+      nodeTypes={nodeTypes}
       initialViewport={{x: 0, y: 0, zoom: 1}}
       proOptions={{ hideAttribution: true }}
       nodesDraggable={true}
