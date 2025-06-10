@@ -16,7 +16,7 @@
   export let deleteTimeout: ReturnType<typeof setTimeout> | undefined = undefined;
 
   let popoverElement: HTMLElement;
-  let nodeDefinition = getNodeDefinition(node.data.type as string);
+  $: nodeDefinition = getNodeDefinition(node.data.type as string);
 
   // Calculate popover position
   function getPopoverPosition() {
