@@ -102,11 +102,32 @@
         const flowContainerRect = flowContainer.getBoundingClientRect();
         const adjustedX = nodeRect.left + (nodeRect.width / 2) - (editorRect.width / 2);
         
-        // Check if the parameter editor is below the fold (bottom of flow container)
+        // Check for vertical overflow (below the fold)
         const editorBottom = editorRect.bottom;
         const containerBottom = flowContainerRect.bottom;
         const isEditorBelowFold = editorBottom > containerBottom;
         
+        // Check for horizontal overflow (left and right sides)
+        const editorLeft = editorRect.left;
+        const editorRight = editorRect.right;
+        const containerLeft = flowContainerRect.left;
+        const containerRight = flowContainerRect.right;
+        const isEditorOffLeft = editorLeft < containerLeft;
+        const isEditorOffRight = editorRight > containerRight;
+        
+        let finalX = adjustedX;
+        let finalY = parameterEditor.top || 0;
+        
+        // Handle horizontal overflow - only move the editor, not the viewport
+        if (isEditorOffLeft) {
+          const bufferSpace = 20;
+          finalX = containerLeft + bufferSpace;
+        } else if (isEditorOffRight) {
+          const bufferSpace = 20;
+          finalX = containerRight - editorRect.width - bufferSpace;
+        }
+        
+        // Handle vertical overflow - move both editor and viewport
         if (isEditorBelowFold) {
           // Calculate how much we need to move up to make it fully visible
           const overflowAmount = editorBottom - containerBottom;
@@ -114,7 +135,7 @@
           const totalMoveUp = overflowAmount + bufferSpace;
           
           // Move the parameter editor up
-          const newEditorTop = (parameterEditor.top || 0) - totalMoveUp;
+          finalY = finalY - totalMoveUp;
           
           // Also move the viewport up by the same amount
           const currentViewport = viewport.current;
@@ -123,20 +144,14 @@
             y: currentViewport.y - totalMoveUp,
             zoom: currentViewport.zoom
           });
-          
-          // Update parameter editor position
-          parameterEditor = {
-            ...parameterEditor,
-            left: adjustedX,
-            top: newEditorTop,
-          };
-        } else {
-          // Just update horizontal position as before
-          parameterEditor = {
-            ...parameterEditor,
-            left: adjustedX,
-          };
         }
+        
+        // Update parameter editor position with final calculated values
+        parameterEditor = {
+          ...parameterEditor,
+          left: finalX,
+          top: finalY,
+        };
       }
     });
   }
