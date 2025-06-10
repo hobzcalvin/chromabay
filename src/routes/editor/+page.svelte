@@ -38,6 +38,12 @@
     );
   }
   
+  // Handle node drag start to close parameter editor
+  function onNodeDragStart(event: any) {
+    // Close parameter editor when any node starts dragging
+    parameterEditor = null;
+  }
+
   // Handle node drag stop to implement snapping
   function onNodeDragStop(event: any) {
     const node = event.targetNode;
@@ -230,12 +236,14 @@
       }}
       proOptions={{ hideAttribution: true }}
       nodesDraggable={true}
+      elementsSelectable={false}
       selectNodesOnDrag={false}
       panOnDrag={true}
       translateExtent={[[0, -Infinity], [450, Infinity]]}
       colorMode="dark"
+      onnodedragstart={onNodeDragStart}
       onnodedragstop={onNodeDragStop}
-              onnodeclick={handleNodeClick}
+      onnodeclick={handleNodeClick}
       onpaneclick={handlePaneClick}
       onedgeclick={onEdgeClick}
       nodesConnectable={true}
