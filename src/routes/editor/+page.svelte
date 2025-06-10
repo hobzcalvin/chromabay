@@ -7,7 +7,7 @@
   import NodeParameterEditor from '$lib/components/NodeParameterEditor.svelte';
   
   // Get SvelteFlow hooks
-  const { screenToFlowPosition } = useSvelteFlow();
+  const { screenToFlowPosition, setViewport } = useSvelteFlow();
   const viewport = useViewport();
   
   // Parameter editor state - similar to context menu approach
@@ -97,15 +97,46 @@
     tick().then(() => {
       // Find the rendered parameter editor element and measure its width
       const editorElement = document.querySelector('.parameter-popover') as HTMLElement;
-      if (editorElement && parameterEditor) {
+      if (editorElement && parameterEditor && flowContainer) {
         const editorRect = editorElement.getBoundingClientRect();
+        const flowContainerRect = flowContainer.getBoundingClientRect();
         const adjustedX = nodeRect.left + (nodeRect.width / 2) - (editorRect.width / 2);
         
-        // Update position to center the editor under the node
-        parameterEditor = {
-          ...parameterEditor,
-          left: adjustedX,
-        };
+        // Check if the parameter editor is below the fold (bottom of flow container)
+        const editorBottom = editorRect.bottom;
+        const containerBottom = flowContainerRect.bottom;
+        const isEditorBelowFold = editorBottom > containerBottom;
+        
+        if (isEditorBelowFold) {
+          // Calculate how much we need to move up to make it fully visible
+          const overflowAmount = editorBottom - containerBottom;
+          const bufferSpace = 20; // Add some buffer space
+          const totalMoveUp = overflowAmount + bufferSpace;
+          
+          // Move the parameter editor up
+          const newEditorTop = (parameterEditor.top || 0) - totalMoveUp;
+          
+          // Also move the viewport up by the same amount
+          const currentViewport = viewport.current;
+          setViewport({
+            x: currentViewport.x,
+            y: currentViewport.y - totalMoveUp,
+            zoom: currentViewport.zoom
+          });
+          
+          // Update parameter editor position
+          parameterEditor = {
+            ...parameterEditor,
+            left: adjustedX,
+            top: newEditorTop,
+          };
+        } else {
+          // Just update horizontal position as before
+          parameterEditor = {
+            ...parameterEditor,
+            left: adjustedX,
+          };
+        }
       }
     });
   }
