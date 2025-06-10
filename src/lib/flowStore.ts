@@ -1,5 +1,5 @@
 import { writable } from 'svelte/store';
-import type { Node, Edge } from '@xyflow/svelte';
+import type { Node, Edge, Connection } from '@xyflow/svelte';
 
 // Global start time for synchronized animations across all nodes
 export const globalStartTime = writable<number>(performance.now());
@@ -573,6 +573,103 @@ const LANES = {
   CENTER: 175,
   RIGHT: 325
 };
+
+// Helper function to get which buffer/lane a node is in
+export function getNodeBuffer(node: Node): number {
+  const x = node.position.x;
+  const distances = [
+    Math.abs(x - LANES.LEFT),
+    Math.abs(x - LANES.CENTER), 
+    Math.abs(x - LANES.RIGHT)
+  ];
+  return distances.indexOf(Math.min(...distances)) + 1; // Return 1, 2, or 3
+}
+
+// Helper function to validate buffer constraints for connections
+export function validateBufferConnection(connection: Edge | Connection, nodes: Node[], edges: Edge[]): boolean {
+  const target = nodes.find((node) => node.id === connection.target);
+  const source = nodes.find((node) => node.id === connection.source);
+  
+  if (!target || !source) return false;
+  
+  const sourceBuffer = getNodeBuffer(source);
+  const targetBuffer = getNodeBuffer(target);
+  
+  // Check if source already outputs to this target's lane
+  const existingOutputsToTargetLane = edges.filter(edge => {
+    if (edge.source !== connection.source) return false;
+    const edgeTarget = nodes.find(n => n.id === edge.target);
+    return edgeTarget && getNodeBuffer(edgeTarget) === targetBuffer;
+  });
+  
+  if (existingOutputsToTargetLane.length > 0) {
+    return false;
+  }
+  
+  // Special rules for blend nodes
+  if (target.data.type === 'blend') {
+    const targetHandleId = connection.targetHandle;
+    
+    // For blend node's second input (input-2), must be from different buffer
+    if (targetHandleId === 'input-2' && sourceBuffer === targetBuffer) {
+      return false;
+    }
+  }
+  
+  return true;
+}
+
+// Enhanced connection validation that includes buffer constraints
+export function isValidConnectionWithBuffers(connection: Edge | Connection, nodes: Node[], edges: Edge[]): boolean {
+  const target = nodes.find((node) => node.id === connection.target);
+  const source = nodes.find((node) => node.id === connection.source);
+  
+  if (!target || !source) return false;
+  
+  // Prevent self-loops
+  if (target.id === source.id) return false;
+  
+  // Check buffer constraints first
+  if (!validateBufferConnection(connection, nodes, edges)) return false;
+  
+  // Check existing connection limits
+  const targetHandleId = connection.targetHandle;
+  const isBlendNode = target.data.type === 'blend';
+  
+  if (isBlendNode) {
+    // For blend nodes, each handle can only have one connection
+    const existingConnections = edges.filter(edge => 
+      edge.target === connection.target && 
+      edge.targetHandle === targetHandleId
+    );
+    if (existingConnections.length >= 1) return false;
+  } else {
+    // For non-blend nodes, only allow one total input connection
+    const allTargetConnections = edges.filter(edge => edge.target === connection.target);
+    if (allTargetConnections.length >= 1) return false;
+  }
+  
+  // Check for cycles (existing logic)
+  const hasCycle = (node: Node, visited = new Set<string>()): boolean => {
+    if (visited.has(node.id)) return false;
+    visited.add(node.id);
+    
+    for (const edge of edges) {
+      if (edge.source === node.id) {
+        const outgoer = nodes.find(n => n.id === edge.target);
+        if (outgoer) {
+          if (outgoer.id === source.id) return true;
+          if (hasCycle(outgoer, visited)) return true;
+        }
+      }
+    }
+    return false;
+  };
+  
+  if (hasCycle(target)) return false;
+  
+  return true;
+}
 
 // Helper function to create a node from a node type
 export function createNodeFromType(nodeType: NodeDefinition, id: string, position: { x: number, y: number }): Node {

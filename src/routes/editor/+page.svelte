@@ -2,7 +2,7 @@
   import { tick } from 'svelte';
   import { SvelteFlow, Controls, Background, BaseEdge, MarkerType, Position, type Node, type Edge, type Connection, useSvelteFlow, useViewport, getOutgoers } from '@xyflow/svelte';
   import '@xyflow/svelte/dist/style.css';
-  import { flowNodes, flowEdges, nextNodeId, LANES, NODE_TYPES, createNodeFromType, getNodeDefinition } from '$lib/flowStore';
+  import { flowNodes, flowEdges, nextNodeId, LANES, NODE_TYPES, createNodeFromType, getNodeDefinition, isValidConnectionWithBuffers } from '$lib/flowStore';
   import PatternNode from '$lib/PatternNode.svelte';
   import NodeParameterEditor from '$lib/components/NodeParameterEditor.svelte';
   
@@ -45,7 +45,7 @@
   
 
 
-  // Handle node drag stop to implement snapping
+  // Handle node drag stop to implement snapping and validate buffer constraints
   function onNodeDragStop(event: any) {
     const node = event.targetNode;
     if (!node) return;
@@ -60,6 +60,29 @@
           : n
       )
     );
+    
+    // After updating position, check for any connections that are now invalid due to buffer constraints
+    validateAndCleanupConnections();
+  }
+  
+  // Validate all connections and remove any that violate buffer constraints
+  function validateAndCleanupConnections() {
+    const invalidConnections: Edge[] = [];
+    
+    // Check each existing connection
+    $flowEdges.forEach(edge => {
+      const isValid = isValidConnectionWithBuffers(edge, $flowNodes, $flowEdges);
+      if (!isValid) {
+        invalidConnections.push(edge);
+      }
+    });
+    
+    // Remove invalid connections
+    if (invalidConnections.length > 0) {
+      flowEdges.update(edges => 
+        edges.filter(edge => !invalidConnections.some(invalid => invalid.id === edge.id))
+      );
+    }
   }
 
   // Handle node clicks for parameter editing - positioned below the node
@@ -204,51 +227,9 @@
     flowEdges.update(edges => edges.filter(e => e.id !== edge.id));
   }
 
-  // Function to validate connections and prevent cycles
+  // Function to validate connections with buffer constraints
   function isValidConnection(connection: Edge | Connection): boolean {
-    // Extract source and target from connection (could be Edge or Connection)
-    const source = connection.source;
-    const target = $flowNodes.find((node) => node.id === connection.target);
-    if (!target || !source) return false;
-    
-    // Prevent self-loops
-    if (target.id === source) return false;
-    
-    // Check input connection limits
-    const targetHandleId = connection.targetHandle;
-    
-    // Check if this is a blend node by examining its type
-    const isBlendNode = target.data.type === 'blend';
-    
-    if (isBlendNode) {
-      // For blend nodes, each handle can only have one connection
-      const existingConnections = $flowEdges.filter(edge => 
-        edge.target === connection.target && 
-        edge.targetHandle === targetHandleId
-      );
-      if (existingConnections.length >= 1) return false;
-    } else {
-      // For all other nodes, only allow one total input connection
-      const allTargetConnections = $flowEdges.filter(edge => edge.target === connection.target);
-      if (allTargetConnections.length >= 1) return false;
-    }
-    
-    // Check for cycles by traversing from target to see if we reach source
-    const hasCycle = (node: Node, visited = new Set<string>()): boolean => {
-      if (visited.has(node.id)) return false;
-      
-      visited.add(node.id);
-      
-      for (const outgoer of getOutgoers(node, $flowNodes, $flowEdges)) {
-        if (outgoer.id === source) return true;
-        if (hasCycle(outgoer, visited)) return true;
-      }
-      
-      return false;
-    };
-    
-    // Check for cycles
-    return !hasCycle(target);
+    return isValidConnectionWithBuffers(connection, $flowNodes, $flowEdges);
   }
 
 
