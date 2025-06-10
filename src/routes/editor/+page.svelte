@@ -57,12 +57,15 @@
       // Use viewport center Y with slight random offset to avoid overlap
       const nodeY = viewportCenterY + (Math.random() * 100 - 50); // ±50px random offset
       
-      // All nodes are now pattern nodes
+      // All nodes are pattern nodes - they determine their behavior from their type
       const newNode: Node = {
         id: newId,
         type: 'pattern',
         position: { x: nodeX, y: nodeY },
-        data: { label: `${nodeType.emoji} ${nodeType.name}` },
+        data: { 
+          label: `${nodeType.emoji} ${nodeType.name}`,
+          type: nodeType.type
+        },
         style: '' // Pattern nodes handle their own styling
       };
       
@@ -94,8 +97,8 @@
     // Check input connection limits
     const targetHandleId = connection.targetHandle;
     
-    // Check if this is a blend node (has multiple input handles)
-    const isBlendNode = target.type === 'blend';
+    // Check if this is a blend node by examining its type
+    const isBlendNode = target.data.type === 'blend';
     
     if (isBlendNode) {
       // For blend nodes, each handle can only have one connection

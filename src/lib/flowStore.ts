@@ -3,17 +3,17 @@ import type { Node, Edge } from '@xyflow/svelte';
 
 // Define LED pattern node types
 export const NODE_TYPES = [
-  { name: 'Rainbow', emoji: '🌙', color: '#10b981' },
-  { name: 'Gradient', emoji: '🌈', color: '#3b82f6' },
-  { name: 'Perlin Noise', emoji: '🌊', color: '#8b5cf6' },
-  { name: 'Moving Blob', emoji: '💧', color: '#f59e0b' },
-  { name: 'Raindrops', emoji: '🌧️', color: '#06b6d4' },
-  { name: 'Strobe', emoji: '⚡', color: '#ef4444' },
-  { name: 'Sparkle', emoji: '✨', color: '#ec4899' },
-  { name: 'Fade', emoji: '🌅', color: '#84cc16' },
-  { name: 'Chase', emoji: '🏃', color: '#f97316' },
-  { name: 'Twinkle', emoji: '⭐', color: '#6366f1' },
-  { name: 'Blend', emoji: '🎨', color: '#8b5cf6' }
+  { name: 'Rainbow', emoji: '🌙', color: '#10b981', type: 'rainbow' },
+  { name: 'Gradient', emoji: '🌈', color: '#3b82f6', type: 'gradient' },
+  { name: 'Perlin Noise', emoji: '🌊', color: '#8b5cf6', type: 'perlin_noise' },
+  { name: 'Moving Blob', emoji: '💧', color: '#f59e0b', type: 'moving_blob' },
+  { name: 'Raindrops', emoji: '🌧️', color: '#06b6d4', type: 'raindrops' },
+  { name: 'Strobe', emoji: '⚡', color: '#ef4444', type: 'strobe' },
+  { name: 'Sparkle', emoji: '✨', color: '#ec4899', type: 'sparkle' },
+  { name: 'Fade', emoji: '🌅', color: '#84cc16', type: 'fade' },
+  { name: 'Chase', emoji: '🏃', color: '#f97316', type: 'chase' },
+  { name: 'Twinkle', emoji: '⭐', color: '#6366f1', type: 'twinkle' },
+  { name: 'Blend', emoji: '🎨', color: '#8b5cf6', type: 'blend' }
 ];
 
 // Define the 3 vertical lanes for node snapping
@@ -29,14 +29,20 @@ const initialNodes: Node[] = [
     id: '1',
     type: 'pattern',
     position: { x: LANES.CENTER, y: 100 },
-    data: { label: `${NODE_TYPES[0].emoji} ${NODE_TYPES[0].name}` },
+    data: { 
+      label: `${NODE_TYPES[0].emoji} ${NODE_TYPES[0].name}`,
+      type: NODE_TYPES[0].type
+    },
     style: ''
   },
   {
     id: '2',
     type: 'pattern',
     position: { x: LANES.CENTER, y: 250 },
-    data: { label: '🏁 Output' },
+    data: { 
+      label: '🏁 Output',
+      type: 'output'
+    },
     style: ''
   }
 ];

@@ -14,20 +14,15 @@
   let textureWidth = 100;
   let textureHeight = 50;
   
-  // Extract node type name from data.label
-  const getNodeTypeName = (label: string): string => {
-    const parts = label.split(' ');
-    return parts.slice(1).join(' ');
-  };
-  
-  const nodeTypeName = getNodeTypeName(data.label as string);
+  // Get the clean node type from data
+  const nodeType = data.type as string;
   
   // Get connected input nodes
   function getInputNodes() {
     const edges = $flowEdges.filter(edge => edge.target === id);
     const nodes = $flowNodes;
     
-    if (nodeTypeName === 'Blend') {
+    if (nodeType === 'blend') {
       // For blend nodes, get both inputs
       const input1Edge = edges.find(e => e.targetHandle === 'input-1');
       const input2Edge = edges.find(e => e.targetHandle === 'input-2');
@@ -70,7 +65,7 @@
     
     const inputs = getInputNodes();
     
-    if (nodeTypeName === 'Output') {
+    if (nodeType === 'output') {
       // Output just passes through its input
       if ('input' in inputs && inputs.input) {
         const inputData = getNodeOutput(inputs.input.id);
@@ -78,7 +73,7 @@
           ctx.putImageData(inputData, 0, 0);
         }
       }
-    } else if (nodeTypeName === 'Blend') {
+    } else if (nodeType === 'blend') {
       // Blend mixes two inputs
       const input1Data = inputs.input1 ? getNodeOutput(inputs.input1.id) : null;
       const input2Data = inputs.input2 ? getNodeOutput(inputs.input2.id) : null;
@@ -139,8 +134,8 @@
   function renderPattern() {
     if (!ctx) return;
     
-    switch (nodeTypeName) {
-      case 'Rainbow':
+    switch (nodeType) {
+      case 'rainbow':
         for (let i = 0; i < textureWidth; i++) {
           const hue = (i / textureWidth + time * 0.1) % 1;
           const [r, g, b] = hslToRgb(hue, 1, 0.5);
@@ -149,7 +144,7 @@
         }
         break;
         
-      case 'Gradient':
+      case 'gradient':
         const gradient = ctx.createLinearGradient(0, 0, textureWidth, 0);
         gradient.addColorStop(0, '#3b82f6');
         gradient.addColorStop(1, '#8b5cf6');
@@ -157,7 +152,7 @@
         ctx.fillRect(0, 0, textureWidth, textureHeight);
         break;
         
-      case 'Perlin Noise':
+      case 'perlin_noise':
         for (let x = 0; x < textureWidth; x += 2) {
           for (let y = 0; y < textureHeight; y += 2) {
             const noise = Math.sin(x * 0.1 + time) * Math.cos(y * 0.1 + time);
@@ -168,7 +163,7 @@
         }
         break;
         
-      case 'Moving Blob':
+      case 'moving_blob':
         const centerX = textureWidth/2 + Math.sin(time * 2) * (textureWidth * 0.2);
         const centerY = textureHeight/2 + Math.cos(time * 1.5) * (textureHeight * 0.2);
         const innerRadius = Math.min(textureWidth, textureHeight) * 0.06;
@@ -180,7 +175,7 @@
         ctx.fillRect(0, 0, textureWidth, textureHeight);
         break;
         
-      case 'Raindrops':
+      case 'raindrops':
         const dropCount = Math.floor(textureWidth / 16);
         for (let i = 0; i < dropCount; i++) {
           const x = (i * (textureWidth / dropCount) + textureWidth / (dropCount * 2)) % textureWidth;
@@ -196,7 +191,7 @@
         }
         break;
         
-      case 'Strobe':
+      case 'strobe':
         const intensity = Math.sin(time * 8) > 0.7 ? 1 : 0;
         if (intensity > 0) {
           ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
@@ -204,7 +199,7 @@
         }
         break;
         
-      case 'Sparkle':
+      case 'sparkle':
         const sparkleCount = Math.floor(textureWidth / 10);
         for (let i = 0; i < sparkleCount; i++) {
           const x = (textureWidth / sparkleCount) * 0.2 + i * (textureWidth / sparkleCount);
@@ -220,7 +215,7 @@
         ctx.globalAlpha = 1;
         break;
         
-      case 'Fade':
+      case 'fade':
         const fadeIntensity = (Math.sin(time) + 1) * 0.5;
         ctx.globalAlpha = fadeIntensity;
         ctx.fillStyle = '#ff6b35';
@@ -228,7 +223,7 @@
         ctx.globalAlpha = 1;
         break;
         
-      case 'Chase':
+      case 'chase':
         const position = (time * 20) % textureWidth;
         ctx.fillStyle = '#00ff00';
         ctx.beginPath();
@@ -237,7 +232,7 @@
         ctx.fill();
         break;
         
-      case 'Twinkle':
+      case 'twinkle':
         const twinkleCount = Math.floor(textureWidth * textureHeight / 200);
         for (let i = 0; i < twinkleCount; i++) {
           const x = (i * (textureWidth / 6)) % textureWidth;
@@ -303,8 +298,8 @@
     });
   });
   
-  const isBlendNode = nodeTypeName === 'Blend';
-  const isOutputNode = nodeTypeName === 'Output';
+  const isBlendNode = nodeType === 'blend';
+  const isOutputNode = nodeType === 'output';
 </script>
 
 <div class="pattern-node" class:blend-node={isBlendNode}>
