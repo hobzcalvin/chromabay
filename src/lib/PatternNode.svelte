@@ -10,6 +10,10 @@
   let animationFrame: number | null = null;
   let time = 0;
   
+  // Configurable texture dimensions - these should come from props or a config store
+  let textureWidth = 100;
+  let textureHeight = 50;
+  
   // Extract node type name from data.label
   const getNodeTypeName = (label: string): string => {
     const parts = label.split(' ');
@@ -46,23 +50,23 @@
     return outputs.get(nodeId) || null;
   }
   
-  onMount(() => {
+    onMount(() => {
     ctx = canvasElement.getContext('2d');
     animate();
   });
-  
+
   function animate() {
     time += 0.016;
     render();
     animationFrame = requestAnimationFrame(animate);
   }
-  
+
   function render() {
     if (!ctx) return;
     
     // Start with black background
     ctx.fillStyle = '#000000';
-    ctx.fillRect(0, 0, 100, 50);
+    ctx.fillRect(0, 0, textureWidth, textureHeight);
     
     const inputs = getInputNodes();
     
@@ -81,7 +85,7 @@
       
       if (input1Data || input2Data) {
         // Create blend effect
-        const imageData = ctx.createImageData(100, 50);
+        const imageData = ctx.createImageData(textureWidth, textureHeight);
         const data = imageData.data;
         
         for (let i = 0; i < data.length; i += 4) {
@@ -125,7 +129,7 @@
     }
     
     // Store this node's output for other nodes to use
-    const outputData = ctx.getImageData(0, 0, 100, 50);
+    const outputData = ctx.getImageData(0, 0, textureWidth, textureHeight);
     nodeOutputs.update(outputs => {
       outputs.set(id, outputData);
       return outputs;
@@ -137,25 +141,25 @@
     
     switch (nodeTypeName) {
       case 'Rainbow':
-        for (let i = 0; i < 100; i++) {
-          const hue = (i / 100 + time * 0.1) % 1;
+        for (let i = 0; i < textureWidth; i++) {
+          const hue = (i / textureWidth + time * 0.1) % 1;
           const [r, g, b] = hslToRgb(hue, 1, 0.5);
           ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
-          ctx.fillRect(i, 0, 1, 50);
+          ctx.fillRect(i, 0, 1, textureHeight);
         }
         break;
         
       case 'Gradient':
-        const gradient = ctx.createLinearGradient(0, 0, 100, 0);
+        const gradient = ctx.createLinearGradient(0, 0, textureWidth, 0);
         gradient.addColorStop(0, '#3b82f6');
         gradient.addColorStop(1, '#8b5cf6');
         ctx.fillStyle = gradient;
-        ctx.fillRect(0, 0, 100, 50);
+        ctx.fillRect(0, 0, textureWidth, textureHeight);
         break;
         
       case 'Perlin Noise':
-        for (let x = 0; x < 100; x += 2) {
-          for (let y = 0; y < 50; y += 2) {
+        for (let x = 0; x < 80; x += 2) {
+          for (let y = 0; y < 80; y += 2) {
             const noise = Math.sin(x * 0.1 + time) * Math.cos(y * 0.1 + time);
             const intensity = Math.floor((noise + 1) * 127.5);
             ctx.fillStyle = `rgb(${intensity}, ${intensity}, ${intensity})`;
@@ -165,20 +169,20 @@
         break;
         
       case 'Moving Blob':
-        const centerX = 50 + Math.sin(time * 2) * 20;
-        const centerY = 25 + Math.cos(time * 1.5) * 10;
+        const centerX = 40 + Math.sin(time * 2) * 16;
+        const centerY = 40 + Math.cos(time * 1.5) * 16;
         const radialGradient = ctx.createRadialGradient(centerX, centerY, 5, centerX, centerY, 20);
         radialGradient.addColorStop(0, '#00ffff');
         radialGradient.addColorStop(1, 'transparent');
         ctx.fillStyle = radialGradient;
-        ctx.fillRect(0, 0, 100, 50);
+        ctx.fillRect(0, 0, 80, 80);
         break;
         
       case 'Raindrops':
         for (let i = 0; i < 5; i++) {
-          const x = (i * 20 + 10) % 100;
-          const y = ((time * 50 + i * 10) % 60) - 10;
-          if (y >= 0 && y <= 50) {
+          const x = (i * 16 + 8) % 80;
+          const y = ((time * 50 + i * 10) % 90) - 10;
+          if (y >= 0 && y <= 80) {
             ctx.fillStyle = '#4fc3f7';
             ctx.beginPath();
             ctx.ellipse(x, y, 2, 4, 0, 0, Math.PI * 2);
@@ -191,14 +195,14 @@
         const intensity = Math.sin(time * 8) > 0.7 ? 1 : 0;
         if (intensity > 0) {
           ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-          ctx.fillRect(0, 0, 100, 50);
+          ctx.fillRect(0, 0, 80, 80);
         }
         break;
         
       case 'Sparkle':
         for (let i = 0; i < 8; i++) {
-          const x = 20 + i * 10;
-          const y = 25 + Math.sin(i * 2) * 10;
+          const x = 16 + i * 8;
+          const y = 40 + Math.sin(i * 2) * 16;
           const alpha = Math.abs(Math.sin(time * 3 + i)) * 0.8 + 0.2;
           ctx.globalAlpha = alpha;
           ctx.fillStyle = '#ffffff';
@@ -213,22 +217,22 @@
         const fadeIntensity = (Math.sin(time) + 1) * 0.5;
         ctx.globalAlpha = fadeIntensity;
         ctx.fillStyle = '#ff6b35';
-        ctx.fillRect(0, 0, 100, 50);
+        ctx.fillRect(0, 0, 80, 80);
         ctx.globalAlpha = 1;
         break;
         
       case 'Chase':
-        const position = (time * 20) % 100;
+        const position = (time * 20) % 80;
         ctx.fillStyle = '#00ff00';
         ctx.beginPath();
-        ctx.arc(position, 25, 8, 0, Math.PI * 2);
+        ctx.arc(position, 40, 8, 0, Math.PI * 2);
         ctx.fill();
         break;
         
       case 'Twinkle':
         for (let i = 0; i < 15; i++) {
-          const x = (i * 7) % 100;
-          const y = 15 + (i % 3) * 10;
+          const x = (i * 6) % 80;
+          const y = 20 + (i % 3) * 20;
           const alpha = Math.sin(time * 4 + i * 0.5) > 0.5 ? 0.9 : 0.1;
           ctx.globalAlpha = alpha;
           ctx.fillStyle = '#ffff88';
@@ -241,11 +245,11 @@
         
       default:
         // Simple wave pattern for unknown types
-        for (let i = 0; i < 100; i++) {
+        for (let i = 0; i < 80; i++) {
           const wave = Math.sin(i * 0.1 + time) * 0.5 + 0.5;
           const gray = Math.floor(wave * 128); // Reduced intensity for layering
           ctx.fillStyle = `rgba(${gray}, ${gray}, ${gray}, 0.5)`;
-          ctx.fillRect(i, 0, 1, 50);
+          ctx.fillRect(i, 0, 1, 80);
         }
     }
   }
@@ -296,8 +300,8 @@
 <div class="pattern-node" class:blend-node={isBlendNode}>
   <canvas 
     bind:this={canvasElement}
-    width="100"
-    height="50"
+    width={textureWidth}
+    height={textureHeight}
     class="pattern-canvas"
   ></canvas>
   
