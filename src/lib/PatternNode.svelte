@@ -1,14 +1,14 @@
 <script lang="ts">
   import { Handle, Position, type NodeProps } from '@xyflow/svelte';
   import { onMount, onDestroy } from 'svelte';
-  import { flowNodes, flowEdges, nodeOutputs, getNodeDefinition, type RenderContext } from '$lib/flowStore';
+  import { flowNodes, flowEdges, nodeOutputs, getNodeDefinition, globalStartTime, type RenderContext } from '$lib/flowStore';
   
   let { data, id, type }: NodeProps & { type: string } = $props();
   
   let canvasElement: HTMLCanvasElement;
   let ctx: CanvasRenderingContext2D | null = null;
   let animationFrame: number | null = null;
-  let time = 0;
+  let lastFrameTime: number;
   
   // Configurable texture dimensions - these should come from props or a config store
   let textureWidth = 100;
@@ -47,17 +47,22 @@
   
   onMount(() => {
     ctx = canvasElement.getContext('2d');
+    lastFrameTime = performance.now();
     animate();
   });
 
   function animate() {
-    time += 0.016;
-    render();
+    const currentTime = performance.now();
+    render(currentTime);
     animationFrame = requestAnimationFrame(animate);
   }
 
-  function render() {
+  function render(currentTime: number) {
     if (!ctx) return;
+    
+    const totalTime = (currentTime - $globalStartTime) / 1000; // Convert to seconds
+    const deltaTime = (currentTime - lastFrameTime) / 1000; // Convert to seconds
+    lastFrameTime = currentTime;
     
     // Start with black background
     ctx.fillStyle = '#000000';
@@ -77,7 +82,8 @@
     if (nodeDefinition) {
       const renderContext: RenderContext = {
         ctx,
-        time,
+        totalTime,
+        deltaTime,
         width: textureWidth,
         height: textureHeight,
         getInputNodes,
@@ -95,8 +101,6 @@
       return outputs;
     });
   }
-  
-
   
   onDestroy(() => {
     if (animationFrame !== null) {

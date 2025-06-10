@@ -1,6 +1,9 @@
 import { writable } from 'svelte/store';
 import type { Node, Edge } from '@xyflow/svelte';
 
+// Global start time for synchronized animations across all nodes
+export const globalStartTime = writable<number>(performance.now());
+
 // Helper function for HSL to RGB conversion
 function hslToRgb(h: number, s: number, l: number): [number, number, number] {
   const c = (1 - Math.abs(2 * l - 1)) * s;
@@ -33,7 +36,8 @@ function hslToRgb(h: number, s: number, l: number): [number, number, number] {
 // Type for render function parameters
 export interface RenderContext {
   ctx: CanvasRenderingContext2D;
-  time: number;
+  totalTime: number; // Total elapsed time in seconds since start
+  deltaTime: number; // Time elapsed since last frame in seconds
   width: number;
   height: number;
   getInputNodes: () => any;
@@ -61,9 +65,9 @@ export const NODE_TYPES: NodeDefinition[] = [
   {
     name: 'Rainbow',
     type: 'rainbow',
-    render: ({ ctx, time, width, height }) => {
+    render: ({ ctx, totalTime, width, height }) => {
       for (let i = 0; i < width; i++) {
-        const hue = (i / width + time * 0.1) % 1;
+        const hue = (i / width + totalTime * 0.1) % 1;
         const [r, g, b] = hslToRgb(hue, 1, 0.5);
         ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
         ctx.fillRect(i, 0, 1, height);
@@ -84,13 +88,14 @@ export const NODE_TYPES: NodeDefinition[] = [
   {
     name: 'Perlin Noise',
     type: 'perlin_noise',
-    render: ({ ctx, time, width, height }) => {
-      for (let x = 0; x < width; x += 2) {
-        for (let y = 0; y < height; y += 2) {
-          const noise = Math.sin(x * 0.1 + time) * Math.cos(y * 0.1 + time);
-          const intensity = Math.floor((noise + 1) * 127.5);
-          ctx.fillStyle = `rgb(${intensity}, ${intensity}, ${intensity})`;
-          ctx.fillRect(x, y, 2, 2);
+    render: ({ ctx, totalTime, width, height }) => {
+      // Create noise overlay
+      for (let x = 0; x < width; x += 1) {
+        for (let y = 0; y < height; y += 1) {
+          const noise = Math.sin(x * 0.1 + totalTime) * Math.cos(y * 0.1 + totalTime);
+          const intensity = (noise + 1) * 0.5; // Normalize to 0-1
+          ctx.fillStyle = `rgba(255, 255, 255, ${intensity})`;
+          ctx.fillRect(x, y, 1, 1);
         }
       }
     }
@@ -98,13 +103,13 @@ export const NODE_TYPES: NodeDefinition[] = [
   {
     name: 'Moving Blob',
     type: 'moving_blob',
-    render: ({ ctx, time, width, height }) => {
-      const centerX = width/2 + Math.sin(time * 2) * (width * 0.2);
-      const centerY = height/2 + Math.cos(time * 1.5) * (height * 0.2);
+    render: ({ ctx, totalTime, width, height }) => {
+      const centerX = width/2 + Math.sin(totalTime * 2) * (width * 0.2);
+      const centerY = height/2 + Math.cos(totalTime * 1.5) * (height * 0.2);
       const innerRadius = Math.min(width, height) * 0.06;
       const outerRadius = Math.min(width, height) * 0.25;
       const radialGradient = ctx.createRadialGradient(centerX, centerY, innerRadius, centerX, centerY, outerRadius);
-      radialGradient.addColorStop(0, '#00ffff');
+      radialGradient.addColorStop(0, '#ffffff');
       radialGradient.addColorStop(1, 'transparent');
       ctx.fillStyle = radialGradient;
       ctx.fillRect(0, 0, width, height);
@@ -113,13 +118,13 @@ export const NODE_TYPES: NodeDefinition[] = [
   {
     name: 'Raindrops',
     type: 'raindrops',
-    render: ({ ctx, time, width, height }) => {
+    render: ({ ctx, totalTime, width, height }) => {
       const dropCount = Math.floor(width / 16);
       for (let i = 0; i < dropCount; i++) {
         const x = (i * (width / dropCount) + width / (dropCount * 2)) % width;
-        const y = ((time * 50 + i * 10) % (height + 10)) - 10;
+        const y = ((totalTime * 50 + i * 10) % (height + 10)) - 10;
         if (y >= 0 && y <= height) {
-          ctx.fillStyle = '#4fc3f7';
+          ctx.fillStyle = '#ffffff';
           ctx.beginPath();
           const dropWidth = width * 0.025;
           const dropHeight = height * 0.08;
@@ -132,8 +137,8 @@ export const NODE_TYPES: NodeDefinition[] = [
   {
     name: 'Strobe',
     type: 'strobe',
-    render: ({ ctx, time, width, height }) => {
-      const intensity = Math.sin(time * 8) > 0.7 ? 1 : 0;
+    render: ({ ctx, totalTime, width, height }) => {
+      const intensity = Math.sin(totalTime * 8) > 0.7 ? 1 : 0;
       if (intensity > 0) {
         ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
         ctx.fillRect(0, 0, width, height);
@@ -143,12 +148,15 @@ export const NODE_TYPES: NodeDefinition[] = [
   {
     name: 'Sparkle',
     type: 'sparkle',
-    render: ({ ctx, time, width, height }) => {
+    render: ({ ctx, totalTime, width, height }) => {
       const sparkleCount = Math.floor(width / 10);
       for (let i = 0; i < sparkleCount; i++) {
-        const x = (width / sparkleCount) * 0.2 + i * (width / sparkleCount);
-        const y = height/2 + Math.sin(i * 2) * (height * 0.32);
-        const alpha = Math.abs(Math.sin(time * 3 + i)) * 0.8 + 0.2;
+        // Make sparkle positions move around randomly
+        const baseX = (width / sparkleCount) * i;
+        const baseY = height / 2;
+        const x = baseX + Math.sin(totalTime + i * 1.7) * (width * 0.1);
+        const y = baseY + Math.cos(totalTime * 1.5 + i * 2.3) * (height * 0.3);
+        const alpha = Math.abs(Math.sin(totalTime * 3 + i * 0.8)) * 0.8 + 0.2;
         ctx.globalAlpha = alpha;
         ctx.fillStyle = '#ffffff';
         ctx.beginPath();
@@ -162,8 +170,8 @@ export const NODE_TYPES: NodeDefinition[] = [
   {
     name: 'Fade',
     type: 'fade',
-    render: ({ ctx, time, width, height }) => {
-      const fadeIntensity = (Math.sin(time) + 1) * 0.5;
+    render: ({ ctx, totalTime, width, height }) => {
+      const fadeIntensity = (Math.sin(totalTime) + 1) * 0.5;
       ctx.globalAlpha = fadeIntensity;
       ctx.fillStyle = '#ff6b35';
       ctx.fillRect(0, 0, width, height);
@@ -173,32 +181,10 @@ export const NODE_TYPES: NodeDefinition[] = [
   {
     name: 'Chase',
     type: 'chase',
-    render: ({ ctx, time, width, height }) => {
-      const position = (time * 20) % width;
-      ctx.fillStyle = '#00ff00';
-      ctx.beginPath();
-      const chaseRadius = Math.min(width, height) * 0.1;
-      ctx.arc(position, height/2, chaseRadius, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  },
-  {
-    name: 'Twinkle',
-    type: 'twinkle',
-    render: ({ ctx, time, width, height }) => {
-      const twinkleCount = Math.floor(width * height / 200);
-      for (let i = 0; i < twinkleCount; i++) {
-        const x = (i * (width / 6)) % width;
-        const y = (height * 0.4) + (i % 3) * (height * 0.4);
-        const alpha = Math.sin(time * 4 + i * 0.5) > 0.5 ? 0.9 : 0.1;
-        ctx.globalAlpha = alpha;
-        ctx.fillStyle = '#ffff88';
-        ctx.beginPath();
-        const twinkleRadius = Math.min(width, height) * 0.0125;
-        ctx.arc(x, y, twinkleRadius, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.globalAlpha = 1;
+    render: ({ ctx, totalTime, width, height }) => {
+      const position = (totalTime * 20) % width;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(position, 0, 4, height); // Full vertical bar instead of circle
     }
   },
   {
