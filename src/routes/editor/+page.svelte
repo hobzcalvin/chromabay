@@ -164,13 +164,16 @@
       bind:nodes={$flowNodes}
       bind:edges={$flowEdges}
       {nodeTypes}
-      initialViewport={{x: 0, y: 0, zoom: 1}}
+      fitView={true}
+      fitViewOptions={{
+        maxZoom: 1.0,
+      }}
       proOptions={{ hideAttribution: true }}
       nodesDraggable={true}
       elementsSelectable={false}
       selectNodesOnDrag={false}
       panOnDrag={true}
-      translateExtent={[[0, 0], [450, Infinity]]}
+      translateExtent={[[0, -Infinity], [450, Infinity]]}
       colorMode="dark"
       onnodedragstop={onNodeDragStop}
       onedgeclick={onEdgeClick}
