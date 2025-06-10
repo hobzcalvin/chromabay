@@ -12,7 +12,8 @@ export const NODE_TYPES = [
   { name: 'Sparkle', emoji: '✨', color: '#ec4899' },
   { name: 'Fade', emoji: '🌅', color: '#84cc16' },
   { name: 'Chase', emoji: '🏃', color: '#f97316' },
-  { name: 'Twinkle', emoji: '⭐', color: '#6366f1' }
+  { name: 'Twinkle', emoji: '⭐', color: '#6366f1' },
+  { name: 'Blend', emoji: '🎨', color: '#8b5cf6' }
 ];
 
 // Define the 3 vertical lanes for node snapping

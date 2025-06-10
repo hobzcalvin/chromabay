@@ -1,11 +1,17 @@
 <script lang="ts">
-  import { SvelteFlow, Controls, Background, BaseEdge, MarkerType, type Node, type Edge, type Connection, useSvelteFlow, useViewport, getOutgoers } from '@xyflow/svelte';
+  import { SvelteFlow, Controls, Background, BaseEdge, MarkerType, Position, type Node, type Edge, type Connection, useSvelteFlow, useViewport, getOutgoers } from '@xyflow/svelte';
   import '@xyflow/svelte/dist/style.css';
   import { flowNodes, flowEdges, nextNodeId, LANES, NODE_TYPES } from '$lib/flowStore';
+  import BlendNode from '$lib/BlendNode.svelte';
   
   // Get SvelteFlow hooks
   const { screenToFlowPosition } = useSvelteFlow();
   const viewport = useViewport();
+  
+  // Define custom node types
+  const nodeTypes = {
+    blend: BlendNode
+  };
   
   // Function to snap nodes to the nearest lane
   function snapToLane(x: number): number {
@@ -59,12 +65,14 @@
       // Use viewport center Y with slight random offset to avoid overlap
       const nodeY = viewportCenterY + (Math.random() * 100 - 50); // ±50px random offset
       
+      // Determine node type and styling
+      const isBlendNode = nodeType.name === 'Blend';
       const newNode: Node = {
         id: newId,
-        type: 'default',
+        type: isBlendNode ? 'blend' : 'default',
         position: { x: nodeX, y: nodeY },
         data: { label: `${nodeType.emoji} ${nodeType.name}` },
-        style: `background: ${nodeType.color}; color: white; border: none; font-weight: bold; width: 100px;`
+        style: isBlendNode ? '' : `background: ${nodeType.color}; color: white; border: none; font-weight: bold; width: 100px;`
       };
       
       // Add new node to the store
@@ -89,6 +97,28 @@
     const target = $flowNodes.find((node) => node.id === connection.target);
     if (!target || !source) return false;
     
+    // Prevent self-loops
+    if (target.id === source) return false;
+    
+    // Check input connection limits
+    const targetHandleId = connection.targetHandle;
+    
+    // Check if this is a blend node (has multiple input handles)
+    const isBlendNode = target.type === 'blend';
+    
+    if (isBlendNode) {
+      // For blend nodes, each handle can only have one connection
+      const existingConnections = $flowEdges.filter(edge => 
+        edge.target === connection.target && 
+        edge.targetHandle === targetHandleId
+      );
+      if (existingConnections.length >= 1) return false;
+    } else {
+      // For all other nodes, only allow one total input connection
+      const allTargetConnections = $flowEdges.filter(edge => edge.target === connection.target);
+      if (allTargetConnections.length >= 1) return false;
+    }
+    
     // Check for cycles by traversing from target to see if we reach source
     const hasCycle = (node: Node, visited = new Set<string>()): boolean => {
       if (visited.has(node.id)) return false;
@@ -102,9 +132,6 @@
       
       return false;
     };
-    
-    // Prevent self-loops
-    if (target.id === source) return false;
     
     // Check for cycles
     return !hasCycle(target);
@@ -145,6 +172,7 @@
     <SvelteFlow 
       bind:nodes={$flowNodes}
       bind:edges={$flowEdges}
+      {nodeTypes}
       initialViewport={{x: 0, y: 0, zoom: 1}}
       proOptions={{ hideAttribution: true }}
       nodesDraggable={true}
