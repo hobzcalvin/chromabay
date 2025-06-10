@@ -138,13 +138,14 @@
           if (!target) return;
           const selectedIndex = target.selectedIndex - 1; // -1 because first option is placeholder
           if (selectedIndex >= 0) {
-            createNode(NODE_TYPES[selectedIndex]);
+            // Add 1 to skip the output node at index 0
+            createNode(NODE_TYPES[selectedIndex + 1]);
             target.selectedIndex = 0; // Reset to placeholder
           }
         }}
       >
         <option value="">➕ Add Pattern Node</option>
-        {#each NODE_TYPES as nodeType}
+        {#each NODE_TYPES.slice(1) as nodeType}
           <option value={nodeType.name}>
             {nodeType.name}
           </option>

@@ -49,7 +49,15 @@ export interface NodeDefinition {
 }
 
 // Define LED pattern node types with their render functions
+// Note: Output is first (index 0) so it's not shown in dropdown, pattern nodes start from index 1
 export const NODE_TYPES: NodeDefinition[] = [
+  {
+    name: 'Output',
+    type: 'output',
+    render: () => {
+      // Output node doesn't render anything - it just passes through input
+    }
+  },
   {
     name: 'Rainbow',
     type: 'rainbow',
@@ -234,13 +242,6 @@ export const NODE_TYPES: NodeDefinition[] = [
         ctx.putImageData(imageData, 0, 0);
       }
     }
-  },
-  {
-    name: 'Output',
-    type: 'output',
-    render: () => {
-      // Output node doesn't render anything - it just passes through input
-    }
   }
 ];
 
@@ -272,8 +273,8 @@ export function createNodeFromType(nodeType: NodeDefinition, id: string, positio
 
 // Define initial nodes for the pattern editor with lane positioning and fixed width
 const initialNodes: Node[] = [
-  createNodeFromType(NODE_TYPES[0], '1', { x: LANES.CENTER, y: 100 }),        // First pattern node
-  createNodeFromType(NODE_TYPES[NODE_TYPES.length - 1], '2', { x: LANES.CENTER, y: 250 })  // Output node (last in array)
+  createNodeFromType(NODE_TYPES[1], '1', { x: LANES.CENTER, y: 100 }),        // First pattern node (index 1)
+  createNodeFromType(NODE_TYPES[0], '2', { x: LANES.CENTER, y: 250 })         // Output node (index 0)
 ];
 
 // Define initial edges with better styling
