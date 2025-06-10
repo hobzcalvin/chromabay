@@ -27,17 +27,17 @@ const LANES = {
 const initialNodes: Node[] = [
   {
     id: '1',
-    type: 'default',
+    type: 'pattern',
     position: { x: LANES.CENTER, y: 100 },
     data: { label: `${NODE_TYPES[0].emoji} ${NODE_TYPES[0].name}` },
-    style: `background: ${NODE_TYPES[0].color}; color: white; border: none; font-weight: bold; width: 100px;`
+    style: ''
   },
   {
     id: '2',
-    type: 'output',
+    type: 'pattern',
     position: { x: LANES.CENTER, y: 250 },
     data: { label: '🏁 Output' },
-    style: 'background: #ef4444; color: white; border: none; font-weight: bold; width: 100px;'
+    style: ''
   }
 ];
 

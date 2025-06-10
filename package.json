@@ -42,6 +42,7 @@
 		"@capacitor/core": "^7.2.0",
 		"@capacitor/ios": "^7.2.0",
 		"@capawesome/capacitor-live-update": "^7.2.0",
-		"@xyflow/svelte": "^1.0.2"
+		"@xyflow/svelte": "^1.0.2",
+		"pixi.js": "^8.10.1"
 	}
 }

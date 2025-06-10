@@ -2,7 +2,7 @@
   import { SvelteFlow, Controls, Background, BaseEdge, MarkerType, Position, type Node, type Edge, type Connection, useSvelteFlow, useViewport, getOutgoers } from '@xyflow/svelte';
   import '@xyflow/svelte/dist/style.css';
   import { flowNodes, flowEdges, nextNodeId, LANES, NODE_TYPES } from '$lib/flowStore';
-  import BlendNode from '$lib/BlendNode.svelte';
+  import PatternNode from '$lib/PatternNode.svelte';
   
   // Get SvelteFlow hooks
   const { screenToFlowPosition } = useSvelteFlow();
@@ -10,7 +10,7 @@
   
   // Define custom node types
   const nodeTypes = {
-    blend: BlendNode
+    pattern: PatternNode
   };
   
   // Function to snap nodes to the nearest lane
@@ -57,14 +57,13 @@
       // Use viewport center Y with slight random offset to avoid overlap
       const nodeY = viewportCenterY + (Math.random() * 100 - 50); // ±50px random offset
       
-      // Determine node type and styling
-      const isBlendNode = nodeType.name === 'Blend';
+      // All nodes are now pattern nodes
       const newNode: Node = {
         id: newId,
-        type: isBlendNode ? 'blend' : 'default',
+        type: 'pattern',
         position: { x: nodeX, y: nodeY },
         data: { label: `${nodeType.emoji} ${nodeType.name}` },
-        style: isBlendNode ? '' : `background: ${nodeType.color}; color: white; border: none; font-weight: bold; width: 100px;`
+        style: '' // Pattern nodes handle their own styling
       };
       
       // Add new node to the store
@@ -289,13 +288,6 @@
       position: static;
       transform: none;
       margin-top: 1rem;
-    }
-    
-    .dropdown-menu {
-      position: relative;
-      top: 0.5rem;
-      right: auto;
-      left: 0;
     }
   }
   
