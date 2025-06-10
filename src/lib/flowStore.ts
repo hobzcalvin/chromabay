@@ -57,5 +57,8 @@ export const flowEdges = writable<Edge[]>(initialEdges);
 // Keep track of next available ID
 export const nextNodeId = writable(3);
 
+// Shared store for node outputs so nodes can access each other's rendered data
+export const nodeOutputs = writable<Map<string, ImageData>>(new Map());
+
 // Export lanes for use in components
 export { LANES }; 
