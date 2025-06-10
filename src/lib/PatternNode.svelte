@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Handle, Position, type NodeProps } from '@xyflow/svelte';
   import { onMount, onDestroy } from 'svelte';
-  import { flowNodes, flowEdges, nodeOutputs } from '$lib/flowStore';
+  import { flowNodes, flowEdges, nodeOutputs, getNodeDefinition, type RenderContext } from '$lib/flowStore';
   
   let { data, id, type }: NodeProps & { type: string } = $props();
   
@@ -45,7 +45,7 @@
     return outputs.get(nodeId) || null;
   }
   
-    onMount(() => {
+  onMount(() => {
     ctx = canvasElement.getContext('2d');
     animate();
   });
@@ -63,58 +63,29 @@
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, textureWidth, textureHeight);
     
+    // Always handle single input first (no-op for blend nodes)
     const inputs = getInputNodes();
+    if ('input' in inputs && inputs.input) {
+      const inputData = getNodeOutput(inputs.input.id);
+      if (inputData) {
+        ctx.putImageData(inputData, 0, 0);
+      }
+    }
     
-    if (nodeType === 'blend') {
-      // Blend mixes two inputs
-      const input1Data = inputs.input1 ? getNodeOutput(inputs.input1.id) : null;
-      const input2Data = inputs.input2 ? getNodeOutput(inputs.input2.id) : null;
+    // Get the node definition and call its render function
+    const nodeDefinition = getNodeDefinition(nodeType);
+    if (nodeDefinition) {
+      const renderContext: RenderContext = {
+        ctx,
+        time,
+        width: textureWidth,
+        height: textureHeight,
+        getInputNodes,
+        getNodeOutput,
+        nodeId: id
+      };
       
-      if (input1Data || input2Data) {
-        // Create blend effect
-        const imageData = ctx.createImageData(textureWidth, textureHeight);
-        const data = imageData.data;
-        
-        for (let i = 0; i < data.length; i += 4) {
-          let r1 = 0, g1 = 0, b1 = 0, a1 = 255;
-          let r2 = 0, g2 = 0, b2 = 0, a2 = 255;
-          
-          if (input1Data) {
-            r1 = input1Data.data[i];
-            g1 = input1Data.data[i + 1];
-            b1 = input1Data.data[i + 2];
-            a1 = input1Data.data[i + 3];
-          }
-          
-          if (input2Data) {
-            r2 = input2Data.data[i];
-            g2 = input2Data.data[i + 1];
-            b2 = input2Data.data[i + 2];
-            a2 = input2Data.data[i + 3];
-          }
-          
-          // Simple additive blend
-          data[i] = Math.min(255, r1 + r2);
-          data[i + 1] = Math.min(255, g1 + g2);
-          data[i + 2] = Math.min(255, b1 + b2);
-          data[i + 3] = 255;
-        }
-        
-        ctx.putImageData(imageData, 0, 0);
-      }
-    } else {
-      // All other nodes (output and pattern nodes): render input first
-      if ('input' in inputs && inputs.input) {
-        const inputData = getNodeOutput(inputs.input.id);
-        if (inputData) {
-          ctx.putImageData(inputData, 0, 0);
-        }
-      }
-      
-      // For pattern nodes, render the pattern effect on top
-      if (nodeType !== 'output') {
-        renderPattern();
-      }
+      nodeDefinition.render(renderContext);
     }
     
     // Store this node's output for other nodes to use
@@ -125,161 +96,7 @@
     });
   }
   
-  function renderPattern() {
-    if (!ctx) return;
-    
-    switch (nodeType) {
-      case 'rainbow':
-        for (let i = 0; i < textureWidth; i++) {
-          const hue = (i / textureWidth + time * 0.1) % 1;
-          const [r, g, b] = hslToRgb(hue, 1, 0.5);
-          ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
-          ctx.fillRect(i, 0, 1, textureHeight);
-        }
-        break;
-        
-      case 'gradient':
-        const gradient = ctx.createLinearGradient(0, 0, textureWidth, 0);
-        gradient.addColorStop(0, '#3b82f6');
-        gradient.addColorStop(1, '#8b5cf6');
-        ctx.fillStyle = gradient;
-        ctx.fillRect(0, 0, textureWidth, textureHeight);
-        break;
-        
-      case 'perlin_noise':
-        for (let x = 0; x < textureWidth; x += 2) {
-          for (let y = 0; y < textureHeight; y += 2) {
-            const noise = Math.sin(x * 0.1 + time) * Math.cos(y * 0.1 + time);
-            const intensity = Math.floor((noise + 1) * 127.5);
-            ctx.fillStyle = `rgb(${intensity}, ${intensity}, ${intensity})`;
-            ctx.fillRect(x, y, 2, 2);
-          }
-        }
-        break;
-        
-      case 'moving_blob':
-        const centerX = textureWidth/2 + Math.sin(time * 2) * (textureWidth * 0.2);
-        const centerY = textureHeight/2 + Math.cos(time * 1.5) * (textureHeight * 0.2);
-        const innerRadius = Math.min(textureWidth, textureHeight) * 0.06;
-        const outerRadius = Math.min(textureWidth, textureHeight) * 0.25;
-        const radialGradient = ctx.createRadialGradient(centerX, centerY, innerRadius, centerX, centerY, outerRadius);
-        radialGradient.addColorStop(0, '#00ffff');
-        radialGradient.addColorStop(1, 'transparent');
-        ctx.fillStyle = radialGradient;
-        ctx.fillRect(0, 0, textureWidth, textureHeight);
-        break;
-        
-      case 'raindrops':
-        const dropCount = Math.floor(textureWidth / 16);
-        for (let i = 0; i < dropCount; i++) {
-          const x = (i * (textureWidth / dropCount) + textureWidth / (dropCount * 2)) % textureWidth;
-          const y = ((time * 50 + i * 10) % (textureHeight + 10)) - 10;
-          if (y >= 0 && y <= textureHeight) {
-            ctx.fillStyle = '#4fc3f7';
-            ctx.beginPath();
-            const dropWidth = textureWidth * 0.025;
-            const dropHeight = textureHeight * 0.08;
-            ctx.ellipse(x, y, dropWidth, dropHeight, 0, 0, Math.PI * 2);
-            ctx.fill();
-          }
-        }
-        break;
-        
-      case 'strobe':
-        const intensity = Math.sin(time * 8) > 0.7 ? 1 : 0;
-        if (intensity > 0) {
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-          ctx.fillRect(0, 0, textureWidth, textureHeight);
-        }
-        break;
-        
-      case 'sparkle':
-        const sparkleCount = Math.floor(textureWidth / 10);
-        for (let i = 0; i < sparkleCount; i++) {
-          const x = (textureWidth / sparkleCount) * 0.2 + i * (textureWidth / sparkleCount);
-          const y = textureHeight/2 + Math.sin(i * 2) * (textureHeight * 0.32);
-          const alpha = Math.abs(Math.sin(time * 3 + i)) * 0.8 + 0.2;
-          ctx.globalAlpha = alpha;
-          ctx.fillStyle = '#ffffff';
-          ctx.beginPath();
-          const sparkleRadius = Math.min(textureWidth, textureHeight) * 0.025;
-          ctx.arc(x, y, sparkleRadius, 0, Math.PI * 2);
-          ctx.fill();
-        }
-        ctx.globalAlpha = 1;
-        break;
-        
-      case 'fade':
-        const fadeIntensity = (Math.sin(time) + 1) * 0.5;
-        ctx.globalAlpha = fadeIntensity;
-        ctx.fillStyle = '#ff6b35';
-        ctx.fillRect(0, 0, textureWidth, textureHeight);
-        ctx.globalAlpha = 1;
-        break;
-        
-      case 'chase':
-        const position = (time * 20) % textureWidth;
-        ctx.fillStyle = '#00ff00';
-        ctx.beginPath();
-        const chaseRadius = Math.min(textureWidth, textureHeight) * 0.1;
-        ctx.arc(position, textureHeight/2, chaseRadius, 0, Math.PI * 2);
-        ctx.fill();
-        break;
-        
-      case 'twinkle':
-        const twinkleCount = Math.floor(textureWidth * textureHeight / 200);
-        for (let i = 0; i < twinkleCount; i++) {
-          const x = (i * (textureWidth / 6)) % textureWidth;
-          const y = (textureHeight * 0.4) + (i % 3) * (textureHeight * 0.4);
-          const alpha = Math.sin(time * 4 + i * 0.5) > 0.5 ? 0.9 : 0.1;
-          ctx.globalAlpha = alpha;
-          ctx.fillStyle = '#ffff88';
-          ctx.beginPath();
-          const twinkleRadius = Math.min(textureWidth, textureHeight) * 0.0125;
-          ctx.arc(x, y, twinkleRadius, 0, Math.PI * 2);
-          ctx.fill();
-        }
-        ctx.globalAlpha = 1;
-        break;
-        
-      default:
-        // Simple wave pattern for unknown types
-        for (let i = 0; i < textureWidth; i++) {
-          const wave = Math.sin(i * 0.1 + time) * 0.5 + 0.5;
-          const gray = Math.floor(wave * 128); // Reduced intensity for layering
-          ctx.fillStyle = `rgba(${gray}, ${gray}, ${gray}, 0.5)`;
-          ctx.fillRect(i, 0, 1, textureHeight);
-        }
-    }
-  }
-  
-  function hslToRgb(h: number, s: number, l: number): [number, number, number] {
-    const c = (1 - Math.abs(2 * l - 1)) * s;
-    const x = c * (1 - Math.abs((h * 6) % 2 - 1));
-    const m = l - c / 2;
-    
-    let r = 0, g = 0, b = 0;
-    
-    if (0 <= h && h < 1/6) {
-      r = c; g = x; b = 0;
-    } else if (1/6 <= h && h < 2/6) {
-      r = x; g = c; b = 0;
-    } else if (2/6 <= h && h < 3/6) {
-      r = 0; g = c; b = x;
-    } else if (3/6 <= h && h < 4/6) {
-      r = 0; g = x; b = c;
-    } else if (4/6 <= h && h < 5/6) {
-      r = x; g = 0; b = c;
-    } else if (5/6 <= h && h < 1) {
-      r = c; g = 0; b = x;
-    }
-    
-    return [
-      Math.round((r + m) * 255),
-      Math.round((g + m) * 255),
-      Math.round((b + m) * 255)
-    ];
-  }
+
   
   onDestroy(() => {
     if (animationFrame !== null) {

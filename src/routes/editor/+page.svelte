@@ -63,7 +63,7 @@
         type: 'pattern',
         position: { x: nodeX, y: nodeY },
         data: { 
-          label: `${nodeType.emoji} ${nodeType.name}`,
+          label: nodeType.name,
           type: nodeType.type
         },
         style: '' // Pattern nodes handle their own styling
@@ -155,7 +155,7 @@
         <option value="">➕ Add Pattern Node</option>
         {#each NODE_TYPES as nodeType}
           <option value={nodeType.name}>
-            {nodeType.emoji} {nodeType.name}
+            {nodeType.name}
           </option>
         {/each}
       </select>
