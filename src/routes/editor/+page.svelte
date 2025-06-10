@@ -55,16 +55,19 @@
     );
   }
 
-  // Handle node right-clicks for parameter editing - positioned below the node
-  function handleNodeContextMenu({ event, node }: { event: MouseEvent | TouchEvent; node: Node }) {
-    console.log('🔍 Node clicked:', { event, node });
-    // Prevent native context menu from showing
-    event.preventDefault();
+  // Handle node clicks for parameter editing - positioned below the node
+  function handleNodeClick({ event, node }: { event: MouseEvent | TouchEvent; node: Node }) {
+    event.stopPropagation();
     
     // Check if this node has parameters
     const nodeDefinition = getNodeDefinition(node.data.type as string);
     if (!nodeDefinition || !nodeDefinition.params || nodeDefinition.params.length === 0) {
-      console.log('❌ Node has no parameters');
+      return;
+    }
+
+    // If parameter editor is already open for this node, close it
+    if (parameterEditor && parameterEditor.id === node.id) {
+      parameterEditor = null;
       return;
     }
  
@@ -187,12 +190,7 @@
     <h1>🎯 Pattern Editor</h1>
     <p>Design your LED patterns visually</p>
     
-    <!-- Debug info -->
-    <div style="background: yellow; color: black; padding: 5px; margin: 10px;">
-      parameterEditor: {parameterEditor?.id || 'null'}
-      <button onclick={() => { parameterEditor = { id: '1', top: 100, left: 100 }; }}>Show Rainbow Params</button>
-      <button onclick={() => { parameterEditor = null; }}>Hide Params</button>
-    </div>
+
     
     <div class="dropdown-container">
       <select 
@@ -238,7 +236,7 @@
       translateExtent={[[0, -Infinity], [450, Infinity]]}
       colorMode="dark"
       onnodedragstop={onNodeDragStop}
-      onnodecontextmenu={handleNodeContextMenu}
+              onnodeclick={handleNodeClick}
       onpaneclick={handlePaneClick}
       onedgeclick={onEdgeClick}
       nodesConnectable={true}
