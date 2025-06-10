@@ -1,7 +1,7 @@
 {
-  "version": "v0.0.29",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.29.zip",
-  "buildDate": "2025-06-10 21:21:44 UTC",
-  "commitHash": "24db6921a2f4cc40b5eb1f8f9af5348a2c5085fa",
-  "commitMessage": "Properly switch params editor"
+  "version": "v0.0.30",
+  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.30.zip",
+  "buildDate": "2025-06-10 21:38:25 UTC",
+  "commitHash": "3cc2e56385b6fc771deb0f9e565b401ae0f58fdf",
+  "commitMessage": "node param enhancements"
 }
