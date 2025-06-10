@@ -158,8 +158,8 @@
         break;
         
       case 'Perlin Noise':
-        for (let x = 0; x < 80; x += 2) {
-          for (let y = 0; y < 80; y += 2) {
+        for (let x = 0; x < textureWidth; x += 2) {
+          for (let y = 0; y < textureHeight; y += 2) {
             const noise = Math.sin(x * 0.1 + time) * Math.cos(y * 0.1 + time);
             const intensity = Math.floor((noise + 1) * 127.5);
             ctx.fillStyle = `rgb(${intensity}, ${intensity}, ${intensity})`;
@@ -169,23 +169,28 @@
         break;
         
       case 'Moving Blob':
-        const centerX = 40 + Math.sin(time * 2) * 16;
-        const centerY = 40 + Math.cos(time * 1.5) * 16;
-        const radialGradient = ctx.createRadialGradient(centerX, centerY, 5, centerX, centerY, 20);
+        const centerX = textureWidth/2 + Math.sin(time * 2) * (textureWidth * 0.2);
+        const centerY = textureHeight/2 + Math.cos(time * 1.5) * (textureHeight * 0.2);
+        const innerRadius = Math.min(textureWidth, textureHeight) * 0.06;
+        const outerRadius = Math.min(textureWidth, textureHeight) * 0.25;
+        const radialGradient = ctx.createRadialGradient(centerX, centerY, innerRadius, centerX, centerY, outerRadius);
         radialGradient.addColorStop(0, '#00ffff');
         radialGradient.addColorStop(1, 'transparent');
         ctx.fillStyle = radialGradient;
-        ctx.fillRect(0, 0, 80, 80);
+        ctx.fillRect(0, 0, textureWidth, textureHeight);
         break;
         
       case 'Raindrops':
-        for (let i = 0; i < 5; i++) {
-          const x = (i * 16 + 8) % 80;
-          const y = ((time * 50 + i * 10) % 90) - 10;
-          if (y >= 0 && y <= 80) {
+        const dropCount = Math.floor(textureWidth / 16);
+        for (let i = 0; i < dropCount; i++) {
+          const x = (i * (textureWidth / dropCount) + textureWidth / (dropCount * 2)) % textureWidth;
+          const y = ((time * 50 + i * 10) % (textureHeight + 10)) - 10;
+          if (y >= 0 && y <= textureHeight) {
             ctx.fillStyle = '#4fc3f7';
             ctx.beginPath();
-            ctx.ellipse(x, y, 2, 4, 0, 0, Math.PI * 2);
+            const dropWidth = textureWidth * 0.025;
+            const dropHeight = textureHeight * 0.08;
+            ctx.ellipse(x, y, dropWidth, dropHeight, 0, 0, Math.PI * 2);
             ctx.fill();
           }
         }
@@ -195,19 +200,21 @@
         const intensity = Math.sin(time * 8) > 0.7 ? 1 : 0;
         if (intensity > 0) {
           ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-          ctx.fillRect(0, 0, 80, 80);
+          ctx.fillRect(0, 0, textureWidth, textureHeight);
         }
         break;
         
       case 'Sparkle':
-        for (let i = 0; i < 8; i++) {
-          const x = 16 + i * 8;
-          const y = 40 + Math.sin(i * 2) * 16;
+        const sparkleCount = Math.floor(textureWidth / 10);
+        for (let i = 0; i < sparkleCount; i++) {
+          const x = (textureWidth / sparkleCount) * 0.2 + i * (textureWidth / sparkleCount);
+          const y = textureHeight/2 + Math.sin(i * 2) * (textureHeight * 0.32);
           const alpha = Math.abs(Math.sin(time * 3 + i)) * 0.8 + 0.2;
           ctx.globalAlpha = alpha;
           ctx.fillStyle = '#ffffff';
           ctx.beginPath();
-          ctx.arc(x, y, 2, 0, Math.PI * 2);
+          const sparkleRadius = Math.min(textureWidth, textureHeight) * 0.025;
+          ctx.arc(x, y, sparkleRadius, 0, Math.PI * 2);
           ctx.fill();
         }
         ctx.globalAlpha = 1;
@@ -217,27 +224,30 @@
         const fadeIntensity = (Math.sin(time) + 1) * 0.5;
         ctx.globalAlpha = fadeIntensity;
         ctx.fillStyle = '#ff6b35';
-        ctx.fillRect(0, 0, 80, 80);
+        ctx.fillRect(0, 0, textureWidth, textureHeight);
         ctx.globalAlpha = 1;
         break;
         
       case 'Chase':
-        const position = (time * 20) % 80;
+        const position = (time * 20) % textureWidth;
         ctx.fillStyle = '#00ff00';
         ctx.beginPath();
-        ctx.arc(position, 40, 8, 0, Math.PI * 2);
+        const chaseRadius = Math.min(textureWidth, textureHeight) * 0.1;
+        ctx.arc(position, textureHeight/2, chaseRadius, 0, Math.PI * 2);
         ctx.fill();
         break;
         
       case 'Twinkle':
-        for (let i = 0; i < 15; i++) {
-          const x = (i * 6) % 80;
-          const y = 20 + (i % 3) * 20;
+        const twinkleCount = Math.floor(textureWidth * textureHeight / 200);
+        for (let i = 0; i < twinkleCount; i++) {
+          const x = (i * (textureWidth / 6)) % textureWidth;
+          const y = (textureHeight * 0.4) + (i % 3) * (textureHeight * 0.4);
           const alpha = Math.sin(time * 4 + i * 0.5) > 0.5 ? 0.9 : 0.1;
           ctx.globalAlpha = alpha;
           ctx.fillStyle = '#ffff88';
           ctx.beginPath();
-          ctx.arc(x, y, 1, 0, Math.PI * 2);
+          const twinkleRadius = Math.min(textureWidth, textureHeight) * 0.0125;
+          ctx.arc(x, y, twinkleRadius, 0, Math.PI * 2);
           ctx.fill();
         }
         ctx.globalAlpha = 1;
@@ -245,11 +255,11 @@
         
       default:
         // Simple wave pattern for unknown types
-        for (let i = 0; i < 80; i++) {
+        for (let i = 0; i < textureWidth; i++) {
           const wave = Math.sin(i * 0.1 + time) * 0.5 + 0.5;
           const gray = Math.floor(wave * 128); // Reduced intensity for layering
           ctx.fillStyle = `rgba(${gray}, ${gray}, ${gray}, 0.5)`;
-          ctx.fillRect(i, 0, 1, 80);
+          ctx.fillRect(i, 0, 1, textureHeight);
         }
     }
   }
