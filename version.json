@@ -1,7 +1,7 @@
 {
-  "version": "v0.0.26",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.26.zip",
-  "buildDate": "2025-06-10 20:15:09 UTC",
-  "commitHash": "efe1fd8146305e6bceb5095c20b422e87a5441e2",
-  "commitMessage": "Move everything up if param editor is below the fold"
+  "version": "v0.0.27",
+  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.27.zip",
+  "buildDate": "2025-06-10 20:23:23 UTC",
+  "commitHash": "74e0d61b95f782f4c070fc3272c978c213aa4225",
+  "commitMessage": "Also move editor if off left/right"
 }
