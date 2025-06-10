@@ -12,11 +12,11 @@
   export let left: number | undefined = undefined;
   export let right: number | undefined = undefined;
   export let bottom: number | undefined = undefined;
+  export let deleteConfirmState: boolean = false;
+  export let deleteTimeout: ReturnType<typeof setTimeout> | undefined = undefined;
 
   let popoverElement: HTMLElement;
   let nodeDefinition = getNodeDefinition(node.data.type as string);
-  let deleteConfirmState = false;
-  let deleteTimeout: ReturnType<typeof setTimeout>;
 
   // Calculate popover position
   function getPopoverPosition() {
@@ -83,9 +83,7 @@
   }
 
   function handleClose() {
-    // Reset delete confirmation state when closing
-    deleteConfirmState = false;
-    clearTimeout(deleteTimeout);
+    // Cleanup is now handled by the parent component
     onClose();
   }
 

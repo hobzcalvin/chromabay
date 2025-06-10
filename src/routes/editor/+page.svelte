@@ -22,6 +22,10 @@
   let clientHeight: number = $state(0);
   let flowContainer: HTMLDivElement;
   
+  // Editor cleanup state - managed here so external closures can reset it
+  let deleteConfirmState = $state(false);
+  let deleteTimeout: ReturnType<typeof setTimeout> | undefined;
+  
   // Reactive check for active node
   const activeNode = $derived(parameterEditor ? $flowNodes.find(n => n.id === parameterEditor!.id) : null);
   const showParameterEditor = $derived(parameterEditor !== null && activeNode !== undefined);
@@ -39,11 +43,7 @@
     );
   }
   
-  // Handle node drag start to close parameter editor
-  function onNodeDragStart(event: any) {
-    // Close parameter editor when any node starts dragging
-    parameterEditor = null;
-  }
+
 
   // Handle node drag stop to implement snapping
   function onNodeDragStop(event: any) {
@@ -66,18 +66,18 @@
   function handleNodeClick({ event, node }: { event: MouseEvent | TouchEvent; node: Node }) {
     event.stopPropagation();
     
+    // If parameter editor is already open, close it
+    if (parameterEditor ) {
+      closeParameterEditor();
+      return;
+    }
+ 
     // Check if this node has parameters
     const nodeDefinition = getNodeDefinition(node.data.type as string);
     if (!nodeDefinition || !nodeDefinition.params || nodeDefinition.params.length === 0) {
       return;
     }
 
-    // If parameter editor is already open for this node, close it
-    if (parameterEditor && parameterEditor.id === node.id) {
-      parameterEditor = null;
-      return;
-    }
- 
     // Get the actual node DOM element from the event target
     const nodeElement = event.target as HTMLElement;
     const nodeRect = nodeElement.getBoundingClientRect();
@@ -112,13 +112,14 @@
   
   // Close parameter editor
   function closeParameterEditor() {
+    console.log('closeParameterEditor');
+    // Reset delete confirmation state and clear timeout
+    deleteConfirmState = false;
+    if (deleteTimeout) clearTimeout(deleteTimeout);
     parameterEditor = null;
   }
   
-  // Handle pane clicks to close parameter editor
-  function handlePaneClick() {
-    parameterEditor = null;
-  }
+
   
   // Create a new node of specified type
   function createNode(nodeType: typeof NODE_TYPES[0]) {
@@ -257,10 +258,11 @@
       panOnDrag={true}
       translateExtent={[[0, -Infinity], [450, Infinity]]}
       colorMode="dark"
-      onnodedragstart={onNodeDragStart}
+      onnodedragstart={closeParameterEditor}
       onnodedragstop={onNodeDragStop}
       onnodeclick={handleNodeClick}
-      onpaneclick={handlePaneClick}
+      onpaneclick={closeParameterEditor}
+      onmovestart={closeParameterEditor}
       onedgeclick={onEdgeClick}
       nodesConnectable={true}
       zoomOnDoubleClick={false}
@@ -289,6 +291,8 @@
         left={parameterEditor?.left}
         right={parameterEditor?.right}
         bottom={parameterEditor?.bottom}
+        bind:deleteConfirmState
+        bind:deleteTimeout
         onClose={closeParameterEditor}
       />
     </SvelteFlow>
