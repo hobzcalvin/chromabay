@@ -26,14 +26,6 @@
     const node = event.targetNode;
     if (!node) return;
     
-    // Check if node is dragged outside the editor bounds for deletion
-    if (node.position.x < -50 || node.position.x > 500 || node.position.y < -50) {
-      // Remove node and connected edges
-      flowNodes.update(nodes => nodes.filter(n => n.id !== node.id));
-      flowEdges.update(edges => edges.filter(e => e.source !== node.id && e.target !== node.id));
-      return;
-    }
-    
     const snappedX = snapToLane(node.position.x);
     
     // Update the node's position in the store
