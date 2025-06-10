@@ -256,28 +256,24 @@ const LANES = {
   RIGHT: 325
 };
 
+// Helper function to create a node from a node type
+export function createNodeFromType(nodeType: NodeDefinition, id: string, position: { x: number, y: number }): Node {
+  return {
+    id,
+    type: 'pattern',
+    position,
+    data: { 
+      label: nodeType.name,
+      type: nodeType.type
+    },
+    style: ''
+  };
+}
+
 // Define initial nodes for the pattern editor with lane positioning and fixed width
 const initialNodes: Node[] = [
-  {
-    id: '1',
-    type: 'pattern',
-    position: { x: LANES.CENTER, y: 100 },
-    data: { 
-      label: NODE_TYPES[0].name,
-      type: NODE_TYPES[0].type
-    },
-    style: ''
-  },
-  {
-    id: '2',
-    type: 'pattern',
-    position: { x: LANES.CENTER, y: 250 },
-    data: { 
-      label: 'Output',
-      type: 'output'
-    },
-    style: ''
-  }
+  createNodeFromType(NODE_TYPES[0], '1', { x: LANES.CENTER, y: 100 }),        // First pattern node
+  createNodeFromType(NODE_TYPES[NODE_TYPES.length - 1], '2', { x: LANES.CENTER, y: 250 })  // Output node (last in array)
 ];
 
 // Define initial edges with better styling

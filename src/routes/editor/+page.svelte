@@ -1,7 +1,7 @@
 <script lang="ts">
   import { SvelteFlow, Controls, Background, BaseEdge, MarkerType, Position, type Node, type Edge, type Connection, useSvelteFlow, useViewport, getOutgoers } from '@xyflow/svelte';
   import '@xyflow/svelte/dist/style.css';
-  import { flowNodes, flowEdges, nextNodeId, LANES, NODE_TYPES } from '$lib/flowStore';
+  import { flowNodes, flowEdges, nextNodeId, LANES, NODE_TYPES, createNodeFromType } from '$lib/flowStore';
   import PatternNode from '$lib/PatternNode.svelte';
   
   // Get SvelteFlow hooks
@@ -57,17 +57,8 @@
       // Use viewport center Y with slight random offset to avoid overlap
       const nodeY = viewportCenterY + (Math.random() * 100 - 50); // ±50px random offset
       
-      // All nodes are pattern nodes - they determine their behavior from their type
-      const newNode: Node = {
-        id: newId,
-        type: 'pattern',
-        position: { x: nodeX, y: nodeY },
-        data: { 
-          label: nodeType.name,
-          type: nodeType.type
-        },
-        style: '' // Pattern nodes handle their own styling
-      };
+      // Create node using shared helper
+      const newNode = createNodeFromType(nodeType, newId, { x: nodeX, y: nodeY });
       
       // Add new node to the store
       flowNodes.update(nodes => [...nodes, newNode]);
