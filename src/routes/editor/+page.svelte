@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import { SvelteFlow, Controls, Background, BaseEdge, MarkerType, Position, type Node, type Edge, type Connection, useSvelteFlow, useViewport, getOutgoers } from '@xyflow/svelte';
   import '@xyflow/svelte/dist/style.css';
   import { flowNodes, flowEdges, nextNodeId, LANES, NODE_TYPES, createNodeFromType, getNodeDefinition } from '$lib/flowStore';
@@ -81,17 +82,32 @@
     const nodeElement = event.target as HTMLElement;
     const nodeRect = nodeElement.getBoundingClientRect();
     
-    // Use absolute coordinates - position editor centered underneath the node
-    const editorWidth = 300; // Parameter editor width
-    const editorX = nodeRect.left + (nodeRect.width / 2) - (editorWidth / 2); // Center horizontally
+    // Initially position editor centered underneath the node (we'll adjust after measuring)
+    const initialX = nodeRect.left + (nodeRect.width / 2); // Start at node center
     const editorY = nodeRect.bottom + 10; // 10px spacing below the node
 
-    // Use absolute positioning
+    // Use absolute positioning - will be adjusted after measuring actual width
     parameterEditor = {
       id: node.id,
       top: editorY,
-      left: editorX,
+      left: initialX,
     };
+
+    // Use tick to wait for the parameter editor to render, then adjust position
+    tick().then(() => {
+      // Find the rendered parameter editor element and measure its width
+      const editorElement = document.querySelector('.parameter-popover') as HTMLElement;
+      if (editorElement && parameterEditor) {
+        const editorRect = editorElement.getBoundingClientRect();
+        const adjustedX = nodeRect.left + (nodeRect.width / 2) - (editorRect.width / 2);
+        
+        // Update position to center the editor under the node
+        parameterEditor = {
+          ...parameterEditor,
+          left: adjustedX,
+        };
+      }
+    });
   }
   
   // Close parameter editor
