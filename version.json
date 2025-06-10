@@ -1,7 +1,7 @@
 {
-  "version": "main-a1f1d5f",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-main-a1f1d5f.zip",
-  "buildDate": "2025-06-08 22:11:10 UTC",
-  "commitHash": "a1f1d5f407f878be682ef67de3d994866c17b590",
-  "commitMessage": "bind nodes and edges for proper bi-directional updates"
+  "version": "v0.0.24",
+  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.24.zip",
+  "buildDate": "2025-06-10 07:50:33 UTC",
+  "commitHash": "2b2e5716517f842aceb82508ae23eb469343fd57",
+  "commitMessage": "Universal time"
 }

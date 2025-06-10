@@ -1,1 +1,0 @@
-import{f as o,a as t}from"../chunks/DZgaND2F.js";import"../chunks/KMcYVNV6.js";var m=o("<main><h1>Patterns</h1> <p>Coming soon: manage and edit pattern list.</p></main>");function i(a){var n=m();t(a,n)}export{i as component};
