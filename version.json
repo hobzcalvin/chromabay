@@ -1,7 +1,7 @@
 {
-  "version": "v0.0.25",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.25.zip",
-  "buildDate": "2025-06-10 18:16:58 UTC",
-  "commitHash": "ac8aa7bca92c744478908f95f1aa4d8f39a8886b",
-  "commitMessage": "node params working"
+  "version": "v0.0.26",
+  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.26.zip",
+  "buildDate": "2025-06-10 20:15:09 UTC",
+  "commitHash": "efe1fd8146305e6bceb5095c20b422e87a5441e2",
+  "commitMessage": "Move everything up if param editor is below the fold"
 }
