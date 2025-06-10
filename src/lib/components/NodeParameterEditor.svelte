@@ -147,6 +147,10 @@
                 step="0.01"
                 value={getParameterValue(param)}
                 oninput={(e) => handleFloatChange(param, e)}
+                onchange={(e) => handleFloatChange(param, e)}
+                ontouchstart={(e) => e.stopPropagation()}
+                ontouchmove={(e) => e.stopPropagation()}
+                ontouchend={(e) => e.stopPropagation()}
               />
               <span class="value-display">{getParameterValue(param).toFixed(2)}</span>
             </div>
@@ -159,6 +163,10 @@
                 step="1"
                 value={getParameterValue(param)}
                 oninput={(e) => handleRangeChange(param, e)}
+                onchange={(e) => handleRangeChange(param, e)}
+                ontouchstart={(e) => e.stopPropagation()}
+                ontouchmove={(e) => e.stopPropagation()}
+                ontouchend={(e) => e.stopPropagation()}
               />
               <span class="value-display">{getParameterValue(param)}</span>
             </div>
@@ -171,6 +179,10 @@
                 step="1"
                 value={getParameterValue(param)}
                 oninput={(e) => handleRangeChange(param, e)}
+                onchange={(e) => handleRangeChange(param, e)}
+                ontouchstart={(e) => e.stopPropagation()}
+                ontouchmove={(e) => e.stopPropagation()}
+                ontouchend={(e) => e.stopPropagation()}
               />
               <span class="value-display">{getParameterValue(param)}</span>
             </div>
@@ -192,6 +204,10 @@
                 step="1"
                 value={getParameterValue(param)}
                 oninput={(e) => handleRangeChange(param, e)}
+                onchange={(e) => handleRangeChange(param, e)}
+                ontouchstart={(e) => e.stopPropagation()}
+                ontouchmove={(e) => e.stopPropagation()}
+                ontouchend={(e) => e.stopPropagation()}
                 style="background: linear-gradient(to right, 
                   hsl(0, 100%, 50%), hsl(60, 100%, 50%), hsl(120, 100%, 50%), 
                   hsl(180, 100%, 50%), hsl(240, 100%, 50%), hsl(300, 100%, 50%), 
@@ -342,11 +358,55 @@
   .hue-control input[type="range"]::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
-    width: 16px;
-    height: 16px;
+    width: 20px;
+    height: 20px;
     background: #3b82f6;
     border-radius: 50%;
     cursor: pointer;
+    border: 2px solid white;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  }
+
+  /* Firefox slider thumb */
+  .float-control input[type="range"]::-moz-range-thumb,
+  .range-control input[type="range"]::-moz-range-thumb,
+  .integer-control input[type="range"]::-moz-range-thumb,
+  .hue-control input[type="range"]::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    background: #3b82f6;
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid white;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  }
+
+  /* Increase touch target area on mobile */
+  @media (max-width: 768px) {
+    .float-control input[type="range"]::-webkit-slider-thumb,
+    .range-control input[type="range"]::-webkit-slider-thumb,
+    .integer-control input[type="range"]::-webkit-slider-thumb,
+    .hue-control input[type="range"]::-webkit-slider-thumb {
+      width: 28px;
+      height: 28px;
+    }
+
+    .float-control input[type="range"]::-moz-range-thumb,
+    .range-control input[type="range"]::-moz-range-thumb,
+    .integer-control input[type="range"]::-moz-range-thumb,
+    .hue-control input[type="range"]::-moz-range-thumb {
+      width: 28px;
+      height: 28px;
+    }
+
+    /* Increase the height of the slider track for better touch interaction */
+    .float-control input[type="range"],
+    .range-control input[type="range"],
+    .integer-control input[type="range"],
+    .hue-control input[type="range"] {
+      height: 8px;
+      padding: 12px 0; /* Add padding around the slider for larger touch area */
+    }
   }
 
   .value-display {
