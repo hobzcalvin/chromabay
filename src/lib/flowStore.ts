@@ -431,4 +431,64 @@ export const nextNodeId = writable(3);
 export const nodeOutputs = writable<Map<string, ImageData>>(new Map());
 
 // Export lanes for use in components
-export { LANES }; 
+export { LANES };
+
+// Helper function to delete a node and handle rewiring
+export function deleteNode(nodeId: string): void {
+  // Get current state
+  let currentNodes: Node[] = [];
+  let currentEdges: Edge[] = [];
+  
+  flowNodes.subscribe(nodes => currentNodes = nodes)();
+  flowEdges.subscribe(edges => currentEdges = edges)();
+  
+  // Find the node to delete
+  const nodeToDelete = currentNodes.find(n => n.id === nodeId);
+  if (!nodeToDelete) return;
+  
+  // Check if it's a blend node
+  const isBlendNode = nodeToDelete.data.type === 'blend';
+  
+  // Get edges connected to this node
+  const inputEdges = currentEdges.filter(edge => edge.target === nodeId);
+  const outputEdges = currentEdges.filter(edge => edge.source === nodeId);
+  
+  // If not a blend node and has both input and output connections, rewire them
+  if (!isBlendNode && inputEdges.length > 0 && outputEdges.length > 0) {
+    // For non-blend nodes, there should be only one input edge
+    const inputEdge = inputEdges[0];
+    
+    // Create new edges connecting the input node directly to all output nodes
+    const newEdges = outputEdges.map((outputEdge, index) => ({
+      id: `e${inputEdge.source}-${outputEdge.target}-${Date.now()}-${index}`,
+      source: inputEdge.source,
+      target: outputEdge.target,
+      sourceHandle: inputEdge.sourceHandle,
+      targetHandle: outputEdge.targetHandle
+    }));
+    
+    // Update edges: remove old edges and add new rewired edges
+    flowEdges.update(edges => {
+      // Remove all edges connected to the deleted node
+      const filteredEdges = edges.filter(edge => 
+        edge.source !== nodeId && edge.target !== nodeId
+      );
+      // Add new rewired edges
+      return [...filteredEdges, ...newEdges];
+    });
+  } else {
+    // For blend nodes or nodes without both input/output, just remove connected edges
+    flowEdges.update(edges => 
+      edges.filter(edge => edge.source !== nodeId && edge.target !== nodeId)
+    );
+  }
+  
+  // Remove the node
+  flowNodes.update(nodes => nodes.filter(n => n.id !== nodeId));
+  
+  // Clean up node parameters
+  nodeParameters.update(params => {
+    params.delete(nodeId);
+    return params;
+  });
+} 

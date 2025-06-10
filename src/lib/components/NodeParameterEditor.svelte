@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { getNodeDefinition, setNodeParameter, getNodeParameter, type Parameter } from '../flowStore';
+  import { onMount, onDestroy } from 'svelte';
+  import { getNodeDefinition, setNodeParameter, getNodeParameter, deleteNode, type Parameter } from '../flowStore';
   import type { Node } from '@xyflow/svelte';
 
   export let node: Node;
@@ -15,6 +15,8 @@
 
   let popoverElement: HTMLElement;
   let nodeDefinition = getNodeDefinition(node.data.type as string);
+  let deleteConfirmState = false;
+  let deleteTimeout: ReturnType<typeof setTimeout>;
 
   // Calculate popover position
   function getPopoverPosition() {
@@ -52,9 +54,44 @@
     updateParameter(param, value);
   }
 
+  function handleDeleteNode() {
+    // Don't allow deletion of output node
+    if (node.data.type === 'output') {
+      return;
+    }
+    
+    if (!deleteConfirmState) {
+      // First click - show "Really?" state
+      deleteConfirmState = true;
+      
+      // Reset after 3 seconds if not clicked again
+      clearTimeout(deleteTimeout);
+      deleteTimeout = setTimeout(() => {
+        deleteConfirmState = false;
+      }, 3000);
+    } else {
+      // Second click - actually delete
+      clearTimeout(deleteTimeout);
+      deleteConfirmState = false;
+      
+      // Delete the node (this will handle rewiring automatically)
+      deleteNode(node.id);
+      
+      // Close the parameter editor
+      onClose();
+    }
+  }
+
+  function handleClose() {
+    // Reset delete confirmation state when closing
+    deleteConfirmState = false;
+    clearTimeout(deleteTimeout);
+    onClose();
+  }
+
   function handleDocumentClick(event: MouseEvent) {
     if (popoverElement && event.target && !popoverElement.contains(event.target as Element)) {
-      onClose();
+      handleClose();
     }
   }
 
@@ -66,6 +103,10 @@
       document.removeEventListener('click', handleDocumentClick);
     };
   });
+
+  onDestroy(() => {
+    clearTimeout(deleteTimeout);
+  });
 </script>
 
 <div 
@@ -73,12 +114,24 @@
   class="parameter-popover"
   style="position: fixed; {getPopoverPosition().top !== undefined ? `top: ${getPopoverPosition().top}px;` : ''} {getPopoverPosition().left !== undefined ? `left: ${getPopoverPosition().left}px;` : ''} {getPopoverPosition().right !== undefined ? `right: ${getPopoverPosition().right}px;` : ''} {getPopoverPosition().bottom !== undefined ? `bottom: ${getPopoverPosition().bottom}px;` : ''} visibility: {visible ? 'visible' : 'hidden'}; opacity: {visible ? '1' : '0'}; transition: opacity 0.2s ease;"
   onclick={(e) => e.stopPropagation()}
+  onkeydown={(e) => e.stopPropagation()}
   role="dialog"
   tabindex="-1"
 >
   <div class="popover-header">
     <h3>{node.data.label} Parameters</h3>
-    <button class="close-btn" onclick={onClose}>×</button>
+    <div class="header-buttons">
+      {#if node.data.type !== 'output'}
+        <button 
+          class="delete-btn" 
+          class:delete-confirm={deleteConfirmState}
+          onclick={handleDeleteNode}
+        >
+          {deleteConfirmState ? 'Really?' : 'Delete'}
+        </button>
+      {/if}
+      <button class="close-btn" onclick={handleClose}>×</button>
+    </div>
   </div>
   
   <div class="popover-content">
@@ -186,13 +239,19 @@
     font-weight: 600;
   }
 
+  .header-buttons {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
   .close-btn {
     background: none;
     border: none;
     color: #9ca3af;
-    font-size: 18px;
+    font-size: 16px;
     cursor: pointer;
-    padding: 0;
+    padding: 2px;
     width: 24px;
     height: 24px;
     display: flex;
@@ -204,6 +263,41 @@
   .close-btn:hover {
     background: #374151;
     color: white;
+  }
+
+  .delete-btn {
+    background: #ef4444;
+    border: none;
+    color: white;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 4px 8px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    min-width: 50px;
+    transition: background-color 0.2s ease;
+  }
+
+  .delete-btn:hover {
+    background: #dc2626;
+  }
+
+  .delete-btn.delete-confirm {
+    background: #f59e0b;
+    animation: pulse 0.5s ease-in-out;
+  }
+
+  .delete-btn.delete-confirm:hover {
+    background: #d97706;
+  }
+
+  @keyframes pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.05); }
   }
 
   .popover-content {

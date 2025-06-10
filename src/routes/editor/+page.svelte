@@ -230,7 +230,6 @@
       }}
       proOptions={{ hideAttribution: true }}
       nodesDraggable={true}
-      elementsSelectable={true}
       selectNodesOnDrag={false}
       panOnDrag={true}
       translateExtent={[[0, -Infinity], [450, Infinity]]}
