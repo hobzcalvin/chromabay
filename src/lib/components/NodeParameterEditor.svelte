@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { getNodeDefinition, setNodeParameter, getNodeParameter, deleteNode, type Parameter } from '../flowStore';
+  import { getNodeDefinition, setNodeParameter, getNodeParameter, deleteNode, nodeParameters, type Parameter } from '../flowStore';
   import type { Node } from '@xyflow/svelte';
 
   export let node: Node;
@@ -30,7 +30,11 @@
   }
 
   function getParameterValue(param: Parameter): any {
-    return getNodeParameter(node.id, param.name, param.default);
+    const nodeParams = $nodeParameters.get(node.id);
+    if (nodeParams && nodeParams.has(param.name)) {
+      return nodeParams.get(param.name);
+    }
+    return param.default;
   }
 
   function updateParameter(param: Parameter, value: any) {
@@ -52,6 +56,11 @@
     const input = event.target as HTMLInputElement;
     const value = Math.max(0, Math.min(1, parseFloat(input.value) || 0));
     updateParameter(param, value);
+  }
+
+  function handleSelectChange(param: Parameter, event: Event) {
+    const select = event.target as HTMLSelectElement;
+    updateParameter(param, select.value);
   }
 
   function handleDeleteNode() {
@@ -214,6 +223,19 @@
                   hsl(360, 100%, 50%));"
               />
               <span class="value-display">{getParameterValue(param)}°</span>
+            </div>
+          {:else if param.type === 'select'}
+            <div class="select-control">
+              <select 
+                value={getParameterValue(param)}
+                onchange={(e) => handleSelectChange(param, e)}
+              >
+                {#if param.options}
+                  {#each param.options as option}
+                    <option value={option.value}>{option.label}</option>
+                  {/each}
+                {/if}
+              </select>
             </div>
           {/if}
         </div>
@@ -435,6 +457,37 @@
     font-size: 11px;
     color: #9ca3af;
     font-family: monospace;
+  }
+
+  .select-control {
+    display: flex;
+    align-items: center;
+  }
+
+  .select-control select {
+    flex: 1;
+    background: #374151;
+    border: 1px solid #4b5563;
+    border-radius: 4px;
+    color: white;
+    font-size: 12px;
+    padding: 6px 8px;
+    cursor: pointer;
+    outline: none;
+  }
+
+  .select-control select:hover {
+    border-color: #6b7280;
+  }
+
+  .select-control select:focus {
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 1px #3b82f6;
+  }
+
+  .select-control select option {
+    background: #374151;
+    color: white;
   }
 
   .no-parameters {

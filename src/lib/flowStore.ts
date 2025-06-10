@@ -5,7 +5,7 @@ import type { Node, Edge } from '@xyflow/svelte';
 export const globalStartTime = writable<number>(performance.now());
 
 // Parameter types
-export type ParameterType = 'float' | 'range' | 'integer' | 'hue' | 'color';
+export type ParameterType = 'float' | 'range' | 'integer' | 'hue' | 'color' | 'select';
 
 export interface Parameter {
   label: string;
@@ -14,6 +14,7 @@ export interface Parameter {
   default: any;
   min?: number;
   max?: number;
+  options?: { value: string; label: string }[];
 }
 
 // Store for parameter values - keyed by nodeId, then by parameter name
@@ -42,11 +43,63 @@ export function setNodeParameter(nodeId: string, paramName: string, value: any):
   });
 }
 
+// Helper function to ensure all parameters are initialized for a node
+export function ensureNodeParametersInitialized(nodeId: string, nodeType: string): void {
+  const nodeDefinition = getNodeDefinition(nodeType);
+  if (!nodeDefinition) return;
+  
+  nodeParameters.update(params => {
+    if (!params.has(nodeId)) {
+      params.set(nodeId, new Map());
+    }
+    
+    const nodeParams = params.get(nodeId)!;
+    
+    // Initialize any missing parameters with their default values
+    nodeDefinition.params.forEach(param => {
+      if (!nodeParams.has(param.name)) {
+        nodeParams.set(param.name, param.default);
+      }
+    });
+    
+    return params;
+  });
+}
+
 // Helper function for HSL to RGB conversion
 function hslToRgb(h: number, s: number, l: number): [number, number, number] {
   const c = (1 - Math.abs(2 * l - 1)) * s;
   const x = c * (1 - Math.abs((h * 6) % 2 - 1));
   const m = l - c / 2;
+  
+  let r = 0, g = 0, b = 0;
+  
+  if (0 <= h && h < 1/6) {
+    r = c; g = x; b = 0;
+  } else if (1/6 <= h && h < 2/6) {
+    r = x; g = c; b = 0;
+  } else if (2/6 <= h && h < 3/6) {
+    r = 0; g = c; b = x;
+  } else if (3/6 <= h && h < 4/6) {
+    r = 0; g = x; b = c;
+  } else if (4/6 <= h && h < 5/6) {
+    r = x; g = 0; b = c;
+  } else if (5/6 <= h && h < 1) {
+    r = c; g = 0; b = x;
+  }
+  
+  return [
+    Math.round((r + m) * 255),
+    Math.round((g + m) * 255),
+    Math.round((b + m) * 255)
+  ];
+}
+
+// Helper function for HSV to RGB conversion
+function hsvToRgb(h: number, s: number, v: number): [number, number, number] {
+  const c = v * s;
+  const x = c * (1 - Math.abs((h * 6) % 2 - 1));
+  const m = v - c;
   
   let r = 0, g = 0, b = 0;
   
@@ -118,18 +171,32 @@ export const NODE_TYPES: NodeDefinition[] = [
     params: [
       { label: 'Speed', name: 'speed', type: 'float', default: 0.1 },
       { label: 'Saturation', name: 'saturation', type: 'float', default: 1.0 },
-      { label: 'Lightness', name: 'lightness', type: 'float', default: 0.5 }
+      { label: 'Value', name: 'value', type: 'float', default: 1.0 },
+      { label: 'Angle', name: 'angle', type: 'range', default: 0, min: 0, max: 360 }
     ],
     render: ({ ctx, totalTime, width, height, nodeId }) => {
-      const speed = getNodeParameter(nodeId, 'speed', 0.1);
+      const speed = getNodeParameter(nodeId, 'speed', 0.1) * 3; // Scale down for reasonable animation speed
       const saturation = getNodeParameter(nodeId, 'saturation', 1.0);
-      const lightness = getNodeParameter(nodeId, 'lightness', 0.5);
+      const value = getNodeParameter(nodeId, 'value', 1.0);
+      const angle = getNodeParameter(nodeId, 'angle', 0);
       
-      for (let i = 0; i < width; i++) {
-        const hue = (i / width + totalTime * speed) % 1;
-        const [r, g, b] = hslToRgb(hue, saturation, lightness);
-        ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
-        ctx.fillRect(i, 0, 1, height);
+      // Convert angle to radians
+      const angleRad = (angle * Math.PI) / 180;
+      const cosAngle = Math.cos(angleRad);
+      const sinAngle = Math.sin(angleRad);
+      
+      for (let x = 0; x < width; x++) {
+        for (let y = 0; y < height; y++) {
+          // Apply rotation to coordinates
+          const rotatedX = x * cosAngle - y * sinAngle;
+          const rotatedY = x * sinAngle + y * cosAngle;
+          
+          // Use rotated X coordinate for hue calculation
+          const hue = ((rotatedX / width) + totalTime * speed) % 1;
+          const [r, g, b] = hsvToRgb(Math.abs(hue), saturation, value);
+          ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+          ctx.fillRect(x, y, 1, 1);
+        }
       }
     }
   },
@@ -138,15 +205,65 @@ export const NODE_TYPES: NodeDefinition[] = [
     type: 'gradient',
     params: [
       { label: 'Color 1', name: 'color1', type: 'color', default: '#3b82f6' },
-      { label: 'Color 2', name: 'color2', type: 'color', default: '#8b5cf6' }
+      { label: 'Color 2', name: 'color2', type: 'color', default: '#8b5cf6' },
+      { label: 'Speed', name: 'speed', type: 'range', default: 10, min: 0, max: 100 },
+      { label: 'Angle', name: 'angle', type: 'range', default: 0, min: 0, max: 360 }
     ],
-    render: ({ ctx, width, height, nodeId }) => {
+    render: ({ ctx, totalTime, width, height, nodeId }) => {
       const color1 = getNodeParameter(nodeId, 'color1', '#3b82f6');
       const color2 = getNodeParameter(nodeId, 'color2', '#8b5cf6');
+      const speed = getNodeParameter(nodeId, 'speed', 10) / 10;
+      const angle = getNodeParameter(nodeId, 'angle', 0);
       
-      const gradient = ctx.createLinearGradient(0, 0, width, 0);
-      gradient.addColorStop(0, color1);
-      gradient.addColorStop(1, color2);
+      // Convert angle to radians and calculate gradient direction
+      const angleRad = (angle * Math.PI) / 180;
+      const gradientLength = Math.sqrt(width * width + height * height);
+      
+      // Calculate gradient endpoints based on angle
+      const centerX = width / 2;
+      const centerY = height / 2;
+      const halfLength = gradientLength / 2;
+      
+      const x1 = centerX - Math.cos(angleRad) * halfLength;
+      const y1 = centerY - Math.sin(angleRad) * halfLength;
+      const x2 = centerX + Math.cos(angleRad) * halfLength;
+      const y2 = centerY + Math.sin(angleRad) * halfLength;
+      
+      // Animate by shifting the gradient colors
+      const timeOffset = totalTime * speed;
+      const gradient = ctx.createLinearGradient(x1, y1, x2, y2);
+      
+      // Create multiple color stops to animate the gradient
+      const stops = 10;
+      for (let i = 0; i <= stops; i++) {
+        const position = i / stops;
+        const animatedPosition = (position + timeOffset) % 2;
+        
+        // Oscillate between the two colors
+        let color;
+        if (animatedPosition <= 1) {
+          // Blend from color1 to color2
+          const blend = animatedPosition;
+          const [r1, g1, b1] = hexToRgb(color1);
+          const [r2, g2, b2] = hexToRgb(color2);
+          const r = Math.round(r1 * (1 - blend) + r2 * blend);
+          const g = Math.round(g1 * (1 - blend) + g2 * blend);
+          const b = Math.round(b1 * (1 - blend) + b2 * blend);
+          color = `rgb(${r}, ${g}, ${b})`;
+        } else {
+          // Blend from color2 back to color1
+          const blend = animatedPosition - 1;
+          const [r1, g1, b1] = hexToRgb(color2);
+          const [r2, g2, b2] = hexToRgb(color1);
+          const r = Math.round(r1 * (1 - blend) + r2 * blend);
+          const g = Math.round(g1 * (1 - blend) + g2 * blend);
+          const b = Math.round(b1 * (1 - blend) + b2 * blend);
+          color = `rgb(${r}, ${g}, ${b})`;
+        }
+        
+        gradient.addColorStop(position, color);
+      }
+      
       ctx.fillStyle = gradient;
       ctx.fillRect(0, 0, width, height);
     }
@@ -155,21 +272,52 @@ export const NODE_TYPES: NodeDefinition[] = [
     name: 'Perlin Noise',
     type: 'perlin_noise',
     params: [
-      { label: 'Speed', name: 'speed', type: 'float', default: 1.0 },
-      { label: 'Scale', name: 'scale', type: 'float', default: 0.1 },
-      { label: 'Intensity', name: 'intensity', type: 'float', default: 1.0 }
+      { label: 'Speed', name: 'speed', type: 'range', default: 50, min: 1, max: 200 },
+      { label: 'Scale', name: 'scale', type: 'float', default: 0.3 },
+      { label: 'Intensity', name: 'intensity', type: 'float', default: 1.0 },
+      { label: 'Octaves', name: 'octaves', type: 'integer', default: 3, min: 1, max: 6 }
     ],
     render: ({ ctx, totalTime, width, height, nodeId }) => {
-      const speed = getNodeParameter(nodeId, 'speed', 1.0);
-      const scale = getNodeParameter(nodeId, 'scale', 0.1);
-      const intensity = getNodeParameter(nodeId, 'intensity', 1.0);
+      // Ensure all parameters are initialized for this node
+      ensureNodeParametersInitialized(nodeId, 'perlin_noise');
       
-      // Create noise overlay
+      const speed = getNodeParameter(nodeId, 'speed', 50) / 10;
+      const scale = getNodeParameter(nodeId, 'scale', 0.3);
+      const intensity = getNodeParameter(nodeId, 'intensity', 1.0);
+      const octaves = getNodeParameter(nodeId, 'octaves', 3);
+      
+      // Create more complex noise with multiple octaves
       for (let x = 0; x < width; x += 1) {
         for (let y = 0; y < height; y += 1) {
-          const noise = Math.sin(x * scale + totalTime * speed) * Math.cos(y * scale + totalTime * speed);
-          const alpha = ((noise + 1) * 0.5) * intensity; // Normalize to 0-1 and apply intensity
-          ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+          let noise = 0;
+          let amplitude = 1;
+          let frequency = scale;
+          let maxValue = 0; // Used for normalizing result to 0-1
+          
+          // Layer multiple noise octaves for more realistic noise
+          for (let i = 0; i < octaves; i++) {
+            // Use multiple sine/cosine layers with different phases for more chaotic noise
+            const n1 = Math.sin(x * frequency + totalTime * speed) * Math.cos(y * frequency + totalTime * speed * 0.7);
+            const n2 = Math.sin(x * frequency * 1.3 + totalTime * speed * 1.5) * Math.cos(y * frequency * 0.8 + totalTime * speed * 0.9);
+            const n3 = Math.sin(x * frequency * 0.6 + totalTime * speed * 2.1) * Math.cos(y * frequency * 1.7 + totalTime * speed * 1.3);
+            
+            const layerNoise = (n1 + n2 * 0.5 + n3 * 0.25) / 1.75; // Mix the layers
+            noise += layerNoise * amplitude;
+            maxValue += amplitude;
+            
+            amplitude *= 0.5; // Each octave has half the amplitude
+            frequency *= 2.0; // Each octave has double the frequency
+          }
+          
+          // Normalize and apply intensity
+          noise = (noise / maxValue); // Now ranges from -1 to 1
+          const alpha = Math.abs(noise) * intensity; // Use absolute value for brightness
+          
+          // Use the noise to create grayscale values instead of just alpha
+          const brightness = Math.max(0, Math.min(1, (noise + 1) * 0.5 * intensity));
+          const colorValue = Math.round(brightness * 255);
+          
+          ctx.fillStyle = `rgb(${colorValue}, ${colorValue}, ${colorValue})`;
           ctx.fillRect(x, y, 1, 1);
         }
       }
@@ -323,10 +471,19 @@ export const NODE_TYPES: NodeDefinition[] = [
     name: 'Blend',
     type: 'blend',
     params: [
-      { label: 'Opacity', name: 'opacity', type: 'float', default: 0.5 }
+      { label: 'Opacity', name: 'opacity', type: 'float', default: 0.5 },
+      { label: 'Blend Mode', name: 'blendMode', type: 'select', default: 'normal', options: [
+        { value: 'normal', label: 'Normal' },
+        { value: 'add', label: 'Add' },
+        { value: 'multiply', label: 'Multiply' },
+        { value: 'screen', label: 'Screen' },
+        { value: 'overlay', label: 'Overlay' },
+        { value: 'difference', label: 'Difference' }
+      ]}
     ],
     render: ({ ctx, width, height, getInputNodes, getNodeOutput, nodeId }) => {
       const opacity = getNodeParameter(nodeId, 'opacity', 0.5);
+      const blendMode = getNodeParameter(nodeId, 'blendMode', 'normal');
       const inputs = getInputNodes();
       const input1Data = inputs.input1 ? getNodeOutput(inputs.input1.id) : null;
       const input2Data = inputs.input2 ? getNodeOutput(inputs.input2.id) : null;
@@ -354,10 +511,48 @@ export const NODE_TYPES: NodeDefinition[] = [
             a2 = input2Data.data[i + 3];
           }
           
-          // Blend with opacity control
-          data[i] = Math.min(255, r1 * (1 - opacity) + r2 * opacity);
-          data[i + 1] = Math.min(255, g1 * (1 - opacity) + g2 * opacity);
-          data[i + 2] = Math.min(255, b1 * (1 - opacity) + b2 * opacity);
+          // Apply blend mode
+          let r, g, b;
+          
+          switch (blendMode) {
+            case 'add':
+              r = Math.min(255, r1 + r2 * opacity);
+              g = Math.min(255, g1 + g2 * opacity);
+              b = Math.min(255, b1 + b2 * opacity);
+              break;
+            case 'multiply':
+              r = Math.min(255, r1 * (1 - opacity) + (r1 * r2 / 255) * opacity);
+              g = Math.min(255, g1 * (1 - opacity) + (g1 * g2 / 255) * opacity);
+              b = Math.min(255, b1 * (1 - opacity) + (b1 * b2 / 255) * opacity);
+              break;
+            case 'screen':
+              r = Math.min(255, r1 * (1 - opacity) + (255 - (255 - r1) * (255 - r2) / 255) * opacity);
+              g = Math.min(255, g1 * (1 - opacity) + (255 - (255 - g1) * (255 - g2) / 255) * opacity);
+              b = Math.min(255, b1 * (1 - opacity) + (255 - (255 - b1) * (255 - b2) / 255) * opacity);
+              break;
+            case 'overlay':
+              const overlayR = r1 < 128 ? 2 * r1 * r2 / 255 : 255 - 2 * (255 - r1) * (255 - r2) / 255;
+              const overlayG = g1 < 128 ? 2 * g1 * g2 / 255 : 255 - 2 * (255 - g1) * (255 - g2) / 255;
+              const overlayB = b1 < 128 ? 2 * b1 * b2 / 255 : 255 - 2 * (255 - b1) * (255 - b2) / 255;
+              r = Math.min(255, r1 * (1 - opacity) + overlayR * opacity);
+              g = Math.min(255, g1 * (1 - opacity) + overlayG * opacity);
+              b = Math.min(255, b1 * (1 - opacity) + overlayB * opacity);
+              break;
+            case 'difference':
+              r = Math.min(255, r1 * (1 - opacity) + Math.abs(r1 - r2) * opacity);
+              g = Math.min(255, g1 * (1 - opacity) + Math.abs(g1 - g2) * opacity);
+              b = Math.min(255, b1 * (1 - opacity) + Math.abs(b1 - b2) * opacity);
+              break;
+            default: // normal
+              r = Math.min(255, r1 * (1 - opacity) + r2 * opacity);
+              g = Math.min(255, g1 * (1 - opacity) + g2 * opacity);
+              b = Math.min(255, b1 * (1 - opacity) + b2 * opacity);
+              break;
+          }
+          
+          data[i] = r;
+          data[i + 1] = g;
+          data[i + 2] = b;
           data[i + 3] = 255;
         }
         
