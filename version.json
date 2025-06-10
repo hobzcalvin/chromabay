@@ -1,7 +1,7 @@
 {
-  "version": "v0.0.28",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.28.zip",
-  "buildDate": "2025-06-10 20:31:51 UTC",
-  "commitHash": "59d100e2e59ea41a2a0daae5e7d11333731cf631",
-  "commitMessage": "Try bigger param sliders"
+  "version": "v0.0.29",
+  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.29.zip",
+  "buildDate": "2025-06-10 21:21:44 UTC",
+  "commitHash": "24db6921a2f4cc40b5eb1f8f9af5348a2c5085fa",
+  "commitMessage": "Properly switch params editor"
 }

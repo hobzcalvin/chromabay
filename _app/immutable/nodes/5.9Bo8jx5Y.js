@@ -1,0 +1,1 @@
+import{f as o,a as t}from"../chunks/Nqe1z2qx.js";import"../chunks/bcCJQyVw.js";var r=o("<main><h1>Interact</h1> <p>Coming soon: interactive interface.</p></main>");function e(a){var n=r();t(a,n)}export{e as component};
