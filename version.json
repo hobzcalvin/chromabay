@@ -1,7 +1,7 @@
 {
-  "version": "v0.0.24",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.24.zip",
-  "buildDate": "2025-06-10 07:50:33 UTC",
-  "commitHash": "2b2e5716517f842aceb82508ae23eb469343fd57",
-  "commitMessage": "Universal time"
+  "version": "v0.0.25",
+  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.25.zip",
+  "buildDate": "2025-06-10 18:16:58 UTC",
+  "commitHash": "ac8aa7bca92c744478908f95f1aa4d8f39a8886b",
+  "commitMessage": "node params working"
 }
