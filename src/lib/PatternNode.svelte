@@ -65,15 +65,7 @@
     
     const inputs = getInputNodes();
     
-    if (nodeType === 'output') {
-      // Output just passes through its input
-      if ('input' in inputs && inputs.input) {
-        const inputData = getNodeOutput(inputs.input.id);
-        if (inputData) {
-          ctx.putImageData(inputData, 0, 0);
-        }
-      }
-    } else if (nodeType === 'blend') {
+    if (nodeType === 'blend') {
       // Blend mixes two inputs
       const input1Data = inputs.input1 ? getNodeOutput(inputs.input1.id) : null;
       const input2Data = inputs.input2 ? getNodeOutput(inputs.input2.id) : null;
@@ -111,7 +103,7 @@
         ctx.putImageData(imageData, 0, 0);
       }
     } else {
-      // Pattern nodes: render input first, then add pattern on top
+      // All other nodes (output and pattern nodes): render input first
       if ('input' in inputs && inputs.input) {
         const inputData = getNodeOutput(inputs.input.id);
         if (inputData) {
@@ -119,8 +111,10 @@
         }
       }
       
-      // Now render the pattern effect on top
-      renderPattern();
+      // For pattern nodes, render the pattern effect on top
+      if (nodeType !== 'output') {
+        renderPattern();
+      }
     }
     
     // Store this node's output for other nodes to use
