@@ -3,7 +3,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { flowNodes, flowEdges, nodeOutputs, getNodeDefinition, globalStartTime, type RenderContext } from '$lib/flowStore';
   
-  let { data, id, type }: NodeProps & { type: string } = $props();
+  let { data, id, type, ...nodeProps }: NodeProps & { type: string } = $props();
   
   let canvasElement: HTMLCanvasElement;
   let ctx: CanvasRenderingContext2D | null = null;
@@ -46,7 +46,7 @@
   }
   
   onMount(() => {
-    ctx = canvasElement.getContext('2d');
+    ctx = canvasElement.getContext('2d', { willReadFrequently: true });
     lastFrameTime = performance.now();
     animate();
   });
@@ -115,9 +115,25 @@
   
   const isBlendNode = nodeType === 'blend';
   const isOutputNode = nodeType === 'output';
+  
+  // Debug parameter availability
+  $effect(() => {
+    const nodeDef = getNodeDefinition(nodeType);
+    console.log(`Node ${id} (${nodeType}):`, { 
+      hasDefinition: !!nodeDef, 
+      paramCount: nodeDef?.params.length || 0,
+      params: nodeDef?.params.map(p => p.name) || [] 
+    });
+  });
 </script>
 
-<div class="pattern-node" class:blend-node={isBlendNode}>
+<div 
+  class="pattern-node" 
+  class:blend-node={isBlendNode}
+  class:has-parameters={getNodeDefinition(nodeType)?.params.length ?? 0 > 0}
+  role="button"
+  tabindex="0"
+>
   <canvas 
     bind:this={canvasElement}
     width={textureWidth}
@@ -178,5 +194,15 @@
   
   .blend-node {
     background: rgba(139, 92, 246, 0.1);
+  }
+  
+  .has-parameters {
+    cursor: pointer;
+    border: 1px solid rgba(59, 130, 246, 0.3);
+  }
+  
+  .has-parameters:hover {
+    border-color: rgba(59, 130, 246, 0.6);
+    box-shadow: 0 0 8px rgba(59, 130, 246, 0.3);
   }
 </style> 

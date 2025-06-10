@@ -1,12 +1,29 @@
 <script lang="ts">
   import { SvelteFlow, Controls, Background, BaseEdge, MarkerType, Position, type Node, type Edge, type Connection, useSvelteFlow, useViewport, getOutgoers } from '@xyflow/svelte';
   import '@xyflow/svelte/dist/style.css';
-  import { flowNodes, flowEdges, nextNodeId, LANES, NODE_TYPES, createNodeFromType } from '$lib/flowStore';
+  import { flowNodes, flowEdges, nextNodeId, LANES, NODE_TYPES, createNodeFromType, getNodeDefinition } from '$lib/flowStore';
   import PatternNode from '$lib/PatternNode.svelte';
+  import NodeParameterEditor from '$lib/components/NodeParameterEditor.svelte';
   
   // Get SvelteFlow hooks
   const { screenToFlowPosition } = useSvelteFlow();
   const viewport = useViewport();
+  
+  // Parameter editor state - similar to context menu approach
+  let parameterEditor: {
+    id: string;
+    top?: number;
+    left?: number;
+    right?: number;
+    bottom?: number;
+  } | null = $state(null);
+  let clientWidth: number = $state(0);
+  let clientHeight: number = $state(0);
+  let flowContainer: HTMLDivElement;
+  
+  // Reactive check for active node
+  const activeNode = $derived(parameterEditor ? $flowNodes.find(n => n.id === parameterEditor!.id) : null);
+  const showParameterEditor = $derived(parameterEditor !== null && activeNode !== undefined);
   
   // Define custom node types
   const nodeTypes = {
@@ -36,6 +53,46 @@
           : n
       )
     );
+  }
+
+  // Handle node right-clicks for parameter editing - positioned below the node
+  function handleNodeContextMenu({ event, node }: { event: MouseEvent | TouchEvent; node: Node }) {
+    console.log('🔍 Node clicked:', { event, node });
+    // Prevent native context menu from showing
+    event.preventDefault();
+    
+    // Check if this node has parameters
+    const nodeDefinition = getNodeDefinition(node.data.type as string);
+    if (!nodeDefinition || !nodeDefinition.params || nodeDefinition.params.length === 0) {
+      console.log('❌ Node has no parameters');
+      return;
+    }
+ 
+    // Get the actual node DOM element from the event target
+    const nodeElement = event.target as HTMLElement;
+    const nodeRect = nodeElement.getBoundingClientRect();
+    
+    // Use absolute coordinates - position editor centered underneath the node
+    const editorWidth = 300; // Parameter editor width
+    const editorX = nodeRect.left + (nodeRect.width / 2) - (editorWidth / 2); // Center horizontally
+    const editorY = nodeRect.bottom + 10; // 10px spacing below the node
+
+    // Use absolute positioning
+    parameterEditor = {
+      id: node.id,
+      top: editorY,
+      left: editorX,
+    };
+  }
+  
+  // Close parameter editor
+  function closeParameterEditor() {
+    parameterEditor = null;
+  }
+  
+  // Handle pane clicks to close parameter editor
+  function handlePaneClick() {
+    parameterEditor = null;
   }
   
   // Create a new node of specified type
@@ -130,6 +187,13 @@
     <h1>🎯 Pattern Editor</h1>
     <p>Design your LED patterns visually</p>
     
+    <!-- Debug info -->
+    <div style="background: yellow; color: black; padding: 5px; margin: 10px;">
+      parameterEditor: {parameterEditor?.id || 'null'}
+      <button onclick={() => { parameterEditor = { id: '1', top: 100, left: 100 }; }}>Show Rainbow Params</button>
+      <button onclick={() => { parameterEditor = null; }}>Hide Params</button>
+    </div>
+    
     <div class="dropdown-container">
       <select 
         class="dropdown-select"
@@ -139,7 +203,10 @@
           const selectedIndex = target.selectedIndex - 1; // -1 because first option is placeholder
           if (selectedIndex >= 0) {
             // Add 1 to skip the output node at index 0
-            createNode(NODE_TYPES[selectedIndex + 1]);
+            const nodeType = NODE_TYPES[selectedIndex + 1];
+            if (nodeType) {
+              createNode(nodeType);
+            }
             target.selectedIndex = 0; // Reset to placeholder
           }
         }}
@@ -154,7 +221,7 @@
     </div>
   </div>
   
-  <div class="flow-container">
+  <div class="flow-container" bind:this={flowContainer} bind:clientWidth bind:clientHeight>
     <SvelteFlow 
       bind:nodes={$flowNodes}
       bind:edges={$flowEdges}
@@ -165,12 +232,14 @@
       }}
       proOptions={{ hideAttribution: true }}
       nodesDraggable={true}
-      elementsSelectable={false}
+      elementsSelectable={true}
       selectNodesOnDrag={false}
       panOnDrag={true}
       translateExtent={[[0, -Infinity], [450, Infinity]]}
       colorMode="dark"
       onnodedragstop={onNodeDragStop}
+      onnodecontextmenu={handleNodeContextMenu}
+      onpaneclick={handlePaneClick}
       onedgeclick={onEdgeClick}
       nodesConnectable={true}
       zoomOnDoubleClick={false}
@@ -187,6 +256,19 @@
       <Background 
         variant={'dots' as any} 
         gap={[150, 5]} 
+      />
+      
+      <!-- Always-rendered Parameter Editor with CSS visibility -->
+      <NodeParameterEditor 
+        node={activeNode || $flowNodes[0]} 
+        nodeElement={document.body}
+        viewport={{ x: 0, y: 0, zoom: 1 }}
+        visible={showParameterEditor}
+        top={parameterEditor?.top}
+        left={parameterEditor?.left}
+        right={parameterEditor?.right}
+        bottom={parameterEditor?.bottom}
+        onClose={closeParameterEditor}
       />
     </SvelteFlow>
   </div>
