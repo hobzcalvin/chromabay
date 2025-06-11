@@ -36,9 +36,22 @@ if [ -n "$(git status --porcelain)" ]; then
     exit 1
 fi
 
-# Pull latest changes
-echo -e "${BLUE}📥 Pulling latest changes...${NC}"
-git pull origin main
+# Check if current branch is ahead of origin/main
+echo -e "${BLUE}🔍 Checking branch status...${NC}"
+git fetch origin main
+AHEAD=$(git rev-list --count origin/main..HEAD)
+BEHIND=$(git rev-list --count HEAD..origin/main)
+
+if [ "$BEHIND" -gt 0 ]; then
+    echo -e "${RED}❌ Error: Your branch is $BEHIND commits behind origin/main${NC}"
+    echo -e "${YELLOW}Please pull latest changes first: git pull origin main${NC}"
+    exit 1
+fi
+
+if [ "$AHEAD" -gt 0 ]; then
+    echo -e "${YELLOW}⚠️  Your branch is $AHEAD commits ahead of origin/main${NC}"
+    echo -e "${BLUE}🚀 Will push local commits to origin before creating release...${NC}"
+fi
 
 # Get current version
 CURRENT_VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
@@ -87,6 +100,12 @@ echo -e "${GREEN}🎯 New version: ${YELLOW}$NEW_VERSION${NC}"
 # Confirm release
 echo -e "${BLUE}🤔 Ready to create release $NEW_VERSION?${NC}"
 read -p "Press Enter to continue or Ctrl+C to cancel..."
+
+# Push any local commits first if we're ahead
+if [ "$AHEAD" -gt 0 ]; then
+    echo -e "${BLUE}📤 Pushing local commits to origin/main...${NC}"
+    git push origin main
+fi
 
 # Create and push tag
 echo -e "${BLUE}🏷️  Creating tag...${NC}"
