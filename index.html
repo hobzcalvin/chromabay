@@ -4,13 +4,26 @@
 		<meta charset="utf-8" />
 		<link rel="icon" href="/blumon/favicon.png" />
 		<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+		<script>
+			// GitHub Pages SPA routing handler
+			(function(l) {
+				if (l.search[1] === '/' ) {
+					var decoded = l.search.slice(1).split('&').map(function(s) { 
+						return s.replace(/~and~/g, '&')
+					}).join('?');
+					window.history.replaceState(null, null,
+						l.pathname.slice(0, -1) + decoded + l.hash
+					);
+				}
+			}(window.location))
+		</script>
 		
-		<link rel="modulepreload" href="/blumon/_app/immutable/entry/start.acxezXaO.js">
-		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/B_UfO6Tv.js">
+		<link rel="modulepreload" href="/blumon/_app/immutable/entry/start.B-wGEVzq.js">
+		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/B36u7a94.js">
 		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/CW5it_jD.js">
 		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/ty2gnEOf.js">
 		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/C3dmlQw-.js">
-		<link rel="modulepreload" href="/blumon/_app/immutable/entry/app.Bk1NJ4bR.js">
+		<link rel="modulepreload" href="/blumon/_app/immutable/entry/app.DnZBccq6.js">
 		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/Dp1pzeXC.js">
 		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/lLG6o5_U.js">
 		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/Nqe1z2qx.js">
@@ -22,7 +35,7 @@
 		<div style="display: contents">
 			<script>
 				{
-					__sveltekit_bdn6ji = {
+					__sveltekit_12yb6nl = {
 						base: "/blumon",
 						assets: "/blumon"
 					};
@@ -30,8 +43,8 @@
 					const element = document.currentScript.parentElement;
 
 					Promise.all([
-						import("/blumon/_app/immutable/entry/start.acxezXaO.js"),
-						import("/blumon/_app/immutable/entry/app.Bk1NJ4bR.js")
+						import("/blumon/_app/immutable/entry/start.B-wGEVzq.js"),
+						import("/blumon/_app/immutable/entry/app.DnZBccq6.js")
 					]).then(([kit, app]) => {
 						kit.start(app, element);
 					});
