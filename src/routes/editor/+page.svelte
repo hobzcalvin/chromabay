@@ -237,6 +237,103 @@
     return isValidConnectionWithBuffers(connection, $flowNodes, $flowEdges);
   }
 
+  // State for tracking connection attempts
+  let connectionAttempt: Connection | null = $state(null);
+  let connectionLineColor = $state('#666'); // Default gray
+  
+  // Handle connection start - track the attempt and store source info
+  function handleConnectionStart(event: any) {
+    connectionAttempt = {
+      source: event.node?.id || '',
+      sourceHandle: event.handleId || null,
+      target: '',
+      targetHandle: null
+    };
+    connectionLineColor = '#666'; // Start gray
+  }
+  
+  // Handle connection end - clear the attempt
+  function handleConnectionEnd() {
+    connectionAttempt = null;
+    connectionLineColor = '#666'; // Reset to gray
+  }
+  
+  // Handle mouse move to detect when not over connection targets
+  function handleFlowMouseMove(event: MouseEvent) {
+    // Only care about mouse movement during active connection attempts
+    if (!connectionAttempt) return;
+    
+    // Check if we're over a connection handle
+    const elements = document.elementsFromPoint(event.clientX, event.clientY);
+    const isOverHandle = elements.some(el => 
+      el.classList.contains('svelte-flow__handle') && 
+      el.classList.contains('svelte-flow__handle-top') // Only input handles
+    );
+    
+    // If not over a handle, reset to gray
+    if (!isOverHandle) {
+      connectionLineColor = '#666';
+    }
+  }
+  
+  // Enhanced isValidConnection that also updates connection line color
+  function isValidConnectionEnhanced(connection: Edge | Connection): boolean {
+    const isValid = isValidConnectionWithBuffers(connection, $flowNodes, $flowEdges);
+    
+    // Only update color if we're actively making a connection
+    if (connectionAttempt) {
+      if (isValid) {
+        connectionLineColor = '#10b981'; // Green for valid
+      } else {
+        connectionLineColor = '#ef4444'; // Red for invalid
+      }
+    } else {
+      // Not actively connecting, keep gray
+      connectionLineColor = '#666';
+    }
+    
+    return isValid;
+  }
+  
+  // Handle successful connections
+  function handleConnect(connection: Connection) {
+    connectionAttempt = null;
+    connectionLineColor = '#666'; // Reset to gray
+    
+    if (isValidConnectionWithBuffers(connection, $flowNodes, $flowEdges)) {
+      // Add the connection to the store with gray styling (original color)
+      const newEdge: Edge = {
+        id: `e${connection.source}-${connection.target}`,
+        source: connection.source,
+        target: connection.target,
+        sourceHandle: connection.sourceHandle,
+        targetHandle: connection.targetHandle,
+        style: 'stroke-width: 3; stroke: #666;', // Gray for connections
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          color: '#666'
+        }
+      };
+      
+      flowEdges.update(edges => [...edges, newEdge]);
+    }
+  }
+  
+  // Ensure existing edges have proper gray styling
+  $effect(() => {
+    // Update any edges that don't have proper styling
+    flowEdges.update(edges => 
+      edges.map(edge => ({
+        ...edge,
+        style: 'stroke-width: 3; stroke: #666;', // Gray for all connections (original color)
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          color: '#666'
+        }
+      }))
+    );
+  });
+
 
 </script>
 
@@ -274,7 +371,7 @@
     </div>
   </div>
   
-  <div class="flow-container" bind:this={flowContainer} bind:clientWidth bind:clientHeight>
+  <div class="flow-container" bind:this={flowContainer} bind:clientWidth bind:clientHeight onmousemove={handleFlowMouseMove}>
     <SvelteFlow 
       bind:nodes={$flowNodes}
       bind:edges={$flowEdges}
@@ -298,15 +395,19 @@
       onedgeclick={onEdgeClick}
       nodesConnectable={true}
       zoomOnDoubleClick={false}
-      isValidConnection={isValidConnection}
+      onconnect={handleConnect}
+      onconnectstart={handleConnectionStart}
+      onconnectend={handleConnectionEnd}
+      isValidConnection={isValidConnectionEnhanced}
       defaultEdgeOptions={{
         type: 'default',
-        style: 'stroke-width: 3; stroke: #666;',
+        style: 'stroke-width: 3; stroke: #666;', // Gray for connections (original color)
         markerEnd: {
           type: MarkerType.ArrowClosed,
           color: '#666'
         }
       }}
+      connectionLineStyle="stroke-width: 3; stroke: {connectionLineColor};"
     >
       <Background 
         variant={'dots' as any} 
