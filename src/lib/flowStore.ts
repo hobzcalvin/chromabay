@@ -596,8 +596,10 @@ export function validateBufferConnection(connection: Edge | Connection, nodes: N
   const targetBuffer = getNodeBuffer(target);
   
   // Check if source already outputs to this target's lane
+  // Exclude the current connection being validated to avoid self-rejection
   const existingOutputsToTargetLane = edges.filter(edge => {
     if (edge.source !== connection.source) return false;
+    if (edge.id === (connection as Edge).id) return false; // Exclude self when validating existing edge
     const edgeTarget = nodes.find(n => n.id === edge.target);
     return edgeTarget && getNodeBuffer(edgeTarget) === targetBuffer;
   });
@@ -640,12 +642,16 @@ export function isValidConnectionWithBuffers(connection: Edge | Connection, node
     // For blend nodes, each handle can only have one connection
     const existingConnections = edges.filter(edge => 
       edge.target === connection.target && 
-      edge.targetHandle === targetHandleId
+      edge.targetHandle === targetHandleId &&
+      edge.id !== (connection as Edge).id // Exclude self when validating existing edge
     );
     if (existingConnections.length >= 1) return false;
   } else {
     // For non-blend nodes, only allow one total input connection
-    const allTargetConnections = edges.filter(edge => edge.target === connection.target);
+    const allTargetConnections = edges.filter(edge => 
+      edge.target === connection.target &&
+      edge.id !== (connection as Edge).id // Exclude self when validating existing edge
+    );
     if (allTargetConnections.length >= 1) return false;
   }
   

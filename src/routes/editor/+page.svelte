@@ -53,16 +53,21 @@
     const snappedX = snapToLane(node.position.x);
     
     // Update the node's position in the store
-    flowNodes.update(nodes => 
-      nodes.map(n => 
+    flowNodes.update(nodes => {
+      const updatedNodes = nodes.map(n => 
         n.id === node.id 
           ? { ...n, position: { x: snappedX, y: node.position.y } }
           : n
-      )
-    );
-    
-    // After updating position, check for any connections that are now invalid due to buffer constraints
-    validateAndCleanupConnections();
+      );
+      
+      // Validate connections with the updated nodes immediately
+      // This avoids async store update issues
+      tick().then(() => {
+        validateAndCleanupConnections();
+      });
+      
+      return updatedNodes;
+    });
   }
   
   // Validate all connections and remove any that violate buffer constraints
