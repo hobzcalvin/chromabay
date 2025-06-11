@@ -1,7 +1,7 @@
 {
-  "version": "v0.0.31",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.31.zip",
-  "buildDate": "2025-06-10 22:18:35 UTC",
-  "commitHash": "b2baa05e095d9960fcecf36f49a2203cfdd1e840",
-  "commitMessage": "Try advanced validation"
+  "version": "v0.0.32",
+  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.32.zip",
+  "buildDate": "2025-06-11 05:12:52 UTC",
+  "commitHash": "71f092aa1c98d4e4b5e57e5ca346ba54f48a51c9",
+  "commitMessage": "Connection color coding etc"
 }
