@@ -69,6 +69,8 @@
       
       return updatedNodes;
     });
+
+    console.log("$flowNodes", JSON.stringify($flowNodes, null, 2), "$flowEdges", JSON.stringify($flowEdges, null, 2));
   }
   
   // Validate all connections and remove any that violate buffer constraints

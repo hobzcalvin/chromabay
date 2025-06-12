@@ -10,10 +10,10 @@
  * 
  * The test pattern matches the "before" image with:
  * - Rainbow (top left)
- * - Perlin Noise (top center)
- * - Raindrops (top right)
- * - Moving Blob (bottom left)
- * - Two Blend nodes (bottom center and bottom right)
+ * - Perlin Noise (middle)
+ * - Raindrops (right)
+ * - Moving Blob (left)
+ * - Two Blend nodes (middle and bottom right)
  * - Output node (connected to the second blend)
  */
 
@@ -25,9 +25,8 @@ import {
 import type { Node, Edge } from '@xyflow/svelte';
 import { 
   NODE_TYPES, 
-  LANES, 
-  type NodeDefinition,
-  type Parameter
+  LANES,
+  getNodeDefinition
 } from '../flowStore';
 
 // Test utilities
@@ -40,55 +39,7 @@ function log(...args: any[]): void {
   }
 }
 
-// Helper to create test nodes with specific positions and parameters
-function createTestNode(
-  id: string, 
-  type: string, 
-  x: number, 
-  y: number, 
-  params: Record<string, any> = {}
-): Node {
-  const nodeType = NODE_TYPES.find(nt => nt.type === type);
-  if (!nodeType) {
-    throw new Error(`Unknown node type: ${type}`);
-  }
-  
-  return {
-    id,
-    type: 'pattern',
-    position: { x, y },
-    data: { 
-      label: nodeType.name,
-      type: nodeType.type,
-      parameters: params
-    },
-    style: ''
-  };
-}
-
-// Helper to create test edges with proper handles
-function createTestEdge(
-  id: string, 
-  source: string, 
-  target: string, 
-  sourceHandle = 'output', 
-  targetHandle = 'input'
-): Edge {
-  return {
-    id,
-    source,
-    target,
-    sourceHandle,
-    targetHandle,
-    style: 'stroke-width: 3; stroke: #666;',
-    markerEnd: {
-      type: 'arrowclosed',
-      color: '#666'
-    }
-  };
-}
-
-// Helper to create a node parameters map
+// Helper to create node parameters map
 function createNodeParametersMap(
   nodes: Node[]
 ): Map<string, Map<string, any>> {
@@ -101,7 +52,7 @@ function createNodeParametersMap(
     const nodeParams = new Map<string, any>();
     
     // Set default values first
-    nodeType.params.forEach((param: Parameter) => {
+    nodeType.params.forEach(param => {
       nodeParams.set(param.name, param.default);
     });
     
@@ -130,7 +81,7 @@ function areMapsEqual(map1: Map<any, any>, map2: Map<any, any>): boolean {
       if (!areMapsEqual(val1, val2)) return false;
     } 
     // Otherwise do direct comparison
-    else if (val1 !== val2) {
+    else if (JSON.stringify(val1) !== JSON.stringify(val2)) {
       return false;
     }
   }
@@ -138,115 +89,231 @@ function areMapsEqual(map1: Map<any, any>, map2: Map<any, any>): boolean {
   return true;
 }
 
-// Helper to find an edge between two nodes
+// Helper to find an edge between two nodes with specific handles
 function findEdge(
   edges: Edge[], 
   sourceId: string, 
   targetId: string, 
+  sourceHandle: string = 'output',
   targetHandle?: string
 ): Edge | undefined {
   return edges.find(e => 
     e.source === sourceId && 
     e.target === targetId && 
+    e.sourceHandle === sourceHandle &&
     (targetHandle ? e.targetHandle === targetHandle : true)
   );
 }
 
-// Helper to verify node vertical ordering
-function verifyTopDownFlow(nodes: Node[], edges: Edge[]): boolean {
-  // Build a dependency graph
-  const dependencyGraph = new Map<string, string[]>();
+// Verify edges match the expected connections
+function verifyEdgeConnections(edges: Edge[], expectedConnections: {source: string, target: string, sourceHandle?: string, targetHandle?: string}[]): boolean {
+  if (edges.length !== expectedConnections.length) {
+    log(`❌ Edge count mismatch: expected ${expectedConnections.length}, got ${edges.length}`);
+    return false;
+  }
   
-  // Initialize the graph
-  nodes.forEach(node => {
-    dependencyGraph.set(node.id, []);
-  });
-  
-  // Add dependencies
-  edges.forEach(edge => {
-    const sourceNode = nodes.find(n => n.id === edge.source);
-    const targetNode = nodes.find(n => n.id === edge.target);
+  for (const expected of expectedConnections) {
+    const edge = findEdge(
+      edges, 
+      expected.source, 
+      expected.target,
+      expected.sourceHandle || 'output',
+      expected.targetHandle
+    );
     
-    if (sourceNode && targetNode) {
-      dependencyGraph.get(targetNode.id)?.push(sourceNode.id);
+    if (!edge) {
+      log(`❌ Missing edge: ${expected.source} -> ${expected.target} (${expected.targetHandle || 'input'})`);
+      return false;
     }
-  });
+  }
   
-  // Check if each node is positioned below its dependencies
-  let valid = true;
-  nodes.forEach(node => {
-    const dependencies = dependencyGraph.get(node.id) || [];
-    
-    dependencies.forEach(depId => {
-      const depNode = nodes.find(n => n.id === depId);
-      if (depNode && depNode.position.y >= node.position.y) {
-        log(`❌ Node ${node.id} (${node.data.type}) is positioned above its dependency ${depId} (${depNode.data.type})`);
-        valid = false;
-      }
-    });
-  });
-  
-  return valid;
+  return true;
 }
 
 // Main test function
 function runRoundtripTest(): boolean {
   log('🧪 Starting pattern serialization round-trip test');
   
-  // 1. Create the test pattern matching the "before" image
+  // 1. Create the test pattern matching the exact structure provided by the user
   log('📝 Creating test pattern with 7 nodes and custom connections');
   
-  // Create nodes with specific positions and parameters
-  // Positioning based on the "before" image:
-  // - Rainbow and Moving Blob in left lane (buffer 0)
-  // - Perlin Noise in center lane (buffer 1)
-  // - Raindrops in right lane (buffer 2)
-  // - First Blend in center lane (buffer 1)
-  // - Second Blend in right lane (buffer 2)
+  // Create nodes with the exact structure from $flowNodes
   const testNodes: Node[] = [
-    createTestNode('rainbow', 'rainbow', LANES.LEFT, 100, { 
-      speed: 0.2, 
-      saturation: 0.9,
-      angle: 45
-    }),
-    createTestNode('perlin', 'perlin_noise', LANES.CENTER, 100, { 
-      speed: 75, 
-      scale: 0.4,
-      octaves: 4
-    }),
-    createTestNode('raindrops', 'raindrops', LANES.RIGHT, 100, { 
-      speed: 60, 
-      count: 12,
-      color: '#ffffff'
-    }),
-    createTestNode('blob', 'moving_blob', LANES.LEFT, 300, { 
-      speed: 1.5, 
-      size: 0.3,
-      color: '#00ffff'
-    }),
-    createTestNode('blend1', 'blend', LANES.CENTER, 300, { 
-      opacity: 0.7, 
-      blendMode: 'multiply'
-    }),
-    createTestNode('blend2', 'blend', LANES.RIGHT, 400, { 
-      opacity: 0.6, 
-      blendMode: 'screen'
-    }),
-    createTestNode('output', 'output', LANES.CENTER, 500)
+    {
+      "id": "1",
+      "type": "pattern",
+      "position": {
+        "x": 25,
+        "y": -430
+      },
+      "data": {
+        "label": "Rainbow",
+        "type": "rainbow",
+        "parameters": {
+          "speed": 0.2,
+          "saturation": 0.9,
+          "value": 1.0,
+          "angle": 45
+        }
+      },
+      "style": ""
+    },
+    {
+      "id": "2",
+      "type": "pattern",
+      "position": {
+        "x": 175,
+        "y": 262
+      },
+      "data": {
+        "label": "Output",
+        "type": "output"
+      },
+      "style": ""
+    },
+    {
+      "id": "3",
+      "type": "pattern",
+      "position": {
+        "x": 175,
+        "y": -168.36556147115445
+      },
+      "data": {
+        "label": "Perlin Noise",
+        "type": "perlin_noise",
+        "parameters": {
+          "speed": 75,
+          "scale": 0.4,
+          "intensity": 1.0,
+          "octaves": 4
+        }
+      },
+      "style": ""
+    },
+    {
+      "id": "4",
+      "type": "pattern",
+      "position": {
+        "x": 325,
+        "y": -164.32671453388474
+      },
+      "data": {
+        "label": "Moving Blob",
+        "type": "moving_blob",
+        "parameters": {
+          "speed": 1.5,
+          "size": 0.3,
+          "color": "#00ffff"
+        }
+      },
+      "style": ""
+    },
+    {
+      "id": "5",
+      "type": "pattern",
+      "position": {
+        "x": 25,
+        "y": -98.93572303584531
+      },
+      "data": {
+        "label": "Raindrops",
+        "type": "raindrops",
+        "parameters": {
+          "speed": 60,
+          "count": 12,
+          "size": 0.025,
+          "color": "#ffffff"
+        }
+      },
+      "style": ""
+    },
+    {
+      "id": "6",
+      "type": "pattern",
+      "position": {
+        "x": 25,
+        "y": 9.043766986553123
+      },
+      "data": {
+        "label": "Blend",
+        "type": "blend",
+        "parameters": {
+          "opacity": 0.7,
+          "blendMode": "multiply"
+        }
+      },
+      "style": ""
+    },
+    {
+      "id": "7",
+      "type": "pattern",
+      "position": {
+        "x": 175,
+        "y": 106.27063819316709
+      },
+      "data": {
+        "label": "Blend",
+        "type": "blend",
+        "parameters": {
+          "opacity": 0.6,
+          "blendMode": "screen"
+        }
+      },
+      "style": ""
+    }
   ];
   
-  // Create edges matching the "before" image
+  // Create edges with the exact structure from $flowEdges
   const testEdges: Edge[] = [
-    // First blend node connections - takes inputs from Raindrops and Perlin
-    createTestEdge('e-raindrops-blend1', 'raindrops', 'blend1', 'output', 'input-1'),
-    createTestEdge('e-perlin-blend1', 'perlin', 'blend1', 'output', 'input-2'),
-    
-    // Second blend node connections - takes inputs from first Blend and Moving Blob
-    createTestEdge('e-blend1-blend2', 'blend1', 'blend2', 'output', 'input-1'),
-    createTestEdge('e-blob-blend2', 'blob', 'blend2', 'output', 'input-2'),
-    
-    // Output connection - connects to the second blend
-    createTestEdge('e-blend2-output', 'blend2', 'output')
+    {
+      "source": "3",
+      "sourceHandle": "output",
+      "target": "6",
+      "targetHandle": "input-2",
+      "id": "xy-edge__3output-6input-2"
+    },
+    {
+      "source": "5",
+      "sourceHandle": "output",
+      "target": "6",
+      "targetHandle": "input-1",
+      "id": "xy-edge__5output-6input-1"
+    },
+    {
+      "source": "1",
+      "sourceHandle": "output",
+      "target": "5",
+      "targetHandle": "input",
+      "id": "xy-edge__1output-5input"
+    },
+    {
+      "source": "4",
+      "sourceHandle": "output",
+      "target": "7",
+      "targetHandle": "input-2",
+      "id": "xy-edge__4output-7input-2"
+    },
+    {
+      "source": "1",
+      "sourceHandle": "output",
+      "target": "4",
+      "targetHandle": "input",
+      "id": "xy-edge__1output-4input"
+    },
+    {
+      "source": "6",
+      "sourceHandle": "output",
+      "target": "7",
+      "targetHandle": "input-1",
+      "id": "xy-edge__6output-7input-1"
+    },
+    {
+      "source": "7",
+      "sourceHandle": "output",
+      "target": "2",
+      "targetHandle": "input",
+      "id": "xy-edge__7output-2input"
+    }
   ];
   
   // Create node parameters map
@@ -280,8 +347,12 @@ function runRoundtripTest(): boolean {
   }
   
   // Check meta.output is set correctly
-  const expectedOutputBuffer = serializedPattern.meta.output;
-  log(`🔄 Output buffer set to: ${expectedOutputBuffer}`);
+  if (serializedPattern.meta.output === undefined) {
+    log('❌ meta.output should be defined');
+    testsPassed = false;
+  } else {
+    log(`✅ Output buffer set to: ${serializedPattern.meta.output}`);
+  }
   
   // Check pattern name
   if (serializedPattern.meta.name !== TEST_PATTERN_NAME) {
@@ -289,6 +360,23 @@ function runRoundtripTest(): boolean {
     testsPassed = false;
   } else {
     log(`✅ Pattern name correctly set to: ${serializedPattern.meta.name}`);
+  }
+  
+  // Check that created/modified timestamps are NOT included
+  if ('created' in serializedPattern.meta || 'modified' in serializedPattern.meta) {
+    log('❌ meta should not include created/modified timestamps');
+    testsPassed = false;
+  } else {
+    log('✅ meta correctly excludes created/modified timestamps');
+  }
+  
+  // Check node parameters are included
+  const rainbowNode = serializedPattern.nodes.find(n => n.t === 'rainbow');
+  if (!rainbowNode || !rainbowNode.p || rainbowNode.p.speed !== 0.2) {
+    log('❌ Node parameters not correctly serialized');
+    testsPassed = false;
+  } else {
+    log('✅ Node parameters correctly serialized');
   }
   
   // 4. Deserialize the pattern
@@ -327,11 +415,18 @@ function runRoundtripTest(): boolean {
   log('📊 Deserialized node types:', nodeTypeCounts);
   
   // Check for required node types
-  const requiredTypes = ['rainbow', 'perlin_noise', 'raindrops', 'moving_blob', 'blend', 'output'];
-  requiredTypes.forEach(type => {
-    const expectedCount = type === 'blend' ? 2 : 1;
-    if ((nodeTypeCounts[type] || 0) !== expectedCount) {
-      log(`❌ Expected ${expectedCount} ${type} node(s), got ${nodeTypeCounts[type] || 0}`);
+  const requiredTypes = {
+    'rainbow': 1,
+    'perlin_noise': 1,
+    'raindrops': 1,
+    'moving_blob': 1,
+    'blend': 2,
+    'output': 1
+  };
+  
+  Object.entries(requiredTypes).forEach(([type, count]) => {
+    if ((nodeTypeCounts[type] || 0) !== count) {
+      log(`❌ Expected ${count} ${type} node(s), got ${nodeTypeCounts[type] || 0}`);
       testsPassed = false;
     } else {
       log(`✅ Correct number of ${type} nodes: ${nodeTypeCounts[type]}`);
@@ -341,69 +436,36 @@ function runRoundtripTest(): boolean {
   // Check edge connections
   log('🔍 Verifying edge connections...');
   
-  // Find nodes by type
-  const findNodeByType = (nodes: Node[], type: string): Node | undefined => {
-    return nodes.find(n => n.data.type === type);
-  };
+  // Expected connections based on the original test edges
+  const expectedConnections = [
+    { source: findNodeByType(deserializedNodes, 'perlin_noise')?.id, target: findBlendNodeByIndex(deserializedNodes, 0)?.id, targetHandle: 'input-2' },
+    { source: findNodeByType(deserializedNodes, 'raindrops')?.id, target: findBlendNodeByIndex(deserializedNodes, 0)?.id, targetHandle: 'input-1' },
+    { source: findNodeByType(deserializedNodes, 'rainbow')?.id, target: findNodeByType(deserializedNodes, 'raindrops')?.id, targetHandle: 'input' },
+    { source: findNodeByType(deserializedNodes, 'moving_blob')?.id, target: findBlendNodeByIndex(deserializedNodes, 1)?.id, targetHandle: 'input-2' },
+    { source: findNodeByType(deserializedNodes, 'rainbow')?.id, target: findNodeByType(deserializedNodes, 'moving_blob')?.id, targetHandle: 'input' },
+    { source: findBlendNodeByIndex(deserializedNodes, 0)?.id, target: findBlendNodeByIndex(deserializedNodes, 1)?.id, targetHandle: 'input-1' },
+    { source: findBlendNodeByIndex(deserializedNodes, 1)?.id, target: findNodeByType(deserializedNodes, 'output')?.id, targetHandle: 'input' }
+  ];
   
-  const findBlendNodes = (nodes: Node[]): Node[] => {
-    return nodes.filter(n => n.data.type === 'blend');
-  };
+  // Filter out any undefined connections (in case node lookup failed)
+  const validExpectedConnections = expectedConnections.filter(
+    conn => conn.source && conn.target
+  ) as {source: string, target: string, sourceHandle?: string, targetHandle?: string}[];
   
-  // Get node references
-  const outputNode = findNodeByType(deserializedNodes, 'output');
-  const rainbowNode = findNodeByType(deserializedNodes, 'rainbow');
-  const perlinNode = findNodeByType(deserializedNodes, 'perlin_noise');
-  const raindropsNode = findNodeByType(deserializedNodes, 'raindrops');
-  const blobNode = findNodeByType(deserializedNodes, 'moving_blob');
-  const blendNodes = findBlendNodes(deserializedNodes);
-  
-  if (!outputNode || !rainbowNode || !perlinNode || !raindropsNode || !blobNode || blendNodes.length !== 2) {
-    log('❌ Not all required nodes were found in deserialized result');
+  const edgesValid = verifyEdgeConnections(deserializedEdges, validExpectedConnections);
+  if (!edgesValid) {
     testsPassed = false;
-  }
-  
-  if (outputNode && blendNodes.length >= 2) {
-    // Check if output node is connected to a blend node
-    const blendToOutput = deserializedEdges.some(e => 
-      e.target === outputNode.id && 
-      blendNodes.some(bn => bn.id === e.source)
-    );
-    
-    if (!blendToOutput) {
-      log('❌ Output node should be connected to a blend node');
-      testsPassed = false;
-    } else {
-      log('✅ Output node correctly connected to blend node');
-    }
-    
-    // Check if blend nodes have dual inputs
-    blendNodes.forEach((blendNode, index) => {
-      const blendInputs = deserializedEdges.filter(e => e.target === blendNode.id);
-      
-      if (blendInputs.length !== 2) {
-        log(`❌ Blend node ${index + 1} should have exactly 2 inputs, has ${blendInputs.length}`);
-        testsPassed = false;
-      } else {
-        const hasInput1 = blendInputs.some(e => e.targetHandle === 'input-1');
-        const hasInput2 = blendInputs.some(e => e.targetHandle === 'input-2');
-        
-        if (!hasInput1 || !hasInput2) {
-          log(`❌ Blend node ${index + 1} should have both input-1 and input-2 connections`);
-          testsPassed = false;
-        } else {
-          log(`✅ Blend node ${index + 1} has correct dual input connections`);
-        }
-      }
-    });
+  } else {
+    log('✅ All edge connections correctly recreated');
   }
   
   // Check parameter preservation
   log('🔍 Verifying parameter preservation...');
   
   // Check a few key parameters
-  if (rainbowNode) {
-    const rainbowParams = deserializedParams.get(rainbowNode.id);
+  const rainbowNodeDeserialized = findNodeByType(deserializedNodes, 'rainbow');
+  if (rainbowNodeDeserialized) {
+    const rainbowParams = deserializedParams.get(rainbowNodeDeserialized.id);
     if (!rainbowParams) {
       log('❌ Rainbow node parameters not found');
       testsPassed = false;
@@ -418,6 +480,7 @@ function runRoundtripTest(): boolean {
     }
   }
   
+  const blendNodes = findNodesByType(deserializedNodes, 'blend');
   if (blendNodes.length > 0) {
     const blend1Params = deserializedParams.get(blendNodes[0].id);
     if (!blend1Params) {
@@ -427,26 +490,53 @@ function runRoundtripTest(): boolean {
       const opacity = blend1Params.get('opacity');
       const blendMode = blend1Params.get('blendMode');
       
-      if (opacity === undefined || (opacity !== 0.7 && opacity !== 0.6)) {
-        log(`❌ Blend node opacity should be 0.7 or 0.6, got ${opacity}`);
+      if (opacity === undefined || opacity !== 0.7) {
+        log(`❌ First blend node opacity should be 0.7, got ${opacity}`);
         testsPassed = false;
       } else {
-        log(`✅ Blend node opacity correctly preserved: ${opacity}`);
+        log(`✅ First blend node opacity correctly preserved: ${opacity}`);
       }
       
-      if (blendMode === undefined || (blendMode !== 'multiply' && blendMode !== 'screen')) {
-        log(`❌ Blend node blendMode should be 'multiply' or 'screen', got ${blendMode}`);
+      if (blendMode === undefined || blendMode !== 'multiply') {
+        log(`❌ First blend node blendMode should be 'multiply', got ${blendMode}`);
         testsPassed = false;
       } else {
-        log(`✅ Blend node blendMode correctly preserved: ${blendMode}`);
+        log(`✅ First blend node blendMode correctly preserved: ${blendMode}`);
+      }
+    }
+    
+    if (blendNodes.length > 1) {
+      const blend2Params = deserializedParams.get(blendNodes[1].id);
+      if (!blend2Params) {
+        log('❌ Second blend node parameters not found');
+        testsPassed = false;
+      } else {
+        const opacity = blend2Params.get('opacity');
+        const blendMode = blend2Params.get('blendMode');
+        
+        if (opacity === undefined || opacity !== 0.6) {
+          log(`❌ Second blend node opacity should be 0.6, got ${opacity}`);
+          testsPassed = false;
+        } else {
+          log(`✅ Second blend node opacity correctly preserved: ${opacity}`);
+        }
+        
+        if (blendMode === undefined || blendMode !== 'screen') {
+          log(`❌ Second blend node blendMode should be 'screen', got ${blendMode}`);
+          testsPassed = false;
+        } else {
+          log(`✅ Second blend node blendMode correctly preserved: ${blendMode}`);
+        }
       }
     }
   }
   
-  // Check top-down flow
+  // Check vertical positioning (top-down flow)
   log('🔍 Verifying top-down node positioning...');
-  const topDownValid = verifyTopDownFlow(deserializedNodes, deserializedEdges);
-  if (!topDownValid) {
+  
+  // Verify that nodes are positioned in a top-down flow
+  const isTopDown = verifyTopDownFlow(deserializedNodes, deserializedEdges);
+  if (!isTopDown) {
     log('❌ Nodes are not properly arranged in top-down flow');
     testsPassed = false;
   } else {
@@ -455,7 +545,25 @@ function runRoundtripTest(): boolean {
   
   // 6. Test against the specific JSON format provided by the user
   log('🔍 Testing against specific JSON format...');
-  const testJson = `{"nodes":[{"t":"rainbow","o":0},{"t":"perlin_noise","o":1},{"t":"moving_blob","o":2,"i":0},{"t":"raindrops","o":1,"i":0},{"t":"blend","o":2,"i":1,"i2":1},{"t":"blend","o":0,"i":2,"i2":2}],"meta":{"output":0}}`;
+  /*  Indices (0-based) of nodes as they appear in the array:
+      0 – rainbow
+      1 – perlin_noise
+      2 – raindrops
+      3 – moving_blob
+      4 – blend (first)
+      5 – blend (second)
+  */
+  const testJson = `{
+    "nodes":[
+      { "t":"rainbow","o":0 },
+      { "t":"perlin_noise","o":1 },
+      { "t":"raindrops","o":0, "i":0, "s":0 },
+      { "t":"moving_blob","o":2, "i":0, "s":0 },
+      { "t":"blend","o":0, "i":0, "s":2, "i2":1, "s2":1 },
+      { "t":"blend","o":1, "i":0, "s":4, "i2":2, "s2":3 }
+    ],
+    "meta":{"output":1}
+  }`;
   
   try {
     const parsedJson = JSON.parse(testJson);
@@ -471,7 +579,7 @@ function runRoundtripTest(): boolean {
     }
     
     // Check if we have all required node types
-    const hasAllTypes = requiredTypes.every(type => 
+    const hasAllTypes = Object.keys(requiredTypes).every(type => 
       nodes.some(n => n.data.type === type)
     );
     
@@ -488,6 +596,7 @@ function runRoundtripTest(): boolean {
       log(`❌ Test JSON should have 2 blend nodes, got ${blendNodesFromJson.length}`);
       testsPassed = false;
     } else {
+      // Count edges going to blend nodes
       const blendEdges = edges.filter(e => 
         blendNodesFromJson.some(bn => bn.id === e.target)
       );
@@ -508,6 +617,59 @@ function runRoundtripTest(): boolean {
   // Final result
   log(`\n🏁 Round-trip test ${testsPassed ? 'PASSED' : 'FAILED'}`);
   return testsPassed;
+}
+
+// Helper to find a node by type
+function findNodeByType(nodes: Node[], type: string): Node | undefined {
+  return nodes.find(n => n.data.type === type);
+}
+
+// Helper to find all nodes of a specific type
+function findNodesByType(nodes: Node[], type: string): Node[] {
+  return nodes.filter(n => n.data.type === type);
+}
+
+// Helper to find a blend node by index
+function findBlendNodeByIndex(nodes: Node[], index: number): Node | undefined {
+  const blendNodes = findNodesByType(nodes, 'blend');
+  return blendNodes[index];
+}
+
+// Helper to verify top-down flow
+function verifyTopDownFlow(nodes: Node[], edges: Edge[]): boolean {
+  // Build a dependency graph
+  const dependencyGraph = new Map<string, string[]>();
+  
+  // Initialize the graph
+  nodes.forEach(node => {
+    dependencyGraph.set(node.id, []);
+  });
+  
+  // Add dependencies
+  edges.forEach(edge => {
+    const sourceNode = nodes.find(n => n.id === edge.source);
+    const targetNode = nodes.find(n => n.id === edge.target);
+    
+    if (sourceNode && targetNode) {
+      dependencyGraph.get(targetNode.id)?.push(sourceNode.id);
+    }
+  });
+  
+  // Check if each node is positioned below its dependencies
+  let valid = true;
+  nodes.forEach(node => {
+    const dependencies = dependencyGraph.get(node.id) || [];
+    
+    dependencies.forEach(depId => {
+      const depNode = nodes.find(n => n.id === depId);
+      if (depNode && depNode.position.y >= node.position.y) {
+        log(`❌ Node ${node.id} (${node.data.type}) is positioned above its dependency ${depId} (${depNode.data.type})`);
+        valid = false;
+      }
+    });
+  });
+  
+  return valid;
 }
 
 // Run the test
