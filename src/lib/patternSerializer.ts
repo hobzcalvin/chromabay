@@ -36,11 +36,11 @@ export interface SerializedNode {
 
   /** Second input buffer index (only for blend nodes) */
   i2?: number;
-
-  /** Source node index for primary input (for edge reconstruction) */
+  
+  /** Source node index for primary input (only needed for complex graphs) */
   s?: number;
-
-  /** Source node index for secondary input (for blend nodes) */
+  
+  /** Source node index for secondary input (only needed for complex graphs) */
   s2?: number;
 }
 
@@ -189,8 +189,8 @@ export function serializePattern(
     nodeIdToIndex.set(node.id, index);
   });
   
-  // Step 4: Create serialized nodes with lane-based buffer assignment and source indices
-  const serializedNodes: SerializedNode[] = nodesToSerialize.map((node, nodeIndex) => {
+  // Step 4: Create serialized nodes with lane-based buffer assignment
+  const serializedNodes: SerializedNode[] = nodesToSerialize.map((node) => {
     const nodeDefinition = getNodeDefinition(node.data.type as string);
     if (!nodeDefinition) {
       console.error(`FATAL: No definition for node type ${node.data.type} during serialization.`);
@@ -220,7 +220,7 @@ export function serializePattern(
       o: outputBuffer
     };
     
-    // Find input buffer(s) and source node indices
+    // Find input buffer(s) and source indices
     const inputEdges = allEdges.filter(edge => edge.target === node.id);
     if (inputEdges.length > 0) {
       // For blend nodes, handle dual inputs
@@ -292,21 +292,54 @@ function calculateDependencyLevels(serializedNodes: SerializedNode[]): Map<numbe
   // Build dependency graph: nodeIndex -> list of indices it depends on
   const dependencies = new Map<number, number[]>();
   
-  // Build dependency graph based on source indices
-  serializedNodes.forEach((node, index) => {
+  // For each node, find its dependencies
+  serializedNodes.forEach((node, nodeIndex) => {
     const nodeDeps: number[] = [];
     
-    // Add primary input dependency if it exists
+    // Add primary input dependency if explicit source is provided
     if (node.s !== undefined) {
       nodeDeps.push(node.s);
+    } 
+    // Otherwise try to find the source based on input buffer
+    else if (node.i !== undefined) {
+      // Find the correct source node that outputs to this buffer
+      // This is tricky because multiple nodes might output to the same buffer
+      
+      // First, check if this node has a direct connection to a specific source
+      let foundSource = false;
+      
+      // If we can't find a direct connection, use the most recent node
+      // that outputs to this buffer as the source
+      if (!foundSource) {
+        for (let i = nodeIndex - 1; i >= 0; i--) {
+          if (serializedNodes[i].o === node.i) {
+            nodeDeps.push(i);
+            break; // Only use the most recent producer
+          }
+        }
+      }
     }
     
-    // Add secondary input dependency if it exists (for blend nodes)
-    if (node.s2 !== undefined && !nodeDeps.includes(node.s2)) {
-      nodeDeps.push(node.s2);
+    // Add secondary input dependency if explicit source is provided
+    if (node.s2 !== undefined) {
+      if (!nodeDeps.includes(node.s2)) {
+        nodeDeps.push(node.s2);
+      }
+    }
+    // Otherwise try to find the source based on secondary input buffer
+    else if (node.i2 !== undefined) {
+      // Find the correct source node that outputs to this buffer
+      for (let i = nodeIndex - 1; i >= 0; i--) {
+        if (serializedNodes[i].o === node.i2) {
+          if (!nodeDeps.includes(i)) {
+            nodeDeps.push(i);
+            break; // Only use the most recent producer
+          }
+        }
+      }
     }
     
-    dependencies.set(index, nodeDeps);
+    dependencies.set(nodeIndex, nodeDeps);
   });
   
   // Calculate levels using BFS
@@ -422,32 +455,103 @@ export function deserializePattern(
     svelteFlowNodes.push(newNode);
   });
   
-  // Step 3: Create edges based on source indices
+  // Step 3: Create edges based on input/output buffer relationships
   serializedPattern.nodes.forEach((sNode, targetIndex) => {
     const targetNodeId = svelteFlowNodes[targetIndex].id;
     
-    // Create edge for primary input if source index exists
-    if (sNode.s !== undefined && sNode.s >= 0 && sNode.s < svelteFlowNodes.length) {
-      const sourceNodeId = svelteFlowNodes[sNode.s].id;
-      svelteFlowEdges.push({
-        id: `e_${sourceNodeId}_${targetNodeId}_i1_${Date.now()}`,
-        source: sourceNodeId,
-        target: targetNodeId,
-        sourceHandle: 'output',
-        targetHandle: (sNode.t === 'blend') ? 'input-1' : 'input',
-      });
+    // Create edge for primary input
+    if (sNode.i !== undefined) {
+      // If explicit source index is provided, use it
+      if (sNode.s !== undefined && sNode.s >= 0 && sNode.s < svelteFlowNodes.length) {
+        const sourceNodeId = svelteFlowNodes[sNode.s].id;
+        svelteFlowEdges.push({
+          id: `e_${sourceNodeId}_${targetNodeId}_i1_${Date.now()}`,
+          source: sourceNodeId,
+          target: targetNodeId,
+          sourceHandle: 'output',
+          targetHandle: (sNode.t === 'blend') ? 'input-1' : 'input',
+        });
+      } 
+      // Otherwise find source node based on buffer
+      else {
+        // Create a map of node indices that output to each buffer
+        const bufferProducers = new Map<number, number[]>();
+        
+        // Populate the map
+        serializedPattern.nodes.forEach((node, idx) => {
+          if (idx < targetIndex) { // Only consider nodes before the current one
+            const producers = bufferProducers.get(node.o) || [];
+            producers.push(idx);
+            bufferProducers.set(node.o, producers);
+          }
+        });
+        
+        // Get all producers for this input buffer
+        const producers = bufferProducers.get(sNode.i) || [];
+        
+        // If we have producers, use the appropriate one
+        if (producers.length > 0) {
+          // For now, use the first producer (this might need refinement)
+          // In a more complex scenario, we might need to analyze the graph structure
+          const sourceIndex = producers[0];
+          const sourceNodeId = svelteFlowNodes[sourceIndex].id;
+          
+          svelteFlowEdges.push({
+            id: `e_${sourceNodeId}_${targetNodeId}_i1_${Date.now()}`,
+            source: sourceNodeId,
+            target: targetNodeId,
+            sourceHandle: 'output',
+            targetHandle: (sNode.t === 'blend') ? 'input-1' : 'input',
+          });
+        }
+      }
     }
     
-    // Create edge for secondary input if source index exists (blend nodes only)
-    if (sNode.t === 'blend' && sNode.s2 !== undefined && sNode.s2 >= 0 && sNode.s2 < svelteFlowNodes.length) {
-      const sourceNodeId = svelteFlowNodes[sNode.s2].id;
-      svelteFlowEdges.push({
-        id: `e_${sourceNodeId}_${targetNodeId}_i2_${Date.now()}`,
-        source: sourceNodeId,
-        target: targetNodeId,
-        sourceHandle: 'output',
-        targetHandle: 'input-2',
-      });
+    // Create edge for secondary input (blend nodes only)
+    if (sNode.t === 'blend' && sNode.i2 !== undefined) {
+      // If explicit source index is provided, use it
+      if (sNode.s2 !== undefined && sNode.s2 >= 0 && sNode.s2 < svelteFlowNodes.length) {
+        const sourceNodeId = svelteFlowNodes[sNode.s2].id;
+        svelteFlowEdges.push({
+          id: `e_${sourceNodeId}_${targetNodeId}_i2_${Date.now()}`,
+          source: sourceNodeId,
+          target: targetNodeId,
+          sourceHandle: 'output',
+          targetHandle: 'input-2',
+        });
+      } 
+      // Otherwise find source node based on buffer
+      else {
+        // Create a map of node indices that output to each buffer
+        const bufferProducers = new Map<number, number[]>();
+        
+        // Populate the map
+        serializedPattern.nodes.forEach((node, idx) => {
+          if (idx < targetIndex) { // Only consider nodes before the current one
+            const producers = bufferProducers.get(node.o) || [];
+            producers.push(idx);
+            bufferProducers.set(node.o, producers);
+          }
+        });
+        
+        // Get all producers for this input buffer
+        const producers = bufferProducers.get(sNode.i2) || [];
+        
+        // If we have producers, use the appropriate one
+        if (producers.length > 0) {
+          // For now, use the first producer (this might need refinement)
+          const sourceIndex = producers[0];
+          const sourceNodeId = svelteFlowNodes[sourceIndex].id;
+          
+          svelteFlowEdges.push({
+            id: `e_${sourceNodeId}_${targetNodeId}_i2_${Date.now()}`,
+            source: sourceNodeId,
+            target: targetNodeId,
+            sourceHandle: 'output',
+            targetHandle: 'input-2',
+          });
+        }
+      }
     }
   });
   

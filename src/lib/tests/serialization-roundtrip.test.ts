@@ -557,10 +557,10 @@ function runRoundtripTest(): boolean {
     "nodes":[
       { "t":"rainbow","o":0 },
       { "t":"perlin_noise","o":1 },
-      { "t":"raindrops","o":0, "i":0, "s":0 },
-      { "t":"moving_blob","o":2, "i":0, "s":0 },
-      { "t":"blend","o":0, "i":0, "s":2, "i2":1, "s2":1 },
-      { "t":"blend","o":1, "i":0, "s":4, "i2":2, "s2":3 }
+      { "t":"raindrops","o":0, "i":0 },
+      { "t":"moving_blob","o":2, "i":0 },
+      { "t":"blend","o":0, "i":0, "i2":1 },
+      { "t":"blend","o":1, "i":0, "i2":2 }
     ],
     "meta":{"output":1}
   }`;
