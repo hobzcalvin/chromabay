@@ -790,3 +790,43 @@ export function deleteNode(nodeId: string): void {
     return params;
   });
 } 
+// Pattern serialization imports and utilities
+import type { SerializedPattern } from './patternSerializer';
+import { serializePattern, deserializePattern, estimatePatternSize, compressPattern } from './patternSerializer';
+
+// Pattern serialization utilities
+export function serializeCurrentPattern(): SerializedPattern {
+  let currentNodes: Node[] = [];
+  let currentEdges: Edge[] = [];
+  
+  flowNodes.subscribe(nodes => currentNodes = nodes)();
+  flowEdges.subscribe(edges => currentEdges = edges)();
+  
+  return serializePattern(currentNodes, currentEdges);
+}
+
+export function loadSerializedPattern(serializedPattern: SerializedPattern): void {
+  const { nodes, edges } = deserializePattern(serializedPattern);
+  
+  // Clear existing parameters
+  nodeParameters.set(new Map());
+  
+  // Update stores with new pattern
+  flowNodes.set(nodes);
+  flowEdges.set(edges);
+  
+  // Set next node ID to be higher than any existing node ID
+  const numericIds = nodes.map(n => parseInt(n.id.replace(/\D+/g, ''), 10)).filter(v => !isNaN(v));
+  const maxId = numericIds.length ? Math.max(...numericIds) : 0;
+  nextNodeId.set(maxId + 1);
+}
+
+export function getPatternSizeEstimate(): number {
+  const pattern = serializeCurrentPattern();
+  return estimatePatternSize(pattern);
+}
+
+export function getPatternForBLE(): string {
+  const pattern = serializeCurrentPattern();
+  return compressPattern(pattern);
+}
