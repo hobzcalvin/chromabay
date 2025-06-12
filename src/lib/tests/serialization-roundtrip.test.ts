@@ -197,6 +197,12 @@ function runRoundtripTest(): boolean {
   log('📝 Creating test pattern with 7 nodes and custom connections');
   
   // Create nodes with specific positions and parameters
+  // Positioning based on the "before" image:
+  // - Rainbow and Moving Blob in left lane (buffer 0)
+  // - Perlin Noise in center lane (buffer 1)
+  // - Raindrops in right lane (buffer 2)
+  // - First Blend in center lane (buffer 1)
+  // - Second Blend in right lane (buffer 2)
   const testNodes: Node[] = [
     createTestNode('rainbow', 'rainbow', LANES.LEFT, 100, { 
       speed: 0.2, 
@@ -222,24 +228,24 @@ function runRoundtripTest(): boolean {
       opacity: 0.7, 
       blendMode: 'multiply'
     }),
-    createTestNode('blend2', 'blend', LANES.RIGHT, 300, { 
+    createTestNode('blend2', 'blend', LANES.RIGHT, 400, { 
       opacity: 0.6, 
       blendMode: 'screen'
     }),
-    createTestNode('output', 'output', LANES.CENTER, 400)
+    createTestNode('output', 'output', LANES.CENTER, 500)
   ];
   
   // Create edges matching the "before" image
   const testEdges: Edge[] = [
-    // First blend node connections
+    // First blend node connections - takes inputs from Raindrops and Perlin
     createTestEdge('e-raindrops-blend1', 'raindrops', 'blend1', 'output', 'input-1'),
     createTestEdge('e-perlin-blend1', 'perlin', 'blend1', 'output', 'input-2'),
     
-    // Second blend node connections
+    // Second blend node connections - takes inputs from first Blend and Moving Blob
     createTestEdge('e-blend1-blend2', 'blend1', 'blend2', 'output', 'input-1'),
     createTestEdge('e-blob-blend2', 'blob', 'blend2', 'output', 'input-2'),
     
-    // Output connection
+    // Output connection - connects to the second blend
     createTestEdge('e-blend2-output', 'blend2', 'output')
   ];
   
@@ -449,7 +455,7 @@ function runRoundtripTest(): boolean {
   
   // 6. Test against the specific JSON format provided by the user
   log('🔍 Testing against specific JSON format...');
-  const testJson = `{"nodes":[{"t":"rainbow","o":0},{"t":"perlin_noise","o":1},{"t":"raindrops","o":2,"i":0},{"t":"moving_blob","o":0,"i":0},{"t":"blend","o":1,"i":2,"i2":1},{"t":"blend","o":2,"i":1,"i2":0}],"meta":{"output":2}}`;
+  const testJson = `{"nodes":[{"t":"rainbow","o":0},{"t":"perlin_noise","o":1},{"t":"moving_blob","o":2,"i":0},{"t":"raindrops","o":1,"i":0},{"t":"blend","o":2,"i":1,"i2":1},{"t":"blend","o":0,"i":2,"i2":2}],"meta":{"output":0}}`;
   
   try {
     const parsedJson = JSON.parse(testJson);
