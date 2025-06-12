@@ -100,112 +100,20 @@ function getLaneFromBuffer(bufferIndex: number): number {
  * @returns Object containing ordered nodes
  */
 function topologicalSort(nodes: Node[], edges: Edge[]): SortResult {
-  const graph: Map<string, string[]> = new Map(); // nodeId -> list of targetNodeIds
-  const inDegree: Map<string, number> = new Map(); // nodeId -> in-degree count
-
-  /* ------------------------------------------------------------------
-   * 1. Pre-compute whether each node **overwrites** one of the buffers it
-   *    reads.  These nodes should be processed **after** non-overwriters
-   *    when several nodes share the same dependency level.
-   * ------------------------------------------------------------------ */
-  const overwrites: Record<string, boolean> = {};
-  const laneBuf = (n: Node) => getNodeLaneBuffer(n);
-
-  const incomingFor = (targetId: string) =>
-    edges.filter(e => e.target === targetId);
-
-  /* ------------------------------------------------------------------
-   * Phase 0: determine dependency (execution) level for every node
-   * (distance from generators).  We run a simple BFS starting from
-   * zero-in-degree nodes to assign levels.
-   * ------------------------------------------------------------------ */
-  const depLevel = new Map<string, number>();
-  const tmpQueue: string[] = [];
+  // Build adjacency + indegree
+  const graph: Map<string, string[]> = new Map();
+  const inDeg: Map<string, number> = new Map();
   nodes.forEach(n => {
-    if ((inDegree.get(n.id) || 0) === 0) {
-      depLevel.set(n.id, 0);
-      tmpQueue.push(n.id);
-    }
+    graph.set(n.id, []);
+    inDeg.set(n.id, 0);
   });
-  while (tmpQueue.length) {
-    const cur = tmpQueue.shift()!;
-    const curLvl = depLevel.get(cur)!;
-    for (const tgt of graph.get(cur) || []) {
-      if (!depLevel.has(tgt) || depLevel.get(tgt)! < curLvl + 1) {
-        depLevel.set(tgt, curLvl + 1);
-        tmpQueue.push(tgt);
-      }
-    }
-  }
-
-  /* ------------------------------------------------------------------
-   * For tie-breaking between generators: compute the earliest consumer
-   * level.  For a node with outgoing edges, consumerLevel = minimum
-   * depLevel of its direct consumers; if no outgoing edges give Infinity
-   * so it will be scheduled last.
-   * ------------------------------------------------------------------ */
-  const earliestConsumerLevel: Record<string, number> = {};
-  nodes.forEach(n => {
-    const outs = graph.get(n.id) || [];
-    if (outs.length === 0) {
-      earliestConsumerLevel[n.id] = Number.MAX_SAFE_INTEGER;
-    } else {
-      earliestConsumerLevel[n.id] = Math.min(
-        ...outs.map(o => depLevel.get(o) ?? Number.MAX_SAFE_INTEGER)
-      );
-    }
+  edges.forEach(e => {
+    graph.get(e.source)?.push(e.target);
+    inDeg.set(e.target, (inDeg.get(e.target) ?? 0) + 1);
   });
 
-  nodes.forEach(n => {
-    const outBuf = laneBuf(n);
-    const ins   = incomingFor(n.id);
-
-    if (ins.length === 0) {
-      overwrites[n.id] = false;
-      return;
-    }
-
-    if (n.data.type !== 'blend') {
-      const src = nodes.find(s => s.id === ins[0].source);
-      overwrites[n.id] = src ? laneBuf(src) === outBuf : false;
-      return;
-    }
-
-    // blend – two inputs
-    const in1 = ins.find(e => e.targetHandle === 'input-1' || e.targetHandle === 'input');
-    const in2 = ins.find(e => e.targetHandle === 'input-2');
-    const buf1 = in1 ? laneBuf(nodes.find(s => s.id === in1.source)!) : undefined;
-    const buf2 = in2 ? laneBuf(nodes.find(s => s.id === in2.source)!) : undefined;
-    overwrites[n.id] = buf1 === outBuf || buf2 === outBuf;
-  });
-
-  nodes.forEach(node => {
-    graph.set(node.id, []);
-    inDegree.set(node.id, 0);
-  });
-
-  edges.forEach(edge => {
-    graph.get(edge.source)?.push(edge.target);
-    inDegree.set(edge.target, (inDegree.get(edge.target) || 0) + 1);
-  });
-
-  // Helper to (re)sort the queue so non-overwriters come first
-  const sortQueue = (q: string[]) =>
-    q.sort((a, b) => {
-      const pa = overwrites[a] ? 1 : 0;
-      const pb = overwrites[b] ? 1 : 0;
-      if (pa !== pb) return pa - pb;          // non-overwriter first
-      // Tie-breaker 1: node whose earliest consumer is at lower level
-      const ea = earliestConsumerLevel[a];
-      const eb = earliestConsumerLevel[b];
-      if (ea !== eb) return ea - eb;
-
-      return a.localeCompare(b);              // stable fallback
-    });
-
-  const queue: string[] = sortQueue(
-    nodes.filter(n => (inDegree.get(n.id) || 0) === 0).map(n => n.id)
-  );
+  // Kahn queue seeded with zero-indegree nodes (keep original insertion order)
+  const queue: string[] = nodes.filter(n => (inDeg.get(n.id) ?? 0) === 0).map(n => n.id);
   const orderedNodeIds: string[] = [];
 
   while (queue.length > 0) {
@@ -213,10 +121,9 @@ function topologicalSort(nodes: Node[], edges: Edge[]): SortResult {
     orderedNodeIds.push(nodeId);
 
     for (const dependentId of graph.get(nodeId) || []) {
-      inDegree.set(dependentId, (inDegree.get(dependentId) || 0) - 1);
-      if ((inDegree.get(dependentId) || 0) === 0) {
+      inDeg.set(dependentId, (inDeg.get(dependentId) ?? 0) - 1);
+      if ((inDeg.get(dependentId) ?? 0) === 0) {
         queue.push(dependentId);
-        sortQueue(queue);
       }
     }
   }
@@ -231,6 +138,60 @@ function topologicalSort(nodes: Node[], edges: Edge[]): SortResult {
   }
 
   const orderedNodes = orderedNodeIds.map(id => nodes.find(node => node.id === id)!);
+
+  /* ------------------------------------------------------------------
+   * SECOND PASS ― JIT GENERATOR PLACEMENT
+   * For each generator (no inputs) find the first node that consumes it
+   * via explicit edge and move the generator just before that consumer.
+   * ------------------------------------------------------------------ */
+  const idToIndex = new Map<string, number>();
+  orderedNodes.forEach((n, idx) => idToIndex.set(n.id, idx));
+
+  const isGenerator = (n: Node) => !edges.some(e => e.target === n.id);
+
+  /* ------------------------------------------------------------------
+   * Improved generator placement:
+   * Only delay a generator if, before its first consumer, another node
+   * writes to the same buffer (thus the generator would overwrite that
+   * buffer too early).
+   * ------------------------------------------------------------------ */
+
+  // helper: buffer a node writes
+  const bufOf = (n: Node) => getNodeLaneBuffer(n);
+
+  // map generator id -> first consumer index
+  const firstConsumer: Record<string, number> = {};
+  edges.forEach(e => {
+    const srcNode = orderedNodes[idToIndex.get(e.source)!];
+    if (!isGenerator(srcNode)) return;
+    const tgtIdx = idToIndex.get(e.target)!;
+    if (
+      firstConsumer[srcNode.id] === undefined ||
+      tgtIdx < firstConsumer[srcNode.id]
+    ) {
+      firstConsumer[srcNode.id] = tgtIdx;
+    }
+  });
+
+  Object.entries(firstConsumer).forEach(([genId, consIdx]) => {
+    let genIdx = idToIndex.get(genId)!;
+    // scan between genIdx+1 .. consIdx-1 for last node writing same buffer
+    const buf = bufOf(orderedNodes[genIdx]);
+    let lastWriter = -1;
+    for (let i = genIdx + 1; i < consIdx; i++) {
+      if (bufOf(orderedNodes[i]) === buf) lastWriter = i;
+    }
+    if (lastWriter !== -1) {
+      // move generator after lastWriter
+      const [genNode] = orderedNodes.splice(genIdx, 1);
+      // adjust if removal shifts index positions
+      if (genIdx < lastWriter) lastWriter -= 1;
+      orderedNodes.splice(lastWriter + 1, 0, genNode);
+      // refresh indices map
+      orderedNodes.forEach((n, i) => idToIndex.set(n.id, i));
+    }
+  });
+
   return { orderedNodes };
 }
 
