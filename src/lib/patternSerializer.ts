@@ -158,6 +158,55 @@ export function serializePattern(
 ): SerializedPattern {
   // Step 1: Sort nodes topologically to determine execution order
   const { orderedNodes: orderedNodesFullGraph } = topologicalSort(allNodes, allEdges);
+
+  /**
+   * Helper – does this node write back to one of the buffers it reads?
+   * If so, it may clobber the buffer for other consumers and therefore
+   * should be executed AFTER nodes that merely read that buffer.
+   */
+  const overwritesRead = (n: Node): boolean => {
+    const def = getNodeDefinition(n.data.type as string);
+    if (!def) return false;
+    const outBuf = getNodeLaneBuffer(n);
+
+    // Find incoming edges to discover buffers consumed
+    const inEdges = allEdges.filter(e => e.target === n.id);
+    if (inEdges.length === 0) return false;
+
+    // Single-input node
+    if (n.data.type !== 'blend') {
+      const srcNode = allNodes.find(nd => nd.id === inEdges[0].source);
+      return srcNode ? getNodeLaneBuffer(srcNode) === outBuf : false;
+    }
+
+    // Blend node – two inputs
+    const src1 = inEdges.find(e => e.targetHandle === 'input-1' || e.targetHandle === 'input');
+    const src2 = inEdges.find(e => e.targetHandle === 'input-2');
+    const buf1 = src1 ? getNodeLaneBuffer(allNodes.find(nd => nd.id === src1.source)!) : undefined;
+    const buf2 = src2 ? getNodeLaneBuffer(allNodes.find(nd => nd.id === src2.source)!) : undefined;
+    return buf1 === outBuf || buf2 === outBuf;
+  };
+
+  /**
+   * Re-order nodes that share the same dependency level so that
+   * buffer-overwriters execute after non-overwriters.
+   * We rely on the fact that Array.sort in V8 is stable.
+   */
+  const reorderForBufferConflicts = (nodes: Node[]): Node[] => {
+    return nodes
+      .map((n, idx) => ({
+        n,
+        priority: overwritesRead(n) ? 1 : 0,
+        idx
+      }))
+      .sort((a, b) => {
+        if (a.priority !== b.priority) return a.priority - b.priority; // non-overwriter first
+        return a.idx - b.idx; // keep original order (stable)
+      })
+      .map(v => v.n);
+  };
+
+  const conflictSafeOrder = reorderForBufferConflicts(orderedNodesFullGraph);
   
   // Step 2: Find output node and determine final output buffer
   let finalOutputBufferIndex = 0; // Default output buffer
@@ -175,7 +224,7 @@ export function serializePattern(
   }
   
   // Step 3: Filter out output node for serialization
-  const nodesToSerialize = orderedNodesFullGraph.filter(node => node.data.type !== 'output');
+  const nodesToSerialize = conflictSafeOrder.filter(node => node.data.type !== 'output');
   
   // Step 4: Create serialized nodes with lane-based buffer assignment
   const serializedNodes: SerializedNode[] = nodesToSerialize.map((node) => {
