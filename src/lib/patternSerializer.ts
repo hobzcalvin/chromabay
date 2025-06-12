@@ -114,6 +114,29 @@ function topologicalSort(nodes: Node[], edges: Edge[]): SortResult {
   const incomingFor = (targetId: string) =>
     edges.filter(e => e.target === targetId);
 
+  /* ------------------------------------------------------------------
+   * Pre-compute a “consumption distance” for each node.
+   * For a generator (node without inputs) that is only used late in
+   * the graph, this value will be large, pushing it later in the queue.
+   *   distance(node) = 0                     if node has no outgoing edges
+   *                  = 1 + min(distance(out)) otherwise
+   * ------------------------------------------------------------------ */
+  const outEdgesOf = (sourceId: string) =>
+    edges.filter(e => e.source === sourceId).map(e => e.target);
+
+  const distanceCache = new Map<string, number>();
+  const calcDistance = (id: string): number => {
+    if (distanceCache.has(id)) return distanceCache.get(id)!;
+    const outs = outEdgesOf(id);
+    if (outs.length === 0) {
+      distanceCache.set(id, 0);
+      return 0;
+    }
+    const dist = 1 + Math.min(...outs.map(calcDistance));
+    distanceCache.set(id, dist);
+    return dist;
+  };
+
   nodes.forEach(n => {
     const outBuf = laneBuf(n);
     const ins   = incomingFor(n.id);
@@ -152,7 +175,15 @@ function topologicalSort(nodes: Node[], edges: Edge[]): SortResult {
     q.sort((a, b) => {
       const pa = overwrites[a] ? 1 : 0;
       const pb = overwrites[b] ? 1 : 0;
-      return pa - pb; // stable in V8
+      if (pa !== pb) return pa - pb;          // non-overwriter first
+
+      // Tie-breaker: node that is consumed *earlier* (smaller distance)
+      // should run earlier, otherwise buffer might be overwritten too soon.
+      const da = calcDistance(a);
+      const db = calcDistance(b);
+      if (da !== db) return da - db;
+
+      return a.localeCompare(b);              // stable fallback
     });
 
   const queue: string[] = sortQueue(
