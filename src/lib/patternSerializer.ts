@@ -1,13 +1,20 @@
 /**
  * Pattern Serialization Module
- * 
+ *
  * This module provides utilities for serializing and deserializing node-based LED patterns
  * for transmission to ESP32 devices via BLE. It handles topological sorting of nodes to ensure
  * proper execution order, buffer assignment, and compact representation.
  */
 
 import type { Node, Edge } from '@xyflow/svelte';
-import { getNodeDefinition, type NodeDefinition, NODE_TYPES, createNodeFromType, LANES } from './flowStore';
+import {
+  getNodeDefinition,
+  type NodeDefinition,
+  NODE_TYPES,
+  createNodeFromType, // This function should correctly set default parameters
+  LANES,
+  type Parameter,
+} from './flowStore';
 
 /**
  * Compact representation of a node in the serialized pattern
@@ -16,16 +23,16 @@ import { getNodeDefinition, type NodeDefinition, NODE_TYPES, createNodeFromType,
 export interface SerializedNode {
   /** Node type identifier (e.g. 'rainbow', 'gradient') */
   t: string;
-  
-  /** Node parameters as key-value pairs with short keys */
+
+  /** Node parameters as key-value pairs. Only non-default values are stored. */
   p?: Record<string, any>;
-  
+
   /** Input buffer index (where this node reads from) */
   i?: number;
-  
+
   /** Output buffer index (where this node writes to) */
   o: number;
-  
+
   /** Second input buffer index (only for blend nodes) */
   i2?: number;
 }
@@ -34,405 +41,403 @@ export interface SerializedNode {
  * Complete serialized pattern format
  */
 export interface SerializedPattern {
-  /** Array of nodes in execution order */
+  /** Array of nodes in execution order (excluding the final 'output' node) */
   nodes: SerializedNode[];
-  
-  /** Optional metadata about the pattern */
-  meta?: {
+
+  /** Metadata about the pattern */
+  meta: {
     name?: string;
-    author?: string;
-    version?: string;
-    created?: number;
-    modified?: number;
+    /** The buffer index that the ESP32 should treat as the final output for display */
+    output: number;
   };
 }
 
-/**
- * Result of the topological sort, including ordered nodes and buffer assignments
- */
 interface SortResult {
-  /** Nodes in execution order */
-  orderedNodes: Node[];
-  
-  /** Map of node IDs to their output buffer indices */
-  bufferMap: Map<string, number>;
-  
-  /** Map of blend node IDs to their second input buffer indices */
-  blendSecondInputMap: Map<string, number>;
+  orderedNodes: Node[]; // All nodes, including output, in execution order
+  bufferMap: Map<string, number>; // Node ID -> Output Buffer Index
+  blendSecondInputMap: Map<string, number>; // Blend Node ID -> Second Input Buffer Index for its sNode.i2
 }
 
-/**
- * Performs a topological sort on the nodes to determine execution order.
- * Assigns buffer indices to ensure proper data flow.
- * 
- * @param nodes - The nodes in the pattern
- * @param edges - The edges connecting the nodes
- * @returns Object containing ordered nodes and buffer assignments
- */
+// Constants for deserialization layout
+// const NODE_WIDTH = 100; // Standard node width from PatternNode.svelte (approx)
+const NODE_HEIGHT = 50; // Standard node height
+const VERTICAL_SPACING = 50; // Increased spacing
+const HORIZONTAL_SPACING = 75; // Spacing between lanes or for jitter
+
 function topologicalSort(nodes: Node[], edges: Edge[]): SortResult {
-  // Create a map of node dependencies (adjacency list)
-  const graph: Map<string, string[]> = new Map();
-  const inDegree: Map<string, number> = new Map();
-  
-  // Initialize maps
+  const graph: Map<string, string[]> = new Map(); // nodeId -> list of targetNodeIds
+  const inDegree: Map<string, number> = new Map(); // nodeId -> in-degree count
+
   nodes.forEach(node => {
     graph.set(node.id, []);
     inDegree.set(node.id, 0);
   });
-  
-  // Build the graph
+
   edges.forEach(edge => {
-    const source = edge.source;
-    const target = edge.target;
-    
-    // Add dependency: target depends on source
-    if (graph.has(source)) {
-      graph.get(source)!.push(target);
-    }
-    
-    // Increment in-degree of target
-    inDegree.set(target, (inDegree.get(target) || 0) + 1);
+    graph.get(edge.source)?.push(edge.target);
+    inDegree.set(edge.target, (inDegree.get(edge.target) || 0) + 1);
   });
-  
-  // Find nodes with no dependencies (in-degree = 0)
-  const queue: string[] = [];
-  nodes.forEach(node => {
-    if ((inDegree.get(node.id) || 0) === 0) {
-      queue.push(node.id);
-    }
-  });
-  
-  // Process nodes in topological order
+
+  const queue: string[] = nodes.filter(node => (inDegree.get(node.id) || 0) === 0).map(n => n.id);
   const orderedNodeIds: string[] = [];
+
   while (queue.length > 0) {
     const nodeId = queue.shift()!;
     orderedNodeIds.push(nodeId);
-    
-    // For each dependent node, reduce in-degree and check if it can be processed
-    const dependents = graph.get(nodeId) || [];
-    for (const dependent of dependents) {
-      inDegree.set(dependent, (inDegree.get(dependent) || 0) - 1);
-      if ((inDegree.get(dependent) || 0) === 0) {
-        queue.push(dependent);
+
+    for (const dependentId of graph.get(nodeId) || []) {
+      inDegree.set(dependentId, (inDegree.get(dependentId) || 0) - 1);
+      if ((inDegree.get(dependentId) || 0) === 0) {
+        queue.push(dependentId);
       }
     }
   }
-  
-  // Check if we have a cycle (not all nodes processed)
+
   if (orderedNodeIds.length !== nodes.length) {
-    console.warn('Cycle detected in pattern graph. Some nodes may not be processed correctly.');
-    
-    // Add remaining nodes in arbitrary order
+    console.warn('Cycle detected or disconnected nodes. Serialization might be affected.');
     nodes.forEach(node => {
       if (!orderedNodeIds.includes(node.id)) {
-        orderedNodeIds.push(node.id);
+        orderedNodeIds.push(node.id); // Add unreached nodes, order might be arbitrary
       }
     });
   }
-  
-  // Map node IDs to actual nodes and maintain order
+
   const orderedNodes = orderedNodeIds.map(id => nodes.find(node => node.id === id)!);
-  
-  // Assign buffer indices
-  // We need at most 3 buffers: current output, previous output (input), and blend second input
-  const bufferMap = new Map<string, number>();
-  const blendSecondInputMap = new Map<string, number>();
-  
-  // First pass: identify blend nodes and their inputs
-  const blendNodes = orderedNodes.filter(node => node.data.type === 'blend');
-  const blendInputs = new Map<string, { input1: string | null, input2: string | null }>();
-  
-  blendNodes.forEach(blendNode => {
-    const blendInputEdges = edges.filter(edge => edge.target === blendNode.id);
-    const input1Edge = blendInputEdges.find(e => e.targetHandle === 'input-1' || e.targetHandle === 'input');
-    const input2Edge = blendInputEdges.find(e => e.targetHandle === 'input-2');
-    
-    blendInputs.set(blendNode.id, {
-      input1: input1Edge ? input1Edge.source : null,
-      input2: input2Edge ? input2Edge.source : null
-    });
-  });
-  
-  // Second pass: assign buffer indices
-  // We'll use a rotating buffer system with at most 3 buffers (0, 1, 2)
-  let currentBuffer = 0;
-  const maxBuffers = 3;
-  
-  orderedNodes.forEach((node, index) => {
-    // For the output node, always use buffer 0
+
+  // Buffer assignment
+  const bufferMap = new Map<string, number>(); // node.id -> its output buffer index
+  const blendSecondInputMap = new Map<string, number>(); // blend_node.id -> buffer index of its second input source
+
+  const MAX_BUFFERS = 3; // ESP32 typically uses 2 or 3 buffers
+  let nextAvailableBufferPoolIndex = 0;
+  const nodeEffectiveOutputBuffer = new Map<string, number>(); // Stores which buffer a node effectively writes its output to
+
+  orderedNodes.forEach(node => {
     if (node.data.type === 'output') {
-      bufferMap.set(node.id, 0);
+      // Output node consumes a buffer, doesn't produce a new one in the chain for serialization
       return;
     }
+
+    let assignedOutputBuffer = nextAvailableBufferPoolIndex;
     
-    // For regular nodes, rotate between buffers
-    bufferMap.set(node.id, currentBuffer);
-    
-    // Special handling for blend nodes with two inputs
+    // A very basic heuristic to try and avoid outputting to a buffer that is an input to the current node
+    // This is not a full-fledged register allocation but a simple attempt.
+    const inputEdges = edges.filter(e => e.target === node.id);
+    const inputBufferIndices = inputEdges.map(e => nodeEffectiveOutputBuffer.get(e.source)).filter(b => b !== undefined) as number[];
+
+    let attempts = 0;
+    while(inputBufferIndices.includes(assignedOutputBuffer) && attempts < MAX_BUFFERS) {
+        assignedOutputBuffer = (assignedOutputBuffer + 1) % MAX_BUFFERS;
+        attempts++;
+    }
+    if (attempts >= MAX_BUFFERS && inputBufferIndices.includes(assignedOutputBuffer)) {
+        console.warn(`Buffer assignment conflict for node ${node.id}. Could not find a free buffer.`);
+        // Fallback: just use the next one, ESP32 might need to handle this with copies if it's a true conflict
+    }
+
+
+    nodeEffectiveOutputBuffer.set(node.id, assignedOutputBuffer);
+    bufferMap.set(node.id, assignedOutputBuffer);
+    nextAvailableBufferPoolIndex = (assignedOutputBuffer + 1) % MAX_BUFFERS;
+
+    // For blend nodes, identify the buffer of their second input source
     if (node.data.type === 'blend') {
-      const inputs = blendInputs.get(node.id);
-      
-      // If this blend node has a second input, assign it a different buffer
-      if (inputs && inputs.input2) {
-        // Find the buffer of the second input
-        const input2Buffer = bufferMap.get(inputs.input2);
-        
-        // Store this as the second input buffer for this blend node
-        if (input2Buffer !== undefined) {
-          blendSecondInputMap.set(node.id, input2Buffer);
+      const input2Edge = inputEdges.find(e => e.targetHandle === 'input-2');
+      if (input2Edge) {
+        const input2SourceBuffer = nodeEffectiveOutputBuffer.get(input2Edge.source);
+        if (input2SourceBuffer !== undefined) {
+          blendSecondInputMap.set(node.id, input2SourceBuffer);
         }
       }
     }
-    
-    // Rotate to next buffer for the next node
-    currentBuffer = (currentBuffer + 1) % maxBuffers;
   });
-  
-  return {
-    orderedNodes,
-    bufferMap,
-    blendSecondInputMap
-  };
+
+  return { orderedNodes, bufferMap, blendSecondInputMap };
 }
 
-/**
- * Serializes a pattern graph into a compact format suitable for BLE transmission.
- * 
- * @param nodes - The nodes in the pattern
- * @param edges - The edges connecting the nodes
- * @returns Serialized pattern object
- */
-export function serializePattern(nodes: Node[], edges: Edge[]): SerializedPattern {
-  // Sort nodes topologically and assign buffers
-  const { orderedNodes, bufferMap, blendSecondInputMap } = topologicalSort(nodes, edges);
-  
-  // Create serialized nodes
-  const serializedNodes: SerializedNode[] = orderedNodes.map(node => {
-    // Get node definition to access parameters
+export function serializePattern(
+  allNodes: Node[],
+  allEdges: Edge[],
+  currentNodeParameters: Map<string, Map<string, any>>, // Actual parameters from the Svelte store
+  patternName?: string
+): SerializedPattern {
+  const {
+    orderedNodes: orderedNodesFullGraph, // Includes output node
+    bufferMap, // node.id -> its output buffer index
+    blendSecondInputMap,
+  } = topologicalSort(allNodes, allEdges);
+
+  let finalOutputBufferIndex = 0; // Default: ESP32 uses buffer 0 for display
+  const outputNode = allNodes.find(n => n.data.type === 'output');
+
+  if (outputNode) {
+    const inputEdgesToOutputNode = allEdges.filter(edge => edge.target === outputNode.id);
+    if (inputEdgesToOutputNode.length > 0) {
+      const sourceNodeId = inputEdgesToOutputNode[0].source; // Output node has one input
+      const sourceOutputBuffer = bufferMap.get(sourceNodeId);
+      if (sourceOutputBuffer !== undefined) {
+        finalOutputBufferIndex = sourceOutputBuffer;
+      } else {
+        console.warn(`Output node's source (${sourceNodeId}) has no assigned output buffer. Defaulting meta.output.`);
+      }
+    } else {
+      console.warn("Output node found but has no inputs. Defaulting meta.output.");
+    }
+  } else if (orderedNodesFullGraph.length > 0) {
+    // If no explicit output node, consider the output of the last non-output node in the sorted list
+    const lastNodeBeforePotentialImplicitOutput = orderedNodesFullGraph.filter(n => n.data.type !== 'output').pop();
+    if (lastNodeBeforePotentialImplicitOutput) {
+        const lastNodeBuffer = bufferMap.get(lastNodeBeforePotentialImplicitOutput.id);
+        if (lastNodeBuffer !== undefined) {
+            finalOutputBufferIndex = lastNodeBuffer;
+        }
+    }
+  }
+
+
+  const nodesToSerialize = orderedNodesFullGraph.filter(node => node.data.type !== 'output');
+
+  const serializedNodes: SerializedNode[] = nodesToSerialize.map(node => {
     const nodeDefinition = getNodeDefinition(node.data.type as string);
     if (!nodeDefinition) {
-      console.warn(`Unknown node type: ${node.data.type}`);
+      // This case should ideally not be reached if graph is validated before serialization
+      console.error(`FATAL: No definition for node type ${node.data.type} during serialization.`);
       return null;
     }
-    
-    // Find input edges for this node
-    const inputEdges = edges.filter(edge => edge.target === node.id);
-    
-    // Get input buffer index from the source node's output buffer
-    let inputBuffer: number | undefined = undefined;
-    if (inputEdges.length > 0) {
-      const sourceNodeId = inputEdges[0].source;
-      inputBuffer = bufferMap.get(sourceNodeId);
-    }
-    
-    // Get output buffer index
-    const outputBuffer = bufferMap.get(node.id)!;
-    
-    // Get second input buffer for blend nodes
-    let secondInputBuffer: number | undefined = undefined;
-    if (node.data.type === 'blend') {
-      secondInputBuffer = blendSecondInputMap.get(node.id);
-    }
-    
-    // Extract parameter values
+
     const params: Record<string, any> = {};
-    if (nodeDefinition.params && node.data.parameters) {
-      nodeDefinition.params.forEach(param => {
-        // Use parameter name as short key
-        // If we need even shorter keys, we could map them to single letters
-        const paramValue = node.data.parameters?.[param.name];
-        if (paramValue !== undefined) {
-          params[param.name] = paramValue;
+    const actualNodeParamsMap = currentNodeParameters.get(node.id);
+
+    if (actualNodeParamsMap && nodeDefinition.params) {
+      nodeDefinition.params.forEach((paramDef: Parameter) => {
+        const actualValue = actualNodeParamsMap.get(paramDef.name);
+        // Only store if value exists and is different from default
+        if (actualValue !== undefined && actualValue !== paramDef.default) {
+          params[paramDef.name] = actualValue;
         }
       });
     }
+
+    let primaryInputBuffer: number | undefined = undefined;
+    const inputEdgesToCurrentNode = allEdges.filter(edge => edge.target === node.id);
+
+    if (node.data.type === 'blend') {
+      const input1Edge = inputEdgesToCurrentNode.find(e => e.targetHandle === 'input-1' || e.targetHandle === 'input');
+      if (input1Edge) {
+        primaryInputBuffer = bufferMap.get(input1Edge.source);
+      }
+    } else { // For non-blend, non-generator nodes
+      if (inputEdgesToCurrentNode.length > 0) {
+        primaryInputBuffer = bufferMap.get(inputEdgesToCurrentNode[0].source);
+      }
+    }
     
-    // Create serialized node with short keys
+    const nodeOutputBuffer = bufferMap.get(node.id);
+    if (nodeOutputBuffer === undefined) {
+        console.error(`FATAL: Node ${node.id} (${node.data.type}) has no output buffer assigned in bufferMap.`);
+        // This indicates a flaw in topologicalSort's bufferMap population for non-output nodes.
+        // As a fallback, though incorrect:
+        // nodeOutputBuffer = 0; 
+        return null; // Critical error, skip this node
+    }
+
+
     const serializedNode: SerializedNode = {
       t: node.data.type as string,
-      o: outputBuffer
+      o: nodeOutputBuffer,
     };
-    
-    // Only include input buffer if it exists
-    if (inputBuffer !== undefined) {
-      serializedNode.i = inputBuffer;
+
+    if (primaryInputBuffer !== undefined) {
+      serializedNode.i = primaryInputBuffer;
     }
-    
-    // Only include second input buffer for blend nodes if it exists
-    if (secondInputBuffer !== undefined) {
-      serializedNode.i2 = secondInputBuffer;
+
+    if (node.data.type === 'blend') {
+      const i2Buffer = blendSecondInputMap.get(node.id); // This map stores the *source buffer index* for i2
+      if (i2Buffer !== undefined) {
+        serializedNode.i2 = i2Buffer;
+      }
     }
-    
-    // Only include params if there are any
+
     if (Object.keys(params).length > 0) {
       serializedNode.p = params;
     }
-    
+
     return serializedNode;
   }).filter(Boolean) as SerializedNode[];
-  
+
   return {
     nodes: serializedNodes,
     meta: {
-      created: Date.now(),
-      modified: Date.now()
-    }
+      name: patternName,
+      output: finalOutputBufferIndex,
+    },
   };
 }
 
-/**
- * Deserializes a pattern from the compact format back into nodes and edges.
- * 
- * @param serializedPattern - The serialized pattern
- * @returns Object containing reconstructed nodes and edges
- */
-export function deserializePattern(serializedPattern: SerializedPattern): { nodes: Node[], edges: Edge[] } {
-  const nodes: Node[] = [];
-  const edges: Edge[] = [];
-  
-  // Maps buffer indices back to node IDs
-  const bufferToNodeMap = new Map<number, string>();
-  
-  // First pass: create nodes
-  serializedPattern.nodes.forEach((serializedNode, index) => {
-    // Find node definition
-    const nodeType = NODE_TYPES.find(nt => nt.type === serializedNode.t);
-    if (!nodeType) {
-      console.warn(`Unknown node type: ${serializedNode.t}`);
+export function deserializePattern(
+  serializedPattern: SerializedPattern
+): { nodes: Node[]; edges: Edge[]; nodeParameters: Map<string, Map<string, any>> } {
+  const svelteFlowNodes: Node[] = [];
+  const svelteFlowEdges: Edge[] = [];
+  const newNodeParameters = new Map<string, Map<string, any>>();
+
+  const outputBufferToSourceNodeIdMap = new Map<number, string>(); // Stores: bufferIndex -> nodeId that wrote to it
+
+  serializedPattern.nodes.forEach((sNode, index) => {
+    const nodeDefinition = getNodeDefinition(sNode.t);
+    if (!nodeDefinition) {
+      console.warn(`Unknown node type during deserialization: ${sNode.t}`);
       return;
     }
-    
-    // Create node ID
-    const nodeId = `node_${index}`;
-    
-    // Determine node position based on its type and index
-    // Output node is always at the bottom
-    // Other nodes are arranged in rows above it
-    let lane = LANES.CENTER;
-    let yPosition = 100;
-    
-    if (serializedNode.t === 'output') {
-      yPosition = 300; // Output at bottom
-    } else {
-      // Distribute other nodes above
-      yPosition = 50 + (index * 75);
-      
-      // Alternate between lanes for better visibility
-      lane = [LANES.LEFT, LANES.CENTER, LANES.RIGHT][index % 3];
-    }
-    
-    // Create node
-    const node = createNodeFromType(nodeType, nodeId, { x: lane, y: yPosition });
-    
-    // Set parameters if available
-    if (serializedNode.p) {
-      node.data.parameters = { ...serializedNode.p };
-    }
-    
-    // Store node
-    nodes.push(node);
-    
-    // Map output buffer to this node ID
-    bufferToNodeMap.set(serializedNode.o, nodeId);
-  });
-  
-  // Second pass: create edges
-  serializedPattern.nodes.forEach((serializedNode, index) => {
-    const targetNodeId = `node_${index}`;
-    
-    // Create edge from input buffer to this node
-    if (serializedNode.i !== undefined) {
-      const sourceNodeId = bufferToNodeMap.get(serializedNode.i);
-      if (sourceNodeId) {
-        // For blend nodes, connect to the first input
-        const targetHandle = serializedNode.t === 'blend' ? 'input-1' : 'input';
-        
-        edges.push({
-          id: `edge_${sourceNodeId}_${targetNodeId}`,
-          source: sourceNodeId,
-          target: targetNodeId,
-          sourceHandle: 'output',
-          targetHandle: targetHandle,
-          style: 'stroke-width: 3; stroke: #666;',
-          markerEnd: {
-            type: 'arrowclosed',
-            color: '#666'
-          }
-        });
+
+    const nodeId = `deserialized_${sNode.t}_${Date.now()}_${index}`; // More unique ID
+
+    // Positioning: Top-down, trying to use lanes
+    const laneKeys = Object.keys(LANES) as Array<keyof typeof LANES>;
+    // Try to place in a lane based on its output buffer, or cycle through lanes
+    const laneIndex = sNode.o % laneKeys.length;
+    const xPos = LANES[laneKeys[laneIndex]] + (Math.random() * HORIZONTAL_SPACING / 2 - HORIZONTAL_SPACING / 4);
+    const yPos = 50 + index * (NODE_HEIGHT + VERTICAL_SPACING);
+
+    // Create SvelteFlow node. createNodeFromType should initialize default parameters.
+    // The parameters will then be managed by the newNodeParameters map.
+    const newNode = createNodeFromType(nodeDefinition, nodeId, { x: xPos, y: yPos });
+
+    // Prepare parameters for this node
+    const currentParamsForNode = new Map<string, any>();
+    nodeDefinition.params.forEach(paramDef => { // Start with defaults
+      currentParamsForNode.set(paramDef.name, paramDef.default);
+    });
+    if (sNode.p) { // Override with serialized values
+      for (const paramName in sNode.p) {
+        if (currentParamsForNode.has(paramName)) { // Ensure param exists in definition
+          currentParamsForNode.set(paramName, sNode.p[paramName]);
+        } else {
+          console.warn(`Node type ${sNode.t} has serialized param ${paramName} not in its definition.`);
+        }
       }
     }
-    
-    // For blend nodes, create edge from second input buffer
-    if (serializedNode.t === 'blend' && serializedNode.i2 !== undefined) {
-      const sourceNodeId = bufferToNodeMap.get(serializedNode.i2);
+    newNodeParameters.set(nodeId, currentParamsForNode);
+    // For visual consistency in PatternNode if it reads data.parameters directly:
+    newNode.data.parameters = Object.fromEntries(currentParamsForNode.entries());
+
+
+    svelteFlowNodes.push(newNode);
+
+    // Create Edges
+    // Primary Input
+    if (sNode.i !== undefined) {
+      const sourceNodeId = outputBufferToSourceNodeIdMap.get(sNode.i);
       if (sourceNodeId) {
-        edges.push({
-          id: `edge_${sourceNodeId}_${targetNodeId}_2`,
+        svelteFlowEdges.push({
+          id: `e_${sourceNodeId}_${nodeId}_i1_${Date.now()}`,
           source: sourceNodeId,
-          target: targetNodeId,
+          target: nodeId,
+          sourceHandle: 'output', // Default output handle name
+          targetHandle: (sNode.t === 'blend') ? 'input-1' : 'input', // Default input handle names
+        });
+      } else {
+        console.warn(`Deserialization: Source node for input buffer ${sNode.i} (node ${nodeId}, type ${sNode.t}) not found.`);
+      }
+    }
+
+    // Secondary Input (for Blend nodes)
+    if (sNode.t === 'blend' && sNode.i2 !== undefined) {
+      const sourceNodeId_i2 = outputBufferToSourceNodeIdMap.get(sNode.i2);
+      if (sourceNodeId_i2) {
+        svelteFlowEdges.push({
+          id: `e_${sourceNodeId_i2}_${nodeId}_i2_${Date.now()}`,
+          source: sourceNodeId_i2,
+          target: nodeId,
           sourceHandle: 'output',
           targetHandle: 'input-2',
-          style: 'stroke-width: 3; stroke: #666;',
-          markerEnd: {
-            type: 'arrowclosed',
-            color: '#666'
-          }
         });
+      } else {
+        console.warn(`Deserialization: Source node for secondary input buffer ${sNode.i2} (blend node ${nodeId}) not found.`);
       }
     }
+
+    // Update map: this node (nodeId) now provides output for buffer sNode.o
+    outputBufferToSourceNodeIdMap.set(sNode.o, nodeId);
   });
-  
-  return { nodes, edges };
+
+  /* ------------------------------------------------------------------
+   * 2. Inject OUTPUT node (not part of the compact list)
+   * ------------------------------------------------------------------ */
+  const outputDef = getNodeDefinition('output');
+  if (outputDef) {
+    const outputNodeId = `deserialized_output_${Date.now()}`;
+
+    /*  Position it centred under the last row */
+    const maxY =
+      svelteFlowNodes.reduce((m, n) => Math.max(m, n.position.y), 0) +
+      NODE_HEIGHT +
+      VERTICAL_SPACING;
+    const outputX = LANES.CENTER;
+
+    const outputNode = createNodeFromType(outputDef, outputNodeId, {
+      x: outputX,
+      y: maxY,
+    });
+
+    // Output node has no adjustable parameters
+    newNodeParameters.set(outputNodeId, new Map());
+
+    svelteFlowNodes.push(outputNode);
+
+    /* Connect the node that wrote to meta.output buffer → output node  */
+    const finalBufIdx =
+      serializedPattern.meta?.output !== undefined
+        ? serializedPattern.meta.output
+        : 0;
+    const sourceForOutput = outputBufferToSourceNodeIdMap.get(finalBufIdx);
+    if (sourceForOutput) {
+      svelteFlowEdges.push({
+        id: `e_${sourceForOutput}_${outputNodeId}_out`,
+        source: sourceForOutput,
+        target: outputNodeId,
+        sourceHandle: 'output',
+        targetHandle: 'input',
+      });
+    } else {
+      console.warn(
+        `deserializePattern: Could not find source node for meta.output buffer ${finalBufIdx}`,
+      );
+    }
+  } else {
+    console.error(
+      'deserializePattern: Output node definition missing – cannot create final node.',
+    );
+  }
+
+  return {
+    nodes: svelteFlowNodes,
+    edges: svelteFlowEdges,
+    nodeParameters: newNodeParameters,
+  };
 }
 
-/**
- * Compresses a serialized pattern using a simple run-length encoding.
- * For more advanced compression, consider using LZ4 or similar algorithm.
- * 
- * @param serializedPattern - The serialized pattern object
- * @returns Compressed string representation
- */
 export function compressPattern(serializedPattern: SerializedPattern): string {
-  // Convert to JSON string
   const jsonString = JSON.stringify(serializedPattern);
-  
-  // For BLE transmission, we could use a more sophisticated compression.
-  // LZ4 would be ideal for ESP32 as it's fast and has low memory requirements.
-  // There are JavaScript implementations like lz4js that could be used.
-  
-  // For now, we'll just return the JSON string with a note about compression
-  console.log('Note: For production use with ESP32, consider implementing LZ4 compression.');
-  console.log('LZ4 is lightweight, fast to decompress, and suitable for embedded devices.');
-  console.log('ESP32 has LZ4 libraries available in both Arduino and ESP-IDF frameworks.');
-  
+  // console.log('Note: For production use with ESP32, consider implementing LZ4 compression.');
   return jsonString;
 }
 
-/**
- * Decompresses a pattern string back into a serialized pattern object.
- * 
- * @param compressedString - The compressed pattern string
- * @returns Deserialized pattern object
- */
 export function decompressPattern(compressedString: string): SerializedPattern {
-  // For now, just parse the JSON string
-  // In a real implementation with LZ4, we would decompress first
   try {
     return JSON.parse(compressedString) as SerializedPattern;
   } catch (error) {
-    console.error('Failed to decompress pattern:', error);
-    throw new Error('Invalid pattern format');
+    console.error('Failed to decompress/parse pattern string:', error);
+    throw new Error('Invalid pattern JSON format');
   }
 }
 
-/**
- * Estimates the size of a serialized pattern in bytes.
- * Useful for determining if it will fit within BLE transmission limits.
- * 
- * @param serializedPattern - The serialized pattern
- * @returns Size estimate in bytes
- */
 export function estimatePatternSize(serializedPattern: SerializedPattern): number {
-  const jsonString = JSON.stringify(serializedPattern);
-  return new TextEncoder().encode(jsonString).length;
+  try {
+    const jsonString = JSON.stringify(serializedPattern);
+    return new TextEncoder().encode(jsonString).length;
+  } catch (e) {
+    console.error("Error estimating pattern size:", e);
+    return Infinity;
+  }
 }
