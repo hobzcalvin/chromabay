@@ -115,27 +115,46 @@ function topologicalSort(nodes: Node[], edges: Edge[]): SortResult {
     edges.filter(e => e.target === targetId);
 
   /* ------------------------------------------------------------------
-   * Pre-compute a “consumption distance” for each node.
-   * For a generator (node without inputs) that is only used late in
-   * the graph, this value will be large, pushing it later in the queue.
-   *   distance(node) = 0                     if node has no outgoing edges
-   *                  = 1 + min(distance(out)) otherwise
+   * Phase 0: determine dependency (execution) level for every node
+   * (distance from generators).  We run a simple BFS starting from
+   * zero-in-degree nodes to assign levels.
    * ------------------------------------------------------------------ */
-  const outEdgesOf = (sourceId: string) =>
-    edges.filter(e => e.source === sourceId).map(e => e.target);
-
-  const distanceCache = new Map<string, number>();
-  const calcDistance = (id: string): number => {
-    if (distanceCache.has(id)) return distanceCache.get(id)!;
-    const outs = outEdgesOf(id);
-    if (outs.length === 0) {
-      distanceCache.set(id, 0);
-      return 0;
+  const depLevel = new Map<string, number>();
+  const tmpQueue: string[] = [];
+  nodes.forEach(n => {
+    if ((inDegree.get(n.id) || 0) === 0) {
+      depLevel.set(n.id, 0);
+      tmpQueue.push(n.id);
     }
-    const dist = 1 + Math.min(...outs.map(calcDistance));
-    distanceCache.set(id, dist);
-    return dist;
-  };
+  });
+  while (tmpQueue.length) {
+    const cur = tmpQueue.shift()!;
+    const curLvl = depLevel.get(cur)!;
+    for (const tgt of graph.get(cur) || []) {
+      if (!depLevel.has(tgt) || depLevel.get(tgt)! < curLvl + 1) {
+        depLevel.set(tgt, curLvl + 1);
+        tmpQueue.push(tgt);
+      }
+    }
+  }
+
+  /* ------------------------------------------------------------------
+   * For tie-breaking between generators: compute the earliest consumer
+   * level.  For a node with outgoing edges, consumerLevel = minimum
+   * depLevel of its direct consumers; if no outgoing edges give Infinity
+   * so it will be scheduled last.
+   * ------------------------------------------------------------------ */
+  const earliestConsumerLevel: Record<string, number> = {};
+  nodes.forEach(n => {
+    const outs = graph.get(n.id) || [];
+    if (outs.length === 0) {
+      earliestConsumerLevel[n.id] = Number.MAX_SAFE_INTEGER;
+    } else {
+      earliestConsumerLevel[n.id] = Math.min(
+        ...outs.map(o => depLevel.get(o) ?? Number.MAX_SAFE_INTEGER)
+      );
+    }
+  });
 
   nodes.forEach(n => {
     const outBuf = laneBuf(n);
@@ -176,12 +195,10 @@ function topologicalSort(nodes: Node[], edges: Edge[]): SortResult {
       const pa = overwrites[a] ? 1 : 0;
       const pb = overwrites[b] ? 1 : 0;
       if (pa !== pb) return pa - pb;          // non-overwriter first
-
-      // Tie-breaker: node that is consumed *earlier* (smaller distance)
-      // should run earlier, otherwise buffer might be overwritten too soon.
-      const da = calcDistance(a);
-      const db = calcDistance(b);
-      if (da !== db) return da - db;
+      // Tie-breaker 1: node whose earliest consumer is at lower level
+      const ea = earliestConsumerLevel[a];
+      const eb = earliestConsumerLevel[b];
+      if (ea !== eb) return ea - eb;
 
       return a.localeCompare(b);              // stable fallback
     });
