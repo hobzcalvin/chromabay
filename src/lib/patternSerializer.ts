@@ -103,6 +103,40 @@ function topologicalSort(nodes: Node[], edges: Edge[]): SortResult {
   const graph: Map<string, string[]> = new Map(); // nodeId -> list of targetNodeIds
   const inDegree: Map<string, number> = new Map(); // nodeId -> in-degree count
 
+  /* ------------------------------------------------------------------
+   * 1. Pre-compute whether each node **overwrites** one of the buffers it
+   *    reads.  These nodes should be processed **after** non-overwriters
+   *    when several nodes share the same dependency level.
+   * ------------------------------------------------------------------ */
+  const overwrites: Record<string, boolean> = {};
+  const laneBuf = (n: Node) => getNodeLaneBuffer(n);
+
+  const incomingFor = (targetId: string) =>
+    edges.filter(e => e.target === targetId);
+
+  nodes.forEach(n => {
+    const outBuf = laneBuf(n);
+    const ins   = incomingFor(n.id);
+
+    if (ins.length === 0) {
+      overwrites[n.id] = false;
+      return;
+    }
+
+    if (n.data.type !== 'blend') {
+      const src = nodes.find(s => s.id === ins[0].source);
+      overwrites[n.id] = src ? laneBuf(src) === outBuf : false;
+      return;
+    }
+
+    // blend – two inputs
+    const in1 = ins.find(e => e.targetHandle === 'input-1' || e.targetHandle === 'input');
+    const in2 = ins.find(e => e.targetHandle === 'input-2');
+    const buf1 = in1 ? laneBuf(nodes.find(s => s.id === in1.source)!) : undefined;
+    const buf2 = in2 ? laneBuf(nodes.find(s => s.id === in2.source)!) : undefined;
+    overwrites[n.id] = buf1 === outBuf || buf2 === outBuf;
+  });
+
   nodes.forEach(node => {
     graph.set(node.id, []);
     inDegree.set(node.id, 0);
@@ -113,7 +147,17 @@ function topologicalSort(nodes: Node[], edges: Edge[]): SortResult {
     inDegree.set(edge.target, (inDegree.get(edge.target) || 0) + 1);
   });
 
-  const queue: string[] = nodes.filter(node => (inDegree.get(node.id) || 0) === 0).map(n => n.id);
+  // Helper to (re)sort the queue so non-overwriters come first
+  const sortQueue = (q: string[]) =>
+    q.sort((a, b) => {
+      const pa = overwrites[a] ? 1 : 0;
+      const pb = overwrites[b] ? 1 : 0;
+      return pa - pb; // stable in V8
+    });
+
+  const queue: string[] = sortQueue(
+    nodes.filter(n => (inDegree.get(n.id) || 0) === 0).map(n => n.id)
+  );
   const orderedNodeIds: string[] = [];
 
   while (queue.length > 0) {
@@ -124,6 +168,7 @@ function topologicalSort(nodes: Node[], edges: Edge[]): SortResult {
       inDegree.set(dependentId, (inDegree.get(dependentId) || 0) - 1);
       if ((inDegree.get(dependentId) || 0) === 0) {
         queue.push(dependentId);
+        sortQueue(queue);
       }
     }
   }
@@ -206,7 +251,15 @@ export function serializePattern(
       .map(v => v.n);
   };
 
-  const conflictSafeOrder = reorderForBufferConflicts(orderedNodesFullGraph);
+  /* ------------------------------------------------------------------
+   * The topological sort above already respects real data dependencies.
+   * Extra re-ordering for “buffer overwrite” was too aggressive and
+   * broke valid dependency chains (e.g. putting a blend before the
+   * Raindrops node it actually needs).  We therefore keep the pure
+   * topological order here.
+   * ------------------------------------------------------------------ */
+
+  const conflictSafeOrder = orderedNodesFullGraph;
   
   // Step 2: Find output node and determine final output buffer
   let finalOutputBufferIndex = 0; // Default output buffer
