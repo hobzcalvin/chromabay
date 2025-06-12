@@ -17,6 +17,9 @@
   let successMessage: string = $state('');
   let showRawJson: boolean = $state(false);
   let copied: boolean = $state(false);
+  // Collapsing & meta
+  let collapsed: boolean = $state(true);   // start collapsed
+  let patternName: string = $state('');    // user-provided pattern name
   
   // Update pattern size on component mount and when pattern changes
   $effect(() => {
@@ -46,7 +49,7 @@
   function serializePattern(): void {
     try {
       errorMessage = '';
-      serializedPattern = serializeCurrentPattern();
+      serializedPattern = serializeCurrentPattern(patternName.trim() || undefined);
       formattedJson = formatJson(serializedPattern);
       serializedString = getPatternForBLE();
       updatePatternSize();
@@ -98,8 +101,25 @@
   }
 </script>
 
-<div class="serialization-panel">
-  <h2>Pattern Serialization</h2>
+<div class="serialization-panel" class:collapsed>
+  <div class="header-row">
+    <h2>Pattern Serialization</h2>
+    <button class="collapse-btn" onclick={() => (collapsed = !collapsed)}>
+      {collapsed ? '▸' : '▾'}
+    </button>
+  </div>
+
+  {#if !collapsed}
+    <!-- Pattern name -->
+    <div class="name-row">
+      <label for="pattern-name">Name:</label>
+      <input
+        id="pattern-name"
+        type="text"
+        placeholder="Pattern name..."
+        bind:value={patternName}
+      />
+    </div>
   
   <div class="info-bar">
     <div class="size-info">
@@ -111,10 +131,10 @@
     </div>
     
     <div class="actions">
-      <button class="primary-button" on:click={serializePattern}>
+      <button class="primary-button" onclick={serializePattern}>
         Serialize Pattern
       </button>
-      <button class="secondary-button" on:click={copyToClipboard} disabled={!serializedString}>
+      <button class="secondary-button" onclick={copyToClipboard} disabled={!serializedString}>
         {copied ? '✓ Copied!' : 'Copy for BLE'}
       </button>
     </div>
@@ -153,10 +173,11 @@
       placeholder="Paste serialized pattern JSON here..."
       rows="5"
     ></textarea>
-    <button class="primary-button" on:click={loadPattern}>
+    <button class="primary-button" onclick={loadPattern}>
       Load Pattern
     </button>
   </div>
+  {/if}
 </div>
 
 <style>
@@ -167,6 +188,15 @@
     color: white;
     font-family: system-ui, -apple-system, sans-serif;
     margin-bottom: 1rem;
+  }
+  .serialization-panel.collapsed {
+    padding-bottom: 0.5rem;
+  }
+
+  .header-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
   }
   
   h2 {
@@ -182,6 +212,33 @@
     color: #e2e8f0;
   }
   
+  .collapse-btn {
+    background: transparent;
+    color: #e2e8f0;
+    border: none;
+    font-size: 1.2rem;
+    cursor: pointer;
+    padding: 0 0.25rem;
+  }
+
+  .name-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+    flex-wrap: wrap;
+  }
+
+  .name-row input {
+    flex: 1;
+    min-width: 150px;
+    padding: 0.4rem 0.6rem;
+    border-radius: 6px;
+    border: 1px solid #4b5563;
+    background: #2a2a2a;
+    color: #e2e8f0;
+  }
+
   .info-bar {
     display: flex;
     justify-content: space-between;

@@ -795,23 +795,23 @@ import type { SerializedPattern } from './patternSerializer';
 import { serializePattern, deserializePattern, estimatePatternSize, compressPattern } from './patternSerializer';
 
 // Pattern serialization utilities
-export function serializeCurrentPattern(): SerializedPattern {
+export function serializeCurrentPattern(patternName?: string): SerializedPattern {
   let currentNodes: Node[] = [];
   let currentEdges: Edge[] = [];
-  
+  let currentParams: Map<string, Map<string, any>> = new Map();
+
   flowNodes.subscribe(nodes => currentNodes = nodes)();
   flowEdges.subscribe(edges => currentEdges = edges)();
-  
-  return serializePattern(currentNodes, currentEdges);
+  nodeParameters.subscribe(params => currentParams = params)();
+
+  return serializePattern(currentNodes, currentEdges, currentParams, patternName);
 }
 
 export function loadSerializedPattern(serializedPattern: SerializedPattern): void {
-  const { nodes, edges } = deserializePattern(serializedPattern);
+  const { nodes, edges, nodeParameters: newNodeParameters } = deserializePattern(serializedPattern);
   
-  // Clear existing parameters
-  nodeParameters.set(new Map());
-  
-  // Update stores with new pattern
+  // Update all stores with new pattern
+  nodeParameters.set(newNodeParameters);
   flowNodes.set(nodes);
   flowEdges.set(edges);
   
