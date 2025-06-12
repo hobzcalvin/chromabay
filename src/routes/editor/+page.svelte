@@ -5,6 +5,7 @@
   import { flowNodes, flowEdges, nextNodeId, LANES, NODE_TYPES, createNodeFromType, getNodeDefinition, isValidConnectionWithBuffers } from '$lib/flowStore';
   import PatternNode from '$lib/PatternNode.svelte';
   import NodeParameterEditor from '$lib/components/NodeParameterEditor.svelte';
+  import PatternSerializationPanel from '$lib/components/PatternSerializationPanel.svelte';
   
   // Get SvelteFlow hooks
   const { screenToFlowPosition, setViewport } = useSvelteFlow();
@@ -370,6 +371,8 @@
       </select>
     </div>
   </div>
+  
+  <PatternSerializationPanel />
   
   <div class="flow-container" bind:this={flowContainer} bind:clientWidth bind:clientHeight onmousemove={handleFlowMouseMove}>
     <SvelteFlow 
