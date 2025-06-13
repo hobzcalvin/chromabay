@@ -140,56 +140,45 @@ function topologicalSort(nodes: Node[], edges: Edge[]): SortResult {
   const orderedNodes = orderedNodeIds.map(id => nodes.find(node => node.id === id)!);
 
   /* ------------------------------------------------------------------
-   * SECOND PASS ― JIT GENERATOR PLACEMENT
-   * For each generator (no inputs) find the first node that consumes it
-   * via explicit edge and move the generator just before that consumer.
+   * SECOND PASS — DETERMINISTIC GENERATOR PLACEMENT
+   *
+   * Generators (nodes with no incoming edges) can safely be executed at
+   * any time before their first consumer.  To guarantee buffers are not
+   * overwritten too early we move every generator **immediately before**
+   * its earliest consumer in the current order.
    * ------------------------------------------------------------------ */
   const idToIndex = new Map<string, number>();
   orderedNodes.forEach((n, idx) => idToIndex.set(n.id, idx));
 
   const isGenerator = (n: Node) => !edges.some(e => e.target === n.id);
 
-  /* ------------------------------------------------------------------
-   * Improved generator placement:
-   * Only delay a generator if, before its first consumer, another node
-   * writes to the same buffer (thus the generator would overwrite that
-   * buffer too early).
-   * ------------------------------------------------------------------ */
-
-  // helper: buffer a node writes
-  const bufOf = (n: Node) => getNodeLaneBuffer(n);
-
-  // map generator id -> first consumer index
-  const firstConsumer: Record<string, number> = {};
+  // Build generator → earliest consumer index map
+  const genConsumers: { node: Node; consumerIdx: number }[] = [];
   edges.forEach(e => {
-    const srcNode = orderedNodes[idToIndex.get(e.source)!];
-    if (!isGenerator(srcNode)) return;
+    const src = orderedNodes[idToIndex.get(e.source)!];
+    if (!isGenerator(src)) return;
     const tgtIdx = idToIndex.get(e.target)!;
-    if (
-      firstConsumer[srcNode.id] === undefined ||
-      tgtIdx < firstConsumer[srcNode.id]
-    ) {
-      firstConsumer[srcNode.id] = tgtIdx;
+    const existing = genConsumers.find(gc => gc.node.id === src.id);
+    if (!existing || tgtIdx < existing.consumerIdx) {
+      if (existing) existing.consumerIdx = tgtIdx;
+      else genConsumers.push({ node: src, consumerIdx: tgtIdx });
     }
   });
 
-  Object.entries(firstConsumer).forEach(([genId, consIdx]) => {
-    let genIdx = idToIndex.get(genId)!;
-    // scan between genIdx+1 .. consIdx-1 for last node writing same buffer
-    const buf = bufOf(orderedNodes[genIdx]);
-    let lastWriter = -1;
-    for (let i = genIdx + 1; i < consIdx; i++) {
-      if (bufOf(orderedNodes[i]) === buf) lastWriter = i;
-    }
-    if (lastWriter !== -1) {
-      // move generator after lastWriter
-      const [genNode] = orderedNodes.splice(genIdx, 1);
-      // adjust if removal shifts index positions
-      if (genIdx < lastWriter) lastWriter -= 1;
-      orderedNodes.splice(lastWriter + 1, 0, genNode);
-      // refresh indices map
-      orderedNodes.forEach((n, i) => idToIndex.set(n.id, i));
-    }
+  // Sort generators by earliest consumer so moves are stable front-to-back
+  genConsumers.sort((a, b) => a.consumerIdx - b.consumerIdx);
+
+  genConsumers.forEach(({ node, consumerIdx }) => {
+    let curIdx = idToIndex.get(node.id)!;
+    const desiredPos = consumerIdx - 1; // right before consumer
+    if (curIdx >= desiredPos) return;   // already late enough
+
+    // Remove and reinsert
+    orderedNodes.splice(curIdx, 1);
+    orderedNodes.splice(desiredPos, 0, node);
+
+    // Re-index map after move
+    orderedNodes.forEach((n, i) => idToIndex.set(n.id, i));
   });
 
   return { orderedNodes };
