@@ -1,7 +1,7 @@
 {
-  "version": "v0.0.35",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.35.zip",
-  "buildDate": "2025-06-13 06:48:15 UTC",
-  "commitHash": "dd070065f93ce172c55e07e8ca54b505bfb903ae",
-  "commitMessage": "Leave Interact view when app is re-foregrounded"
+  "version": "v0.0.36",
+  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.36.zip",
+  "buildDate": "2025-06-13 16:22:26 UTC",
+  "commitHash": "d9c3d98752bb9e650aa617a78459d5fb68046d15",
+  "commitMessage": "feat: implement precise buffer conflict resolution"
 }
