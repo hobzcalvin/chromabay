@@ -213,18 +213,24 @@ export function serializePattern(
     const outBuf = getNodeLaneBuffer(n);
 
     // Find incoming edges to discover buffers consumed
-    const inEdges = allEdges.filter(e => e.target === n.id);
-    if (inEdges.length === 0) return false;
+    const incoming = allEdges.filter(e => e.target === n.id);
+
+    /* ------------------------------------------------------------------
+     * A node that has **no incoming edges** is a generator.  Generators
+     * never overwrite a buffer they read from because they do not read
+     * anything at all, so we can return early.
+     * ------------------------------------------------------------------ */
+    if (incoming.length === 0) return false;
 
     // Single-input node
     if (n.data.type !== 'blend') {
-      const srcNode = allNodes.find(nd => nd.id === inEdges[0].source);
+      const srcNode = allNodes.find(nd => nd.id === incoming[0].source);
       return srcNode ? getNodeLaneBuffer(srcNode) === outBuf : false;
     }
 
     // Blend node – two inputs
-    const src1 = inEdges.find(e => e.targetHandle === 'input-1' || e.targetHandle === 'input');
-    const src2 = inEdges.find(e => e.targetHandle === 'input-2');
+    const src1 = incoming.find(e => e.targetHandle === 'input-1' || e.targetHandle === 'input');
+    const src2 = incoming.find(e => e.targetHandle === 'input-2');
     const buf1 = src1 ? getNodeLaneBuffer(allNodes.find(nd => nd.id === src1.source)!) : undefined;
     const buf2 = src2 ? getNodeLaneBuffer(allNodes.find(nd => nd.id === src2.source)!) : undefined;
     return buf1 === outBuf || buf2 === outBuf;
@@ -253,11 +259,73 @@ export function serializePattern(
    * The topological sort above already respects real data dependencies.
    * Extra re-ordering for “buffer overwrite” was too aggressive and
    * broke valid dependency chains (e.g. putting a blend before the
-   * Raindrops node it actually needs).  We therefore keep the pure
-   * topological order here.
+   * Raindrops node it actually needs).  We bring it back in a *scoped*
+   * manner: nodes are only re-ordered **within the same dependency
+   * level** so true dependencies are never violated.
    * ------------------------------------------------------------------ */
 
-  const conflictSafeOrder = orderedNodesFullGraph;
+  /* --- 1. compute dependency level for every node ------------------ */
+  const levelMap = new Map<string, number>();        // nodeId -> level
+  const indegTmp = new Map<string, number>();
+  allNodes.forEach(n => indegTmp.set(n.id, 0));
+  allEdges.forEach(e => indegTmp.set(e.target, (indegTmp.get(e.target) ?? 0) + 1));
+
+  const q: string[] = [];
+  indegTmp.forEach((v, id) => { if (v === 0) { q.push(id); levelMap.set(id, 0);} });
+  while (q.length) {
+    const id = q.shift()!;
+    const lvl = levelMap.get(id)!;
+    allEdges
+      .filter(e => e.source === id)
+      .forEach(e => {
+        const next = e.target;
+        const newLvl = lvl + 1;
+        // keep max level reached
+        levelMap.set(next, Math.max(levelMap.get(next) ?? 0, newLvl));
+        indegTmp.set(next, (indegTmp.get(next) ?? 0) - 1);
+        if (indegTmp.get(next) === 0) q.push(next);
+      });
+  }
+
+  /* --- 2. group by level and apply reader-first ordering ------------ */
+  const grouped: Map<number, Node[]> = new Map();
+  orderedNodesFullGraph.forEach(n => {
+    const lvl = levelMap.get(n.id) ?? 0;
+    if (!grouped.has(lvl)) grouped.set(lvl, []);
+    grouped.get(lvl)!.push(n);
+  });
+
+  const conflictSafeOrder: Node[] = [];
+  Array.from(grouped.keys()).sort((a,b)=>a-b).forEach(lvl => {
+    const group = grouped.get(lvl)!;
+    // Determine if this level actually mixes readers and writers.
+    // If every node has the same overwrite status we keep original
+    // topological order to avoid unnecessary shuffling (e.g. generators).
+    const hasWriter = group.some(overwritesRead);
+    const hasReader = group.some(n => !overwritesRead(n));
+
+    let orderedGroup: Node[];
+    if (hasWriter && hasReader) {
+      // Only when the group contains both readers **and** writers do we
+      // reorder to ensure writers execute after all readers.
+      orderedGroup = group
+        .map((n, idx) => ({
+          n,
+          priority: overwritesRead(n) ? 1 : 0,
+          idx
+        }))
+        .sort((a, b) => {
+          if (a.priority !== b.priority) return a.priority - b.priority; // readers first
+          return a.idx - b.idx; // stable for same priority
+        })
+        .map(v => v.n);
+    } else {
+      // All readers or all writers – preserve original order
+      orderedGroup = group;
+    }
+
+    conflictSafeOrder.push(...orderedGroup);
+  });
   
   // Step 2: Find output node and determine final output buffer
   let finalOutputBufferIndex = 0; // Default output buffer
