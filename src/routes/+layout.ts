@@ -6,6 +6,17 @@ import { dev } from '$app/environment';
 let hasAskedForUpdateThisSession = false;
 let isCheckingForUpdates = false;
 
+// Enable iOS swipe back gesture using proper plugin
+if (browser && Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'ios') {
+  // Use the dedicated plugin for WebView configuration
+  import('capacitor-plugin-ios-webview-configurator').then(({ setBackForwardNavigationGestures }) => {
+    setBackForwardNavigationGestures(true);
+    console.log('📱 iOS swipe back gesture enabled');
+  }).catch(error => {
+    console.log('📱 Swipe back plugin not available:', error);
+  });
+}
+
 // Initialize live updates when app loads (only for native platforms and NOT in development)
 if (browser && Capacitor.isNativePlatform() && !dev) {
   import('@capawesome/capacitor-live-update').then(({ LiveUpdate }) => {
