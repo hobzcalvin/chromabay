@@ -44,7 +44,7 @@
       <slot />
     </div>
     
-    <nav class="bottom-nav">
+    <nav class="bottom-nav" class:hidden={$page.url.pathname.startsWith(`${base}/interact`)}>
       <a href="{base}/devices" class:active={$page.url.pathname.startsWith(`${base}/devices`)}
         >Devices
         <span 
@@ -231,6 +231,10 @@
   .badge.red {
     background-color: #dc2626;
     box-shadow: 0 0 8px rgba(220, 38, 38, 0.4);
+  }
+
+  .hidden {
+    display: none !important;
   }
 
   /* Remove all global main styling since we now have proper layout */
