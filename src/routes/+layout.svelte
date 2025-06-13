@@ -67,7 +67,7 @@
   :global(body) {
     margin: 0;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: black;
     min-height: 100vh;
     padding: 0;
     /* Allow scrolling on iOS Safari but prevent bounce */
@@ -127,6 +127,8 @@
     box-sizing: border-box;
     /* Text styles */
     color: white;
+    /* Purple gradient background for the main content area */
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   }
 
   /* Bottom navigation - fixed height, takes only what it needs */
