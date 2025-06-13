@@ -183,6 +183,23 @@ if (browser && Capacitor.isNativePlatform() && !dev) {
   console.log('📱 UPDATE: Live updates disabled in development mode');
 }
 
+// Handle app state changes - leave Interact view when foregrounded
+if (browser && Capacitor.isNativePlatform()) {
+  import('@capacitor/app').then(({ App }) => {
+    App.addListener('appStateChange', ({ isActive }) => {
+      if (isActive) {
+        // App was foregrounded - check if we're on interact page
+        if (window.location.pathname === '/interact') {
+          // Navigate to home page
+          window.location.href = '/';
+        }
+      }
+    });
+  }).catch(error => {
+    console.log('📱 Failed to add app state listener:', error);
+  });
+}
+
 // Disable prerendering since the app uses browser-specific APIs
 export const prerender = false;
 export const ssr = false; 
