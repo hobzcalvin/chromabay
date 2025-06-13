@@ -16,7 +16,7 @@
 		"ios": "npm run build:dev && npm run sync && npx cap run ios",
 		"ios:phone": "npm run build:dev && npm run sync && npx cap open ios",
 		"ios:sim": "npm run build:dev && npm run sync && npx cap run ios --target=7CFDC71F-C7F2-4755-B460-278906924787",
-		"android": "npm run build:dev && npm run sync && npx cap run android -l --external",
+		"android": "npm run build:dev && npm run sync && npx cap run android",
 		"deploy": "npm run deploy:docs",
 		"bundle:create": "node scripts/deploy-live-update.js",
 		"bundle:live": "npm run build && node scripts/deploy-live-update.js",
