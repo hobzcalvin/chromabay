@@ -1,7 +1,7 @@
 {
-  "version": "v0.0.34",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.34.zip",
-  "buildDate": "2025-06-13 06:28:05 UTC",
-  "commitHash": "5aaf6f342dd08332a7208a35449102387c95ba30",
-  "commitMessage": "Add test button"
+  "version": "v0.0.35",
+  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.35.zip",
+  "buildDate": "2025-06-13 06:48:15 UTC",
+  "commitHash": "dd070065f93ce172c55e07e8ca54b505bfb903ae",
+  "commitMessage": "Leave Interact view when app is re-foregrounded"
 }
