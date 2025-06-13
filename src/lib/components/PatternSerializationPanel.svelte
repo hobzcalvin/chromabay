@@ -99,11 +99,40 @@
       setTimeout(() => errorMessage = '', 3000);
     }
   }
+
+  // Test serialization round-trip (serialize then immediately deserialize)
+  function testSerializationRoundtrip(): void {
+    try {
+      errorMessage = '';
+      
+      // Serialize current pattern
+      const serialized = serializeCurrentPattern(patternName.trim() || undefined);
+      
+      // Immediately deserialize it
+      loadSerializedPattern(serialized);
+      
+      // Update the UI to show the serialized data
+      serializedPattern = serialized;
+      formattedJson = formatJson(serialized);
+      serializedString = getPatternForBLE();
+      updatePatternSize();
+      
+      successMessage = 'Round-trip test completed successfully';
+      setTimeout(() => successMessage = '', 3000);
+    } catch (error) {
+      console.error('Error in serialization round-trip test:', error);
+      errorMessage = `Round-trip test failed: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      successMessage = '';
+    }
+  }
 </script>
 
 <div class="serialization-panel" class:collapsed>
   <div class="header-row">
     <h2>Pattern Serialization</h2>
+      <button class="test-button" onclick={testSerializationRoundtrip}>
+        Test Round-trip
+      </button>
     <button class="collapse-btn" onclick={() => (collapsed = !collapsed)}>
       {collapsed ? '▸' : '▾'}
     </button>
@@ -315,6 +344,22 @@
     cursor: not-allowed;
   }
   
+  .test-button {
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-size: 0.9rem;
+    border: none;
+    background: #10b981;
+    color: white;
+  }
+  
+  .test-button:hover {
+    background: #059669;
+  }
+  
   .json-container {
     margin: 1rem 0;
     border: 1px solid #4b5563;
@@ -409,7 +454,7 @@
       justify-content: stretch;
     }
     
-    .primary-button, .secondary-button {
+    .primary-button, .secondary-button, .test-button {
       flex: 1;
     }
   }
