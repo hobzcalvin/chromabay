@@ -477,6 +477,9 @@ export function deserializePattern(
   
   // Step 1: Calculate dependency levels for proper vertical positioning
   const dependencyLevels = calculateDependencyLevels(serializedPattern.nodes);
+  // Track how many nodes have been placed in a given lane at a given level
+  // Key format: `${laneBufferIndex}-${level}`
+  const laneLevelCounts = new Map<string, number>();
   
   // Step 2: Create nodes based on serialized data
   serializedPattern.nodes.forEach((sNode, index) => {
@@ -491,7 +494,17 @@ export function deserializePattern(
     // Position node based on its output buffer (x) and dependency level (y)
     const xPos = getLaneFromBuffer(sNode.o);
     const level = dependencyLevels.get(index) || 0;
-    const yPos = 50 + level * (NODE_HEIGHT + VERTICAL_SPACING);
+    // Calculate base Y position
+    let yPos = 50 + level * (NODE_HEIGHT + VERTICAL_SPACING);
+    // Determine if another node already occupies this lane+level;
+    // if so, offset further to avoid overlap
+    const laneLevelKey = `${sNode.o}-${level}`;
+    const alreadyPlaced = laneLevelCounts.get(laneLevelKey) ?? 0;
+    if (alreadyPlaced > 0) {
+      // Add extra spacing for each stacked node
+      yPos += alreadyPlaced * (NODE_HEIGHT + VERTICAL_SPACING);
+    }
+    laneLevelCounts.set(laneLevelKey, alreadyPlaced + 1);
     
     // Create node
     const newNode = createNodeFromType(nodeDefinition, nodeId, { x: xPos, y: yPos });
