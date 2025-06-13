@@ -1,7 +1,7 @@
 {
-  "version": "v0.0.33",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.33.zip",
-  "buildDate": "2025-06-11 05:22:27 UTC",
-  "commitHash": "790e631e9a9da520cdc1b368220732a723d4a449",
-  "commitMessage": "Improve release script to handle local commits properly - Push HEAD instead of pulling to avoid FETCH_HEAD issues"
+  "version": "v0.0.34",
+  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.34.zip",
+  "buildDate": "2025-06-13 06:28:05 UTC",
+  "commitHash": "5aaf6f342dd08332a7208a35449102387c95ba30",
+  "commitMessage": "Add test button"
 }
