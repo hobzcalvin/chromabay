@@ -13,20 +13,8 @@ const connectedDevices = new Map<string, any>();
 
 // Configuration for ESP32 service UUIDs
 let esp32ServiceUUIDs: string[] = [
-  // Generic services
-  '0000180f-0000-1000-8000-00805f9b34fb', // Battery Service
-  '0000180a-0000-1000-8000-00805f9b34fb', // Device Information Service
-  '00001800-0000-1000-8000-00805f9b34fb', // Generic Access
-  '00001801-0000-1000-8000-00805f9b34fb', // Generic Attribute
-  // Nordic UART Service (commonly used with ESP32)
-  '6e400001-b5a3-f393-e0a9-e50e24dcca9e',
-  // ESP32 Arduino BLE Library common services
-  '4fafc201-1fb5-459e-8fcc-c5c9c331914b',
-  // ESP32 specific services (examples)
-  '12345678-1234-1234-1234-123456789abc',
-  '87654321-4321-4321-4321-cba987654321',
-  // Custom service UUIDs that might be used
-  'ffffffff-ffff-ffff-ffff-ffffffffffff'
+  // LED Service (BluMon custom service) - ONLY service to look for
+  'a0be83e4-8dc9-47f0-ab40-b19721d20ed1'
 ];
 
 /**
@@ -142,21 +130,10 @@ function startWebBluetoothScan(
   callback: (result: any) => void,
   options?: any
 ): Promise<void> {
-  // Comprehensive list of ESP32 and common BLE service UUIDs
+  // Only look for the specific LED service UUID
   const commonServiceUUIDs = [
-    // Standard Bluetooth services
-    '0000180f-0000-1000-8000-00805f9b34fb', // Battery Service
-    '0000180a-0000-1000-8000-00805f9b34fb', // Device Information Service
-    '00001800-0000-1000-8000-00805f9b34fb', // Generic Access
-    '00001801-0000-1000-8000-00805f9b34fb', // Generic Attribute
-    
-    // Nordic UART Service (very common with ESP32)
-    '6e400001-b5a3-f393-e0a9-e50e24dcca9e',
-    
-    // ESP32 Arduino BLE Library default services
-    '4fafc201-1fb5-459e-8fcc-c5c9c331914b', // Common ESP32 service
-    
-    // Custom ESP32 services (add your specific UUIDs here)
+    // LED Service (BluMon custom service) - ONLY service to look for
+    'a0be83e4-8dc9-47f0-ab40-b19721d20ed1',
     ...esp32ServiceUUIDs,
     ...((options?.services || []) as string[])
   ];

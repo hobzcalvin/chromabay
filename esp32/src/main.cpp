@@ -15,10 +15,10 @@
 // LED Array
 CRGB leds[NUM_LEDS];
 
-// NimBLE UART Service (Nordic UART Service UUID)
-#define SERVICE_UUID           "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
-#define CHARACTERISTIC_UUID_RX "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
-#define CHARACTERISTIC_UUID_TX "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
+// NimBLE LED Service (BluMon custom LED service UUID)
+#define SERVICE_UUID           "a0be83e4-8dc9-47f0-ab40-b19721d20ed1"
+#define CHARACTERISTIC_UUID_RX "a0be83e5-8dc9-47f0-ab40-b19721d20ed1"
+#define CHARACTERISTIC_UUID_TX "a0be83e6-8dc9-47f0-ab40-b19721d20ed1"
 
 NimBLEServer* pServer = nullptr;
 NimBLECharacteristic* pTxCharacteristic = nullptr;

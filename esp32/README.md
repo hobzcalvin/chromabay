@@ -49,11 +49,11 @@ npm run esp32:full
 
 ## BLE UART Service
 
-The ESP32 advertises as **"BluMon_ESP32"** with Nordic UART Service:
+The ESP32 advertises as **"BluMon_ESP32"** with custom LED Service:
 
-- **Service UUID**: `6E400001-B5A3-F393-E0A9-E50E24DCCA9E`
-- **RX Characteristic**: `6E400002-B5A3-F393-E0A9-E50E24DCCA9E` (receive commands)
-- **TX Characteristic**: `6E400003-B5A3-F393-E0A9-E50E24DCCA9E` (send responses)
+- **Service UUID**: `a0be83e4-8dc9-47f0-ab40-b19721d20ed1`
+- **RX Characteristic**: `a0be83e5-8dc9-47f0-ab40-b19721d20ed1` (receive commands)
+- **TX Characteristic**: `a0be83e6-8dc9-47f0-ab40-b19721d20ed1` (send responses)
 
 ### Available Commands
 - `status` - Get LED count, brightness, and memory info
