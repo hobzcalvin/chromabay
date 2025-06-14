@@ -145,8 +145,11 @@ void setup() {
     pAdvertising->setMinPreferred(0x0);  // set value to 0x00 to not advertise this parameter
     NimBLEDevice::startAdvertising();
     
-    Serial.println("NimBLE UART Service started - waiting for connections...");
+    Serial.println("NimBLE LED Service started - waiting for connections...");
     Serial.println("Device name: Blumon_ESP32");
+    Serial.println("Advertising Service UUID: " + String(SERVICE_UUID));
+    Serial.println("RX Characteristic UUID: " + String(CHARACTERISTIC_UUID_RX));
+    Serial.println("TX Characteristic UUID: " + String(CHARACTERISTIC_UUID_TX));
     
     Serial.println("Setup complete - Starting rainbow animation");
     Serial.printf("Free heap: %d bytes\n", ESP.getFreeHeap());
