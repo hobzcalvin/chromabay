@@ -1,4 +1,4 @@
-import { BleClient, BleDevice, BleService, BleCharacteristic, ScanResult, BleClientInterface, numbersToDataView, dataViewToNumbers, dataViewToText, textToDataView } from '@capacitor-community/bluetooth-le';
+import { BleClient, numbersToDataView, dataViewToNumbers, dataViewToText, textToDataView } from '@capacitor-community/bluetooth-le';
 import { Capacitor } from '@capacitor/core';
 
 /**
