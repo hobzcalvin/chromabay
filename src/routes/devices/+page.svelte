@@ -23,10 +23,8 @@
     stopOTAStatusNotifications,
     type DeviceInfo,
     type FirmwareRegistryEntry,
-    type OTAUpdateStatus,
-    LED_SERVICE_UUID, // Import if needed for direct calls, though OTA functions encapsulate this
-    CHARACTERISTIC_UUID_DEVICE_INFO, // For direct read if needed, though getDeviceInfo handles it
-    CHARACTERISTIC_UUID_OTA_STATUS // For direct notification start if needed
+    type OTAUpdateStatus
+    // Removed internal constants like LED_SERVICE_UUID as they are not exported from ble.ts
   } from '$lib/ble';
   import { Capacitor } from '@capacitor/core';
 
@@ -140,29 +138,28 @@
       services = discoveredServices;
       
       if (services.length === 0) {
-        statusMessage = `Connected to ${device.name}, but no services found. Try \"Retry Service Discovery\" or check if your ESP32 is advertising services.`;
+        statusMessage = `Connected to ${device.name}, but no services found. Try "Retry Service Discovery" or check if your ESP32 is advertising services.`;
       } else {
         statusMessage = `Connected! Found ${services.length} service(s). Fetching device info...`;
         await handleGetDeviceInfo(); // Automatically get device info on connect
         await startOTAStatusNotifications(selectedDevice.deviceId, (status) => { // Start listening for OTA status
           otaStatus = status;
+          notifications = [`${new Date().toLocaleTimeString()} [OTA]: ${status.statusMessage}${status.progress !== undefined ? ' ('+status.progress+'%)' : ''}`, ...notifications].slice(0,20);
           if (status.isError || status.isComplete) {
             otaInProgress = false;
           }
           if (status.statusMessage.includes("OTA_SUCCESS_REBOOTING")) {
-            // Device will reboot, might disconnect.
-            // Optionally, try to re-fetch device info after a delay.
             setTimeout(async () => {
                 statusMessage = "Device rebooted. Re-fetching info...";
                 await handleGetDeviceInfo();
-            }, 5000); // Wait 5s for reboot
+            }, 5000); 
           }
         });
       }
     } catch (error: any) {
       statusMessage = `Failed to connect to ${device.name}`;
       console.error('Connect error:', error);
-      selectedDevice = null; // Clear selected device on connection error
+      selectedDevice = null; 
     }
   }
 
@@ -190,7 +187,7 @@
     if (!selectedDevice) return;
     
     try {
-      if (otaInProgress) { // Stop OTA status notifications if OTA was in progress
+      if (otaInProgress) { 
         await stopOTAStatusNotifications(selectedDevice.deviceId);
       }
       await disconnectFromDevice(selectedDevice.deviceId);
@@ -214,7 +211,7 @@
     
     try {
       const value = await readCharacteristic(selectedDevice.deviceId, serviceUuid, charUuid);
-      statusMessage = `Read: \"${value}\"`;
+      statusMessage = `Read: "${value}"`;
       console.log('Read value:', value);
     } catch (error: any) {
       statusMessage = 'Failed to read characteristic';
@@ -227,7 +224,7 @@
     
     try {
       await writeCharacteristic(selectedDevice.deviceId, serviceUuid, charUuid, writeData);
-      statusMessage = `Wrote: \"${writeData}\"`;
+      statusMessage = `Wrote: "${writeData}"`;
       writeData = '';
     } catch (error: any) {
       statusMessage = 'Failed to write characteristic';
@@ -316,9 +313,7 @@
     showUpdateConfirmation = false;
     otaStatus = { statusMessage: 'Starting OTA update...', progress: 0 };
 
-    // Construct full URLs for firmware and signature if paths are relative
-    // Assuming gh-pages serves from root. Adjust if your setup is different.
-    const baseUrl = isWeb ? window.location.origin : ''; // For native, might need full URL if not bundled
+    const baseUrl = isWeb ? window.location.origin : ''; 
 
     const firmwareUrl = `${baseUrl}${latestFirmware.path}`;
     const signatureUrl = `${baseUrl}${latestFirmware.signaturePath}`;
@@ -330,14 +325,14 @@
         signatureUrl,
         (statusUpdate) => {
           otaStatus = statusUpdate;
+          notifications = [`${new Date().toLocaleTimeString()} [OTA]: ${statusUpdate.statusMessage}${statusUpdate.progress !== undefined ? ' ('+statusUpdate.progress+'%)' : ''}`, ...notifications].slice(0,20);
           if (statusUpdate.isComplete || statusUpdate.isError) {
             otaInProgress = false;
-            // Optionally re-fetch device info after a successful update and reboot
             if (!statusUpdate.isError && statusUpdate.statusMessage.includes("OTA_SUCCESS_REBOOTING")) {
               setTimeout(async () => {
                 statusMessage = "OTA complete. Device rebooting. Re-fetching info...";
-                await handleGetDeviceInfo(); // Attempt to get new info
-              }, 10000); // Wait 10s for reboot and reconnection
+                await handleGetDeviceInfo(); 
+              }, 10000); 
             }
           }
         }
@@ -345,6 +340,7 @@
     } catch (error: any) {
       console.error('OTA process error:', error);
       otaStatus = { statusMessage: `OTA Error: ${error.message}`, isError: true, isComplete: true };
+      notifications = [`${new Date().toLocaleTimeString()} [OTA ERROR]: ${error.message}`, ...notifications].slice(0,20);
       otaInProgress = false;
     }
   }
@@ -379,7 +375,7 @@
 
       {#if isWeb}
         <div class="web-info">
-          <p><strong>Web Mode:</strong> Uses browser\'s device picker instead of continuous scanning.</p>
+          <p><strong>Web Mode:</strong> Uses browser's device picker instead of continuous scanning.</p>
           <p>Requires HTTPS and works best in Chrome/Edge browsers.</p>
           
           {#if selectedDevice && services.length === 0}
@@ -395,7 +391,7 @@
               <p><strong>💡 Tips:</strong></p>
               <ul>
                 <li>Try the "Retry Service Discovery" button after waiting a few seconds</li>
-                <li>If you know your ESP32\'s service UUIDs, contact the developer to add them</li>
+                <li>If you know your ESP32's service UUIDs, contact the developer to add them</li>
                 <li>Test with a different ESP32 sketch that uses standard services</li>
               </ul>
             </div>
@@ -437,13 +433,20 @@
             {isWeb ? 'Select ESP32 Device' : 'Scan for ESP32s'}
           </button>
         {:else if !isWeb}
-          <button class="btn secondary" on:click={handleStopScan}>\n            Stop Scanning\n          </button>
+          <button class="btn secondary" on:click={handleStopScan}>
+            Stop Scanning
+          </button>
         {/if}
       {/if}
 
       {#if selectedDevice}
-        <button class="btn danger" on:click={handleDisconnect} disabled={otaInProgress}>\n          Disconnect from {selectedDevice.name}\n        </button>
-        {#if services.length === 0 && !otaInProgress}\n          <button class="btn primary" on:click={handleRetryServiceDiscovery}>\n            Retry Service Discovery\n          </button>
+        <button class="btn danger" on:click={handleDisconnect} disabled={otaInProgress}>
+          Disconnect from {selectedDevice.name}
+        </button>
+        {#if services.length === 0 && !otaInProgress}
+          <button class="btn primary" on:click={handleRetryServiceDiscovery}>
+            Retry Service Discovery
+          </button>
         {/if}
       {/if}
     </div>
@@ -458,18 +461,24 @@
         {#if deviceInfo.heap !== undefined}
           <p><strong>Free Heap:</strong> {deviceInfo.heap} bytes</p>
         {/if}
-        <button class="btn secondary small" on:click={handleGetDeviceInfo} disabled={otaInProgress || checkingForUpdate}>\n          Refresh Info\n        </button>
+        <button class="btn secondary small" on:click={handleGetDeviceInfo} disabled={otaInProgress || checkingForUpdate}>
+          Refresh Info
+        </button>
       </div>
 
       <div class="ota-controls">
         {#if !otaInProgress}
-          <button class="btn primary" on:click={handleCheckForUpdate} disabled={checkingForUpdate}>\n            {checkingForUpdate ? 'Checking...' : 'Check for Updates'}\n          </button>
+          <button class="btn primary" on:click={handleCheckForUpdate} disabled={checkingForUpdate}>
+            {checkingForUpdate ? 'Checking...' : 'Check for Updates'}
+          </button>
         {/if}
 
         {#if latestFirmware && latestFirmware.version !== deviceInfo.fw_ver && !otaInProgress && showUpdateConfirmation}
           <div class="update-available">
             <p>New firmware available: <strong>{latestFirmware.version}</strong></p>
-            <button class="btn success" on:click={handlePerformOTAUpdate}>\n              Update to {latestFirmware.version}\n            </button>
+            <button class="btn success" on:click={handlePerformOTAUpdate}>
+              Update to {latestFirmware.version}
+            </button>
             <button class="btn secondary small" on:click={() => showUpdateConfirmation = false}>Dismiss</button>
           </div>
         {/if}
@@ -477,4 +486,537 @@
     </section>
   {/if}
 
-  {#if devices.length > 0 && !selectedDevice}\n    <section class="devices">\n      <h2>{isWeb ? 'Selected Devices' : 'Discovered Devices'} ({devices.length})</h2>\n      <div class="device-list">\n        {#each devices as device}\n          <div class="device-card">\n            <div class="device-header">\n              <div class="device-name">\n                {device.name || 'Unknown Device'}\n              </div>\n              <button class="btn primary small" on:click={() => handleConnect(device)}>\n                Connect\n              </button>\n            </div>\n            <div class="device-id">\n              {device.deviceId}\n            </div>\n            {#if device.rssi}\n              <div class="device-rssi">\n                Signal: {device.rssi} dBm\n              </div>\n            {/if}\n          </div>\n        {/each}\n      </div>\n    </section>\n  {/if}\n\n  {#if selectedDevice && services.length > 0}\n    <section class="services">\n      <h2>ESP32 Services & Characteristics (Debug)</h2>\n      <div class="write-section">\n        <input \n          bind:value={writeData} \n          placeholder="Enter data to send to ESP32 (RX char)" \n          class="write-input"\n          disabled={otaInProgress}\n        />\n      </div>\n      \n      <div class="services-list">\n        {#each services as service}\n          <div class="service-card">\n            <h3>Service: {service.uuid}</h3>\n            <div class="characteristics">\n              {#each service.characteristics as characteristic}\n                <div class="characteristic-card">\n                  <div class="char-header">\n                    <span class="char-uuid">{characteristic.uuid}</span>\n                    <div class="char-properties">\n                      {#if characteristic.properties.read}\n                        <span class="property read">R</span>\n                      {/if}\n                      {#if characteristic.properties.write || characteristic.properties.writeWithoutResponse}\n                        <span class="property write">W</span>\n                      {/if}\n                      {#if characteristic.properties.notify}\n                        <span class="property notify">N</span>\n                      {/if}\n                    </div>\n                  </div>\n                  <div class="char-actions">\n                    {#if characteristic.properties.read}\n                      <button class="btn secondary small" on:click={() => handleRead(service.uuid, characteristic.uuid)} disabled={otaInProgress}>\n                        Read\n                      </button>\n                    {/if}\n                    {#if characteristic.properties.write || characteristic.properties.writeWithoutResponse}\n                      <button class="btn primary small" on:click={() => handleWrite(service.uuid, characteristic.uuid)} disabled={otaInProgress}>\n                        Write\n                      </button>\n                    {/if}\n                    {#if characteristic.properties.notify}\n                      <button class="btn info small" on:click={() => handleStartNotifications(service.uuid, characteristic.uuid)} disabled={otaInProgress}>\n                        Notify\n                      </button>\n                      <button class="btn secondary small" on:click={() => handleStopNotifications(service.uuid, characteristic.uuid)} disabled={otaInProgress}>\n                        Stop\n                      </button>\n                    {/if}\n                  </div>\n                </div>\n              {/each}\n            </div>\n          </div>\n        {/each}\n      </div>\n    </section>\n  {/if}\n\n  {#if notifications.length > 0}\n    <section class="notifications">\n      <h2>ESP32 Notifications (TX & OTA Status)</h2>\n      <div class="notifications-list">\n        {#each notifications as notification}\n          <div class="notification-item">\n            {notification}\n          </div>\n        {/each}\n      </div>\n    </section>\n  {/if}\n\n  <footer>\n    <p>Built with SvelteKit + Capacitor + Bluetooth LE</p>\n    <p>Ready for ESP32 communication on iOS, Android, and Web</p>\n    <div class="build-info">\n      <p><strong>Build Info:</strong></p>\n      <p>📦 Version: <code>{buildInfo.version}</code></p>\n      <p>📦 Commit: <code>{buildInfo.commitHash}</code></p>\n      <p>🕒 Built: {buildInfo.buildDate}</p>\n      <p>💬 {buildInfo.commitMessage}</p>\n    </div>\n  </footer>\n</main>\n\n<style>\n  .progress-bar-container {\n    width: 100%;\n    background-color: rgba(255, 255, 255, 0.2);\n    border-radius: 4px;\n    margin-bottom: 1rem;\n    overflow: hidden;\n  }\n  .progress-bar {\n    width: 0%;\n    height: 10px;\n    background-color: #22c55e; /* green-500 */\n    border-radius: 4px;\n    transition: width 0.3s ease-in-out;\n  }\n  .ota-section {\n    margin-top: 2rem;\n    margin-bottom: 2rem;\n  }\n  .device-info-card, .ota-controls {\n    background: rgba(255, 255, 255, 0.1);\n    backdrop-filter: blur(10px);\n    border-radius: 12px;\n    padding: 1.5rem;\n    margin-bottom: 1rem;\n    border: 1px solid rgba(255, 255, 255, 0.2);\n  }\n  .device-info-card h3, .ota-controls h3 {\n    margin-top: 0;\n  }\n  .update-available {\n    margin-top: 1rem;\n    padding: 1rem;\n    background: rgba(34, 197, 94, 0.1);\n    border: 1px solid rgba(34, 197, 94, 0.2);\n    border-radius: 8px;\n  }\n  .update-available p {\n    margin: 0 0 0.5rem 0;\n  }\n  .btn.success {\n    background: linear-gradient(135deg, #10b981, #059669);\n    color: white;\n  }\n  .btn.success:hover {\n    transform: translateY(-2px);\n    box-shadow: 0 8px 16px rgba(16, 185, 129, 0.3);\n  }\n\n  header {\n    text-align: center;\n    margin-bottom: 3rem;\n  }\n\n  h1 {\n    font-size: 3rem;\n    margin: 0;\n    text-shadow: 2px 2px 4px rgba(0,0,0,0.3);\n  }\n\n  .subtitle {\n    font-size: 1.2rem;\n    margin: 0.5rem 0;\n    opacity: 0.9;\n  }\n\n  .company {\n    font-size: 1rem;\n    opacity: 0.7;\n    margin: 0;\n  }\n\n  .status-card {\n    background: rgba(255, 255, 255, 0.1);\n    backdrop-filter: blur(10px);\n    border-radius: 16px;\n    padding: 2rem;\n    margin-bottom: 2rem;\n    border: 1px solid rgba(255, 255, 255, 0.2);\n  }\n\n  .status-card h2 {\n    margin-top: 0;\n    margin-bottom: 1rem;\n  }\n\n  .status-message {\n    font-size: 1.1rem;\n    margin-bottom: 1.5rem;\n    padding: 1rem;\n    border-radius: 8px;\n    background: rgba(255, 255, 255, 0.1);\n  }\n\n  .status-message.success {\n    background: rgba(34, 197, 94, 0.2);\n    border: 1px solid rgba(34, 197, 94, 0.3);\n  }\n\n  .status-message.error {\n    background: rgba(239, 68, 68, 0.2);\n    border: 1px solid rgba(239, 68, 68, 0.3);\n  }\n\n  .web-info {\n    background: rgba(59, 130, 246, 0.2);\n    border: 1px solid rgba(59, 130, 246, 0.3);\n    border-radius: 8px;\n    padding: 1rem;\n    margin-bottom: 1.5rem;\n    font-size: 0.9rem;\n  }\n\n  .web-info p {\n    margin: 0.5rem 0;\n  }\n\n  .troubleshooting {\n    background: rgba(245, 158, 11, 0.2);\n    border: 1px solid rgba(245, 158, 11, 0.3);\n    border-radius: 8px;\n    padding: 1rem;\n    margin-top: 1rem;\n  }\n\n  .troubleshooting h4 {\n    margin: 0 0 0.5rem 0;\n    color: #fbbf24;\n  }\n\n  .troubleshooting ul {\n    margin: 0.5rem 0;\n    padding-left: 1.5rem;\n  }\n\n  .troubleshooting li {\n    margin: 0.25rem 0;\n    font-size: 0.85rem;\n  }\n\n  .indicators {\n    display: flex;\n    gap: 1rem;\n    flex-wrap: wrap;\n  }\n\n  .indicator {\n    display: flex;\n    align-items: center;\n    gap: 0.5rem;\n    padding: 0.5rem 1rem;\n    border-radius: 8px;\n    background: rgba(255, 255, 255, 0.1);\n    opacity: 0.5;\n    transition: opacity 0.3s ease;\n  }\n\n  .indicator.active {\n    opacity: 1;\n    background: rgba(34, 197, 94, 0.2);\n  }\n\n  .control-buttons {\n    display: flex;\n    gap: 1rem;\n    justify-content: center;\n    margin-bottom: 2rem;\n    flex-wrap: wrap;\n  }\n\n  .btn {\n    padding: 1rem 2rem;\n    border: none;\n    border-radius: 12px;\n    font-size: 1.1rem;\n    font-weight: 600;\n    cursor: pointer;\n    transition: all 0.3s ease;\n    text-transform: uppercase;\n    letter-spacing: 0.5px;\n  }\n\n  .btn.small {\n    padding: 0.5rem 1rem;\n    font-size: 0.9rem;\n  }\n\n  .btn.primary {\n    background: linear-gradient(135deg, #22c55e, #16a34a);\n    color: white;\n  }\n\n  .btn.primary:hover {\n    transform: translateY(-2px);\n    box-shadow: 0 8px 16px rgba(34, 197, 94, 0.3);\n  }\n\n  .btn.secondary {\n    background: linear-gradient(135deg, #f59e0b, #d97706);\n    color: white;\n  }\n\n  .btn.secondary:hover {\n    transform: translateY(-2px);\n    box-shadow: 0 8px 16px rgba(245, 158, 11, 0.3);\n  }\n\n  .btn.danger {\n    background: linear-gradient(135deg, #ef4444, #dc2626);\n    color: white;\n  }\n\n  .btn.danger:hover {\n    transform: translateY(-2px);\n    box-shadow: 0 8px 16px rgba(239, 68, 68, 0.3);\n  }\n\n  .btn.info {\n    background: linear-gradient(135deg, #3b82f6, #2563eb);\n    color: white;\n  }\n\n  .btn.info:hover {\n    transform: translateY(-2px);\n    box-shadow: 0 8px 16px rgba(59, 130, 246, 0.3);\n  }\n\n  .devices h2, .services h2, .notifications h2 {\n    margin-bottom: 1rem;\n  }\n\n  .device-list, .services-list {\n    display: grid;\n    gap: 1rem;\n  }\n\n  .device-card, .service-card {\n    background: rgba(255, 255, 255, 0.1);\n    backdrop-filter: blur(10px);\n    border-radius: 12px;\n    padding: 1.5rem;\n    border: 1px solid rgba(255, 255, 255, 0.2);\n  }\n\n  .device-header {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    margin-bottom: 0.5rem;\n  }\n\n  .device-name {\n    font-size: 1.2rem;\n    font-weight: 600;\n  }\n\n  .device-id {\n    font-family: monospace;\n    font-size: 0.9rem;\n    opacity: 0.7;\n    margin-bottom: 0.5rem;\n  }\n\n  .device-rssi {\n    font-size: 0.9rem;\n    color: #22c55e;\n  }\n\n  .write-section {\n    margin-bottom: 2rem;\n  }\n\n  .write-input {\n    width: 100%;\n    padding: 1rem;\n    border: 1px solid rgba(255, 255, 255, 0.3);\n    border-radius: 8px;\n    background: rgba(255, 255, 255, 0.1);\n    color: white;\n    font-size: 1rem;\n  }\n\n  .write-input::placeholder {\n    color: rgba(255, 255, 255, 0.7);\n  }\n\n  .service-card h3 {\n    margin: 0 0 1rem 0;\n    font-size: 1rem;\n    opacity: 0.9;\n  }\n\n  .characteristics {\n    display: grid;\n    gap: 1rem;\n  }\n\n  .characteristic-card {\n    background: rgba(255, 255, 255, 0.05);\n    border-radius: 8px;\n    padding: 1rem;\n  }\n\n  .char-header {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    margin-bottom: 1rem;\n  }\n\n  .char-uuid {\n    font-family: monospace;\n    font-size: 0.8rem;\n    opacity: 0.8;\n  }\n\n  .char-properties {\n    display: flex;\n    gap: 0.25rem;\n  }\n\n  .property {\n    padding: 0.25rem 0.5rem;\n    border-radius: 4px;\n    font-size: 0.7rem;\n    font-weight: bold;\n  }\n\n  .property.read {\n    background: rgba(34, 197, 94, 0.3);\n  }\n\n  .property.write {\n    background: rgba(59, 130, 246, 0.3);\n  }\n\n  .property.notify {\n    background: rgba(245, 158, 11, 0.3);\n  }\n\n  .char-actions {\n    display: flex;\n    gap: 0.5rem;\n    flex-wrap: wrap;\n  }\n\n  .notifications-list {\n    max-height: 300px;\n    overflow-y: auto;\n    background: rgba(0, 0, 0, 0.2);\n    border-radius: 8px;\n    padding: 1rem;\n  }\n\n  .notification-item {\n    padding: 0.5rem;\n    border-bottom: 1px solid rgba(255, 255, 255, 0.1);\n    font-family: monospace;\n    font-size: 0.9rem;\n  }\n\n  .notification-item:last-child {\n    border-bottom: none;\n  }\n\n  footer {\n    text-align: center;\n    margin-top: 3rem;\n    opacity: 0.7;\n  }\n\n  footer p {\n    margin: 0.5rem 0;\n  }\n\n  .build-info {\n    margin-top: 1.5rem;\n    padding: 1rem;\n    background: rgba(0, 0, 0, 0.2);\n    border-radius: 8px;\n    font-size: 0.85rem;\n  }\n\n  .build-info code {\n    background: rgba(255, 255, 255, 0.2);\n    padding: 0.2rem 0.4rem;\n    border-radius: 4px;\n    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;\n  }\n\n  @media (max-width: 768px) {\n    /* Removed main padding override to be consistent with global layout */\n    \n    h1 {\n      font-size: 2rem;\n    }\n    \n    .control-buttons {\n      flex-direction: column;\n      align-items: center;\n    }\n    \n    .btn {\n      width: 100%;\n      max-width: 300px;\n    }\n\n    .device-header {\n      flex-direction: column;\n      align-items: flex-start;\n      gap: 1rem;\n    }\n\n    .char-header {\n      flex-direction: column;\n      align-items: flex-start;\n      gap: 0.5rem;\n    }\n  }\n</style>
+  {#if devices.length > 0 && !selectedDevice}
+    <section class="devices">
+      <h2>{isWeb ? 'Selected Devices' : 'Discovered Devices'} ({devices.length})</h2>
+      <div class="device-list">
+        {#each devices as device}
+          <div class="device-card">
+            <div class="device-header">
+              <div class="device-name">
+                {device.name || 'Unknown Device'}
+              </div>
+              <button class="btn primary small" on:click={() => handleConnect(device)}>
+                Connect
+              </button>
+            </div>
+            <div class="device-id">
+              {device.deviceId}
+            </div>
+            {#if device.rssi}
+              <div class="device-rssi">
+                Signal: {device.rssi} dBm
+              </div>
+            {/if}
+          </div>
+        {/each}
+      </div>
+    </section>
+  {/if}
+
+  {#if selectedDevice && services.length > 0}
+    <section class="services">
+      <h2>ESP32 Services & Characteristics (Debug)</h2>
+      <div class="write-section">
+        <input 
+          bind:value={writeData} 
+          placeholder="Enter data to send to ESP32 (RX char)" 
+          class="write-input"
+          disabled={otaInProgress}
+        />
+      </div>
+      
+      <div class="services-list">
+        {#each services as service}
+          <div class="service-card">
+            <h3>Service: {service.uuid}</h3>
+            <div class="characteristics">
+              {#each service.characteristics as characteristic}
+                <div class="characteristic-card">
+                  <div class="char-header">
+                    <span class="char-uuid">{characteristic.uuid}</span>
+                    <div class="char-properties">
+                      {#if characteristic.properties.read}
+                        <span class="property read">R</span>
+                      {/if}
+                      {#if characteristic.properties.write || characteristic.properties.writeWithoutResponse}
+                        <span class="property write">W</span>
+                      {/if}
+                      {#if characteristic.properties.notify}
+                        <span class="property notify">N</span>
+                      {/if}
+                    </div>
+                  </div>
+                  <div class="char-actions">
+                    {#if characteristic.properties.read}
+                      <button class="btn secondary small" on:click={() => handleRead(service.uuid, characteristic.uuid)} disabled={otaInProgress}>
+                        Read
+                      </button>
+                    {/if}
+                    {#if characteristic.properties.write || characteristic.properties.writeWithoutResponse}
+                      <button class="btn primary small" on:click={() => handleWrite(service.uuid, characteristic.uuid)} disabled={otaInProgress}>
+                        Write
+                      </button>
+                    {/if}
+                    {#if characteristic.properties.notify}
+                      <button class="btn info small" on:click={() => handleStartNotifications(service.uuid, characteristic.uuid)} disabled={otaInProgress}>
+                        Notify
+                      </button>
+                      <button class="btn secondary small" on:click={() => handleStopNotifications(service.uuid, characteristic.uuid)} disabled={otaInProgress}>
+                        Stop
+                      </button>
+                    {/if}
+                  </div>
+                </div>
+              {/each}
+            </div>
+          </div>
+        {/each}
+      </div>
+    </section>
+  {/if}
+
+  {#if notifications.length > 0}
+    <section class="notifications">
+      <h2>ESP32 Notifications (TX & OTA Status)</h2>
+      <div class="notifications-list">
+        {#each notifications as notification}
+          <div class="notification-item">
+            {notification}
+          </div>
+        {/each}
+      </div>
+    </section>
+  {/if}
+
+  <footer>
+    <p>Built with SvelteKit + Capacitor + Bluetooth LE</p>
+    <p>Ready for ESP32 communication on iOS, Android, and Web</p>
+    <div class="build-info">
+      <p><strong>Build Info:</strong></p>
+      <p>📦 Version: <code>{buildInfo.version}</code></p>
+      <p>📦 Commit: <code>{buildInfo.commitHash}</code></p>
+      <p>🕒 Built: {buildInfo.buildDate}</p>
+      <p>💬 {buildInfo.commitMessage}</p>
+    </div>
+  </footer>
+</main>
+
+<style>
+  .progress-bar-container {
+    width: 100%;
+    background-color: rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    margin-bottom: 1rem;
+    overflow: hidden;
+  }
+  .progress-bar {
+    width: 0%;
+    height: 10px;
+    background-color: #22c55e; /* green-500 */
+    border-radius: 4px;
+    transition: width 0.3s ease-in-out;
+  }
+  .ota-section {
+    margin-top: 2rem;
+    margin-bottom: 2rem;
+  }
+  .device-info-card, .ota-controls {
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 1rem;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+  }
+  .device-info-card h3, .ota-controls h3 {
+    margin-top: 0;
+  }
+  .update-available {
+    margin-top: 1rem;
+    padding: 1rem;
+    background: rgba(34, 197, 94, 0.1);
+    border: 1px solid rgba(34, 197, 94, 0.2);
+    border-radius: 8px;
+  }
+  .update-available p {
+    margin: 0 0 0.5rem 0;
+  }
+  .btn.success {
+    background: linear-gradient(135deg, #10b981, #059669);
+    color: white;
+  }
+  .btn.success:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 16px rgba(16, 185, 129, 0.3);
+  }
+
+  header {
+    text-align: center;
+    margin-bottom: 3rem;
+  }
+
+  h1 {
+    font-size: 3rem;
+    margin: 0;
+    text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+  }
+
+  .subtitle {
+    font-size: 1.2rem;
+    margin: 0.5rem 0;
+    opacity: 0.9;
+  }
+
+  .company {
+    font-size: 1rem;
+    opacity: 0.7;
+    margin: 0;
+  }
+
+  .status-card {
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+    border-radius: 16px;
+    padding: 2rem;
+    margin-bottom: 2rem;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+  }
+
+  .status-card h2 {
+    margin-top: 0;
+    margin-bottom: 1rem;
+  }
+
+  .status-message {
+    font-size: 1.1rem;
+    margin-bottom: 1.5rem;
+    padding: 1rem;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  .status-message.success {
+    background: rgba(34, 197, 94, 0.2);
+    border: 1px solid rgba(34, 197, 94, 0.3);
+  }
+
+  .status-message.error {
+    background: rgba(239, 68, 68, 0.2);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+  }
+
+  .web-info {
+    background: rgba(59, 130, 246, 0.2);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1.5rem;
+    font-size: 0.9rem;
+  }
+
+  .web-info p {
+    margin: 0.5rem 0;
+  }
+
+  .troubleshooting {
+    background: rgba(245, 158, 11, 0.2);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    border-radius: 8px;
+    padding: 1rem;
+    margin-top: 1rem;
+  }
+
+  .troubleshooting h4 {
+    margin: 0 0 0.5rem 0;
+    color: #fbbf24;
+  }
+
+  .troubleshooting ul {
+    margin: 0.5rem 0;
+    padding-left: 1.5rem;
+  }
+
+  .troubleshooting li {
+    margin: 0.25rem 0;
+    font-size: 0.85rem;
+  }
+
+  .indicators {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+
+  .indicator {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.1);
+    opacity: 0.5;
+    transition: opacity 0.3s ease;
+  }
+
+  .indicator.active {
+    opacity: 1;
+    background: rgba(34, 197, 94, 0.2);
+  }
+
+  .control-buttons {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+    margin-bottom: 2rem;
+    flex-wrap: wrap;
+  }
+
+  .btn {
+    padding: 1rem 2rem;
+    border: none;
+    border-radius: 12px;
+    font-size: 1.1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .btn.small {
+    padding: 0.5rem 1rem;
+    font-size: 0.9rem;
+  }
+
+  .btn.primary {
+    background: linear-gradient(135deg, #22c55e, #16a34a);
+    color: white;
+  }
+
+  .btn.primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 16px rgba(34, 197, 94, 0.3);
+  }
+
+  .btn.secondary {
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+    color: white;
+  }
+
+  .btn.secondary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 16px rgba(245, 158, 11, 0.3);
+  }
+
+  .btn.danger {
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+    color: white;
+  }
+
+  .btn.danger:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 16px rgba(239, 68, 68, 0.3);
+  }
+
+  .btn.info {
+    background: linear-gradient(135deg, #3b82f6, #2563eb);
+    color: white;
+  }
+
+  .btn.info:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 16px rgba(59, 130, 246, 0.3);
+  }
+
+  .devices h2, .services h2, .notifications h2 {
+    margin-bottom: 1rem;
+  }
+
+  .device-list, .services-list {
+    display: grid;
+    gap: 1rem;
+  }
+
+  .device-card, .service-card {
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+    border-radius: 12px;
+    padding: 1.5rem;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+  }
+
+  .device-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+  }
+
+  .device-name {
+    font-size: 1.2rem;
+    font-weight: 600;
+  }
+
+  .device-id {
+    font-family: monospace;
+    font-size: 0.9rem;
+    opacity: 0.7;
+    margin-bottom: 0.5rem;
+  }
+
+  .device-rssi {
+    font-size: 0.9rem;
+    color: #22c55e;
+  }
+
+  .write-section {
+    margin-bottom: 2rem;
+  }
+
+  .write-input {
+    width: 100%;
+    padding: 1rem;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+    font-size: 1rem;
+  }
+
+  .write-input::placeholder {
+    color: rgba(255, 255, 255, 0.7);
+  }
+
+  .service-card h3 {
+    margin: 0 0 1rem 0;
+    font-size: 1rem;
+    opacity: 0.9;
+  }
+
+  .characteristics {
+    display: grid;
+    gap: 1rem;
+  }
+
+  .characteristic-card {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    padding: 1rem;
+  }
+
+  .char-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+  }
+
+  .char-uuid {
+    font-family: monospace;
+    font-size: 0.8rem;
+    opacity: 0.8;
+  }
+
+  .char-properties {
+    display: flex;
+    gap: 0.25rem;
+  }
+
+  .property {
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: bold;
+  }
+
+  .property.read {
+    background: rgba(34, 197, 94, 0.3);
+  }
+
+  .property.write {
+    background: rgba(59, 130, 246, 0.3);
+  }
+
+  .property.notify {
+    background: rgba(245, 158, 11, 0.3);
+  }
+
+  .char-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .notifications-list {
+    max-height: 300px;
+    overflow-y: auto;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 8px;
+    padding: 1rem;
+  }
+
+  .notification-item {
+    padding: 0.5rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    font-family: monospace;
+    font-size: 0.9rem;
+  }
+
+  .notification-item:last-child {
+    border-bottom: none;
+  }
+
+  footer {
+    text-align: center;
+    margin-top: 3rem;
+    opacity: 0.7;
+  }
+
+  footer p {
+    margin: 0.5rem 0;
+  }
+
+  .build-info {
+    margin-top: 1.5rem;
+    padding: 1rem;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 8px;
+    font-size: 0.85rem;
+  }
+
+  .build-info code {
+    background: rgba(255, 255, 255, 0.2);
+    padding: 0.2rem 0.4rem;
+    border-radius: 4px;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  }
+
+  @media (max-width: 768px) {    
+    h1 {
+      font-size: 2rem;
+    }
+    
+    .control-buttons {
+      flex-direction: column;
+      align-items: center;
+    }
+    
+    .btn {
+      width: 100%;
+      max-width: 300px;
+    }
+
+    .device-header {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 1rem;
+    }
+
+    .char-header {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.5rem;
+    }
+  }
+</style>
