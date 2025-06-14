@@ -13,7 +13,7 @@ const connectedDevices = new Map<string, any>();
 
 // Configuration for ESP32 service UUIDs
 let esp32ServiceUUIDs: string[] = [
-  // LED Service (BluMon custom service) - ONLY service to look for
+  // LED Service (Blumon custom service) - ONLY service to look for
   'a0be83e4-8dc9-47f0-ab40-b19721d20ed1'
 ];
 
@@ -132,7 +132,7 @@ function startWebBluetoothScan(
 ): Promise<void> {
   // Only look for the specific LED service UUID
   const commonServiceUUIDs = [
-    // LED Service (BluMon custom service) - ONLY service to look for
+    // LED Service (Blumon custom service) - ONLY service to look for
     'a0be83e4-8dc9-47f0-ab40-b19721d20ed1',
     ...esp32ServiceUUIDs,
     ...((options?.services || []) as string[])
@@ -147,7 +147,7 @@ function startWebBluetoothScan(
         { namePrefix: 'esp32' },
         { namePrefix: 'Arduino' },
         { namePrefix: 'MyESP32' },
-        { namePrefix: 'BluMon' },
+        { namePrefix: 'Blumon' },
         { namePrefix: 'blumon' }
       ],
       optionalServices: commonServiceUUIDs

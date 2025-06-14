@@ -15,7 +15,7 @@
 // LED Array
 CRGB leds[NUM_LEDS];
 
-// NimBLE LED Service (BluMon custom LED service UUID)
+// NimBLE LED Service (Blumon custom LED service UUID)
 #define SERVICE_UUID           "a0be83e4-8dc9-47f0-ab40-b19721d20ed1"
 #define CHARACTERISTIC_UUID_RX "a0be83e5-8dc9-47f0-ab40-b19721d20ed1"
 #define CHARACTERISTIC_UUID_TX "a0be83e6-8dc9-47f0-ab40-b19721d20ed1"
@@ -64,7 +64,7 @@ class CharacteristicCallbacks: public NimBLECharacteristicCallbacks {
                 pTxCharacteristic->setValue(response.c_str());
                 pTxCharacteristic->notify();
             } else if (receivedData == "info") {
-                String response = "BluMon ESP32 - FastLED Rainbow Demo (NimBLE)";
+                String response = "Blumon ESP32 - FastLED Rainbow Demo (NimBLE)";
                 pTxCharacteristic->setValue(response.c_str());
                 pTxCharacteristic->notify();
             }
@@ -113,7 +113,7 @@ void setup() {
     
     // Initialize NimBLE
     Serial.println("Initializing NimBLE...");
-    NimBLEDevice::init("BluMon_ESP32");
+    NimBLEDevice::init("Blumon_ESP32");
     
     // Create BLE Server
     pServer = NimBLEDevice::createServer();
@@ -146,7 +146,7 @@ void setup() {
     NimBLEDevice::startAdvertising();
     
     Serial.println("NimBLE UART Service started - waiting for connections...");
-    Serial.println("Device name: BluMon_ESP32");
+    Serial.println("Device name: Blumon_ESP32");
     
     Serial.println("Setup complete - Starting rainbow animation");
     Serial.printf("Free heap: %d bytes\n", ESP.getFreeHeap());

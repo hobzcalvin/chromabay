@@ -1,6 +1,6 @@
-# BluMon ESP32 Project
+# Blumon ESP32 Project
 
-This is the ESP32 firmware for the BluMon LED controller project.
+This is the ESP32 firmware for the Blumon LED controller project.
 
 ## Quick Start (from project root)
 
@@ -49,7 +49,7 @@ npm run esp32:full
 
 ## BLE UART Service
 
-The ESP32 advertises as **"BluMon_ESP32"** with custom LED Service:
+The ESP32 advertises as **"Blumon_ESP32"** with custom LED Service:
 
 - **Service UUID**: `a0be83e4-8dc9-47f0-ab40-b19721d20ed1`
 - **RX Characteristic**: `a0be83e5-8dc9-47f0-ab40-b19721d20ed1` (receive commands)
@@ -118,7 +118,7 @@ The project uses custom build flags to:
 
 ## Commands
 
-Connect via Bluetooth Serial (device name: "BluMon_ESP32") and send:
+Connect via Bluetooth Serial (device name: "Blumon_ESP32") and send:
 - `status` - Get LED and system status
 - `info` - Get chip and memory information
 
