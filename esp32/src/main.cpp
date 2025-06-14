@@ -7,6 +7,7 @@
 
 #include "led_manager.h" // Include the new LED Manager
 #include "config_manager.h"   // Restore MessagePack config handling
+#include "firmware_version.h" // Include firmware version header
 
 // LED Configuration (some of these are now defaults for LedManager config)
 #define LED_PIN     13
@@ -23,11 +24,27 @@ LedConfig::ConfigManager configMgr(ledMgr);
 
 // NimBLE LED Service (Blumon custom LED service UUID - restored)
 #define SERVICE_UUID           "a0be83e4-8dc9-47f0-ab40-b19721d20ed1"
+// Original RX/TX Characteristics
 #define CHARACTERISTIC_UUID_RX "a0be83e5-8dc9-47f0-ab40-b19721d20ed1"
 #define CHARACTERISTIC_UUID_TX "a0be83e6-8dc9-47f0-ab40-b19721d20ed1"
 
+// New OTA Characteristics
+#define CHARACTERISTIC_UUID_DEVICE_INFO "a0be83e7-8dc9-47f0-ab40-b19721d20ed1"
+#define CHARACTERISTIC_UUID_OTA_CONTROL "a0be83e8-8dc9-47f0-ab40-b19721d20ed1"
+#define CHARACTERISTIC_UUID_OTA_DATA    "a0be83e9-8dc9-47f0-ab40-b19721d20ed1"
+#define CHARACTERISTIC_UUID_OTA_STATUS  "a0be83ea-8dc9-47f0-ab40-b19721d20ed1"
+
+
 NimBLEServer* pServer = nullptr;
+// Original RX/TX Characteristics
 NimBLECharacteristic* pTxCharacteristic = nullptr;
+// OTA Characteristics
+NimBLECharacteristic* pDeviceInfoCharacteristic = nullptr;
+NimBLECharacteristic* pOTAControlCharacteristic = nullptr;
+NimBLECharacteristic* pOTADataCharacteristic = nullptr;
+NimBLECharacteristic* pOTAStatusCharacteristic = nullptr;
+
+
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
 String receivedData = "";
@@ -50,7 +67,7 @@ class ServerCallbacks: public NimBLEServerCallbacks {
     }
 };
 
-// NimBLE Characteristic Callbacks (for receiving data)
+// NimBLE Characteristic Callbacks (for original RX characteristic)
 class CharacteristicCallbacks: public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic* pCharacteristic) {
         std::string rxValue = pCharacteristic->getValue();
@@ -60,9 +77,8 @@ class CharacteristicCallbacks: public NimBLECharacteristicCallbacks {
             for (int i = 0; i < rxValue.length(); i++) {
                 receivedData += rxValue[i];
             }
-            Serial.println("BLE Received: " + receivedData);
+            Serial.println("BLE Received (RX): " + receivedData);
             
-            // Process BLE commands here
             if (receivedData == "status") {
                 String response = "LEDs: " + String(ledMgr.getNumStrips() > 0 ? ledMgr.getStrip(0)->getLength() : 0) + 
                                 ", Brightness: " + String(ledMgr.getGlobalBrightness()) + 
@@ -82,12 +98,83 @@ class CharacteristicCallbacks: public NimBLECharacteristicCallbacks {
     }
 };
 
+// Callback for Device Info Characteristic (Read-Only)
+class DeviceInfoCallbacks : public NimBLECharacteristicCallbacks {
+    void onRead(NimBLECharacteristic* pCharacteristic) {
+        Serial.println("Device Info Characteristic Read Request");
+        // Construct JSON response
+        String deviceInfoJson = "{";
+        deviceInfoJson += "\"fw_ver\":\"" + String(FIRMWARE_VERSION) + "\",";
+        deviceInfoJson += "\"hw_ver\":\"" + String(HARDWARE_VERSION) + "\",";
+        deviceInfoJson += "\"heap\":" + String(ESP.getFreeHeap());
+        // Add more info if needed, e.g., MAC address, uptime, etc.
+        // deviceInfoJson += ",\"mac\":\"" + String(NimBLEDevice::getAddress().toString().c_str()) + "\"";
+        deviceInfoJson += "}";
+        
+        pCharacteristic->setValue(deviceInfoJson.c_str());
+        Serial.println("Sent Device Info: " + deviceInfoJson);
+    }
+};
+
+// Callback for OTA Control Characteristic (Write)
+class OTAControlCallbacks : public NimBLECharacteristicCallbacks {
+    void onWrite(NimBLECharacteristic* pCharacteristic) {
+        std::string value = pCharacteristic->getValue();
+        Serial.print("OTA Control Received: ");
+        if (value.length() > 0) {
+            Serial.println(value.c_str());
+            // Basic command handling (placeholder)
+            if (value == "START_OTA") {
+                Serial.println("OTA Start command received. Placeholder for OTA logic.");
+                if (pOTAStatusCharacteristic) {
+                    pOTAStatusCharacteristic->setValue("OTA_STARTED");
+                    pOTAStatusCharacteristic->notify();
+                }
+            } else if (value == "END_OTA") {
+                Serial.println("OTA End command received. Placeholder.");
+                 if (pOTAStatusCharacteristic) {
+                    pOTAStatusCharacteristic->setValue("OTA_ENDED_CMD"); // Example status
+                    pOTAStatusCharacteristic->notify();
+                }
+            } else if (value == "ABORT_OTA") {
+                Serial.println("OTA Abort command received. Placeholder.");
+                if (pOTAStatusCharacteristic) {
+                    pOTAStatusCharacteristic->setValue("OTA_ABORTED_CMD"); // Example status
+                    pOTAStatusCharacteristic->notify();
+                }
+            }
+        } else {
+            Serial.println("(empty)");
+        }
+    }
+};
+
+// Callback for OTA Data Characteristic (Write Without Response)
+class OTADataCallbacks : public NimBLECharacteristicCallbacks {
+    void onWrite(NimBLECharacteristic* pCharacteristic) {
+        std::string value = pCharacteristic->getValue();
+        // For WriteWithoutResponse, often just process data directly.
+        // Serial output here might be too slow for actual OTA.
+        // Serial.printf("OTA Data Chunk Received: %d bytes\n", value.length());
+        
+        // Placeholder for esp_ota_write(ota_handle, value.data(), value.length());
+        // For now, just acknowledge receipt by blinking an LED or similar minimal action if needed for debug.
+        // Or send a status update via pOTAStatusCharacteristic after N chunks.
+        static int chunkCount = 0;
+        chunkCount++;
+        if (chunkCount % 10 == 0 && pOTAStatusCharacteristic) { // Example: notify every 10 chunks
+             String status = "RX_CHUNK_" + String(chunkCount);
+             pOTAStatusCharacteristic->setValue(status.c_str());
+             pOTAStatusCharacteristic->notify();
+        }
+    }
+};
+
+
 void pushCRGBToStrip() {
     if (ledMgr.getNumStrips() > 0) { 
         LedConfig::LedBus* strip0 = ledMgr.getStrip(0);
         if (strip0) {
-            // Ensure we don't write past the physical strip length
-            // or past the `leds` buffer size.
             uint16_t count = min((uint16_t)strip0->getLength(), (uint16_t)NUM_LEDS);
             for (int i = 0; i < count; i++) {
                 strip0->setPixelColor(i, leds[i]);
@@ -99,13 +186,13 @@ void pushCRGBToStrip() {
 void setup() {
     Serial.begin(115200);
     delay(1000); 
-    Serial.println("ESP32 LedManager Rainbow Test Starting...");
+    Serial.println("ESP32 LedManager + OTA Demo Starting...");
+    Serial.println("Firmware Version: " + String(FIRMWARE_VERSION));
+    Serial.println("Hardware Version: " + String(HARDWARE_VERSION));
 
-    // ------------------------------------------------------------------
-    // Filesystem & Configuration
-    // ------------------------------------------------------------------
+
     Serial.println("Mounting LittleFS (once)...");
-    if (!LittleFS.begin(true)) { // true = format if mount failed
+    if (!LittleFS.begin(true)) { 
         Serial.println("LittleFS Mount Failed - continuing WITHOUT filesystem for config.");
     } else {
         Serial.println("LittleFS Mounted Successfully");
@@ -131,7 +218,7 @@ void setup() {
     if (!configLoadedAndApplied || ledMgr.getNumStrips() == 0) {
         if (!configLoadedAndApplied) {
             Serial.println("Config load/apply reported failure.");
-        } else { // implies ledMgr.getNumStrips() == 0
+        } else { 
             Serial.println("Config applied but resulted in 0 LED strips.");
         }
         Serial.println("Falling back to built-in default LED strip configuration …");
@@ -147,7 +234,6 @@ void setup() {
     } else {
         Serial.println("Configuration successfully loaded and applied from file.");
         Serial.println("Calling ledMgr.begin() for loaded configuration …");
-        // Brightness should have been loaded from config or set by applyConfiguration
         ledMgr.begin();
         Serial.println("ledMgr.begin() finished for loaded configuration.");
     }
@@ -163,7 +249,7 @@ void setup() {
                           static_cast<int>(cfg.chipset),
                           static_cast<int>(cfg.colorOrder),
                           cfg.rmtChannel,
-                          strip0->getBrightness()); // This gets strip-specific, LedManager global is separate
+                          strip0->getBrightness()); 
              if (cfg.numLeds != NUM_LEDS) {
                 Serial.printf("WARNING: Strip 0 configured with %d LEDs, but main code expects NUM_LEDS = %d for CRGB buffer.\n", cfg.numLeds, NUM_LEDS);
             }
@@ -194,37 +280,68 @@ void setup() {
     }
     
     Serial.println("Initializing NimBLE...");
-    NimBLEDevice::init("Blumon_ESP32"); // Restored original device name
+    NimBLEDevice::init("Blumon_ESP32"); 
     
     pServer = NimBLEDevice::createServer();
     pServer->setCallbacks(new ServerCallbacks());
     
-    NimBLEService *pService = pServer->createService(SERVICE_UUID); // Restored original UUID
+    NimBLEService *pService = pServer->createService(SERVICE_UUID); 
     
+    // Original TX Characteristic (for sending data to client)
     pTxCharacteristic = pService->createCharacteristic(
-                        CHARACTERISTIC_UUID_TX, // Restored original UUID
+                        CHARACTERISTIC_UUID_TX, 
                         NIMBLE_PROPERTY::NOTIFY
                       );
     
+    // Original RX Characteristic (for receiving data from client)
     NimBLECharacteristic* pRxCharacteristic = pService->createCharacteristic(
-                                               CHARACTERISTIC_UUID_RX, // Restored original UUID
+                                               CHARACTERISTIC_UUID_RX, 
                                                NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR
                                              );
     pRxCharacteristic->setCallbacks(new CharacteristicCallbacks());
+
+    // --- New OTA Characteristics ---
+    // Device Info Characteristic (Read-Only, Notify for potential future dynamic updates)
+    pDeviceInfoCharacteristic = pService->createCharacteristic(
+                                CHARACTERISTIC_UUID_DEVICE_INFO,
+                                NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY
+                              );
+    pDeviceInfoCharacteristic->setCallbacks(new DeviceInfoCallbacks()); // Handles onRead
+
+    // OTA Control Characteristic (Write)
+    pOTAControlCharacteristic = pService->createCharacteristic(
+                                CHARACTERISTIC_UUID_OTA_CONTROL,
+                                NIMBLE_PROPERTY::WRITE // Use WRITE for acknowledged commands
+                              );
+    pOTAControlCharacteristic->setCallbacks(new OTAControlCallbacks());
+
+    // OTA Data Characteristic (Write Without Response for speed)
+    pOTADataCharacteristic = pService->createCharacteristic(
+                                CHARACTERISTIC_UUID_OTA_DATA,
+                                NIMBLE_PROPERTY::WRITE_NR // WRITE_NO_RESPONSE
+                             );
+    pOTADataCharacteristic->setCallbacks(new OTADataCallbacks());
+
+    // OTA Status Characteristic (Notify)
+    pOTAStatusCharacteristic = pService->createCharacteristic(
+                                CHARACTERISTIC_UUID_OTA_STATUS,
+                                NIMBLE_PROPERTY::NOTIFY
+                               );
+    // No specific callback needed for pOTAStatusCharacteristic as ESP32 writes to it.
+    // -------------------------------
     
     pService->start();
     
     NimBLEAdvertising *pAdvertising = NimBLEDevice::getAdvertising();
-    pAdvertising->addServiceUUID(SERVICE_UUID); // Restored original UUID
+    pAdvertising->addServiceUUID(SERVICE_UUID); 
     pAdvertising->setScanResponse(false);
     pAdvertising->setMinPreferred(0x0);
     NimBLEDevice::startAdvertising();
     
-    Serial.println("NimBLE LED Service started - waiting for connections...");
+    Serial.println("NimBLE Service (incl. OTA Chars) started - waiting for connections...");
     Serial.println("Device name: Blumon_ESP32");
     Serial.println("Advertising Service UUID: " + String(SERVICE_UUID));
-    Serial.println("RX Characteristic UUID: " + String(CHARACTERISTIC_UUID_RX));
-    Serial.println("TX Characteristic UUID: " + String(CHARACTERISTIC_UUID_TX));
+    // Could print all characteristic UUIDs for debugging if needed
     
     Serial.println("Setup complete - Starting rainbow animation");
     Serial.printf("Free heap: %d bytes\n", ESP.getFreeHeap());

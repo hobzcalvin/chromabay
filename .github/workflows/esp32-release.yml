@@ -1,0 +1,128 @@
+name: ESP32 Firmware Release
+
+on:
+  push:
+    tags:
+      - 'esp32-v*'
+
+jobs:
+  build_and_deploy_esp32_firmware:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Allow peaceiris/actions-gh-pages to push to the gh-pages branch
+      pages: write    # If using GitHub Pages deployments via artifacts (not used here but good to be aware)
+      id-token: write # If using OIDC for deployments (not used here)
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11' # PlatformIO generally works well with recent Python 3 versions
+
+      - name: Install PlatformIO Core
+        run: pip install platformio
+
+      - name: Cache PlatformIO Core and dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio/packages
+            ~/.platformio/.cache
+          key: ${{ runner.os }}-platformio-${{ hashFiles('esp32/platformio.ini') }}
+
+      - name: Get Version Information
+        id: versions
+        run: |
+          FIRMWARE_TAG_VERSION="${{ github.ref_name }}"
+          echo "FIRMWARE_TAG_VERSION=${FIRMWARE_TAG_VERSION}" >> $GITHUB_ENV
+          
+          # Extract hardware version from firmware_version.h
+          # Assumes format: #define HARDWARE_VERSION "esp32-hw-vX.Y"
+          HARDWARE_VERSION_LINE=$(grep '#define HARDWARE_VERSION' esp32/src/firmware_version.h)
+          if [[ -z "$HARDWARE_VERSION_LINE" ]]; then
+            echo "Error: HARDWARE_VERSION define not found in esp32/src/firmware_version.h"
+            exit 1
+          fi
+          HARDWARE_VERSION=$(echo "$HARDWARE_VERSION_LINE" | awk -F'"' '{print $2}')
+          if [[ -z "$HARDWARE_VERSION" ]]; then
+            echo "Error: Could not parse HARDWARE_VERSION from esp32/src/firmware_version.h"
+            exit 1
+          fi
+          echo "HARDWARE_VERSION=${HARDWARE_VERSION}" >> $GITHUB_ENV
+          
+          echo "Firmware Tag Version: ${FIRMWARE_TAG_VERSION}"
+          echo "Hardware Version: ${HARDWARE_VERSION}"
+
+      - name: Build ESP32 Firmware
+        run: |
+          cd esp32
+          pio run -e esp32dev # Assuming 'esp32dev' is your target environment
+        working-directory: ./ # Run pio from the root, but it will find project in esp32/
+
+      - name: Prepare deployment artifacts
+        run: |
+          mkdir -p ./ota_staging/firmware/esp32/${{ env.FIRMWARE_TAG_VERSION }}
+          cp esp32/.pio/build/esp32dev/firmware.bin ./ota_staging/firmware/esp32/${{ env.FIRMWARE_TAG_VERSION }}/firmware.bin
+          echo "Firmware binary prepared at ./ota_staging/firmware/esp32/${{ env.FIRMWARE_TAG_VERSION }}/firmware.bin"
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Create/Update Firmware Registry
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO_NAME: ${{ github.repository }}
+        run: |
+          REGISTRY_FILE_ON_GHPAGES="firmware/esp32/esp32_firmware_registry.json"
+          LOCAL_STAGING_REGISTRY_PATH="./ota_staging/${REGISTRY_FILE_ON_GHPAGES}"
+          
+          mkdir -p $(dirname "${LOCAL_STAGING_REGISTRY_PATH}")
+
+          # Clone gh-pages branch to a temporary directory to fetch existing registry
+          git clone --depth=1 --branch=gh-pages "https://x-access-token:${GH_TOKEN}@github.com/${REPO_NAME}.git" gh_pages_temp
+          
+          EXISTING_REGISTRY_CONTENT="[]" # Default to empty array
+          if [ -f "gh_pages_temp/${REGISTRY_FILE_ON_GHPAGES}" ]; then
+            TEMP_CONTENT=$(cat "gh_pages_temp/${REGISTRY_FILE_ON_GHPAGES}")
+            if echo "${TEMP_CONTENT}" | jq empty > /dev/null 2>&1; then
+              EXISTING_REGISTRY_CONTENT="${TEMP_CONTENT}"
+              echo "Found existing registry."
+            else
+              echo "Existing registry file is not valid JSON. Initializing new registry."
+            fi
+          else
+            echo "No existing registry file found. Initializing new registry."
+          fi
+          rm -rf gh_pages_temp
+
+          FIRMWARE_PATH_IN_REGISTRY="firmware/esp32/${FIRMWARE_TAG_VERSION}/firmware.bin"
+          BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          NEW_ENTRY=$(jq -n \
+            --arg ver "${FIRMWARE_TAG_VERSION}" \
+            --arg hwver "${HARDWARE_VERSION}" \
+            --arg path "${FIRMWARE_PATH_IN_REGISTRY}" \
+            --arg date "${BUILD_DATE}" \
+            '{version: $ver, hardwareVersion: $hwver, path: $path, date: $date}')
+          
+          echo "New registry entry: ${NEW_ENTRY}"
+          
+          UPDATED_REGISTRY=$(echo "${EXISTING_REGISTRY_CONTENT}" | jq --argjson new_entry "${NEW_ENTRY}" '[$new_entry] + .')
+          
+          echo "${UPDATED_REGISTRY}" > "${LOCAL_STAGING_REGISTRY_PATH}"
+          echo "Firmware registry created/updated at ${LOCAL_STAGING_REGISTRY_PATH}"
+          cat "${LOCAL_STAGING_REGISTRY_PATH}"
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./ota_staging # This directory contains firmware/esp32/...
+          publish_branch: gh-pages
+          keep_files: true # Important to not overwrite SvelteKit app or other files
+          user_name: 'github-actions[bot]'
+          user_email: 'github-actions[bot]@users.noreply.github.com'
+          commit_message: Deploy ESP32 firmware ${{ env.FIRMWARE_TAG_VERSION }} and update registry
