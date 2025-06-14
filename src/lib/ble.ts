@@ -11,44 +11,8 @@ function isWeb(): boolean {
 // Store connected devices and their GATT servers
 const connectedDevices = new Map<string, any>();
 
-// Configuration for ESP32 service UUIDs
-let esp32ServiceUUIDs: string[] = [
-  // LED Service (Blumon custom service) - ONLY service to look for
-  'a0be83e4-8dc9-47f0-ab40-b19721d20ed1'
-];
-
-/**
- * Configure ESP32 service UUIDs for Web Bluetooth
- * Call this before scanning to add your custom service UUIDs
- * 
- * IMPORTANT FOR WEB BLUETOOTH:
- * If your ESP32 uses custom service UUIDs, you MUST add them here
- * or they won't be accessible in web browsers.
- * 
- * @param serviceUUIDs Array of service UUID strings
- */
-export function configureESP32Services(serviceUUIDs: string[]): void {
-  esp32ServiceUUIDs = [...esp32ServiceUUIDs, ...serviceUUIDs];
-  console.log('Configured ESP32 services:', esp32ServiceUUIDs);
-}
-
-/**
- * Add a single ESP32 service UUID
- * @param serviceUUID Single service UUID string
- */
-export function addESP32Service(serviceUUID: string): void {
-  if (!esp32ServiceUUIDs.includes(serviceUUID)) {
-    esp32ServiceUUIDs.push(serviceUUID);
-    console.log('Added ESP32 service:', serviceUUID);
-  }
-}
-
-/**
- * Get current ESP32 service UUIDs
- */
-export function getESP32Services(): string[] {
-  return [...esp32ServiceUUIDs];
-}
+// Blumon LED Service UUID - the only service we care about
+const LED_SERVICE_UUID = 'a0be83e4-8dc9-47f0-ab40-b19721d20ed1';
 
 /**
  * Initialize the Bluetooth Low Energy client
@@ -100,21 +64,22 @@ export async function enableBle(): Promise<void> {
 }
 
 /**
- * Start scanning for BLE devices
+ * Start scanning for BLE devices with Blumon LED service
  * On web, this uses requestDevice instead of requestLEScan
  * IMPORTANT: For web, this MUST be called directly from a user interaction event handler
  */
 export async function startScan(
-  callback: (result: any) => void,
-  options?: any
+  callback: (result: any) => void
 ): Promise<void> {
   if (isWeb()) {
     // For web, we need to call requestDevice synchronously from user gesture
-    return startWebBluetoothScan(callback, options);
+    return startWebBluetoothScan(callback);
   } else {
-    // Use native scanning for iOS/Android
+    // Use native scanning for iOS/Android - only look for LED service
     try {
-      await BleClient.requestLEScan(options || {}, callback);
+      await BleClient.requestLEScan({
+        services: [LED_SERVICE_UUID]
+      }, callback);
     } catch (error) {
       console.error('Error starting BLE scan:', error);
       throw error;
@@ -123,34 +88,18 @@ export async function startScan(
 }
 
 /**
- * Start Web Bluetooth device selection
+ * Start Web Bluetooth device selection for Blumon LED service
  * This function must be called directly from a user interaction event handler
  */
 function startWebBluetoothScan(
-  callback: (result: any) => void,
-  options?: any
+  callback: (result: any) => void
 ): Promise<void> {
-  // Only look for the specific LED service UUID
-  const commonServiceUUIDs = [
-    // LED Service (Blumon custom service) - ONLY service to look for
-    'a0be83e4-8dc9-47f0-ab40-b19721d20ed1',
-    ...esp32ServiceUUIDs,
-    ...((options?.services || []) as string[])
-  ];
-
-  // Return a promise that resolves immediately with the device selection
   return new Promise((resolve, reject) => {
-    // First try with specific filters
     navigator.bluetooth.requestDevice({
       filters: [
-        { namePrefix: 'ESP32' },
-        { namePrefix: 'esp32' },
-        { namePrefix: 'Arduino' },
-        { namePrefix: 'MyESP32' },
-        { namePrefix: 'Blumon' },
-        { namePrefix: 'blumon' }
+        { services: [LED_SERVICE_UUID] }
       ],
-      optionalServices: commonServiceUUIDs
+      optionalServices: [LED_SERVICE_UUID]
     }).then(device => {
       callback({
         device: {
@@ -160,26 +109,9 @@ function startWebBluetoothScan(
         }
       });
       resolve();
-    }).catch(filterError => {
-      console.log('Filtered device selection failed, trying acceptAllDevices...', filterError);
-      
-      // Fallback to acceptAllDevices if filtering fails
-      navigator.bluetooth.requestDevice({
-        acceptAllDevices: true,
-        optionalServices: commonServiceUUIDs
-      }).then(device => {
-        callback({
-          device: {
-            deviceId: device.id,
-            name: device.name || 'Unknown Device',
-            webDevice: device
-          }
-        });
-        resolve();
-      }).catch(error => {
-        console.error('Error starting BLE scan:', error);
-        reject(error);
-      });
+    }).catch(error => {
+      console.error('Error selecting BLE device:', error);
+      reject(error);
     });
   });
 }

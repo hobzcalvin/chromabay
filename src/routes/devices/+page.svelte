@@ -13,8 +13,7 @@
     readCharacteristic,
     writeCharacteristic,
     startNotifications,
-    stopNotifications,
-    addESP32Service
+    stopNotifications
   } from '$lib/ble';
   import { Capacitor } from '@capacitor/core';
 
