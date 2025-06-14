@@ -114,76 +114,97 @@ export async function enableBle(): Promise<void> {
 /**
  * Start scanning for BLE devices
  * On web, this uses requestDevice instead of requestLEScan
+ * IMPORTANT: For web, this MUST be called directly from a user interaction event handler
  */
 export async function startScan(
   callback: (result: any) => void,
   options?: any
 ): Promise<void> {
-  try {
-    if (isWeb()) {
-      // Comprehensive list of ESP32 and common BLE service UUIDs
-      const commonServiceUUIDs = [
-        // Standard Bluetooth services
-        '0000180f-0000-1000-8000-00805f9b34fb', // Battery Service
-        '0000180a-0000-1000-8000-00805f9b34fb', // Device Information Service
-        '00001800-0000-1000-8000-00805f9b34fb', // Generic Access
-        '00001801-0000-1000-8000-00805f9b34fb', // Generic Attribute
-        
-        // Nordic UART Service (very common with ESP32)
-        '6e400001-b5a3-f393-e0a9-e50e24dcca9e',
-        
-        // ESP32 Arduino BLE Library default services
-        '4fafc201-1fb5-459e-8fcc-c5c9c331914b', // Common ESP32 service
-        
-        // Custom ESP32 services (add your specific UUIDs here)
-        ...esp32ServiceUUIDs,
-        ...((options?.services || []) as string[])
-      ];
-
-      try {
-        // First try with specific services for better compatibility
-        const device = await navigator.bluetooth.requestDevice({
-          filters: [
-            { namePrefix: 'ESP32' },
-            { namePrefix: 'esp32' },
-            { namePrefix: 'Arduino' },
-            { namePrefix: 'MyESP32' }
-          ],
-          optionalServices: commonServiceUUIDs
-        });
-        
-        callback({
-          device: {
-            deviceId: device.id,
-            name: device.name || 'Unknown Device',
-            webDevice: device
-          }
-        });
-      } catch (filterError) {
-        console.log('Filtered device selection failed, trying acceptAllDevices...', filterError);
-        
-        // Fallback to acceptAllDevices if filtering fails
-        const device = await navigator.bluetooth.requestDevice({
-          acceptAllDevices: true,
-          optionalServices: commonServiceUUIDs
-        });
-        
-        callback({
-          device: {
-            deviceId: device.id,
-            name: device.name || 'Unknown Device',
-            webDevice: device
-          }
-        });
-      }
-    } else {
-      // Use native scanning for iOS/Android
+  if (isWeb()) {
+    // For web, we need to call requestDevice synchronously from user gesture
+    return startWebBluetoothScan(callback, options);
+  } else {
+    // Use native scanning for iOS/Android
+    try {
       await BleClient.requestLEScan(options || {}, callback);
+    } catch (error) {
+      console.error('Error starting BLE scan:', error);
+      throw error;
     }
-  } catch (error) {
-    console.error('Error starting BLE scan:', error);
-    throw error;
   }
+}
+
+/**
+ * Start Web Bluetooth device selection
+ * This function must be called directly from a user interaction event handler
+ */
+function startWebBluetoothScan(
+  callback: (result: any) => void,
+  options?: any
+): Promise<void> {
+  // Comprehensive list of ESP32 and common BLE service UUIDs
+  const commonServiceUUIDs = [
+    // Standard Bluetooth services
+    '0000180f-0000-1000-8000-00805f9b34fb', // Battery Service
+    '0000180a-0000-1000-8000-00805f9b34fb', // Device Information Service
+    '00001800-0000-1000-8000-00805f9b34fb', // Generic Access
+    '00001801-0000-1000-8000-00805f9b34fb', // Generic Attribute
+    
+    // Nordic UART Service (very common with ESP32)
+    '6e400001-b5a3-f393-e0a9-e50e24dcca9e',
+    
+    // ESP32 Arduino BLE Library default services
+    '4fafc201-1fb5-459e-8fcc-c5c9c331914b', // Common ESP32 service
+    
+    // Custom ESP32 services (add your specific UUIDs here)
+    ...esp32ServiceUUIDs,
+    ...((options?.services || []) as string[])
+  ];
+
+  // Return a promise that resolves immediately with the device selection
+  return new Promise((resolve, reject) => {
+    // First try with specific filters
+    navigator.bluetooth.requestDevice({
+      filters: [
+        { namePrefix: 'ESP32' },
+        { namePrefix: 'esp32' },
+        { namePrefix: 'Arduino' },
+        { namePrefix: 'MyESP32' },
+        { namePrefix: 'BluMon' },
+        { namePrefix: 'blumon' }
+      ],
+      optionalServices: commonServiceUUIDs
+    }).then(device => {
+      callback({
+        device: {
+          deviceId: device.id,
+          name: device.name || 'Unknown Device',
+          webDevice: device
+        }
+      });
+      resolve();
+    }).catch(filterError => {
+      console.log('Filtered device selection failed, trying acceptAllDevices...', filterError);
+      
+      // Fallback to acceptAllDevices if filtering fails
+      navigator.bluetooth.requestDevice({
+        acceptAllDevices: true,
+        optionalServices: commonServiceUUIDs
+      }).then(device => {
+        callback({
+          device: {
+            deviceId: device.id,
+            name: device.name || 'Unknown Device',
+            webDevice: device
+          }
+        });
+        resolve();
+      }).catch(error => {
+        console.error('Error starting BLE scan:', error);
+        reject(error);
+      });
+    });
+  });
 }
 
 /**

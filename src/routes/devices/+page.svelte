@@ -62,38 +62,39 @@
     }
   }
 
-  async function handleStartScan() {
+  function handleStartScan() {
     if (!bleEnabled) {
       statusMessage = 'Please enable Bluetooth first';
       return;
     }
 
-    try {
-      scanning = true;
-      devices = [];
-      statusMessage = isWeb ? 'Opening device picker...' : 'Scanning for devices...';
-      
-      await startScan((result) => {
-        // Add unique devices to the list
-        const existingDevice = devices.find(d => d.deviceId === result.device.deviceId);
-        if (!existingDevice) {
-          devices = [...devices, result.device];
-        }
-      });
-      
+    scanning = true;
+    devices = [];
+    statusMessage = isWeb ? 'Opening device picker...' : 'Scanning for devices...';
+    
+    // For web, call startScan synchronously to preserve user gesture
+    startScan((result) => {
+      // Add unique devices to the list
+      const existingDevice = devices.find(d => d.deviceId === result.device.deviceId);
+      if (!existingDevice) {
+        devices = [...devices, result.device];
+      }
+    }).then(() => {
       if (isWeb) {
         scanning = false;
         statusMessage = `Device selected. Found ${devices.length} device(s).`;
       }
-    } catch (error: any) {
+    }).catch((error: any) => {
       scanning = false;
       if (error.name === 'NotFoundError') {
         statusMessage = 'No device selected or no devices found';
+      } else if (error.name === 'SecurityError') {
+        statusMessage = 'Bluetooth access denied. Make sure you clicked the button directly and your site is on HTTPS (or localhost).';
       } else {
         statusMessage = 'Failed to start scanning';
       }
       console.error('Scan error:', error);
-    }
+    });
   }
 
   async function handleStopScan() {
