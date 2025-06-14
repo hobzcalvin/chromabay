@@ -1,0 +1,14 @@
+# PlatformIO build artifacts
+.pio/
+
+# Temporary files and debugging artifacts
+*.bin
+default_partitions.bin
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db

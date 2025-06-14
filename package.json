@@ -20,7 +20,11 @@
 		"deploy": "npm run deploy:docs",
 		"bundle:create": "node scripts/deploy-live-update.js",
 		"bundle:live": "npm run build && node scripts/deploy-live-update.js",
-		"clear-cache": "rm -rf .svelte-kit node_modules/.vite build docs && echo '✅ All caches cleared!'"
+		"clear-cache": "rm -rf .svelte-kit node_modules/.vite build docs && echo '✅ All caches cleared!'",
+		"esp32:build": "cd esp32 && pio run",
+		"esp32:upload": "cd esp32 && pio run --target upload",
+		"esp32:monitor": "cd esp32 && pio device monitor --baud 115200",
+		"esp32:full": "npm run esp32:upload && npm run esp32:monitor"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-auto": "^6.0.0",
