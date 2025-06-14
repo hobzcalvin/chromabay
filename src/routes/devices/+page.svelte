@@ -629,7 +629,7 @@
     margin-bottom: 1rem;
     border: 1px solid rgba(255, 255, 255, 0.2);
   }
-  .device-info-card h3, .ota-controls h3 {
+  .device-info-card h3 { /* Removed .ota-controls h3 as it's not used */
     margin-top: 0;
   }
   .update-available {

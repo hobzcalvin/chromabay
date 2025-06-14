@@ -419,19 +419,21 @@ async function sendFirmwareChunk(deviceId: string, chunk: ArrayBuffer): Promise<
     });
 
   } else {
-    // Native: Write and rely on a separate notification subscription for ACKs
+    // Native: Write and use a short delay. Flow control relies on ESP32 handling speed.
     return new Promise(async (resolve, reject) => {
-        // The ACK will come via the global OTA_DATA notification listener
-        // We need a way to correlate this specific write to its ACK.
-        // For simplicity here, we'll assume the next notification IS the ACK.
-        // A more robust system would use a transaction ID or sequence number.
-        const tempListener = (ackValue: DataView) => {
-            // console.log('[OTA] Native ACK received:', dataViewToText(ackValue));
-            BleClient.removeListener('notification|' + deviceId + '|' + LED_SERVICE_UUID + '|' + CHARACTERISTIC_UUID_OTA_DATA, tempListener);
-            resolve();
-        };
-        BleClient.addListener('notification|' + deviceId + '|' + LED_SERVICE_UUID + '|' + CHARACTERISTIC_UUID_OTA_DATA, tempListener);
-        await BleClient.writeWithoutResponse(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_OTA_DATA, dataView).catch(reject);
+        try {
+            await BleClient.writeWithoutResponse(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_OTA_DATA, dataView);
+            // Short delay to allow ESP32 to process and to roughly pace sending.
+            // This is not true flow control but a simple pacing mechanism.
+            // The ESP32 will send a notification on this characteristic as an ACK,
+            // which will be picked up by the global listener in performOTAUpdate if active.
+            setTimeout(() => {
+                // console.log('[OTA] Native chunk sent, assuming processed after delay.');
+                resolve();
+            }, 50); // e.g., 50ms delay, can be tuned. A more robust solution would wait for the ACK.
+        } catch (err) {
+            reject(err);
+        }
     });
   }
 }
@@ -490,13 +492,12 @@ export async function performOTAUpdate(
     // await sendOTAControlCommand(deviceId, 'START_OTA'); // Or send total size
 
     // 3. Start listening for ACKs on OTA_DATA characteristic (if not already globally handled)
-    //    For native, this is tricky as BleClient.startNotifications is global per characteristic.
-    //    We'll set up a temporary listener within sendFirmwareChunk for native for now.
-    //    For web, the listener is per-characteristic object.
-    if (!isWeb()) { // For native, ensure notifications are globally started for OTA_DATA for ACKs
+    //    The ESP32 will send a notification on OTA_DATA characteristic after processing each chunk.
+    //    This global listener is for debugging/logging these ACKs.
+    //    The sendFirmwareChunk function handles its own ACK logic (web) or pacing (native).
+    if (!isWeb()) { 
         await BleClient.startNotifications(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_OTA_DATA, (ackValue) => {
-            // This global listener will capture ACKs. sendFirmwareChunk will handle its own promise resolution.
-            // console.log('[OTA] Global ACK Listener (Native):', dataViewToText(ackValue));
+            // console.log('[OTA] Global ACK Listener (Native) for OTA_DATA:', dataViewToText(ackValue));
         });
         otaDataNotificationsStarted = true;
     }
@@ -518,7 +519,7 @@ export async function performOTAUpdate(
       
       // console.log(`[OTA] Sending chunk: offset ${offset}, size ${chunk.byteLength}`);
       await sendFirmwareChunk(deviceId, chunk);
-      // console.log(`[OTA] Chunk sent, ACK received for offset ${offset}`);
+      // console.log(`[OTA] Chunk sent, (assumed) ACK received for offset ${offset}`);
       
       offset = chunkEnd;
       const progress = Math.round((offset / totalSize) * 100);

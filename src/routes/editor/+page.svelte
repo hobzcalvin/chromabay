@@ -25,7 +25,7 @@
   
   // Editor cleanup state - managed here so external closures can reset it
   let deleteConfirmState = $state(false);
-  let deleteTimeout: ReturnType<typeof setTimeout> | undefined;
+  let deleteTimeout: ReturnType<typeof setTimeout> | undefined = $state(undefined);
   
   // Reactive check for active node
   const activeNode = $derived(parameterEditor ? $flowNodes.find(n => n.id === parameterEditor!.id) : null);
@@ -376,7 +376,7 @@
   
   <PatternSerializationPanel />
   
-  <div class="flow-container" bind:this={flowContainer} bind:clientWidth bind:clientHeight onmousemove={handleFlowMouseMove}>
+  <div class="flow-container" bind:this={flowContainer} bind:clientWidth bind:clientHeight onmousemove={handleFlowMouseMove} role="application">
     <SvelteFlow 
       bind:nodes={$flowNodes}
       bind:edges={$flowEdges}

@@ -5,8 +5,9 @@
 
   export let node: Node;
   export let onClose: () => void;
-  export let nodeElement: HTMLElement;
-  export let viewport: { x: number; y: number; zoom: number } = { x: 0, y: 0, zoom: 1 };
+  // Changed to const as per svelte-check warning if only for external reference / initial value
+  export const nodeElement: HTMLElement = undefined as any; // Initialized by parent
+  export const viewport: { x: number; y: number; zoom: number } = { x: 0, y: 0, zoom: 1 }; // Initialized by parent
   export let visible: boolean = true;
   export let top: number | undefined = undefined;
   export let left: number | undefined = undefined;
@@ -114,6 +115,10 @@
   onDestroy(() => {
     clearTimeout(deleteTimeout);
   });
+
+  function getUniqueInputId(paramName: string): string {
+    return `param-input-${node.id}-${paramName}`;
+  }
 </script>
 
 <div 
@@ -123,10 +128,11 @@
   onclick={(e) => e.stopPropagation()}
   onkeydown={(e) => e.stopPropagation()}
   role="dialog"
+  aria-labelledby="popover-header-title"
   tabindex="-1"
 >
   <div class="popover-header">
-    <h3>{node.data.label} Parameters</h3>
+    <h3 id="popover-header-title">{node.data.label} Parameters</h3>
     <div class="header-buttons">
       {#if node.data.type !== 'output'}
         <button 
@@ -137,19 +143,21 @@
           {deleteConfirmState ? 'Really?' : 'Delete'}
         </button>
       {/if}
-      <button class="close-btn" onclick={handleClose}>×</button>
+      <button class="close-btn" onclick={handleClose} aria-label="Close parameter editor">×</button>
     </div>
   </div>
   
   <div class="popover-content">
     {#if nodeDefinition && nodeDefinition.params.length > 0}
-      {#each nodeDefinition.params as param}
+      {#each nodeDefinition.params as param (param.name)}
+        {@const inputId = getUniqueInputId(param.name)}
         <div class="parameter-group">
-          <label class="parameter-label">{param.label}</label>
+          <label class="parameter-label" for={inputId}>{param.label}</label>
           
           {#if param.type === 'float'}
             <div class="float-control">
               <input 
+                id={inputId}
                 type="range" 
                 min="0" 
                 max="1" 
@@ -166,6 +174,7 @@
           {:else if param.type === 'range'}
             <div class="range-control">
               <input 
+                id={inputId}
                 type="range" 
                 min={param.min || 0} 
                 max={param.max || 100} 
@@ -182,6 +191,7 @@
           {:else if param.type === 'integer'}
             <div class="integer-control">
               <input 
+                id={inputId}
                 type="range" 
                 min={param.min || 0} 
                 max={param.max || 100} 
@@ -198,6 +208,7 @@
           {:else if param.type === 'color'}
             <div class="color-control">
               <input 
+                id={inputId}
                 type="color" 
                 value={getParameterValue(param)}
                 oninput={(e) => handleColorChange(param, e)}
@@ -207,6 +218,7 @@
           {:else if param.type === 'hue'}
             <div class="hue-control">
               <input 
+                id={inputId}
                 type="range" 
                 min="0" 
                 max="360" 
@@ -227,11 +239,12 @@
           {:else if param.type === 'select'}
             <div class="select-control">
               <select 
+                id={inputId}
                 value={getParameterValue(param)}
                 onchange={(e) => handleSelectChange(param, e)}
               >
                 {#if param.options}
-                  {#each param.options as option}
+                  {#each param.options as option (option.value)}
                     <option value={option.value}>{option.label}</option>
                   {/each}
                 {/if}
@@ -372,6 +385,7 @@
     border-radius: 2px;
     outline: none;
     -webkit-appearance: none;
+    appearance: none; /* Added for broader compatibility */
   }
 
   .float-control input[type="range"]::-webkit-slider-thumb,
@@ -451,6 +465,7 @@
     border-radius: 4px;
     cursor: pointer;
     background: none;
+    padding: 0; /* Ensure no extra padding affects size */
   }
 
   .color-value {
@@ -474,6 +489,9 @@
     padding: 6px 8px;
     cursor: pointer;
     outline: none;
+    appearance: none; /* Added for broader compatibility */
+    -webkit-appearance: none; /* For Safari */
+    -moz-appearance: none; /* For Firefox */
   }
 
   .select-control select:hover {

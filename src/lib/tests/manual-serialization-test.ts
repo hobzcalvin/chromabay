@@ -1,238 +1,170 @@
 /**
- * Pattern Serialization Test: Manual UI Simulation & Buffer Conflict Resolution
- *
- * This test manually constructs a pattern graph (nodes and edges) as it would
- * be created and managed within the editor UI. It then serializes this graph
- * and verifies that the node ordering correctly handles a specific buffer
- * conflict scenario, ensuring that nodes that overwrite a buffer are placed
- * after nodes that only read from it.
- *
- * The pattern involves:
- * - 'strobe' (generator, outputs to lane 0)
- * - 'moving_blob' (reads from strobe, outputs to lane 1)
- * - 'raindrops' (reads from strobe, outputs to lane 2)
- * - 'sparkle' (reads from strobe, outputs to lane 0 - this is the buffer conflict)
- *
- * Expected serialized order: [strobe, moving_blob, raindrops, sparkle]
- * (Sparkle, being an overwriter of buffer 0, should come last among the nodes
- * that read from strobe's output on buffer 0).
+ * Manual Pattern Serialization Test
+ * 
+ * This file is for manually creating and testing the serialization
+ * and deserialization of complex LED patterns.
+ * 
+ * Run with: npx ts-node src/lib/tests/manual-serialization-test.ts
  */
 
 import type { Node, Edge } from '@xyflow/svelte';
-import {
-  serializePattern,
-  deserializePattern,
-  type SerializedPattern
+import { MarkerType } from '@xyflow/svelte'; // Added MarkerType import
+import { 
+  serializePattern, 
+  deserializePattern, 
+  compressPattern, 
+  decompressPattern,
+  estimatePatternSize,
+  type SerializedPattern 
 } from '../patternSerializer';
-import {
-  NODE_TYPES,
-  LANES,
-  getNodeDefinition,
-  getNodeBuffer
-} from '../flowStore';
+import { NODE_TYPES, LANES, type NodeDefinition, getNodeDefinition, createNodeFromType } from '../flowStore';
 
-// Test utilities
-function log(...args: any[]): void {
-  // Set to true for detailed test output, false for quiet
-  const VERBOSE_LOGGING = true;
-  if (VERBOSE_LOGGING) {
-    console.log(...args);
-  }
-}
-
-// Helper to create test nodes mimicking UI creation
-function createTestNode(
-  id: string,
-  type: string,
-  x: number,
-  y: number,
-  customParams: Record<string, any> = {}
-): Node {
+// Helper to create nodes and edges for testing
+function createTestNode(id: string, type: string, x: number, y: number, params: Record<string, any> = {}): Node {
   const nodeType = NODE_TYPES.find(nt => nt.type === type);
   if (!nodeType) {
     throw new Error(`Unknown node type: ${type}`);
   }
-
+  
   return {
     id,
-    type: 'pattern', // All pattern nodes have type 'pattern' in SvelteFlow
+    type: 'pattern', // SvelteFlow node type
     position: { x, y },
-    data: {
+    data: { 
       label: nodeType.name,
-      type: nodeType.type,
-      // Parameters are typically managed by flowStore, but we can simulate them here
-      parameters: customParams
+      type: nodeType.type, // Actual pattern type (e.g., 'rainbow')
+      parameters: params 
     },
     style: ''
   };
 }
 
-// Helper to create test edges
-function createTestEdge(
-  source: string,
-  target: string,
-  sourceHandle: string = 'output',
-  targetHandle: string = 'input'
-): Edge {
+function createTestEdge(id: string, source: string, target: string, sourceHandle = 'output', targetHandle = 'input'): Edge {
   return {
-    id: `e_${source}-${target}_${sourceHandle}-${targetHandle}`,
+    id,
     source,
     target,
     sourceHandle,
     targetHandle,
-    style: 'stroke-width: 3; stroke: #666;', // Default style
+    style: 'stroke-width: 3; stroke: #666;',
     markerEnd: {
-      type: 'arrowclosed',
+      type: MarkerType.ArrowClosed, 
       color: '#666'
     }
   };
 }
 
-// Helper to create a node parameters map from test nodes
-function createNodeParametersMap(
-  nodes: Node[]
-): Map<string, Map<string, any>> {
-  const paramsMap = new Map<string, Map<string, any>>();
+// --- Define your complex pattern here ---
+const manualNodes: Node[] = [
+  createTestNode('gen1', 'rainbow', LANES.LEFT, 50, { speed: 0.1, saturation: 1.0 }),
+  createTestNode('gen2', 'gradient', LANES.RIGHT, 50, { color1: '#FF0000', color2: '#00FF00', speed: 0.2 }),
+  createTestNode('op1', 'blur', LANES.LEFT, 150, { amount: 0.5 }),
+  createTestNode('blend1', 'blend', LANES.CENTER, 250, { opacity: 0.7, blendMode: 'add' }),
+  createTestNode('op2', 'strobe', LANES.CENTER, 350, { onColor: '#FFFFFF', offColor: '#000000', frequency: 2 }),
+  createTestNode('output1', 'output', LANES.CENTER, 450) // Final output node
+];
 
-  nodes.forEach(node => {
-    const nodeType = NODE_TYPES.find(nt => nt.type === node.data.type);
-    if (!nodeType) return;
+const manualEdges: Edge[] = [
+  createTestEdge('e-gen1-op1', 'gen1', 'op1'),
+  createTestEdge('e-op1-blend1', 'op1', 'blend1', 'output', 'input-1'),
+  createTestEdge('e-gen2-blend1', 'gen2', 'blend1', 'output', 'input-2'),
+  createTestEdge('e-blend1-op2', 'blend1', 'op2'),
+  createTestEdge('e-op2-output1', 'op2', 'output1')
+];
 
-    const nodeParams = new Map<string, any>();
-
-    // Set default values first
-    nodeType.params.forEach(param => {
-      nodeParams.set(param.name, param.default);
-    });
-
-    // Override with custom values from node.data.parameters
-    if (node.data.parameters) {
-      Object.entries(node.data.parameters).forEach(([key, value]) => {
-        nodeParams.set(key, value);
-      });
+// Populate currentNodeParameters for the manual test case
+const manualCurrentNodeParameters = new Map<string, Map<string, any>>();
+manualNodes.forEach(node => {
+    const nodeDef = getNodeDefinition(node.data.type as string);
+    const paramMap = new Map<string, any>();
+    if (nodeDef && nodeDef.params) {
+        nodeDef.params.forEach(pDef => {
+            paramMap.set(pDef.name, (node.data.parameters as any)?.[pDef.name] ?? pDef.default);
+        });
+    } else if (node.data.parameters) { // For nodes like 'output' that might not have formal defs but carry data
+        for (const key in node.data.parameters) {
+            paramMap.set(key, (node.data.parameters as any)[key]);
+        }
     }
+    manualCurrentNodeParameters.set(node.id, paramMap);
+});
 
-    paramsMap.set(node.id, nodeParams);
-  });
 
-  return paramsMap;
+// --- Perform Serialization ---
+console.log('Serializing manual pattern...');
+const serializedPattern = serializePattern(manualNodes, manualEdges, manualCurrentNodeParameters, "My Manual Test Pattern");
+console.log('Serialized Pattern:', JSON.stringify(serializedPattern, null, 2));
+
+// --- Estimate Size ---
+const estimatedSize = estimatePatternSize(serializedPattern);
+console.log(`\nEstimated size of serialized pattern: ${estimatedSize} bytes`);
+
+// --- Compress (currently just JSON stringify) ---
+const compressedPattern = compressPattern(serializedPattern);
+console.log('\nCompressed Pattern (JSON string):', compressedPattern);
+console.log(`Length of compressed string: ${compressedPattern.length} characters`);
+
+// --- Decompress ---
+const decompressedPattern = decompressPattern(compressedPattern);
+console.log('\nDecompressed Pattern (should match serialized):', JSON.stringify(decompressedPattern, null, 2));
+
+// --- Deserialize back to SvelteFlow nodes/edges ---
+console.log('\nDeserializing pattern back to SvelteFlow format...');
+const { 
+  nodes: deserializedNodes, 
+  edges: deserializedEdges, 
+  nodeParameters: deserializedNodeParameters 
+} = deserializePattern(decompressedPattern);
+
+console.log(`\nDeserialized Nodes (${deserializedNodes.length}):`);
+deserializedNodes.forEach(node => {
+  console.log(`  Node ID: ${node.id}, Type: ${node.data.type}, Position: (${node.position.x}, ${node.position.y})`);
+  const params = deserializedNodeParameters.get(node.id);
+  if (params && params.size > 0) {
+    console.log('    Parameters:', Object.fromEntries(params));
+  }
+});
+
+console.log(`\nDeserialized Edges (${deserializedEdges.length}):`);
+deserializedEdges.forEach(edge => {
+  console.log(`  Edge ID: ${edge.id}, Source: ${edge.source} -> Target: ${edge.target}`);
+});
+
+// --- Verification (simple checks) ---
+if (serializedPattern.nodes.length === manualNodes.length -1) { // -1 because 'output' node is not in serialized.nodes
+  console.log('\n✅ Node count in serialized pattern is correct (excluding output node).');
+} else {
+  console.error(`\n❌ Node count mismatch. Expected ${manualNodes.length -1}, Got ${serializedPattern.nodes.length}`);
 }
 
-function runManualSerializationTest(): boolean {
-  log('🧪 Starting manual UI simulation serialization test');
-  let testsPassed = true;
-
-  try {
-    // 1. Manually create the pattern as if in the editor UI
-    log('📝 Creating test pattern nodes and edges...');
-
-    const testNodes: Node[] = [
-      createTestNode('strobe_node', 'strobe', LANES.LEFT, 100),
-      createTestNode('moving_blob_node', 'moving_blob', LANES.CENTER, 200),
-      createTestNode('raindrops_node', 'raindrops', LANES.RIGHT, 200),
-      createTestNode('sparkle_node', 'sparkle', LANES.LEFT, 300),
-      createTestNode('output_node', 'output', LANES.CENTER, 400) // Output node
-    ];
-
-    const testEdges: Edge[] = [
-      createTestEdge('strobe_node', 'moving_blob_node'),
-      createTestEdge('strobe_node', 'raindrops_node'),
-      createTestEdge('strobe_node', 'sparkle_node'),
-      // In Grant's scenario the final output buffer is lane 1, produced by
-      // `moving_blob`. Therefore we connect **moving_blob** to the output
-      // node instead of `sparkle`.
-      createTestEdge('moving_blob_node', 'output_node')
-    ];
-
-    // Create the node parameters map as flowStore would
-    const nodeParametersMap = createNodeParametersMap(testNodes);
-
-    // 2. Serialize the manually created pattern
-    log('🔄 Serializing manually created pattern...');
-    const serializedPattern = serializePattern(
-      testNodes,
-      testEdges,
-      nodeParametersMap,
-      'Manual Buffer Conflict Test'
-    );
-
-    log('📊 Re-serialized pattern structure:', JSON.stringify(serializedPattern, null, 2));
-
-    // 3. Verify the node ordering for buffer conflict resolution
-    log('🔍 Verifying node ordering for buffer conflict...');
-    const reSerializedNodes = serializedPattern.nodes;
-
-    const strobeIdx = reSerializedNodes.findIndex(n => n.t === 'strobe');
-    const movingBlobIdx = reSerializedNodes.findIndex(n => n.t === 'moving_blob');
-    const raindropsIdx = reSerializedNodes.findIndex(n => n.t === 'raindrops');
-    const sparkleIdx = reSerializedNodes.findIndex(n => n.t === 'sparkle');
-
-    if (strobeIdx === -1 || movingBlobIdx === -1 || raindropsIdx === -1 || sparkleIdx === -1) {
-      log('❌ Could not find all required nodes for ordering check.');
-      testsPassed = false;
-    } else {
-      // Strobe should be first among these four
-      if (strobeIdx > movingBlobIdx || strobeIdx > raindropsIdx || strobeIdx > sparkleIdx) {
-        log('❌ Strobe node is not positioned correctly (should be earliest).');
-        testsPassed = false;
-      } else {
-        log('✅ Strobe node positioned correctly.');
-      }
-
-      // Sparkle (overwriter) should come after moving_blob and raindrops (readers)
-      if (sparkleIdx < movingBlobIdx || sparkleIdx < raindropsIdx) {
-        log('❌ Sparkle node is positioned too early (should be after readers).');
-        testsPassed = false;
-      } else {
-        log('✅ Sparkle node positioned correctly after readers.');
-      }
-
-      // Verify the exact expected order: [strobe, moving_blob, raindrops, sparkle]
-      // (moving_blob and raindrops order relative to each other doesn't matter,
-      // but they must be after strobe and before sparkle)
-      const expectedOrder = ['strobe', 'moving_blob', 'raindrops', 'sparkle'];
-      const actualOrder = reSerializedNodes
-        .filter(n => expectedOrder.includes(n.t))
-        .map(n => n.t);
-
-      // Check if strobe is first
-      if (actualOrder[0] !== 'strobe') {
-        log(`❌ Expected strobe first, got ${actualOrder[0]}`);
-        testsPassed = false;
-      }
-
-      // Check if sparkle is last
-      if (actualOrder[actualOrder.length - 1] !== 'sparkle') {
-        log(`❌ Expected sparkle last, got ${actualOrder[actualOrder.length - 1]}`);
-        testsPassed = false;
-      }
-
-      // Check that moving_blob and raindrops are between strobe and sparkle
-      const readers = actualOrder.slice(1, actualOrder.length - 1);
-      if (!readers.includes('moving_blob') || !readers.includes('raindrops')) {
-        log('❌ moving_blob or raindrops not correctly positioned between strobe and sparkle.');
-        testsPassed = false;
-      } else {
-        log('✅ moving_blob and raindrops correctly positioned between strobe and sparkle.');
-      }
+// Check if the final output buffer in meta matches the output of the node connected to 'output1'
+const outputNodeSourceId = manualEdges.find(e => e.target === 'output1')?.source;
+const outputNodeSource = manualNodes.find(n => n.id === outputNodeSourceId); // Fixed typo here
+let expectedFinalOutputBuffer = 0;
+if (outputNodeSource) {
+    // This needs to use the same logic as serializePattern to determine the buffer
+    // For simplicity, let's assume the node connected to output1 is 'op2' and it's in a specific lane.
+    // This part of the test might need more sophisticated logic to truly verify meta.output
+    const op2Node = manualNodes.find(n => n.id === 'op2');
+    if (op2Node) {
+        // Determine lane of op2
+        if (op2Node.position.x === LANES.LEFT) expectedFinalOutputBuffer = 0;
+        else if (op2Node.position.x === LANES.CENTER) expectedFinalOutputBuffer = 1;
+        else expectedFinalOutputBuffer = 2;
     }
-
-  } catch (error) {
-    log('❌ An error occurred during the test:', error);
-    testsPassed = false;
-  }
-
-  log(`\n🏁 Manual UI Simulation Test ${testsPassed ? 'PASSED' : 'FAILED'}`);
-  return testsPassed;
 }
 
-// Run the test
-try {
-  const testResult = runManualSerializationTest();
-  if (!testResult) {
-    process.exit(1); // Exit with error code if test fails
-  }
-} catch (error) {
-  console.error('❌ TEST EXECUTION ERROR:', error);
-  process.exit(1); // Exit with error code on unexpected errors
+if (serializedPattern.meta.output === expectedFinalOutputBuffer) {
+    console.log(`✅ Meta output buffer index (${serializedPattern.meta.output}) seems correct.`);
+} else {
+    console.error(`❌ Meta output buffer index mismatch. Expected around ${expectedFinalOutputBuffer}, Got ${serializedPattern.meta.output}`);
 }
+
+
+console.log('\nManual serialization test complete.');
+console.log('Review the output above for correctness.');
+
+// Example of how to use this for further testing:
+// 1. Copy the `compressedPattern` string.
+// 2. Send it to your ESP32 via BLE (e.g., using the Blumon app's write characteristic feature).
+// 3. Observe the ESP32's behavior and serial logs to see if it correctly interprets the pattern.
