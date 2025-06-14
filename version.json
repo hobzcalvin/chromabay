@@ -1,7 +1,7 @@
 {
-  "version": "v0.0.36",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.36.zip",
-  "buildDate": "2025-06-13 16:22:26 UTC",
-  "commitHash": "d9c3d98752bb9e650aa617a78459d5fb68046d15",
-  "commitMessage": "feat: implement precise buffer conflict resolution"
+  "version": "v0.0.37",
+  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.37.zip",
+  "buildDate": "2025-06-14 06:57:23 UTC",
+  "commitHash": "2c3da9fe525b7e1dde01ce9238082a4c982c4f19",
+  "commitMessage": "Fix web bluetooth"
 }
