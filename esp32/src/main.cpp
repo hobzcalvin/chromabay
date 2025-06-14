@@ -5,6 +5,7 @@
 #include <NimBLEServer.h>
 #include <NimBLEUtils.h>
 #include "esp_ota_ops.h" // For OTA updates
+#include "esp_app_format.h" // For esp_app_desc_t and image state checks
 
 #include "led_manager.h" // Include the new LED Manager
 #include "config_manager.h"   // Restore MessagePack config handling
@@ -34,11 +35,11 @@ LedConfig::ConfigManager configMgr(ledMgr);
 #define CHARACTERISTIC_UUID_OTA_CONTROL "a0be83e8-8dc9-47f0-ab40-b19721d20ed1"
 #define CHARACTERISTIC_UUID_OTA_DATA    "a0be83e9-8dc9-47f0-ab40-b19721d20ed1"
 #define CHARACTERISTIC_UUID_OTA_STATUS  "a0be83ea-8dc9-47f0-ab40-b19721d20ed1"
+#define CHARACTERISTIC_UUID_OTA_SIGNATURE "a0be83eb-8dc9-47f0-ab40-b19721d20ed1"
+
 
 // OTA Constants
-#define MAX_BLE_CHUNK_SIZE 500 // Max data bytes per BLE packet for OTA data (NimBLE default MTU is 23, effective payload ~20. Max is ~512)
-                               // Sparkfun uses 512. Let's use a slightly smaller value to be safe.
-                               // This needs to be coordinated with the client.
+#define MAX_BLE_CHUNK_SIZE 500 
 
 NimBLEServer* pServer = nullptr;
 // Original RX/TX Characteristics
@@ -48,6 +49,7 @@ NimBLECharacteristic* pDeviceInfoCharacteristic = nullptr;
 NimBLECharacteristic* pOTAControlCharacteristic = nullptr;
 NimBLECharacteristic* pOTADataCharacteristic = nullptr;
 NimBLECharacteristic* pOTAStatusCharacteristic = nullptr;
+NimBLECharacteristic* pOTASignatureCharacteristic = nullptr;
 
 
 bool deviceConnected = false;
@@ -64,7 +66,9 @@ esp_ota_handle_t ota_handle = 0;
 const esp_partition_t *update_partition = nullptr;
 bool ota_in_progress = false;
 int ota_received_size = 0;
-// int ota_total_firmware_size = 0; // Optional: if client sends total size
+uint8_t received_signature[FIRMWARE_SIGNATURE_LENGTH];
+bool signature_received = false;
+
 
 // NimBLE Server Callbacks
 class ServerCallbacks: public NimBLEServerCallbacks {
@@ -76,14 +80,14 @@ class ServerCallbacks: public NimBLEServerCallbacks {
     void onDisconnect(NimBLEServer* pServer) {
         deviceConnected = false;
         Serial.println("BLE Client Disconnected");
-        // If OTA was in progress and client disconnects, abort it
         if (ota_in_progress) {
             Serial.println("Client disconnected during OTA. Aborting OTA.");
-            if (ota_handle != 0) { // Check if handle is valid
-                 esp_ota_abort(ota_handle); // Use abort to clean up
+            if (ota_handle != 0) { 
+                 esp_ota_abort(ota_handle); 
             }
             ota_in_progress = false;
             ota_handle = 0;
+            signature_received = false;
             if (pOTAStatusCharacteristic) {
                 pOTAStatusCharacteristic->setValue("OTA_ERR_DISCONNECTED");
                 pOTAStatusCharacteristic->notify();
@@ -131,18 +135,37 @@ class DeviceInfoCallbacks : public NimBLECharacteristicCallbacks {
         deviceInfoJson += "\"fw_ver\":\"" + String(FIRMWARE_VERSION) + "\",";
         deviceInfoJson += "\"hw_ver\":\"" + String(HARDWARE_VERSION) + "\",";
         deviceInfoJson += "\"heap\":" + String(ESP.getFreeHeap());
-        // Example: Add MAC address
-        // uint8_t mac[6];
-        // esp_read_mac(mac, ESP_MAC_WIFI_STA); // Or ESP_MAC_BT
-        // char macStr[18];
-        // snprintf(macStr, sizeof(macStr), "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-        // deviceInfoJson += ",\"mac\":\"" + String(macStr) + "\"";
         deviceInfoJson += "}";
         
         pCharacteristic->setValue(deviceInfoJson.c_str());
         Serial.println("Sent Device Info: " + deviceInfoJson);
     }
 };
+
+// Callback for OTA Signature Characteristic (Write)
+class OTASignatureCallbacks : public NimBLECharacteristicCallbacks {
+    void onWrite(NimBLECharacteristic* pCharacteristic) {
+        std::string value = pCharacteristic->getValue();
+        Serial.print("OTA Signature Received: ");
+        if (value.length() == FIRMWARE_SIGNATURE_LENGTH) {
+            memcpy(received_signature, value.data(), FIRMWARE_SIGNATURE_LENGTH);
+            signature_received = true;
+            Serial.printf("%d bytes stored.\n", value.length());
+            if (pOTAStatusCharacteristic) {
+                pOTAStatusCharacteristic->setValue("OTA_SIG_RECEIVED");
+                pOTAStatusCharacteristic->notify();
+            }
+        } else {
+            Serial.printf("Invalid length %d bytes. Expected %d.\n", value.length(), FIRMWARE_SIGNATURE_LENGTH);
+            signature_received = false; // Mark as not (properly) received
+            if (pOTAStatusCharacteristic) {
+                pOTAStatusCharacteristic->setValue("OTA_ERR_SIG_LEN");
+                pOTAStatusCharacteristic->notify();
+            }
+        }
+    }
+};
+
 
 // Callback for OTA Control Characteristic (Write)
 class OTAControlCallbacks : public NimBLECharacteristicCallbacks {
@@ -159,8 +182,58 @@ class OTAControlCallbacks : public NimBLECharacteristicCallbacks {
                         pOTAStatusCharacteristic->setValue("OTA_ERR_NO_ACTIVE_OTA");
                         pOTAStatusCharacteristic->notify();
                     }
+                    signature_received = false; // Reset for next attempt
                     return;
                 }
+
+                if (!signature_received) {
+                    Serial.println("OTA Error: END_OTA received but no signature was provided.");
+                    if (pOTAStatusCharacteristic) {
+                        pOTAStatusCharacteristic->setValue("OTA_ERR_NO_SIGNATURE");
+                        pOTAStatusCharacteristic->notify();
+                    }
+                    // Optionally abort here, or let it fail at esp_ota_end if it checks.
+                    // For safety, let's abort if signature is mandatory.
+                    esp_ota_abort(ota_handle);
+                    ota_in_progress = false;
+                    ota_handle = 0;
+                    ota_received_size = 0;
+                    signature_received = false;
+                    return;
+                }
+
+                // --- Placeholder for Signature Verification ---
+                Serial.println("OTA: Verifying firmware signature (Placeholder - Assuming VALID for now)...");
+                bool signature_is_valid = true; // Replace with actual verification
+                // Example:
+                // esp_err_t sig_verify_err = esp_ota_verify_secure_boot_signature(&ota_handle); // This is for secure boot, not general app sig
+                // For custom signature:
+                // 1. Calculate hash of the received firmware in the ota_partition.
+                //    You might need to read it back or hash it as it comes.
+                // 2. Use mbedtls (available in ESP-IDF) to verify the hash against `received_signature`
+                //    using `FIRMWARE_SIGNATURE_PUBLIC_KEY`.
+                //
+                // const esp_partition_t* ota_partition_for_verification = esp_ota_get_next_update_partition(NULL);
+                // if (ota_partition_for_verification != NULL) {
+                //    // Logic to read from partition and verify
+                // } else { signature_is_valid = false; }
+
+                if (!signature_is_valid) {
+                    Serial.println("OTA Error: Firmware signature verification FAILED!");
+                    if (pOTAStatusCharacteristic) {
+                        pOTAStatusCharacteristic->setValue("OTA_ERR_SIG_INVALID");
+                        pOTAStatusCharacteristic->notify();
+                    }
+                    esp_ota_abort(ota_handle);
+                    ota_in_progress = false;
+                    ota_handle = 0;
+                    ota_received_size = 0;
+                    signature_received = false;
+                    return;
+                }
+                Serial.println("OTA: Firmware signature (assumed) VALID.");
+                // --- End Signature Verification Placeholder ---
+
 
                 Serial.println("OTA End command received. Finalizing update...");
                 esp_err_t err = esp_ota_end(ota_handle);
@@ -169,7 +242,7 @@ class OTAControlCallbacks : public NimBLECharacteristicCallbacks {
                     if (pOTAStatusCharacteristic) {
                         pOTAStatusCharacteristic->setValue("OTA_VALIDATING");
                         pOTAStatusCharacteristic->notify();
-                        delay(10); // Allow BLE notification to send
+                        delay(10); 
                     }
                     
                     err = esp_ota_set_boot_partition(update_partition);
@@ -178,7 +251,7 @@ class OTAControlCallbacks : public NimBLECharacteristicCallbacks {
                         if (pOTAStatusCharacteristic) {
                             pOTAStatusCharacteristic->setValue("OTA_SUCCESS_REBOOTING");
                             pOTAStatusCharacteristic->notify();
-                            delay(100); // Allow BLE notification to send before reboot
+                            delay(100); 
                         }
                         esp_restart();
                     } else {
@@ -197,10 +270,10 @@ class OTAControlCallbacks : public NimBLECharacteristicCallbacks {
                         pOTAStatusCharacteristic->notify();
                     }
                 }
-                // Whether successful or not (unless rebooting), reset OTA state after attempting to end.
                 ota_in_progress = false;
-                ota_handle = 0; // Invalidate handle
+                ota_handle = 0; 
                 ota_received_size = 0;
+                signature_received = false;
 
             } else if (value == "ABORT_OTA") {
                 if (ota_in_progress) {
@@ -211,6 +284,7 @@ class OTAControlCallbacks : public NimBLECharacteristicCallbacks {
                     ota_in_progress = false;
                     ota_handle = 0;
                     ota_received_size = 0;
+                    signature_received = false;
                     if (pOTAStatusCharacteristic) {
                         pOTAStatusCharacteristic->setValue("OTA_ABORTED_CMD");
                         pOTAStatusCharacteristic->notify();
@@ -224,13 +298,6 @@ class OTAControlCallbacks : public NimBLECharacteristicCallbacks {
                 }
             } else if (value.rfind("TOTAL_SIZE:", 0) == 0) { 
                 // Optional: Client can send total firmware size
-                // String sizeStr = String(value.c_str()).substring(strlen("TOTAL_SIZE:"));
-                // ota_total_firmware_size = sizeStr.toInt();
-                // Serial.printf("OTA Total firmware size set: %d bytes\n", ota_total_firmware_size);
-                // if (pOTAStatusCharacteristic) {
-                //     pOTAStatusCharacteristic->setValue("OTA_INFO_SIZE_RECEIVED");
-                //     pOTAStatusCharacteristic->notify();
-                // }
             }
         } else {
             Serial.println("(empty)");
@@ -250,6 +317,9 @@ class OTADataCallbacks : public NimBLECharacteristicCallbacks {
 
         if (!ota_in_progress) {
             Serial.println("First OTA data packet received. Starting OTA process...");
+            signature_received = false; // Reset signature status for new OTA
+            ota_received_size = 0;      // Reset received size
+
             update_partition = esp_ota_get_next_update_partition(NULL);
             if (update_partition == NULL) {
                 Serial.println("OTA Error: No valid update partition found!");
@@ -274,7 +344,6 @@ class OTADataCallbacks : public NimBLECharacteristicCallbacks {
                 return;
             }
             ota_in_progress = true;
-            ota_received_size = 0;
             Serial.println("OTA: esp_ota_begin succeeded. Ready for firmware data.");
             if (pOTAStatusCharacteristic) {
                 pOTAStatusCharacteristic->setValue("OTA_STARTED_READY");
@@ -293,6 +362,7 @@ class OTADataCallbacks : public NimBLECharacteristicCallbacks {
             esp_ota_abort(ota_handle); 
             ota_in_progress = false;
             ota_handle = 0;
+            signature_received = false;
             return;
         }
 
@@ -321,8 +391,30 @@ void setup() {
     Serial.begin(115200);
     delay(1000); 
     Serial.println("ESP32 LedManager + OTA Demo Starting...");
-    Serial.println("Firmware Version: " + String(FIRMWARE_VERSION));
-    Serial.println("Hardware Version: " + String(HARDWARE_VERSION));
+
+    // --- Boot-time firmware state check ---
+    const esp_app_desc_t *app_desc = esp_ota_get_app_description();
+    Serial.printf("Current firmware version: %s\n", app_desc->version);
+    Serial.println("Hardware Version: " + String(HARDWARE_VERSION)); // From firmware_version.h
+
+    const esp_partition_t *running_partition = esp_ota_get_running_partition();
+    esp_ota_img_states_t ota_state;
+    if (esp_ota_get_state_partition(running_partition, &ota_state) == ESP_OK) {
+        if (ota_state == ESP_OTA_IMG_PENDING_VERIFY) {
+            Serial.println("Boot: Firmware is PENDING VERIFICATION.");
+            // If we reach here, it means the app has started successfully.
+            // The health check at the end of setup() will mark it valid.
+        } else if (ota_state == ESP_OTA_IMG_VALID) {
+            Serial.println("Boot: Firmware is VALID.");
+        } else if (ota_state == ESP_OTA_IMG_INVALID) {
+            Serial.println("Boot: Firmware is INVALID. This should ideally not happen if rollback is configured.");
+        } else {
+            Serial.printf("Boot: Firmware OTA state is UNDEFINED (%d).\n", ota_state);
+        }
+    } else {
+        Serial.println("Boot: Could not get OTA state for the running partition.");
+    }
+    // --- End boot-time check ---
 
 
     Serial.println("Mounting LittleFS (once)...");
@@ -435,32 +527,34 @@ void setup() {
     pRxCharacteristic->setCallbacks(new CharacteristicCallbacks());
 
     // --- New OTA Characteristics ---
-    // Device Info Characteristic (Read-Only, Notify for potential future dynamic updates)
     pDeviceInfoCharacteristic = pService->createCharacteristic(
                                 CHARACTERISTIC_UUID_DEVICE_INFO,
                                 NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY
                               );
-    pDeviceInfoCharacteristic->setCallbacks(new DeviceInfoCallbacks()); // Handles onRead
+    pDeviceInfoCharacteristic->setCallbacks(new DeviceInfoCallbacks()); 
 
-    // OTA Control Characteristic (Write)
     pOTAControlCharacteristic = pService->createCharacteristic(
                                 CHARACTERISTIC_UUID_OTA_CONTROL,
-                                NIMBLE_PROPERTY::WRITE // Use WRITE for acknowledged commands
+                                NIMBLE_PROPERTY::WRITE 
                               );
     pOTAControlCharacteristic->setCallbacks(new OTAControlCallbacks());
 
-    // OTA Data Characteristic (Write Without Response for speed, with Notify for ACK)
     pOTADataCharacteristic = pService->createCharacteristic(
                                 CHARACTERISTIC_UUID_OTA_DATA,
                                 NIMBLE_PROPERTY::WRITE_NR | NIMBLE_PROPERTY::NOTIFY 
                              );
     pOTADataCharacteristic->setCallbacks(new OTADataCallbacks());
 
-    // OTA Status Characteristic (Notify)
     pOTAStatusCharacteristic = pService->createCharacteristic(
                                 CHARACTERISTIC_UUID_OTA_STATUS,
                                 NIMBLE_PROPERTY::NOTIFY
                                );
+    
+    pOTASignatureCharacteristic = pService->createCharacteristic(
+                                CHARACTERISTIC_UUID_OTA_SIGNATURE,
+                                NIMBLE_PROPERTY::WRITE // Acknowledge signature receipt
+                               );
+    pOTASignatureCharacteristic->setCallbacks(new OTASignatureCallbacks());
     // -------------------------------
     
     pService->start();
@@ -475,6 +569,25 @@ void setup() {
     Serial.println("Device name: Blumon_ESP32");
     Serial.println("Advertising Service UUID: " + String(SERVICE_UUID));
     
+    // --- Health Check: Mark app as valid if it was pending verification ---
+    if (esp_ota_get_state_partition(running_partition, &ota_state) == ESP_OK) {
+        if (ota_state == ESP_OTA_IMG_PENDING_VERIFY) {
+            Serial.println("Setup complete. App is PENDING VERIFICATION. Marking as VALID.");
+            esp_err_t mark_valid_err = esp_ota_mark_app_valid_cancel_rollback();
+            if (mark_valid_err == ESP_OK) {
+                Serial.println("App successfully marked as valid. Rollback cancelled.");
+            } else {
+                Serial.printf("Error marking app valid: %s. OTA rollback might occur on next boot if watchdog triggers.\n", esp_err_to_name(mark_valid_err));
+                // Consider a more drastic error state here if marking valid fails.
+            }
+        } else {
+            Serial.println("Setup complete. App was not pending verification.");
+        }
+    } else {
+         Serial.println("Setup complete. Could not get OTA state for health check mark.");
+    }
+    // --- End Health Check ---
+
     Serial.println("Setup complete - Starting rainbow animation");
     Serial.printf("Free heap: %d bytes\n", ESP.getFreeHeap());
 }

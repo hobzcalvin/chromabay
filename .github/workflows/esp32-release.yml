@@ -10,8 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write # Allow peaceiris/actions-gh-pages to push to the gh-pages branch
-      pages: write    # If using GitHub Pages deployments via artifacts (not used here but good to be aware)
-      id-token: write # If using OIDC for deployments (not used here)
+      pages: write    # If using GitHub Pages deployments via artifacts
+      id-token: write # If using OIDC for deployments
 
     steps:
       - name: Checkout repository
@@ -20,7 +20,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11' # PlatformIO generally works well with recent Python 3 versions
+          python-version: '3.11'
 
       - name: Install PlatformIO Core
         run: pip install platformio
@@ -39,8 +39,6 @@ jobs:
           FIRMWARE_TAG_VERSION="${{ github.ref_name }}"
           echo "FIRMWARE_TAG_VERSION=${FIRMWARE_TAG_VERSION}" >> $GITHUB_ENV
           
-          # Extract hardware version from firmware_version.h
-          # Assumes format: #define HARDWARE_VERSION "esp32-hw-vX.Y"
           HARDWARE_VERSION_LINE=$(grep '#define HARDWARE_VERSION' esp32/src/firmware_version.h)
           if [[ -z "$HARDWARE_VERSION_LINE" ]]; then
             echo "Error: HARDWARE_VERSION define not found in esp32/src/firmware_version.h"
@@ -56,17 +54,63 @@ jobs:
           echo "Firmware Tag Version: ${FIRMWARE_TAG_VERSION}"
           echo "Hardware Version: ${HARDWARE_VERSION}"
 
+      - name: Check for Signing Key Secret
+        env:
+          ESP32_SIGNING_KEY: ${{ secrets.ESP32_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "$ESP32_SIGNING_KEY" ]; then
+            echo "Error: ESP32_SIGNING_PRIVATE_KEY secret is not set."
+            echo "Please configure this secret in your repository settings."
+            exit 1
+          fi
+          echo "Signing key secret found."
+
       - name: Build ESP32 Firmware
         run: |
           cd esp32
-          pio run -e esp32dev # Assuming 'esp32dev' is your target environment
-        working-directory: ./ # Run pio from the root, but it will find project in esp32/
+          pio run -e esp32dev 
+        working-directory: ./ 
+
+      - name: Sign Firmware
+        env:
+          ESP32_SIGNING_KEY: ${{ secrets.ESP32_SIGNING_PRIVATE_KEY }}
+        run: |
+          echo "Starting firmware signing process..."
+          FIRMWARE_BIN_PATH="esp32/.pio/build/esp32dev/firmware.bin"
+          SIGNATURE_OUTPUT_PATH="esp32/.pio/build/esp32dev/firmware.sig"
+          PRIVATE_KEY_FILE="private_key.pem"
+
+          if [ ! -f "$FIRMWARE_BIN_PATH" ]; then
+            echo "Error: Firmware binary not found at $FIRMWARE_BIN_PATH"
+            exit 1
+          fi
+
+          echo "${ESP32_SIGNING_KEY}" > ${PRIVATE_KEY_FILE}
+          echo "Private key written to ${PRIVATE_KEY_FILE}"
+
+          # Sign the firmware binary (produces a DER-encoded signature for EC keys)
+          openssl dgst -sha256 -sign ${PRIVATE_KEY_FILE} -out ${SIGNATURE_OUTPUT_PATH} ${FIRMWARE_BIN_PATH}
+          
+          if [ $? -ne 0 ]; then
+            echo "Error: Firmware signing failed."
+            rm ${PRIVATE_KEY_FILE} # Clean up private key file
+            exit 1
+          fi
+          
+          rm ${PRIVATE_KEY_FILE} # Clean up private key file
+          echo "Firmware signed successfully. Signature at ${SIGNATURE_OUTPUT_PATH}"
+          ls -l ${SIGNATURE_OUTPUT_PATH}
 
       - name: Prepare deployment artifacts
         run: |
-          mkdir -p ./ota_staging/firmware/esp32/${{ env.FIRMWARE_TAG_VERSION }}
-          cp esp32/.pio/build/esp32dev/firmware.bin ./ota_staging/firmware/esp32/${{ env.FIRMWARE_TAG_VERSION }}/firmware.bin
-          echo "Firmware binary prepared at ./ota_staging/firmware/esp32/${{ env.FIRMWARE_TAG_VERSION }}/firmware.bin"
+          STAGING_DIR_BASE="./ota_staging/firmware/esp32/${{ env.FIRMWARE_TAG_VERSION }}"
+          mkdir -p "${STAGING_DIR_BASE}"
+          
+          cp esp32/.pio/build/esp32dev/firmware.bin "${STAGING_DIR_BASE}/firmware.bin"
+          echo "Firmware binary prepared at ${STAGING_DIR_BASE}/firmware.bin"
+          
+          cp esp32/.pio/build/esp32dev/firmware.sig "${STAGING_DIR_BASE}/firmware.sig"
+          echo "Firmware signature prepared at ${STAGING_DIR_BASE}/firmware.sig"
 
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
@@ -81,10 +125,9 @@ jobs:
           
           mkdir -p $(dirname "${LOCAL_STAGING_REGISTRY_PATH}")
 
-          # Clone gh-pages branch to a temporary directory to fetch existing registry
           git clone --depth=1 --branch=gh-pages "https://x-access-token:${GH_TOKEN}@github.com/${REPO_NAME}.git" gh_pages_temp
           
-          EXISTING_REGISTRY_CONTENT="[]" # Default to empty array
+          EXISTING_REGISTRY_CONTENT="[]" 
           if [ -f "gh_pages_temp/${REGISTRY_FILE_ON_GHPAGES}" ]; then
             TEMP_CONTENT=$(cat "gh_pages_temp/${REGISTRY_FILE_ON_GHPAGES}")
             if echo "${TEMP_CONTENT}" | jq empty > /dev/null 2>&1; then
@@ -99,20 +142,29 @@ jobs:
           rm -rf gh_pages_temp
 
           FIRMWARE_PATH_IN_REGISTRY="firmware/esp32/${FIRMWARE_TAG_VERSION}/firmware.bin"
+          SIGNATURE_PATH_IN_REGISTRY="firmware/esp32/${FIRMWARE_TAG_VERSION}/firmware.sig"
           BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
           NEW_ENTRY=$(jq -n \
             --arg ver "${FIRMWARE_TAG_VERSION}" \
             --arg hwver "${HARDWARE_VERSION}" \
             --arg path "${FIRMWARE_PATH_IN_REGISTRY}" \
+            --arg sigpath "${SIGNATURE_PATH_IN_REGISTRY}" \
             --arg date "${BUILD_DATE}" \
-            '{version: $ver, hardwareVersion: $hwver, path: $path, date: $date}')
+            '{version: $ver, hardwareVersion: $hwver, path: $path, signaturePath: $sigpath, date: $date}')
           
           echo "New registry entry: ${NEW_ENTRY}"
           
+          # Prepend new entry to the existing array
           UPDATED_REGISTRY=$(echo "${EXISTING_REGISTRY_CONTENT}" | jq --argjson new_entry "${NEW_ENTRY}" '[$new_entry] + .')
           
-          echo "${UPDATED_REGISTRY}" > "${LOCAL_STAGING_REGISTRY_PATH}"
+          # Ensure the final output is a valid JSON array (even if initial was empty or invalid)
+          if ! echo "${UPDATED_REGISTRY}" | jq empty > /dev/null 2>&1; then
+            echo "Error: Updated registry is not valid JSON. Falling back to new entry only."
+            UPDATED_REGISTRY=$(echo "[]" | jq --argjson new_entry "${NEW_ENTRY}" '[$new_entry] + .')
+          fi
+          
+          echo "${UPDATED_REGISTRY}" | jq '.' > "${LOCAL_STAGING_REGISTRY_PATH}" # Pretty print JSON
           echo "Firmware registry created/updated at ${LOCAL_STAGING_REGISTRY_PATH}"
           cat "${LOCAL_STAGING_REGISTRY_PATH}"
 
@@ -120,9 +172,9 @@ jobs:
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./ota_staging # This directory contains firmware/esp32/...
+          publish_dir: ./ota_staging 
           publish_branch: gh-pages
-          keep_files: true # Important to not overwrite SvelteKit app or other files
+          keep_files: true 
           user_name: 'github-actions[bot]'
           user_email: 'github-actions[bot]@users.noreply.github.com'
           commit_message: Deploy ESP32 firmware ${{ env.FIRMWARE_TAG_VERSION }} and update registry
