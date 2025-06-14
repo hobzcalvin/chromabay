@@ -72,6 +72,9 @@ The deployed app displays build information in the footer:
 # Install dependencies
 npm install
 
+# Initialize SvelteKit (required for fresh checkouts)
+npx svelte-kit sync
+
 # Start development server
 npm run dev
 
