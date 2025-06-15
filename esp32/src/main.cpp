@@ -367,7 +367,7 @@ class OTAControlCallbacks : public NimBLECharacteristicCallbacks {
                     return;
                 }
 
-                // Real firmware signature verification
+                // Real firmware signature verification - BEFORE esp_ota_end()
                 Serial.println("OTA: Verifying firmware signature...");
                 bool signature_is_valid = verifyFirmwareSignature(received_signature, FIRMWARE_SIGNATURE_LENGTH, update_partition, ota_received_size);
 
@@ -387,8 +387,7 @@ class OTAControlCallbacks : public NimBLECharacteristicCallbacks {
                 }
                 Serial.println("OTA: Firmware signature verification PASSED.");
 
-
-                            Serial.printf("OTA End command received. Finalizing update... (Total received: %d bytes)\n", ota_received_size);
+                Serial.printf("OTA End command received. Finalizing update... (Total received: %d bytes)\n", ota_received_size);
             esp_err_t err = esp_ota_end(ota_handle);
             if (err == ESP_OK) {
                 Serial.println("OTA: Firmware write completed successfully.");
