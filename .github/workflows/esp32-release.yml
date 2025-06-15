@@ -23,7 +23,9 @@ jobs:
         pip install cryptography
     
     - name: Setup PlatformIO
-      uses: enterprise-oss/setup-platformio@v1
+      run: |
+        pip install platformio
+        pio --version
       
     - name: Create private key file from secret
       run: |
