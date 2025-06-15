@@ -8,6 +8,9 @@ on:
 jobs:
   build-and-sign:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Required to create releases
+      actions: read    # Required to read workflow info
     
     steps:
     - name: Checkout repository
@@ -49,7 +52,7 @@ jobs:
       run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
           
     - name: Create release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
         files: |
           esp32/.pio/build/esp32dev/firmware.bin
@@ -89,9 +92,6 @@ jobs:
           
         draft: false
         prerelease: false
-        tag_name: ${{ steps.version.outputs.VERSION }}
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         
     - name: Clean up private key
       if: always()
