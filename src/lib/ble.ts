@@ -377,7 +377,15 @@ export async function fetchFirmwareRegistry(registryUrl: string = "/firmware/esp
   try {
     // For web, relative path works if served from same origin (gh-pages)
     // For native, ensure this path is accessible or use full URL
-    const response = await fetch(registryUrl);
+    
+    // Add cache-busting to ensure we get the latest registry
+    const cacheBuster = new Date().getTime();
+    const urlWithCacheBuster = `${registryUrl}?t=${cacheBuster}`;
+    console.log(`[OTA] Fetching with cache-buster: ${urlWithCacheBuster}`);
+    
+    const response = await fetch(urlWithCacheBuster, {
+      cache: 'no-cache'  // Simple cache-busting without custom headers to avoid CORS preflight
+    });
     if (!response.ok) {
       throw new Error(`Failed to fetch registry: ${response.statusText}`);
     }
@@ -425,6 +433,8 @@ export async function sendFirmwareSignature(deviceId: string, signature: ArrayBu
 
 async function sendFirmwareChunk(deviceId: string, chunk: ArrayBuffer): Promise<void> {
   const dataView = new DataView(chunk);
+  console.log(`[OTA] Sending chunk: ${chunk.byteLength} bytes`);
+  
   // OTA_DATA uses WriteWithoutResponse for speed, but ESP32 notifies on same char for ACK
   if (isWeb()) {
     const deviceInfo = connectedDevices.get(deviceId);
@@ -433,17 +443,29 @@ async function sendFirmwareChunk(deviceId: string, chunk: ArrayBuffer): Promise<
     const characteristic = await service.getCharacteristic(CHARACTERISTIC_UUID_OTA_DATA);
     
     return new Promise(async (resolve, reject) => {
-      const listener = (event: any) => {
+      const timeoutId = setTimeout(() => {
         characteristic.removeEventListener('characteristicvaluechanged', listener);
-        // console.log('[OTA] Web ACK received for chunk');
+        reject(new Error('Timeout waiting for ACK from ESP32'));
+      }, 5000); // 5 second timeout
+      
+      const listener = (event: any) => {
+        clearTimeout(timeoutId);
+        characteristic.removeEventListener('characteristicvaluechanged', listener);
+        console.log('[OTA] Web ACK received for chunk');
         resolve();
       };
+      
       characteristic.addEventListener('characteristicvaluechanged', listener);
-      // Ensure notifications are started for this characteristic on web if not already
-      // This might need to be done once before starting the chunk sending loop.
-      // For simplicity, assuming notifications are active or start them here if needed.
-      // await characteristic.startNotifications(); // Potentially needed
-      await characteristic.writeValueWithoutResponse(dataView).catch(reject);
+      console.log('[OTA] Writing chunk and waiting for ACK...');
+      
+      try {
+        await characteristic.writeValueWithoutResponse(dataView);
+        console.log('[OTA] Chunk written, waiting for ACK notification...');
+      } catch (error) {
+        clearTimeout(timeoutId);
+        characteristic.removeEventListener('characteristicvaluechanged', listener);
+        reject(error);
+      }
     });
 
   } else {
@@ -456,7 +478,7 @@ async function sendFirmwareChunk(deviceId: string, chunk: ArrayBuffer): Promise<
             // The ESP32 will send a notification on this characteristic as an ACK,
             // which will be picked up by the global listener in performOTAUpdate if active.
             setTimeout(() => {
-                // console.log('[OTA] Native chunk sent, assuming processed after delay.');
+                console.log('[OTA] Native chunk sent, assuming processed after delay.');
                 resolve();
             }, 50); // e.g., 50ms delay, can be tuned. A more robust solution would wait for the ACK.
         } catch (err) {
@@ -513,11 +535,18 @@ export async function performOTAUpdate(
     //    Our ESP32 code starts OTA on first data chunk.
     // await sendOTAControlCommand(deviceId, 'START_OTA'); // Or send total size
 
-    // 3. Start listening for ACKs on OTA_DATA characteristic (if not already globally handled)
+    // 3. Start listening for ACKs on OTA_DATA characteristic for flow control
     //    The ESP32 will send a notification on OTA_DATA characteristic after processing each chunk.
-    //    This global listener is for debugging/logging these ACKs.
-    //    The sendFirmwareChunk function handles its own ACK logic (web) or pacing (native).
-    if (!isWeb()) { 
+    if (isWeb()) {
+        // For Web Bluetooth, we need to start notifications to receive ACKs
+        const deviceInfo = connectedDevices.get(deviceId);
+        if (!deviceInfo?.gattServer) throw new Error('Device not connected');
+        const service = await deviceInfo.gattServer.getPrimaryService(LED_SERVICE_UUID);
+        const otaDataCharacteristic = await service.getCharacteristic(CHARACTERISTIC_UUID_OTA_DATA);
+        await otaDataCharacteristic.startNotifications();
+        otaDataNotificationsStartedForAck = true;
+        console.log('[OTA] Started notifications on OTA_DATA for ACK flow control');
+    } else { 
         await BleClient.startNotifications(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_OTA_DATA, (_ackValue) => {
         });
         otaDataNotificationsStartedForAck = true;
@@ -560,11 +589,21 @@ export async function performOTAUpdate(
     // await sendOTAControlCommand(deviceId, 'ABORT_OTA').catch(e => console.warn("Failed to send ABORT_OTA", e));
     throw error;
   } finally {
-    if (otaDataNotificationsStartedForAck && !isWeb()) {
+    if (otaDataNotificationsStartedForAck) {
         try {
-            await BleClient.stopNotifications(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_OTA_DATA);
+            if (isWeb()) {
+                const deviceInfo = connectedDevices.get(deviceId);
+                if (deviceInfo?.gattServer) {
+                    const service = await deviceInfo.gattServer.getPrimaryService(LED_SERVICE_UUID);
+                    const otaDataCharacteristic = await service.getCharacteristic(CHARACTERISTIC_UUID_OTA_DATA);
+                    await otaDataCharacteristic.stopNotifications();
+                    console.log('[OTA] Stopped notifications on OTA_DATA');
+                }
+            } else {
+                await BleClient.stopNotifications(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_OTA_DATA);
+            }
         } catch (e) {
-            console.warn("[OTA] Failed to stop OTA_DATA ACK notifications (native):", e);
+            console.warn("[OTA] Failed to stop OTA_DATA ACK notifications:", e);
         }
     }
   }

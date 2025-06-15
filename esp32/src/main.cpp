@@ -373,43 +373,45 @@ class OTAControlCallbacks : public NimBLECharacteristicCallbacks {
                 Serial.println("OTA: Firmware signature verification PASSED.");
 
 
-                Serial.println("OTA End command received. Finalizing update...");
-                esp_err_t err = esp_ota_end(ota_handle);
+                            Serial.printf("OTA End command received. Finalizing update... (Total received: %d bytes)\n", ota_received_size);
+            esp_err_t err = esp_ota_end(ota_handle);
+            if (err == ESP_OK) {
+                Serial.println("OTA: Firmware write completed successfully.");
+                if (pOTAStatusCharacteristic) {
+                    const char* msg = "OTA_VALIDATING";
+                    pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
+                    pOTAStatusCharacteristic->notify();
+                    delay(10); // Allow BLE notification to send
+                }
+                
+                Serial.println("OTA: Setting new firmware as boot partition...");
+                err = esp_ota_set_boot_partition(update_partition);
                 if (err == ESP_OK) {
-                    Serial.println("OTA: esp_ota_end succeeded.");
+                    Serial.println("OTA: Boot partition updated successfully. Rebooting in 2 seconds...");
                     if (pOTAStatusCharacteristic) {
-                        const char* msg = "OTA_VALIDATING";
+                        const char* msg = "OTA_SUCCESS_REBOOTING";
                         pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
                         pOTAStatusCharacteristic->notify();
-                        delay(10); // Allow BLE notification to send
+                        delay(100); // Allow BLE notification to send before reboot
                     }
-                    
-                    err = esp_ota_set_boot_partition(update_partition);
-                    if (err == ESP_OK) {
-                        Serial.println("OTA: esp_ota_set_boot_partition succeeded. Rebooting...");
-                        if (pOTAStatusCharacteristic) {
-                            const char* msg = "OTA_SUCCESS_REBOOTING";
-                            pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
-                            pOTAStatusCharacteristic->notify();
-                            delay(100); // Allow BLE notification to send before reboot
-                        }
-                        esp_restart();
-                    } else {
-                        Serial.printf("OTA Error: esp_ota_set_boot_partition failed! (%s)\n", esp_err_to_name(err));
-                        if (pOTAStatusCharacteristic) {
-                            String errorMsg = "OTA_ERR_SET_BOOT:" + String(esp_err_to_name(err));
-                            pOTAStatusCharacteristic->setValue((uint8_t*)errorMsg.c_str(), errorMsg.length());
-                            pOTAStatusCharacteristic->notify();
-                        }
-                    }
+                    delay(2000); // Give time for final messages
+                    esp_restart();
                 } else {
-                    Serial.printf("OTA Error: esp_ota_end failed! (%s)\n", esp_err_to_name(err));
+                    Serial.printf("OTA Error: esp_ota_set_boot_partition failed! (%s)\n", esp_err_to_name(err));
                     if (pOTAStatusCharacteristic) {
-                        String errorMsg = "OTA_ERR_END_FAILED:" + String(esp_err_to_name(err));
+                        String errorMsg = "OTA_ERR_SET_BOOT:" + String(esp_err_to_name(err));
                         pOTAStatusCharacteristic->setValue((uint8_t*)errorMsg.c_str(), errorMsg.length());
                         pOTAStatusCharacteristic->notify();
                     }
                 }
+            } else {
+                Serial.printf("OTA Error: esp_ota_end failed! (%s)\n", esp_err_to_name(err));
+                if (pOTAStatusCharacteristic) {
+                    String errorMsg = "OTA_ERR_END_FAILED:" + String(esp_err_to_name(err));
+                    pOTAStatusCharacteristic->setValue((uint8_t*)errorMsg.c_str(), errorMsg.length());
+                    pOTAStatusCharacteristic->notify();
+                }
+            }
                 // Reset OTA state after attempting to end, unless rebooting
                 ota_in_progress = false;
                 ota_handle = 0; 
@@ -488,6 +490,15 @@ class OTADataCallbacks : public NimBLECharacteristicCallbacks {
                 return;
             }
             ota_in_progress = true;
+            
+            // Turn off LEDs during OTA to save power and avoid interference
+            if (ledMgr.getNumStrips() > 0 && ledMgr.getStrip(0)) {
+                for(int i = 0; i < ledMgr.getStrip(0)->getLength(); i++) { 
+                    ledMgr.setPixelColor(0, i, CRGB::Black); 
+                }
+                ledMgr.show();
+            }
+            
             Serial.println("OTA: esp_ota_begin succeeded. Ready for firmware data.");
             if (pOTAStatusCharacteristic) {
                 const char* msg = "OTA_STARTED_READY";
@@ -513,6 +524,14 @@ class OTADataCallbacks : public NimBLECharacteristicCallbacks {
         }
 
         ota_received_size += length;
+
+        // Print progress every 10KB or so
+        static int lastReportedKB = 0;
+        int currentKB = ota_received_size / 1024;
+        if (currentKB >= lastReportedKB + 10) {
+            lastReportedKB = currentKB;
+            Serial.printf("OTA Progress: %d KB received\n", currentKB);
+        }
 
         // Acknowledge chunk receipt by notifying on the same characteristic (flow control)
         // This is what Sparkfun example does.
@@ -750,16 +769,16 @@ void loop() {
             hue += 10;
         }
         
-        // Print status every 5 seconds
+        // Print status every 5 seconds (only when OTA is not in progress)
         static unsigned long lastStatus = 0;
-        if (currentTime - lastStatus >= 5000) {
+        if (currentTime - lastStatus >= 5000 && !ota_in_progress) {
             lastStatus = currentTime;
             uint8_t currentBrightness = 0;
             if (ledMgr.getNumStrips() > 0 && ledMgr.getStrip(0) != nullptr) {
                 currentBrightness = ledMgr.getStrip(0)->getBrightness(); 
             }
-            Serial.printf("Rainbow running - Hue: %d, Brightness: %d, Free heap: %d bytes, BLE: %s, Strips: %d, OTA: %s\n", 
-                         hue, currentBrightness, ESP.getFreeHeap(), deviceConnected ? "Connected" : "Disconnected", ledMgr.getNumStrips(), ota_in_progress ? "In Progress" : "Idle");
+            Serial.printf("Rainbow running - Hue: %d, Brightness: %d, Free heap: %d bytes, BLE: %s, Strips: %d\n", 
+                         hue, currentBrightness, ESP.getFreeHeap(), deviceConnected ? "Connected" : "Disconnected", ledMgr.getNumStrips());
         }
     }
 

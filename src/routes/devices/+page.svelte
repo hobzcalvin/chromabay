@@ -316,8 +316,8 @@
     // Always use GitHub Pages for firmware downloads, even during local development
     const baseUrl = 'https://hobzcalvin.github.io/blumon'; 
 
-    const firmwareUrl = `${baseUrl}${latestFirmware.path}`;
-    const signatureUrl = `${baseUrl}${latestFirmware.signaturePath}`;
+    const firmwareUrl = `${baseUrl}/${latestFirmware.path}`;
+    const signatureUrl = `${baseUrl}/${latestFirmware.signaturePath}`;
 
     try {
       await performOTAUpdate(
