@@ -811,7 +811,7 @@ void loop() {
             fill_rainbow(leds, NUM_LEDS, hue, 7); 
             pushCRGBToStrip();
             ledMgr.show();
-            hue += 1;
+            hue += 10;
         }
         
         // Print status every 5 seconds (only when OTA is not in progress)
