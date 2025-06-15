@@ -106,8 +106,13 @@ bool verifyFirmwareSignature(const uint8_t* signature, size_t sigLen, const esp_
         }
         
         // Load public key from firmware_version.h (64 bytes: X + Y coordinates)
+        // mbedtls expects uncompressed point format: 0x04 + X (32 bytes) + Y (32 bytes)
+        uint8_t uncompressed_key[65];
+        uncompressed_key[0] = 0x04; // Uncompressed point indicator
+        memcpy(&uncompressed_key[1], FIRMWARE_PUBLIC_KEY, 64); // Copy X + Y coordinates
+        
         ret = mbedtls_ecp_point_read_binary(&grp, &public_key_point, 
-                                          FIRMWARE_PUBLIC_KEY, sizeof(FIRMWARE_PUBLIC_KEY));
+                                          uncompressed_key, sizeof(uncompressed_key));
         if (ret != 0) {
             Serial.printf("Failed to load public key: -0x%04x\n", -ret);
             break;
@@ -135,6 +140,7 @@ bool verifyFirmwareSignature(const uint8_t* signature, size_t sigLen, const esp_
         }
         
         // Read firmware from partition in chunks and hash it
+        // The partition should contain the exact same bytes as the signed .bin file
         const size_t CHUNK_SIZE = 4096;
         uint8_t* chunk_buffer = (uint8_t*)malloc(CHUNK_SIZE);
         if (!chunk_buffer) {
@@ -144,6 +150,8 @@ bool verifyFirmwareSignature(const uint8_t* signature, size_t sigLen, const esp_
         
         size_t remaining = firmware_size;
         size_t offset = 0;
+        
+        Serial.printf("Hashing %d bytes from partition starting at offset 0\n", firmware_size);
         
         while (remaining > 0) {
             size_t to_read = (remaining < CHUNK_SIZE) ? remaining : CHUNK_SIZE;
@@ -174,9 +182,16 @@ bool verifyFirmwareSignature(const uint8_t* signature, size_t sigLen, const esp_
             break;
         }
         
-        Serial.print("Firmware hash: ");
+        Serial.print("Calculated firmware hash: ");
         for (int i = 0; i < 32; i++) {
             Serial.printf("%02x", firmware_hash[i]);
+        }
+        Serial.println();
+        
+        // Print signature for debugging
+        Serial.print("Received signature (r||s): ");
+        for (int i = 0; i < 64; i++) {
+            Serial.printf("%02x", signature[i]);
         }
         Serial.println();
         
@@ -766,7 +781,7 @@ void loop() {
             fill_rainbow(leds, NUM_LEDS, hue, 7); 
             pushCRGBToStrip();
             ledMgr.show();
-            hue += 10;
+            hue += 1;
         }
         
         // Print status every 5 seconds (only when OTA is not in progress)
