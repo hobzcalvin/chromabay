@@ -47,7 +47,7 @@
   let otaInProgress = false;
   let checkingForUpdate = false;
   let showUpdateConfirmation = false;
-  let espFirmwareRegistryUrl = "/firmware/esp32/esp32_firmware_registry.json"; // Default path on gh-pages
+  let espFirmwareRegistryUrl = "https://hobzcalvin.github.io/blumon/firmware/esp32/esp32_firmware_registry.json"; // Always use production GitHub Pages
 
   // Build information from environment variables
   const buildInfo = {
@@ -313,7 +313,8 @@
     showUpdateConfirmation = false;
     otaStatus = { statusMessage: 'Starting OTA update...', progress: 0 };
 
-    const baseUrl = isWeb ? window.location.origin : ''; 
+    // Always use GitHub Pages for firmware downloads, even during local development
+    const baseUrl = 'https://hobzcalvin.github.io/blumon'; 
 
     const firmwareUrl = `${baseUrl}${latestFirmware.path}`;
     const signatureUrl = `${baseUrl}${latestFirmware.signaturePath}`;
