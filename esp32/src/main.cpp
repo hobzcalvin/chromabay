@@ -747,7 +747,7 @@ void loop() {
             fill_rainbow(leds, NUM_LEDS, hue, 7); 
             pushCRGBToStrip();
             ledMgr.show();
-            hue++;
+            hue += 10;
         }
         
         // Print status every 5 seconds
