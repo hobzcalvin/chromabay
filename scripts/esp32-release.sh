@@ -4,22 +4,38 @@
 set -e
 
 # --- Configuration ---
-ESP32_VERSION_FILE="esp32/src/firmware_version.h" # Assumed file to store firmware version
+ESP32_VERSION_FILE="esp32/src/firmware_version.h" # File to store firmware version
 VERSION_DEFINE_PATTERN="FIRMWARE_VERSION" # The #define name in the version file
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
 
 # --- Helper Functions ---
 show_usage() {
-  echo "Usage: $(basename "$0")"
-  echo "This script automates the ESP32 firmware release process:"
-  echo "1. Prompts for a new firmware version (e.g., esp32-v1.0.0)."
-  echo "2. Validates the version format."
-  echo "3. Updates the version in '$ESP32_VERSION_FILE'."
-  echo "4. Commits the version change."
-  echo "5. Creates a new git tag with the provided version."
-  echo "6. Pushes the new tag to the remote repository to trigger the release GHA."
+  echo -e "${BLUE}🔵 ESP32 Firmware Release Script${NC}"
+  echo -e "${BLUE}==================================${NC}"
   echo ""
-  echo "Important: Ensure you have committed all other changes for this release"
-  echo "           and are on the main branch before running this script."
+  echo "Usage: $(basename "$0") [patch|minor|major|version]"
+  echo ""
+  echo "This script automates the ESP32 firmware release process:"
+  echo "1. Increments version (patch/minor/major) or sets specific version"
+  echo "2. Updates the version in '$ESP32_VERSION_FILE'"
+  echo "3. Commits the version change"
+  echo "4. Creates a new git tag with the provided version"
+  echo "5. Pushes the tag to trigger GitHub Actions release"
+  echo ""
+  echo -e "${YELLOW}Examples:${NC}"
+  echo "  $0 patch     # fwv0.0.1 -> fwv0.0.2"
+  echo "  $0 minor     # fwv0.0.1 -> fwv0.1.0" 
+  echo "  $0 major     # fwv0.0.1 -> fwv1.0.0"
+  echo "  $0 fwv1.2.3  # Set specific version"
+  echo ""
+  echo -e "${RED}Important:${NC} Ensure you have committed all other changes for this release"
+  echo "and are on the main branch before running this script."
 }
 
 # --- Main Script ---
@@ -30,85 +46,141 @@ if [[ "$1" == "-h" || "$1" == "--help" ]]; then
   exit 0
 fi
 
-echo "Starting ESP32 Firmware Release Process..."
-echo "-----------------------------------------"
+echo -e "${BLUE}🔵 ESP32 Firmware Release Process${NC}"
+echo -e "${BLUE}===================================${NC}"
 
-# 1. Check for uncommitted changes
-if ! git diff-index --quiet HEAD --; then
-  echo "Error: You have uncommitted changes. Please commit or stash them before creating a release."
-  exit 1
-fi
-
-echo "Current branch: $(git rev-parse --abbrev-ref HEAD)"
-if [[ "$(git rev-parse --abbrev-ref HEAD)" != "main" ]]; then
-  read -r -p "Warning: You are not on the main branch. Continue anyway? (y/N): " confirm_branch
-  if [[ "$confirm_branch" != "y" && "$confirm_branch" != "Y" ]]; then
-    echo "Release aborted by user."
+# Check if we're on main branch
+CURRENT_BRANCH=$(git branch --show-current)
+if [ "$CURRENT_BRANCH" != "main" ]; then
+    echo -e "${RED}❌ Error: You must be on the main branch to create a release${NC}"
+    echo -e "${YELLOW}Current branch: $CURRENT_BRANCH${NC}"
     exit 1
-  fi
 fi
 
-
-# 2. Prompt for the new ESP32 firmware version
-read -r -p "Enter the new ESP32 firmware version (e.g., esp32-v1.0.0): " new_version
-
-# 3. Validate the version format (esp32-vX.Y.Z)
-version_regex="^esp32-v([0-9]+)\.([0-9]+)\.([0-9]+)$"
-if [[ ! "$new_version" =~ $version_regex ]]; then
-  echo "Error: Invalid version format. Expected format: esp32-vX.Y.Z (e.g., esp32-v1.0.0)"
-  exit 1
+# Check if working directory is clean
+if [ -n "$(git status --porcelain)" ]; then
+    echo -e "${RED}❌ Error: Working directory is not clean${NC}"
+    echo -e "${YELLOW}Please commit or stash your changes before creating a release${NC}"
+    git status --short
+    exit 1
 fi
 
-echo "New ESP32 firmware version: $new_version"
+# Check if current branch is ahead of origin/main
+echo -e "${BLUE}🔍 Checking branch status...${NC}"
+git fetch origin main
+AHEAD=$(git rev-list --count origin/main..HEAD)
+BEHIND=$(git rev-list --count HEAD..origin/main)
 
-# 4. Update version in the ESP32 source file
+if [ "$BEHIND" -gt 0 ]; then
+    echo -e "${RED}❌ Error: Your branch is $BEHIND commits behind origin/main${NC}"
+    echo -e "${YELLOW}Please pull latest changes first: git pull origin main${NC}"
+    exit 1
+fi
+
+if [ "$AHEAD" -gt 0 ]; then
+    echo -e "${YELLOW}⚠️  Your branch is $AHEAD commits ahead of origin/main${NC}"
+    echo -e "${BLUE}🚀 Will push local commits to origin before creating release...${NC}"
+fi
+
+# Get current version from firmware_version.h
 if [ ! -f "$ESP32_VERSION_FILE" ]; then
-  echo "Error: Version file '$ESP32_VERSION_FILE' not found."
-  echo "Please create it with a line like: #define $VERSION_DEFINE_PATTERN \"esp32-v0.0.0\""
+  echo -e "${RED}❌ Error: Version file '$ESP32_VERSION_FILE' not found.${NC}"
   exit 1
 fi
 
-# Check if the version define pattern exists
-if ! grep -q "#define $VERSION_DEFINE_PATTERN" "$ESP32_VERSION_FILE"; then
-    echo "Error: Pattern '#define $VERSION_DEFINE_PATTERN' not found in '$ESP32_VERSION_FILE'."
+CURRENT_VERSION=$(grep "#define $VERSION_DEFINE_PATTERN" "$ESP32_VERSION_FILE" | sed 's/.*"\(.*\)".*/\1/')
+if [ -z "$CURRENT_VERSION" ]; then
+    echo -e "${RED}❌ Error: Could not extract version from '$ESP32_VERSION_FILE'${NC}"
     exit 1
 fi
 
-# Using sed to update the version string. This assumes a specific format.
-# Format: #define FIRMWARE_VERSION "esp32-vX.Y.Z"
-sed -i.bak "s/#define $VERSION_DEFINE_PATTERN \".*\"/#define $VERSION_DEFINE_PATTERN \"$new_version\"/" "$ESP32_VERSION_FILE"
+echo -e "${BLUE}📋 Current version: ${YELLOW}$CURRENT_VERSION${NC}"
+
+# Determine new version
+if [ $# -eq 0 ]; then
+    show_usage
+    exit 1
+fi
+
+# Parse current version (remove 'fwv' prefix)
+CURRENT_VERSION_NUM=${CURRENT_VERSION#fwv}
+IFS='.' read -ra VERSION_PARTS <<< "$CURRENT_VERSION_NUM"
+MAJOR=${VERSION_PARTS[0]:-0}
+MINOR=${VERSION_PARTS[1]:-0}  
+PATCH=${VERSION_PARTS[2]:-0}
+
+case $1 in
+    patch)
+        NEW_VERSION="fwv$MAJOR.$MINOR.$((PATCH + 1))"
+        ;;
+    minor)
+        NEW_VERSION="fwv$MAJOR.$((MINOR + 1)).0"
+        ;;
+    major)
+        NEW_VERSION="fwv$((MAJOR + 1)).0.0"
+        ;;
+    fwv*.*.*)
+        NEW_VERSION="$1"
+        ;;
+    *)
+        echo -e "${RED}❌ Error: Invalid version argument '$1'${NC}"
+        echo -e "${YELLOW}Use: patch, minor, major, or a specific version like fwv1.2.3${NC}"
+        exit 1
+        ;;
+esac
+
+echo -e "${GREEN}🎯 New version: ${YELLOW}$NEW_VERSION${NC}"
+
+# Confirm release
+echo -e "${BLUE}🤔 Ready to create ESP32 firmware release $NEW_VERSION?${NC}"
+read -p "Press Enter to continue or Ctrl+C to cancel..."
+
+# Push any local commits first if we're ahead
+if [ "$AHEAD" -gt 0 ]; then
+    echo -e "${BLUE}📤 Pushing local commits to origin/main...${NC}"
+    git push origin main
+fi
+
+# Update version in the ESP32 source file
+echo -e "${BLUE}📝 Updating version in '$ESP32_VERSION_FILE'...${NC}"
+
+# Using sed to update the version string
+# Format: #define FIRMWARE_VERSION "fwvX.Y.Z"
+sed -i.bak "s/#define $VERSION_DEFINE_PATTERN \".*\"/#define $VERSION_DEFINE_PATTERN \"$NEW_VERSION\"/" "$ESP32_VERSION_FILE"
 rm "${ESP32_VERSION_FILE}.bak" # Remove backup file created by sed -i on macOS
 
-echo "Updated version in '$ESP32_VERSION_FILE'."
+echo -e "${GREEN}✅ Updated version in '$ESP32_VERSION_FILE'${NC}"
 
-# 5. Git operations: add, commit, tag, push
-echo "Committing version update..."
+# Git operations: add, commit, tag, push
+echo -e "${BLUE}📝 Committing version update...${NC}"
 git add "$ESP32_VERSION_FILE"
-git commit -m "release(esp32): Bump firmware version to $new_version"
+git commit -m "release(esp32): Bump firmware version to $NEW_VERSION"
 
-echo "Creating git tag '$new_version'..."
-if git rev-parse "$new_version" >/dev/null 2>&1; then
-  echo "Error: Tag '$new_version' already exists."
-  # Optionally, offer to delete and recreate, or just exit.
-  # For now, exiting to prevent accidental overwrite.
-  read -r -p "Tag '$new_version' already exists locally. Delete and recreate? (y/N): " confirm_delete_tag
+echo -e "${BLUE}🏷️  Creating git tag '$NEW_VERSION'...${NC}"
+if git rev-parse "$NEW_VERSION" >/dev/null 2>&1; then
+  echo -e "${YELLOW}⚠️  Tag '$NEW_VERSION' already exists locally.${NC}"
+  read -r -p "Delete and recreate? (y/N): " confirm_delete_tag
   if [[ "$confirm_delete_tag" == "y" || "$confirm_delete_tag" == "Y" ]]; then
-    git tag -d "$new_version"
-    echo "Deleted local tag '$new_version'."
+    git tag -d "$NEW_VERSION"
+    echo -e "${GREEN}✅ Deleted local tag '$NEW_VERSION'${NC}"
   else
-    echo "Release aborted. Please use a different version or manually manage the existing tag."
+    echo -e "${RED}❌ Release aborted. Please use a different version or manually manage the existing tag.${NC}"
     exit 1
   fi
 fi
-git tag "$new_version"
 
-echo "Pushing new tag '$new_version' to remote..."
-git push origin "$new_version"
+git tag -a "$NEW_VERSION" -m "ESP32 Firmware Release $NEW_VERSION"
 
-echo "-----------------------------------------"
-echo "ESP32 Firmware Release Process Complete!"
-echo "Version: $new_version"
-echo "Tag pushed to remote. This should trigger the ESP32 release GitHub Action."
-echo "-----------------------------------------"
+echo -e "${BLUE}📤 Pushing tag '$NEW_VERSION' to remote...${NC}"
+git push origin "$NEW_VERSION"
+
+echo -e "${GREEN}🎉 ESP32 Firmware Release $NEW_VERSION created successfully!${NC}"
+echo -e "${BLUE}📋 What happens next:${NC}"
+echo -e "  1. GitHub Actions will build, sign, and create release"
+echo -e "  2. Check deployment status: https://github.com/hobzcalvin/blumon/actions"
+echo -e "  3. Signed firmware will be available in GitHub releases"
+echo -e "  4. Use BLE OTA client to update ESP32 devices securely"
+
+echo -e "${GREEN}✅ Done!${NC}"
 
 exit 0

@@ -22,3 +22,8 @@ Thumbs.db
 # Vite
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# ESP32 Signing Keys (SECURITY CRITICAL - DO NOT COMMIT)
+keys/
+*.pem
+*.sig

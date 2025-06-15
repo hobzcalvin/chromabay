@@ -7,6 +7,12 @@
 #include "esp_ota_ops.h" // For OTA updates
 #include "esp_app_format.h" // For esp_app_desc_t and image state checks
 
+// mbedtls includes for signature verification
+#include "mbedtls/sha256.h"
+#include "mbedtls/ecdsa.h"
+#include "mbedtls/ecp.h"
+#include "mbedtls/error.h"
+
 #include "led_manager.h" // Include the new LED Manager
 #include "config_manager.h"   // Restore MessagePack config handling
 #include "firmware_version.h" // Include firmware version header
@@ -69,6 +75,133 @@ int ota_received_size = 0;
 uint8_t received_signature[FIRMWARE_SIGNATURE_LENGTH];
 bool signature_received = false;
 
+
+// Function to verify firmware signature using ECDSA P-256
+bool verifyFirmwareSignature(const uint8_t* signature, size_t sigLen, const esp_partition_t* partition, size_t firmware_size) {
+    if (sigLen != FIRMWARE_SIGNATURE_LENGTH) {
+        Serial.printf("Invalid signature length: %d, expected %d\n", sigLen, FIRMWARE_SIGNATURE_LENGTH);
+        return false;
+    }
+
+    // Initialize mbedtls contexts
+    mbedtls_ecp_group grp;
+    mbedtls_ecp_point public_key_point;
+    mbedtls_mpi r, s;
+    mbedtls_sha256_context sha_ctx;
+    
+    mbedtls_ecp_group_init(&grp);
+    mbedtls_ecp_point_init(&public_key_point);
+    mbedtls_mpi_init(&r);
+    mbedtls_mpi_init(&s);
+    mbedtls_sha256_init(&sha_ctx);
+    
+    bool verification_result = false;
+    
+    do {
+        // Load SECP256R1 curve
+        int ret = mbedtls_ecp_group_load(&grp, MBEDTLS_ECP_DP_SECP256R1);
+        if (ret != 0) {
+            Serial.printf("Failed to load ECP group: -0x%04x\n", -ret);
+            break;
+        }
+        
+        // Load public key from firmware_version.h (64 bytes: X + Y coordinates)
+        ret = mbedtls_ecp_point_read_binary(&grp, &public_key_point, 
+                                          FIRMWARE_PUBLIC_KEY, sizeof(FIRMWARE_PUBLIC_KEY));
+        if (ret != 0) {
+            Serial.printf("Failed to load public key: -0x%04x\n", -ret);
+            break;
+        }
+        
+        // Extract r and s from signature (32 bytes each)
+        ret = mbedtls_mpi_read_binary(&r, signature, 32);
+        if (ret != 0) {
+            Serial.printf("Failed to read signature r: -0x%04x\n", -ret);
+            break;
+        }
+        
+        ret = mbedtls_mpi_read_binary(&s, signature + 32, 32);
+        if (ret != 0) {
+            Serial.printf("Failed to read signature s: -0x%04x\n", -ret);
+            break;
+        }
+        
+        // Calculate hash of firmware in flash partition
+        uint8_t firmware_hash[32];
+        ret = mbedtls_sha256_starts_ret(&sha_ctx, 0); // 0 = SHA-256
+        if (ret != 0) {
+            Serial.printf("Failed to start SHA-256: -0x%04x\n", -ret);
+            break;
+        }
+        
+        // Read firmware from partition in chunks and hash it
+        const size_t CHUNK_SIZE = 4096;
+        uint8_t* chunk_buffer = (uint8_t*)malloc(CHUNK_SIZE);
+        if (!chunk_buffer) {
+            Serial.println("Failed to allocate chunk buffer for hashing");
+            break;
+        }
+        
+        size_t remaining = firmware_size;
+        size_t offset = 0;
+        
+        while (remaining > 0) {
+            size_t to_read = (remaining < CHUNK_SIZE) ? remaining : CHUNK_SIZE;
+            
+            esp_err_t read_err = esp_partition_read(partition, offset, chunk_buffer, to_read);
+            if (read_err != ESP_OK) {
+                Serial.printf("Failed to read partition at offset %d: %s\n", offset, esp_err_to_name(read_err));
+                free(chunk_buffer);
+                goto cleanup;
+            }
+            
+            ret = mbedtls_sha256_update_ret(&sha_ctx, chunk_buffer, to_read);
+            if (ret != 0) {
+                Serial.printf("Failed to update SHA-256: -0x%04x\n", -ret);
+                free(chunk_buffer);
+                goto cleanup;
+            }
+            
+            offset += to_read;
+            remaining -= to_read;
+        }
+        
+        free(chunk_buffer);
+        
+        ret = mbedtls_sha256_finish_ret(&sha_ctx, firmware_hash);
+        if (ret != 0) {
+            Serial.printf("Failed to finish SHA-256: -0x%04x\n", -ret);
+            break;
+        }
+        
+        Serial.print("Firmware hash: ");
+        for (int i = 0; i < 32; i++) {
+            Serial.printf("%02x", firmware_hash[i]);
+        }
+        Serial.println();
+        
+        // Verify ECDSA signature
+        ret = mbedtls_ecdsa_verify(&grp, firmware_hash, 32, &public_key_point, &r, &s);
+        if (ret == 0) {
+            Serial.println("✅ Firmware signature verification PASSED");
+            verification_result = true;
+        } else {
+            Serial.printf("❌ Firmware signature verification FAILED: -0x%04x\n", -ret);
+            verification_result = false;
+        }
+        
+    } while (0);
+    
+cleanup:
+    // Clean up mbedtls contexts
+    mbedtls_sha256_free(&sha_ctx);
+    mbedtls_mpi_free(&s);
+    mbedtls_mpi_free(&r);
+    mbedtls_ecp_point_free(&public_key_point);
+    mbedtls_ecp_group_free(&grp);
+    
+    return verification_result;
+}
 
 // Function to update the Device Info characteristic
 // This should be called periodically or when relevant info changes (e.g., heap on connect)
@@ -219,23 +352,9 @@ class OTAControlCallbacks : public NimBLECharacteristicCallbacks {
                     return;
                 }
 
-                // Placeholder for actual firmware signature verification.
-                // This should involve hashing the received firmware and verifying against the received signature
-                // using the public key defined in firmware_version.h.
-                Serial.println("OTA: Verifying firmware signature (Placeholder - Assuming VALID for now)...");
-                bool signature_is_valid = true; // Replace with actual verification
-                // Example:
-                // esp_err_t sig_verify_err = esp_ota_verify_secure_boot_signature(&ota_handle); // This is for secure boot, not general app sig
-                // For custom signature:
-                // 1. Calculate hash of the received firmware in the ota_partition.
-                //    You might need to read it back or hash it as it comes.
-                // 2. Use mbedtls (available in ESP-IDF) to verify the hash against `received_signature`
-                //    using `FIRMWARE_SIGNATURE_PUBLIC_KEY`.
-                //
-                // const esp_partition_t* ota_partition_for_verification = esp_ota_get_next_update_partition(NULL);
-                // if (ota_partition_for_verification != NULL) {
-                //    // Logic to read from partition and verify
-                // } else { signature_is_valid = false; }
+                // Real firmware signature verification
+                Serial.println("OTA: Verifying firmware signature...");
+                bool signature_is_valid = verifyFirmwareSignature(received_signature, FIRMWARE_SIGNATURE_LENGTH, update_partition, ota_received_size);
 
                 if (!signature_is_valid) {
                     Serial.println("OTA Error: Firmware signature verification FAILED!");
@@ -251,8 +370,7 @@ class OTAControlCallbacks : public NimBLECharacteristicCallbacks {
                     signature_received = false;
                     return;
                 }
-                Serial.println("OTA: Firmware signature (assumed) VALID.");
-                // --- End Signature Verification Placeholder ---
+                Serial.println("OTA: Firmware signature verification PASSED.");
 
 
                 Serial.println("OTA End command received. Finalizing update...");
@@ -321,7 +439,7 @@ class OTAControlCallbacks : public NimBLECharacteristicCallbacks {
                         pOTAStatusCharacteristic->notify();
                     }
                 }
-            } else if (value.rfind("TOTAL_SIZE:", 0) == 0) { 
+            } else if (strncmp(value, "TOTAL_SIZE:", 11) == 0) { 
                 // Optional: Client can send total firmware size
             }
         } else {

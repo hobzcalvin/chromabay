@@ -3,178 +3,95 @@ name: ESP32 Firmware Release
 on:
   push:
     tags:
-      - 'esp32-v*'
+      - 'fwv*'
 
 jobs:
-  build_and_deploy_esp32_firmware:
+  build-and-sign:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write # Allow peaceiris/actions-gh-pages to push to the gh-pages branch
-      pages: write    # If using GitHub Pages deployments via artifacts
-      id-token: write # If using OIDC for deployments
-
+    
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install PlatformIO Core
-        run: pip install platformio
-
-      - name: Cache PlatformIO Core and dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.platformio/packages
-            ~/.platformio/.cache
-          key: ${{ runner.os }}-platformio-${{ hashFiles('esp32/platformio.ini') }}
-
-      - name: Get Version Information
-        id: versions
-        run: |
-          FIRMWARE_TAG_VERSION="${{ github.ref_name }}"
-          echo "FIRMWARE_TAG_VERSION=${FIRMWARE_TAG_VERSION}" >> $GITHUB_ENV
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install Python dependencies
+      run: |
+        pip install cryptography
+    
+    - name: Setup PlatformIO
+      uses: enterprise-oss/setup-platformio@v1
+      
+    - name: Create private key file from secret
+      run: |
+        echo "${{ secrets.ESP32_SIGNING_PRIVATE_KEY }}" > esp32-signing-private.pem
+        chmod 600 esp32-signing-private.pem
+        
+    - name: Build firmware
+      run: |
+        cd esp32
+        pio run
+        
+    - name: Sign firmware
+      run: |
+        python scripts/sign_firmware.py \
+          esp32/.pio/build/esp32dev/firmware.bin \
+          --private-key esp32-signing-private.pem \
+          --output firmware.sig
           
-          HARDWARE_VERSION_LINE=$(grep '#define HARDWARE_VERSION' esp32/src/firmware_version.h)
-          if [[ -z "$HARDWARE_VERSION_LINE" ]]; then
-            echo "Error: HARDWARE_VERSION define not found in esp32/src/firmware_version.h"
-            exit 1
-          fi
-          HARDWARE_VERSION=$(echo "$HARDWARE_VERSION_LINE" | awk -F'"' '{print $2}')
-          if [[ -z "$HARDWARE_VERSION" ]]; then
-            echo "Error: Could not parse HARDWARE_VERSION from esp32/src/firmware_version.h"
-            exit 1
-          fi
-          echo "HARDWARE_VERSION=${HARDWARE_VERSION}" >> $GITHUB_ENV
+    - name: Get version from tag
+      id: version
+      run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
           
-          echo "Firmware Tag Version: ${FIRMWARE_TAG_VERSION}"
-          echo "Hardware Version: ${HARDWARE_VERSION}"
-
-      - name: Check for Signing Key Secret
-        env:
-          ESP32_SIGNING_KEY: ${{ secrets.ESP32_SIGNING_PRIVATE_KEY }}
-        run: |
-          if [ -z "$ESP32_SIGNING_KEY" ]; then
-            echo "Error: ESP32_SIGNING_PRIVATE_KEY secret is not set."
-            echo "Please configure this secret in your repository settings."
-            exit 1
-          fi
-          echo "Signing key secret found."
-
-      - name: Build ESP32 Firmware
-        run: |
-          cd esp32
-          pio run -e esp32dev 
-        working-directory: ./ 
-
-      - name: Sign Firmware
-        env:
-          ESP32_SIGNING_KEY: ${{ secrets.ESP32_SIGNING_PRIVATE_KEY }}
-        run: |
-          echo "Starting firmware signing process..."
-          FIRMWARE_BIN_PATH="esp32/.pio/build/esp32dev/firmware.bin"
-          SIGNATURE_OUTPUT_PATH="esp32/.pio/build/esp32dev/firmware.sig"
-          PRIVATE_KEY_FILE="private_key.pem"
-
-          if [ ! -f "$FIRMWARE_BIN_PATH" ]; then
-            echo "Error: Firmware binary not found at $FIRMWARE_BIN_PATH"
-            exit 1
-          fi
-
-          echo "${ESP32_SIGNING_KEY}" > ${PRIVATE_KEY_FILE}
-          echo "Private key written to ${PRIVATE_KEY_FILE}"
-
-          # Sign the firmware binary (produces a DER-encoded signature for EC keys)
-          openssl dgst -sha256 -sign ${PRIVATE_KEY_FILE} -out ${SIGNATURE_OUTPUT_PATH} ${FIRMWARE_BIN_PATH}
+    - name: Create release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          esp32/.pio/build/esp32dev/firmware.bin
+          firmware.sig
+        body: |
+          ## 🔵 ESP32 Firmware Release ${{ steps.version.outputs.VERSION }}
           
-          if [ $? -ne 0 ]; then
-            echo "Error: Firmware signing failed."
-            rm ${PRIVATE_KEY_FILE} # Clean up private key file
-            exit 1
-          fi
+          ### 📦 Files:
+          - **`firmware.bin`** - Main firmware binary for ESP32
+          - **`firmware.sig`** - ECDSA P-256 signature for secure OTA updates
           
-          rm ${PRIVATE_KEY_FILE} # Clean up private key file
-          echo "Firmware signed successfully. Signature at ${SIGNATURE_OUTPUT_PATH}"
-          ls -l ${SIGNATURE_OUTPUT_PATH}
-
-      - name: Prepare deployment artifacts
-        run: |
-          STAGING_DIR_BASE="./ota_staging/firmware/esp32/${{ env.FIRMWARE_TAG_VERSION }}"
-          mkdir -p "${STAGING_DIR_BASE}"
+          ### 🔐 Security Features:
+          - ✅ Firmware is cryptographically signed with ECDSA P-256
+          - ✅ Signature verification enforced on device during OTA
+          - ✅ Tamper-proof updates prevent malicious firmware installation
           
-          cp esp32/.pio/build/esp32dev/firmware.bin "${STAGING_DIR_BASE}/firmware.bin"
-          echo "Firmware binary prepared at ${STAGING_DIR_BASE}/firmware.bin"
+          ### 📋 Installation:
+          **Initial Upload (USB):**
+          ```bash
+          # Download firmware.bin and flash via USB
+          esptool.py --port /dev/ttyUSB0 write_flash 0x10000 firmware.bin
+          ```
           
-          cp esp32/.pio/build/esp32dev/firmware.sig "${STAGING_DIR_BASE}/firmware.sig"
-          echo "Firmware signature prepared at ${STAGING_DIR_BASE}/firmware.sig"
-
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
-
-      - name: Create/Update Firmware Registry
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO_NAME: ${{ github.repository }}
-        run: |
-          REGISTRY_FILE_ON_GHPAGES="firmware/esp32/esp32_firmware_registry.json"
-          LOCAL_STAGING_REGISTRY_PATH="./ota_staging/${REGISTRY_FILE_ON_GHPAGES}"
+          **OTA Update (BLE):**
+          1. Connect to device via BLE (Service UUID: `a0be83e4-8dc9-47f0-ab40-b19721d20ed1`)
+          2. Send signature to characteristic `a0be83eb-8dc9-47f0-ab40-b19721d20ed1`
+          3. Send firmware data to characteristic `a0be83e9-8dc9-47f0-ab40-b19721d20ed1`
+          4. Send "END_OTA" to characteristic `a0be83e8-8dc9-47f0-ab40-b19721d20ed1`
+          5. Device verifies signature and reboots with new firmware
           
-          mkdir -p $(dirname "${LOCAL_STAGING_REGISTRY_PATH}")
-
-          git clone --depth=1 --branch=gh-pages "https://x-access-token:${GH_TOKEN}@github.com/${REPO_NAME}.git" gh_pages_temp
+          ### 🛠 Technical Details:
+          - **Target:** ESP32 with 4MB flash
+          - **Framework:** Arduino with PlatformIO
+          - **Partition Scheme:** Dual OTA (app0/app1) with LittleFS
+          - **BLE Stack:** NimBLE for efficient memory usage
+          - **LED Support:** WS2812B via NeoPixelBus + FastLED
           
-          EXISTING_REGISTRY_CONTENT="[]" 
-          if [ -f "gh_pages_temp/${REGISTRY_FILE_ON_GHPAGES}" ]; then
-            TEMP_CONTENT=$(cat "gh_pages_temp/${REGISTRY_FILE_ON_GHPAGES}")
-            if echo "${TEMP_CONTENT}" | jq empty > /dev/null 2>&1; then
-              EXISTING_REGISTRY_CONTENT="${TEMP_CONTENT}"
-              echo "Found existing registry."
-            else
-              echo "Existing registry file is not valid JSON. Initializing new registry."
-            fi
-          else
-            echo "No existing registry file found. Initializing new registry."
-          fi
-          rm -rf gh_pages_temp
-
-          FIRMWARE_PATH_IN_REGISTRY="firmware/esp32/${FIRMWARE_TAG_VERSION}/firmware.bin"
-          SIGNATURE_PATH_IN_REGISTRY="firmware/esp32/${FIRMWARE_TAG_VERSION}/firmware.sig"
-          BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
-          NEW_ENTRY=$(jq -n \
-            --arg ver "${FIRMWARE_TAG_VERSION}" \
-            --arg hwver "${HARDWARE_VERSION}" \
-            --arg path "${FIRMWARE_PATH_IN_REGISTRY}" \
-            --arg sigpath "${SIGNATURE_PATH_IN_REGISTRY}" \
-            --arg date "${BUILD_DATE}" \
-            '{version: $ver, hardwareVersion: $hwver, path: $path, signaturePath: $sigpath, date: $date}')
-          
-          echo "New registry entry: ${NEW_ENTRY}"
-          
-          # Prepend new entry to the existing array
-          UPDATED_REGISTRY=$(echo "${EXISTING_REGISTRY_CONTENT}" | jq --argjson new_entry "${NEW_ENTRY}" '[$new_entry] + .')
-          
-          # Ensure the final output is a valid JSON array (even if initial was empty or invalid)
-          if ! echo "${UPDATED_REGISTRY}" | jq empty > /dev/null 2>&1; then
-            echo "Error: Updated registry is not valid JSON. Falling back to new entry only."
-            UPDATED_REGISTRY=$(echo "[]" | jq --argjson new_entry "${NEW_ENTRY}" '[$new_entry] + .')
-          fi
-          
-          echo "${UPDATED_REGISTRY}" | jq '.' > "${LOCAL_STAGING_REGISTRY_PATH}" # Pretty print JSON
-          echo "Firmware registry created/updated at ${LOCAL_STAGING_REGISTRY_PATH}"
-          cat "${LOCAL_STAGING_REGISTRY_PATH}"
-
-      - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./ota_staging 
-          publish_branch: gh-pages
-          keep_files: true 
-          user_name: 'github-actions[bot]'
-          user_email: 'github-actions[bot]@users.noreply.github.com'
-          commit_message: Deploy ESP32 firmware ${{ env.FIRMWARE_TAG_VERSION }} and update registry
+        draft: false
+        prerelease: false
+        tag_name: ${{ steps.version.outputs.VERSION }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Clean up private key
+      if: always()
+      run: |
+        rm -f esp32-signing-private.pem
