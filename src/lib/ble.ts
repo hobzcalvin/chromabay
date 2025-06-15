@@ -31,7 +31,6 @@ export interface DeviceInfo {
   fw_ver: string;
   hw_ver: string;
   heap?: number;
-  // mac?: string; // Optional
 }
 
 export interface FirmwareRegistryEntry {
@@ -49,6 +48,29 @@ export interface OTAUpdateStatus {
   isComplete?: boolean;
   isError?: boolean;
 }
+
+// --- UTF-8 Decoder ---
+/**
+ * Decodes a DataView object as a UTF-8 string.
+ * Uses TextDecoder if available, otherwise falls back to the library's dataViewToText.
+ * @param dataView The DataView to decode.
+ * @returns The decoded string.
+ */
+function decodeDataViewAsUtf8(dataView: DataView): string {
+  if (typeof TextDecoder !== 'undefined') {
+    try {
+      const decoder = new TextDecoder('utf-8');
+      return decoder.decode(dataView);
+    } catch (e) {
+      console.warn('[BLE] TextDecoder failed, falling back to dataViewToText:', e);
+      return dataViewToText(dataView); // Fallback
+    }
+  } else {
+    // console.warn('[BLE] TextDecoder not available, using library\'s dataViewToText.'); // Less verbose
+    return dataViewToText(dataView); // Fallback if TextDecoder is not supported
+  }
+}
+
 
 // --- Existing BLE Functions ---
 
@@ -96,7 +118,7 @@ export async function startScan(
   } else {
     try {
       await BleClient.requestLEScan({
-        services: [LED_SERVICE_UUID] // Scan for the main service
+        services: [LED_SERVICE_UUID] 
       }, callback);
     } catch (error) {
       console.error('Error starting BLE scan:', error);
@@ -113,13 +135,13 @@ function startWebBluetoothScan(
       filters: [
         { services: [LED_SERVICE_UUID] }
       ],
-      optionalServices: [LED_SERVICE_UUID] // Ensure all characteristics under this service are accessible
+      optionalServices: [LED_SERVICE_UUID] 
     }).then(device => {
       callback({
         device: {
           deviceId: device.id,
           name: device.name || 'Unknown Device',
-          webDevice: device // Store the Web Bluetooth device object
+          webDevice: device 
         }
       });
       resolve();
@@ -222,18 +244,23 @@ export async function discoverServices(deviceId: string): Promise<any[]> {
 }
 
 export async function readCharacteristic(deviceId: string, serviceUuid: string, characteristicUuid: string): Promise<string> {
+  // console.log(`[BLE Read] Attempting to read char: ${characteristicUuid} on service: ${serviceUuid} for device: ${deviceId}`); // Less verbose
   try {
+    let valueDataView: DataView;
     if (isWeb()) {
       const deviceInfo = connectedDevices.get(deviceId);
       if (!deviceInfo?.gattServer) throw new Error('Device not connected');
       const service = await deviceInfo.gattServer.getPrimaryService(serviceUuid);
       const characteristic = await service.getCharacteristic(characteristicUuid);
-      const value = await characteristic.readValue();
-      return dataViewToText(value);
+      valueDataView = await characteristic.readValue();
     } else {
-      const result = await BleClient.read(deviceId, serviceUuid, characteristicUuid);
-      return dataViewToText(result);
+      valueDataView = await BleClient.read(deviceId, serviceUuid, characteristicUuid);
     }
+    
+    const decodedString = decodeDataViewAsUtf8(valueDataView);
+    // console.log(`[BLE Read - ${characteristicUuid}] Decoded string: "${decodedString}" (length: ${decodedString.length})`); // Less verbose
+    return decodedString;
+
   } catch (error) {
     console.error(`Error reading characteristic ${characteristicUuid}:`, error);
     throw error;
@@ -280,7 +307,7 @@ async function writeCharacteristicWithoutResponse(deviceId: string, serviceUuid:
 export async function startNotifications(deviceId: string, serviceUuid: string, characteristicUuid: string, callback: (data: string) => void): Promise<void> {
   try {
     const notificationCallback = (value: DataView) => {
-        const stringValue = dataViewToText(value);
+        const stringValue = decodeDataViewAsUtf8(value);
         callback(stringValue);
     };
 
@@ -383,15 +410,16 @@ export async function sendOTAControlCommand(deviceId: string, command: 'END_OTA'
 export async function sendFirmwareSignature(deviceId: string, signature: ArrayBuffer): Promise<void> {
   console.log(`[OTA] Sending firmware signature (${signature.byteLength} bytes) to ${deviceId}`);
   const dataView = new DataView(signature);
-  // Use writeCharacteristic for acknowledged write, as signature is critical
-  await writeCharacteristic(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_OTA_SIGNATURE, dataViewToText(dataView)); // Assuming text for simplicity, adjust if binary
-  // Or if ESP32 expects raw bytes:
-  // await BleClient.write(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_OTA_SIGNATURE, dataView); // for native
-  // For web, if characteristic supports writeValueWithResponse:
-  // const deviceInfo = connectedDevices.get(deviceId);
-  // const service = await deviceInfo.gattServer.getPrimaryService(LED_SERVICE_UUID);
-  // const characteristic = await service.getCharacteristic(CHARACTERISTIC_UUID_OTA_SIGNATURE);
-  // await characteristic.writeValueWithResponse(dataView);
+
+  if (isWeb()) {
+      const deviceInfo = connectedDevices.get(deviceId);
+      if (!deviceInfo?.gattServer) throw new Error('Device not connected');
+      const service = await deviceInfo.gattServer.getPrimaryService(LED_SERVICE_UUID);
+      const characteristic = await service.getCharacteristic(CHARACTERISTIC_UUID_OTA_SIGNATURE);
+      await characteristic.writeValueWithResponse(dataView);
+  } else {
+      await BleClient.write(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_OTA_SIGNATURE, dataView);
+  }
   console.log('[OTA] Firmware signature sent.');
 }
 
@@ -440,15 +468,9 @@ async function sendFirmwareChunk(deviceId: string, chunk: ArrayBuffer): Promise<
 
 export async function startOTAStatusNotifications(deviceId: string, callback: (status: OTAUpdateStatus) => void): Promise<void> {
   console.log(`[OTA] Starting status notifications for ${deviceId}`);
-  await startNotifications(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_OTA_STATUS, (jsonString) => {
-    try {
-      // Attempt to parse as JSON object first
-      const statusObj = JSON.parse(jsonString) as OTAUpdateStatus;
-      callback(statusObj);
-    } catch (e) {
-      // If not JSON, treat as simple status message string
-      callback({ statusMessage: jsonString });
-    }
+  await startNotifications(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_OTA_STATUS, (stringValue) => {
+    // console.log(`[OTA Status Notification Received]: "${stringValue}"`); // Less verbose
+    callback({ statusMessage: stringValue });
   });
 }
 
@@ -467,7 +489,7 @@ export async function performOTAUpdate(
   console.log(`[OTA] Starting OTA update for ${deviceId} from ${firmwareUrl}`);
   progressCallback({ statusMessage: 'Starting OTA...' });
 
-  let otaDataNotificationsStarted = false;
+  let otaDataNotificationsStartedForAck = false; 
 
   try {
     // 1. Fetch firmware and signature
@@ -496,10 +518,9 @@ export async function performOTAUpdate(
     //    This global listener is for debugging/logging these ACKs.
     //    The sendFirmwareChunk function handles its own ACK logic (web) or pacing (native).
     if (!isWeb()) { 
-        await BleClient.startNotifications(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_OTA_DATA, (ackValue) => {
-            // console.log('[OTA] Global ACK Listener (Native) for OTA_DATA:', dataViewToText(ackValue));
+        await BleClient.startNotifications(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_OTA_DATA, (_ackValue) => {
         });
-        otaDataNotificationsStarted = true;
+        otaDataNotificationsStartedForAck = true;
     }
 
 
@@ -539,12 +560,11 @@ export async function performOTAUpdate(
     // await sendOTAControlCommand(deviceId, 'ABORT_OTA').catch(e => console.warn("Failed to send ABORT_OTA", e));
     throw error;
   } finally {
-    // Clean up: Stop listening for ACKs on OTA_DATA if started for native
-    if (otaDataNotificationsStarted && !isWeb()) {
+    if (otaDataNotificationsStartedForAck && !isWeb()) {
         try {
             await BleClient.stopNotifications(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_OTA_DATA);
         } catch (e) {
-            console.warn("[OTA] Failed to stop OTA_DATA notifications (native):", e);
+            console.warn("[OTA] Failed to stop OTA_DATA ACK notifications (native):", e);
         }
     }
   }

@@ -70,16 +70,43 @@ uint8_t received_signature[FIRMWARE_SIGNATURE_LENGTH];
 bool signature_received = false;
 
 
+// Function to update the Device Info characteristic
+// This should be called periodically or when relevant info changes (e.g., heap on connect)
+void updateDeviceInfoCharacteristic() {
+    if (!pDeviceInfoCharacteristic) {
+        // This should not happen if BLE setup is correct
+        return;
+    }
+
+    String deviceInfoJson = "{";
+    deviceInfoJson += "\"fw_ver\":\"" + String(FIRMWARE_VERSION) + "\",";
+    deviceInfoJson += "\"hw_ver\":\"" + String(HARDWARE_VERSION) + "\",";
+    deviceInfoJson += "\"heap\":" + String(ESP.getFreeHeap());
+    deviceInfoJson += "}";
+    
+    // IMPORTANT: Always use setValue with explicit length for strings with NimBLE
+    // to avoid issues with strlen or incomplete data transmission.
+    // The NimBLE setValue(const char*) overload has proven unreliable.
+    pDeviceInfoCharacteristic->setValue((uint8_t*)deviceInfoJson.c_str(), deviceInfoJson.length());
+    
+    // Optionally notify if the characteristic supports it and clients are subscribed,
+    // though for device info, a read-on-demand is usually sufficient.
+    // if (deviceConnected) { pDeviceInfoCharacteristic->notify(); }
+}
+
 // NimBLE Server Callbacks
 class ServerCallbacks: public NimBLEServerCallbacks {
     void onConnect(NimBLEServer* pServer) {
         deviceConnected = true;
         Serial.println("BLE Client Connected");
+        // Update device info characteristic as heap might have changed or client needs fresh info
+        updateDeviceInfoCharacteristic(); 
     };
 
     void onDisconnect(NimBLEServer* pServer) {
         deviceConnected = false;
         Serial.println("BLE Client Disconnected");
+        // If OTA was in progress and client disconnects, abort it to free resources
         if (ota_in_progress) {
             Serial.println("Client disconnected during OTA. Aborting OTA.");
             if (ota_handle != 0) { 
@@ -87,9 +114,10 @@ class ServerCallbacks: public NimBLEServerCallbacks {
             }
             ota_in_progress = false;
             ota_handle = 0;
-            signature_received = false;
+            signature_received = false; // Reset signature status
             if (pOTAStatusCharacteristic) {
-                pOTAStatusCharacteristic->setValue("OTA_ERR_DISCONNECTED");
+                const char* msg = "OTA_ERR_DISCONNECTED";
+                pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
                 pOTAStatusCharacteristic->notify();
             }
         }
@@ -108,37 +136,23 @@ class CharacteristicCallbacks: public NimBLECharacteristicCallbacks {
             }
             Serial.println("BLE Received (RX): " + receivedData);
             
+            // Process general BLE commands
             if (receivedData == "status") {
                 String response = "LEDs: " + String(ledMgr.getNumStrips() > 0 ? ledMgr.getStrip(0)->getLength() : 0) + 
                                 ", Brightness: " + String(ledMgr.getGlobalBrightness()) + 
                                 ", Free Heap: " + String(ESP.getFreeHeap());
                 if (pTxCharacteristic) {
-                    pTxCharacteristic->setValue(response.c_str());
+                    pTxCharacteristic->setValue((uint8_t*)response.c_str(), response.length());
                     pTxCharacteristic->notify();
                 }
             } else if (receivedData == "info") {
                 String response = "Blumon ESP32 - LedManager Rainbow Demo (NimBLE)";
                  if (pTxCharacteristic) {
-                    pTxCharacteristic->setValue(response.c_str());
+                    pTxCharacteristic->setValue((uint8_t*)response.c_str(), response.length());
                     pTxCharacteristic->notify();
                 }
             }
         }
-    }
-};
-
-// Callback for Device Info Characteristic (Read-Only)
-class DeviceInfoCallbacks : public NimBLECharacteristicCallbacks {
-    void onRead(NimBLECharacteristic* pCharacteristic) {
-        Serial.println("Device Info Characteristic Read Request");
-        String deviceInfoJson = "{";
-        deviceInfoJson += "\"fw_ver\":\"" + String(FIRMWARE_VERSION) + "\",";
-        deviceInfoJson += "\"hw_ver\":\"" + String(HARDWARE_VERSION) + "\",";
-        deviceInfoJson += "\"heap\":" + String(ESP.getFreeHeap());
-        deviceInfoJson += "}";
-        
-        pCharacteristic->setValue(deviceInfoJson.c_str());
-        Serial.println("Sent Device Info: " + deviceInfoJson);
     }
 };
 
@@ -152,14 +166,16 @@ class OTASignatureCallbacks : public NimBLECharacteristicCallbacks {
             signature_received = true;
             Serial.printf("%d bytes stored.\n", value.length());
             if (pOTAStatusCharacteristic) {
-                pOTAStatusCharacteristic->setValue("OTA_SIG_RECEIVED");
+                const char* msg = "OTA_SIG_RECEIVED";
+                pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
                 pOTAStatusCharacteristic->notify();
             }
         } else {
-            Serial.printf("Invalid length %d bytes. Expected %d.\n", value.length(), FIRMWARE_SIGNATURE_LENGTH);
-            signature_received = false; // Mark as not (properly) received
+            Serial.printf("Invalid signature length %d bytes. Expected %d.\n", value.length(), FIRMWARE_SIGNATURE_LENGTH);
+            signature_received = false; 
             if (pOTAStatusCharacteristic) {
-                pOTAStatusCharacteristic->setValue("OTA_ERR_SIG_LEN");
+                const char* msg = "OTA_ERR_SIG_LEN";
+                pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
                 pOTAStatusCharacteristic->notify();
             }
         }
@@ -170,30 +186,31 @@ class OTASignatureCallbacks : public NimBLECharacteristicCallbacks {
 // Callback for OTA Control Characteristic (Write)
 class OTAControlCallbacks : public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic* pCharacteristic) {
-        std::string value = pCharacteristic->getValue();
+        std::string value_str = pCharacteristic->getValue();
+        const char* value = value_str.c_str(); 
         Serial.print("OTA Control Received: ");
-        if (value.length() > 0) {
-            Serial.println(value.c_str());
+        if (strlen(value) > 0) {
+            Serial.println(value);
             
-            if (value == "END_OTA") {
+            if (strcmp(value, "END_OTA") == 0) {
                 if (!ota_in_progress || ota_handle == 0) {
                     Serial.println("OTA Error: END_OTA received but no OTA process was active or handle invalid.");
                     if (pOTAStatusCharacteristic) {
-                        pOTAStatusCharacteristic->setValue("OTA_ERR_NO_ACTIVE_OTA");
+                        const char* msg = "OTA_ERR_NO_ACTIVE_OTA";
+                        pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
                         pOTAStatusCharacteristic->notify();
                     }
-                    signature_received = false; // Reset for next attempt
+                    signature_received = false; 
                     return;
                 }
 
                 if (!signature_received) {
                     Serial.println("OTA Error: END_OTA received but no signature was provided.");
                     if (pOTAStatusCharacteristic) {
-                        pOTAStatusCharacteristic->setValue("OTA_ERR_NO_SIGNATURE");
+                        const char* msg = "OTA_ERR_NO_SIGNATURE";
+                        pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
                         pOTAStatusCharacteristic->notify();
                     }
-                    // Optionally abort here, or let it fail at esp_ota_end if it checks.
-                    // For safety, let's abort if signature is mandatory.
                     esp_ota_abort(ota_handle);
                     ota_in_progress = false;
                     ota_handle = 0;
@@ -202,7 +219,9 @@ class OTAControlCallbacks : public NimBLECharacteristicCallbacks {
                     return;
                 }
 
-                // --- Placeholder for Signature Verification ---
+                // Placeholder for actual firmware signature verification.
+                // This should involve hashing the received firmware and verifying against the received signature
+                // using the public key defined in firmware_version.h.
                 Serial.println("OTA: Verifying firmware signature (Placeholder - Assuming VALID for now)...");
                 bool signature_is_valid = true; // Replace with actual verification
                 // Example:
@@ -221,7 +240,8 @@ class OTAControlCallbacks : public NimBLECharacteristicCallbacks {
                 if (!signature_is_valid) {
                     Serial.println("OTA Error: Firmware signature verification FAILED!");
                     if (pOTAStatusCharacteristic) {
-                        pOTAStatusCharacteristic->setValue("OTA_ERR_SIG_INVALID");
+                        const char* msg = "OTA_ERR_SIG_INVALID";
+                        pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
                         pOTAStatusCharacteristic->notify();
                     }
                     esp_ota_abort(ota_handle);
@@ -240,25 +260,27 @@ class OTAControlCallbacks : public NimBLECharacteristicCallbacks {
                 if (err == ESP_OK) {
                     Serial.println("OTA: esp_ota_end succeeded.");
                     if (pOTAStatusCharacteristic) {
-                        pOTAStatusCharacteristic->setValue("OTA_VALIDATING");
+                        const char* msg = "OTA_VALIDATING";
+                        pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
                         pOTAStatusCharacteristic->notify();
-                        delay(10); 
+                        delay(10); // Allow BLE notification to send
                     }
                     
                     err = esp_ota_set_boot_partition(update_partition);
                     if (err == ESP_OK) {
                         Serial.println("OTA: esp_ota_set_boot_partition succeeded. Rebooting...");
                         if (pOTAStatusCharacteristic) {
-                            pOTAStatusCharacteristic->setValue("OTA_SUCCESS_REBOOTING");
+                            const char* msg = "OTA_SUCCESS_REBOOTING";
+                            pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
                             pOTAStatusCharacteristic->notify();
-                            delay(100); 
+                            delay(100); // Allow BLE notification to send before reboot
                         }
                         esp_restart();
                     } else {
                         Serial.printf("OTA Error: esp_ota_set_boot_partition failed! (%s)\n", esp_err_to_name(err));
                         if (pOTAStatusCharacteristic) {
                             String errorMsg = "OTA_ERR_SET_BOOT:" + String(esp_err_to_name(err));
-                            pOTAStatusCharacteristic->setValue(errorMsg.c_str());
+                            pOTAStatusCharacteristic->setValue((uint8_t*)errorMsg.c_str(), errorMsg.length());
                             pOTAStatusCharacteristic->notify();
                         }
                     }
@@ -266,16 +288,17 @@ class OTAControlCallbacks : public NimBLECharacteristicCallbacks {
                     Serial.printf("OTA Error: esp_ota_end failed! (%s)\n", esp_err_to_name(err));
                     if (pOTAStatusCharacteristic) {
                         String errorMsg = "OTA_ERR_END_FAILED:" + String(esp_err_to_name(err));
-                        pOTAStatusCharacteristic->setValue(errorMsg.c_str());
+                        pOTAStatusCharacteristic->setValue((uint8_t*)errorMsg.c_str(), errorMsg.length());
                         pOTAStatusCharacteristic->notify();
                     }
                 }
+                // Reset OTA state after attempting to end, unless rebooting
                 ota_in_progress = false;
                 ota_handle = 0; 
                 ota_received_size = 0;
                 signature_received = false;
 
-            } else if (value == "ABORT_OTA") {
+            } else if (strcmp(value, "ABORT_OTA") == 0) {
                 if (ota_in_progress) {
                     Serial.println("OTA Abort command received. Cleaning up.");
                     if (ota_handle != 0) {
@@ -286,13 +309,15 @@ class OTAControlCallbacks : public NimBLECharacteristicCallbacks {
                     ota_received_size = 0;
                     signature_received = false;
                     if (pOTAStatusCharacteristic) {
-                        pOTAStatusCharacteristic->setValue("OTA_ABORTED_CMD");
+                        const char* msg = "OTA_ABORTED_CMD";
+                        pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
                         pOTAStatusCharacteristic->notify();
                     }
                 } else {
                     Serial.println("Abort command received, but no OTA in progress.");
                      if (pOTAStatusCharacteristic) {
-                        pOTAStatusCharacteristic->setValue("OTA_WARN_NO_OTA_TO_ABORT");
+                        const char* msg = "OTA_WARN_NO_OTA_TO_ABORT";
+                        pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
                         pOTAStatusCharacteristic->notify();
                     }
                 }
@@ -324,7 +349,8 @@ class OTADataCallbacks : public NimBLECharacteristicCallbacks {
             if (update_partition == NULL) {
                 Serial.println("OTA Error: No valid update partition found!");
                 if (pOTAStatusCharacteristic) {
-                    pOTAStatusCharacteristic->setValue("OTA_ERR_NO_PARTITION");
+                    const char* msg = "OTA_ERR_NO_PARTITION";
+                    pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
                     pOTAStatusCharacteristic->notify();
                 }
                 return;
@@ -337,7 +363,7 @@ class OTADataCallbacks : public NimBLECharacteristicCallbacks {
                 Serial.printf("OTA Error: esp_ota_begin failed (%s)\n", esp_err_to_name(err));
                 if (pOTAStatusCharacteristic) {
                     String errorMsg = "OTA_ERR_BEGIN_FAILED:" + String(esp_err_to_name(err));
-                    pOTAStatusCharacteristic->setValue(errorMsg.c_str());
+                    pOTAStatusCharacteristic->setValue((uint8_t*)errorMsg.c_str(), errorMsg.length());
                     pOTAStatusCharacteristic->notify();
                 }
                 ota_handle = 0; 
@@ -346,17 +372,19 @@ class OTADataCallbacks : public NimBLECharacteristicCallbacks {
             ota_in_progress = true;
             Serial.println("OTA: esp_ota_begin succeeded. Ready for firmware data.");
             if (pOTAStatusCharacteristic) {
-                pOTAStatusCharacteristic->setValue("OTA_STARTED_READY");
+                const char* msg = "OTA_STARTED_READY";
+                pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
                 pOTAStatusCharacteristic->notify();
             }
         }
 
+        // Write received data to OTA partition
         esp_err_t err = esp_ota_write(ota_handle, value.data(), length);
         if (err != ESP_OK) {
             Serial.printf("OTA Error: esp_ota_write failed (%s)\n", esp_err_to_name(err));
             if (pOTAStatusCharacteristic) {
                 String errorMsg = "OTA_ERR_WRITE:" + String(esp_err_to_name(err));
-                pOTAStatusCharacteristic->setValue(errorMsg.c_str());
+                pOTAStatusCharacteristic->setValue((uint8_t*)errorMsg.c_str(), errorMsg.length());
                 pOTAStatusCharacteristic->notify();
             }
             esp_ota_abort(ota_handle); 
@@ -368,8 +396,10 @@ class OTADataCallbacks : public NimBLECharacteristicCallbacks {
 
         ota_received_size += length;
 
-        uint8_t ack_payload[1] = { (uint8_t)(ota_received_size % 256) }; 
-        pCharacteristic->setValue(ack_payload, 1);
+        // Acknowledge chunk receipt by notifying on the same characteristic (flow control)
+        // This is what Sparkfun example does.
+        uint8_t ack_payload[1] = { (uint8_t)(ota_received_size % 256) }; // Simple ACK
+        pCharacteristic->setValue(ack_payload, 1); 
         pCharacteristic->notify();
     }
 };
@@ -435,12 +465,10 @@ void setup() {
     defaultStrip.rmtChannel  = 0;
     
     configMgr.createDefaultConfigFileIfMissing(defaultStrip);
-    Serial.println("Default config check complete (file created if missing).");
 
     bool configLoadedAndApplied = configMgr.loadAndApplyConfiguration();
-    Serial.printf("loadAndApplyConfiguration() returned: %s\n",
-                  configLoadedAndApplied ? "true" : "false");
 
+    // Fallback to default strip if config loading/application fails or results in no strips
     if (!configLoadedAndApplied || ledMgr.getNumStrips() == 0) {
         if (!configLoadedAndApplied) {
             Serial.println("Config load/apply reported failure.");
@@ -450,18 +478,14 @@ void setup() {
         Serial.println("Falling back to built-in default LED strip configuration …");
         ledMgr.clearStrips();
         if (ledMgr.addStrip(defaultStrip)) {
-            Serial.println("Default strip added; calling ledMgr.begin() …");
-            ledMgr.setGlobalBrightness(BRIGHTNESS);
+            ledMgr.setGlobalBrightness(BRIGHTNESS); // Apply default brightness for fallback
             ledMgr.begin();
-            Serial.println("ledMgr.begin() finished for fallback strip.");
         } else {
             Serial.println("CRITICAL: Failed to add fallback LED strip!");
         }
     } else {
         Serial.println("Configuration successfully loaded and applied from file.");
-        Serial.println("Calling ledMgr.begin() for loaded configuration …");
-        ledMgr.begin();
-        Serial.println("ledMgr.begin() finished for loaded configuration.");
+        ledMgr.begin(); // Brightness should have been loaded from config
     }
 
     Serial.printf("LedManager initialized. Number of configured strips: %d\n", ledMgr.getNumStrips());
@@ -484,25 +508,21 @@ void setup() {
         Serial.println("WARNING: No LED strips are configured in LedManager after setup!");
     }
     
-    Serial.println("Testing LEDs with red pattern (LedManager)...");
+    // Test pattern to confirm LEDs are working
     if (ledMgr.getNumStrips() > 0 && ledMgr.getStrip(0)) {
         for(int i = 0; i < ledMgr.getStrip(0)->getLength(); i++) { 
             ledMgr.setPixelColor(0, i, CRGB::Red); 
         }
         ledMgr.show();
-    } else {
-        Serial.println("Skipping red pattern test: No strips configured.");
     }
     delay(1000);
     
-    Serial.println("Clearing LEDs (LedManager)...");
+    // Clear LEDs
     if (ledMgr.getNumStrips() > 0 && ledMgr.getStrip(0)) {
         for(int i = 0; i < ledMgr.getStrip(0)->getLength(); i++) { 
             ledMgr.setPixelColor(0, i, CRGB::Black); 
         }
         ledMgr.show();
-    } else {
-        Serial.println("Skipping clear LEDs test: No strips configured.");
     }
     
     Serial.println("Initializing NimBLE...");
@@ -531,7 +551,7 @@ void setup() {
                                 CHARACTERISTIC_UUID_DEVICE_INFO,
                                 NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY
                               );
-    pDeviceInfoCharacteristic->setCallbacks(new DeviceInfoCallbacks()); 
+    // Device Info value is set by updateDeviceInfoCharacteristic(), no onRead callback needed.
 
     pOTAControlCharacteristic = pService->createCharacteristic(
                                 CHARACTERISTIC_UUID_OTA_CONTROL,
@@ -552,12 +572,14 @@ void setup() {
     
     pOTASignatureCharacteristic = pService->createCharacteristic(
                                 CHARACTERISTIC_UUID_OTA_SIGNATURE,
-                                NIMBLE_PROPERTY::WRITE // Acknowledge signature receipt
+                                NIMBLE_PROPERTY::WRITE 
                                );
     pOTASignatureCharacteristic->setCallbacks(new OTASignatureCallbacks());
-    // -------------------------------
+    // --- End OTA Characteristics ---
     
     pService->start();
+    
+    updateDeviceInfoCharacteristic(); // Set initial device info before advertising
     
     NimBLEAdvertising *pAdvertising = NimBLEDevice::getAdvertising();
     pAdvertising->addServiceUUID(SERVICE_UUID); 
@@ -570,6 +592,7 @@ void setup() {
     Serial.println("Advertising Service UUID: " + String(SERVICE_UUID));
     
     // --- Health Check: Mark app as valid if it was pending verification ---
+    // This is the point where we consider the app to have started successfully.
     if (esp_ota_get_state_partition(running_partition, &ota_state) == ESP_OK) {
         if (ota_state == ESP_OTA_IMG_PENDING_VERIFY) {
             Serial.println("Setup complete. App is PENDING VERIFICATION. Marking as VALID.");
@@ -578,7 +601,6 @@ void setup() {
                 Serial.println("App successfully marked as valid. Rollback cancelled.");
             } else {
                 Serial.printf("Error marking app valid: %s. OTA rollback might occur on next boot if watchdog triggers.\n", esp_err_to_name(mark_valid_err));
-                // Consider a more drastic error state here if marking valid fails.
             }
         } else {
             Serial.println("Setup complete. App was not pending verification.");
@@ -592,19 +614,25 @@ void setup() {
     Serial.printf("Free heap: %d bytes\n", ESP.getFreeHeap());
 }
 
+unsigned long lastHeapUpdateTime = 0;
+const unsigned long heapUpdateInterval = 5000; // Update heap in device info every 5 seconds
+
 void loop() {
     unsigned long currentTime = millis();
     
+    // Update rainbow animation
     if (currentTime - lastUpdate >= updateInterval) {
         lastUpdate = currentTime;
         
-        if (ledMgr.getNumStrips() > 0 && ledMgr.getStrip(0) != nullptr && !ota_in_progress) { // Pause rainbow during OTA
+        // Pause rainbow animation if OTA is in progress to free up resources
+        if (ledMgr.getNumStrips() > 0 && ledMgr.getStrip(0) != nullptr && !ota_in_progress) { 
             fill_rainbow(leds, NUM_LEDS, hue, 7); 
             pushCRGBToStrip();
             ledMgr.show();
             hue++;
         }
         
+        // Print status every 5 seconds
         static unsigned long lastStatus = 0;
         if (currentTime - lastStatus >= 5000) {
             lastStatus = currentTime;
@@ -616,7 +644,16 @@ void loop() {
                          hue, currentBrightness, ESP.getFreeHeap(), deviceConnected ? "Connected" : "Disconnected", ledMgr.getNumStrips(), ota_in_progress ? "In Progress" : "Idle");
         }
     }
+
+    // Periodically update device info characteristic (for heap value)
+    if (currentTime - lastHeapUpdateTime >= heapUpdateInterval) {
+        lastHeapUpdateTime = currentTime;
+        if (deviceConnected) { // Only update if connected to potentially save power/CPU
+            updateDeviceInfoCharacteristic();
+        }
+    }
     
+    // Handle BLE connection changes
     if (!deviceConnected && oldDeviceConnected) {
         Serial.println("Client disconnected, advertising should restart automatically if configured.");
         oldDeviceConnected = deviceConnected;
@@ -626,5 +663,5 @@ void loop() {
         oldDeviceConnected = deviceConnected;
     }
 
-    delay(1); 
+    delay(1); // Small delay to allow other tasks (like BLE stack) to run
 }
