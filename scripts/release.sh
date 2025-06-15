@@ -99,7 +99,8 @@ echo -e "${GREEN}🎯 New version: ${YELLOW}$NEW_VERSION${NC}"
 
 # Confirm release
 echo -e "${BLUE}🤔 Ready to create release $NEW_VERSION?${NC}"
-read -p "Press Enter to continue or Ctrl+C to cancel..."
+echo -e "${YELLOW}Press Enter to continue or Ctrl+C to cancel...${NC}"
+read -r confirmation || { echo -e "\n${RED}❌ Release cancelled by user${NC}"; exit 1; }
 
 # Push any local commits first if we're ahead
 if [ "$AHEAD" -gt 0 ]; then

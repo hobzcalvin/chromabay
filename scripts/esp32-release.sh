@@ -159,7 +159,8 @@ git commit -m "release(esp32): Bump firmware version to $NEW_VERSION"
 echo -e "${BLUE}🏷️  Creating git tag '$NEW_VERSION'...${NC}"
 if git rev-parse "$NEW_VERSION" >/dev/null 2>&1; then
   echo -e "${YELLOW}⚠️  Tag '$NEW_VERSION' already exists locally.${NC}"
-  read -r -p "Delete and recreate? (y/N): " confirm_delete_tag
+  echo -n "Delete and recreate? (y/N): "
+  read -r confirm_delete_tag || { echo -e "\n${RED}❌ Operation cancelled${NC}"; exit 1; }
   if [[ "$confirm_delete_tag" == "y" || "$confirm_delete_tag" == "Y" ]]; then
     git tag -d "$NEW_VERSION"
     echo -e "${GREEN}✅ Deleted local tag '$NEW_VERSION'${NC}"
