@@ -119,6 +119,7 @@ bool verifyFirmwareSignature(const uint8_t* signature, size_t sigLen, const esp_
         }
         
         // Extract r and s from signature (32 bytes each)
+        // Try both big-endian (normal) and little-endian in case of endianness issues
         ret = mbedtls_mpi_read_binary(&r, signature, 32);
         if (ret != 0) {
             Serial.printf("Failed to read signature r: -0x%04x\n", -ret);
@@ -182,7 +183,7 @@ bool verifyFirmwareSignature(const uint8_t* signature, size_t sigLen, const esp_
             break;
         }
         
-        Serial.print("Calculated firmware hash: ");
+        Serial.print("Firmware hash: ");
         for (int i = 0; i < 32; i++) {
             Serial.printf("%02x", firmware_hash[i]);
         }
@@ -195,15 +196,45 @@ bool verifyFirmwareSignature(const uint8_t* signature, size_t sigLen, const esp_
         }
         Serial.println();
         
-        // Verify ECDSA signature
+        // Print r and s components separately for debugging
+        Serial.print("r component: ");
+        for (int i = 0; i < 32; i++) {
+            Serial.printf("%02x", signature[i]);
+        }
+        Serial.println();
+        
+        Serial.print("s component: ");
+        for (int i = 32; i < 64; i++) {
+            Serial.printf("%02x", signature[i]);
+        }
+        Serial.println();
+        
+        Serial.println("Trying signature verification with original byte order...");
+        
+        // First try: original byte order
         ret = mbedtls_ecdsa_verify(&grp, firmware_hash, 32, &public_key_point, &r, &s);
         if (ret == 0) {
-            Serial.println("✅ Firmware signature verification PASSED");
+            Serial.println("✅ Firmware signature verification PASSED (original order)");
             verification_result = true;
+            break;
         } else {
-            Serial.printf("❌ Firmware signature verification FAILED: -0x%04x\n", -ret);
-            verification_result = false;
+            Serial.printf("❌ Original order failed: -0x%04x\n", -ret);
         }
+        
+        // Second try: swap r and s in case they're in wrong order
+        Serial.println("Trying signature verification with swapped r/s...");
+        ret = mbedtls_ecdsa_verify(&grp, firmware_hash, 32, &public_key_point, &s, &r);
+        if (ret == 0) {
+            Serial.println("✅ Firmware signature verification PASSED (swapped r/s)");
+            verification_result = true;
+            break;
+        } else {
+            Serial.printf("❌ Swapped r/s failed: -0x%04x\n", -ret);
+        }
+        
+        // If both fail, report the original error
+        Serial.printf("❌ Firmware signature verification FAILED: -0x%04x\n", -ret);
+        verification_result = false;
         
     } while (0);
     
