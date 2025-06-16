@@ -43,11 +43,6 @@ public:
     }
 
     bool saveConfiguration(const char* filePath = DEFAULT_CONFIG_FILENAME) const {
-        if (!LittleFS.begin(false)) {
-             Serial.println(F("[ConfigManager] Failed to mount LittleFS for saving."));
-             return false;
-        }
-
         mpack_writer_t writer;
         char* mpack_buffer = nullptr;
         size_t mpack_size = 0;
@@ -124,11 +119,6 @@ public:
     FullLedConfiguration loadConfigurationFromFile(const char* filePath = DEFAULT_CONFIG_FILENAME, bool* successFlag = nullptr) const {
         FullLedConfiguration loadedConfig; 
         if (successFlag) *successFlag = false;
-
-        if (!LittleFS.begin(false)) {
-             Serial.println(F("[ConfigManager] Failed to mount LittleFS for loading."));
-             return loadedConfig;
-        }
 
         if (!LittleFS.exists(filePath)) {
             Serial.print(F("[ConfigManager] Config file not found: "));
@@ -316,19 +306,61 @@ public:
         return currentConfig;
     }
 
-    bool createDefaultConfigFileIfMissing(const LedStripConfig& defaultStrip, const char* filePath = DEFAULT_CONFIG_FILENAME) {
-        if (!LittleFS.begin(false)) {
-             Serial.println(F("[ConfigManager] Failed to mount LittleFS for default config check."));
-             return false;
-        }
+    bool ensureValidConfigFile(const LedStripConfig& defaultStrip, const char* filePath = DEFAULT_CONFIG_FILENAME) {
+        // Check if file exists and is valid
         if (LittleFS.exists(filePath)) {
-            Serial.println(F("[ConfigManager] Config file exists, not creating default."));
-            return true; 
+            File configFile = LittleFS.open(filePath, FILE_READ);
+            if (configFile) {
+                size_t fileSize = configFile.size();
+                configFile.close();
+                
+                if (fileSize > 0) {
+                    // File exists and is not empty, try to load it to check if it's valid
+                    bool loadSuccess = false;
+                    loadConfigurationFromFile(filePath, &loadSuccess);
+                    if (loadSuccess) {
+                        Serial.println(F("[ConfigManager] Valid config file found."));
+                        return true;
+                    }
+                    Serial.println(F("[ConfigManager] Config file exists but is invalid, overwriting with defaults."));
+                } else {
+                    Serial.println(F("[ConfigManager] Config file exists but is empty, writing defaults."));
+                }
+            }
+        } else {
+            Serial.print(F("[ConfigManager] No config file found. Creating default at: "));
+            Serial.println(filePath);
         }
 
-        Serial.print(F("[ConfigManager] No config file found. Creating default at: "));
-        Serial.println(filePath);
+        // Create or overwrite with default config
+        return createDefaultConfigContent(defaultStrip, filePath);
+    }
 
+    bool createDefaultConfigFileIfMissing(const LedStripConfig& defaultStrip, const char* filePath = DEFAULT_CONFIG_FILENAME) {
+        if (LittleFS.exists(filePath)) {
+            // Check if file is empty
+            File configFile = LittleFS.open(filePath, FILE_READ);
+            if (configFile) {
+                size_t fileSize = configFile.size();
+                configFile.close();
+                if (fileSize > 0) {
+                    Serial.println(F("[ConfigManager] Config file exists and is not empty."));
+                    return true;
+                }
+                Serial.println(F("[ConfigManager] Config file exists but is empty, writing defaults."));
+            }
+        } else {
+            Serial.print(F("[ConfigManager] No config file found. Creating default at: "));
+            Serial.println(filePath);
+        }
+
+        return createDefaultConfigContent(defaultStrip, filePath);
+    }
+
+private:
+    LedManager& _ledManager; // Reference to the main LedManager
+
+    bool createDefaultConfigContent(const LedStripConfig& defaultStrip, const char* filePath) {
         FullLedConfiguration defaultConfigStruct;
         defaultConfigStruct.globalBrightness = 20; // Default brightness
         if (defaultStrip.numLeds > 0) { // Only add if it's a valid strip
@@ -385,9 +417,6 @@ public:
         Serial.println(F("[ConfigManager] Default config file created successfully."));
         return true;
     }
-
-private:
-    LedManager& _ledManager; // Reference to the main LedManager
 };
 
 } // namespace LedConfig

@@ -690,7 +690,8 @@ void setup() {
     defaultStrip.colorOrder  = LedConfig::ColorOrderValue::CO_GRB;
     defaultStrip.rmtChannel  = 0;
     
-    configMgr.createDefaultConfigFileIfMissing(defaultStrip);
+    // Ensure we have a valid config file (create/overwrite if missing or empty/invalid)
+    configMgr.ensureValidConfigFile(defaultStrip);
     bool configLoadedAndApplied = configMgr.loadAndApplyConfiguration();
 
     // Fallback to default strip if config loading/application fails or results in no strips
