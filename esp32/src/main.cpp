@@ -817,7 +817,7 @@ void loop() {
             fill_rainbow(leds, NUM_LEDS, hue, 1); 
             pushCRGBToStrip();
             ledMgr.show();
-            hue += 1;
+            hue += 10;
         }
     }
 
