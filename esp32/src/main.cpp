@@ -767,9 +767,7 @@ void setup() {
     esp_ota_img_states_t ota_state;
     if (esp_ota_get_state_partition(running_partition, &ota_state) == ESP_OK) {
         if (ota_state == ESP_OTA_IMG_PENDING_VERIFY) {
-            Serial.println("Boot: Firmware is PENDING VERIFICATION.");
-            // If we reach here, it means the app has started successfully.
-            // The health check at the end of setup() will mark it valid.
+            Serial.println("Boot: Firmware is PENDING VERIFICATION - will verify critical systems and mark valid/invalid.");
         } else if (ota_state == ESP_OTA_IMG_VALID) {
             Serial.println("Boot: Firmware is VALID.");
         } else if (ota_state == ESP_OTA_IMG_INVALID) {
@@ -782,10 +780,13 @@ void setup() {
     }
     // --- End boot-time check ---
 
+    // --- Critical System Initialization with Rollback on Failure ---
+    bool criticalSystemsOK = true;
 
-    Serial.println("Mounting LittleFS (once)...");
+    Serial.println("Mounting LittleFS (critical system)...");
     if (!LittleFS.begin(true)) { 
-        Serial.println("LittleFS Mount Failed - continuing WITHOUT filesystem for config.");
+        Serial.println("CRITICAL ERROR: LittleFS Mount Failed!");
+        criticalSystemsOK = false;
     } else {
         Serial.println("LittleFS Mounted Successfully");
         size_t totalBytes = LittleFS.totalBytes();
@@ -793,6 +794,7 @@ void setup() {
         Serial.printf("LittleFS Total: %d bytes, Used: %d bytes\n", totalBytes, usedBytes);
     }
 
+    // Initialize LED configuration (critical for device function)
     LedConfig::LedStripConfig defaultStrip;
     defaultStrip.chipset     = LedConfig::LedChipset::WS2812_RGB;
     defaultStrip.pin         = LED_PIN;
@@ -813,11 +815,12 @@ void setup() {
         }
         Serial.println("Falling back to built-in default LED strip configuration …");
         ledMgr.clearStrips();
-        if (ledMgr.addStrip(defaultStrip)) {
+        if (!ledMgr.addStrip(defaultStrip)) {
+            Serial.println("CRITICAL ERROR: Failed to add fallback LED strip!");
+            criticalSystemsOK = false;
+        } else {
             ledMgr.setGlobalBrightness(BRIGHTNESS); // Apply default brightness for fallback
             ledMgr.begin();
-        } else {
-            Serial.println("CRITICAL: Failed to add fallback LED strip!");
         }
     } else {
         Serial.println("Configuration successfully loaded and applied from file.");
@@ -841,15 +844,19 @@ void setup() {
             }
         }
     } else {
-        Serial.println("WARNING: No LED strips are configured in LedManager after setup!");
+        Serial.println("CRITICAL ERROR: No LED strips are configured in LedManager after setup!");
+        criticalSystemsOK = false;
     }
     
-    // Test pattern to confirm LEDs are working
+    // Test LED functionality (critical for device operation)
     if (ledMgr.getNumStrips() > 0 && ledMgr.getStrip(0)) {
         for(int i = 0; i < ledMgr.getStrip(0)->getLength(); i++) { 
             ledMgr.setPixelColor(0, i, CRGB::Red); 
         }
         ledMgr.show();
+    } else {
+        Serial.println("CRITICAL ERROR: Cannot test LED functionality - no strips available!");
+        criticalSystemsOK = false;
     }
     delay(1000);
     
@@ -861,88 +868,119 @@ void setup() {
         ledMgr.show();
     }
     
-    Serial.println("Initializing NimBLE...");
+    Serial.println("Initializing NimBLE (critical system)...");
     NimBLEDevice::init("Blumon_ESP32"); 
     
     pServer = NimBLEDevice::createServer();
-    pServer->setCallbacks(new ServerCallbacks());
-    
-    NimBLEService *pService = pServer->createService(SERVICE_UUID); 
-    
-    // Original TX Characteristic (for sending data to client)
-    pTxCharacteristic = pService->createCharacteristic(
-                        CHARACTERISTIC_UUID_TX, 
-                        NIMBLE_PROPERTY::NOTIFY
-                      );
-    
-    // Original RX Characteristic (for receiving data from client)
-    NimBLECharacteristic* pRxCharacteristic = pService->createCharacteristic(
-                                               CHARACTERISTIC_UUID_RX, 
-                                               NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR
-                                             );
-    pRxCharacteristic->setCallbacks(new CharacteristicCallbacks());
-
-    // --- New OTA Characteristics ---
-    pDeviceInfoCharacteristic = pService->createCharacteristic(
-                                CHARACTERISTIC_UUID_DEVICE_INFO,
-                                NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY
-                              );
-    // Device Info value is set by updateDeviceInfoCharacteristic(), no onRead callback needed.
-
-    pOTAControlCharacteristic = pService->createCharacteristic(
-                                CHARACTERISTIC_UUID_OTA_CONTROL,
-                                NIMBLE_PROPERTY::WRITE 
-                              );
-    pOTAControlCharacteristic->setCallbacks(new OTAControlCallbacks());
-
-    pOTADataCharacteristic = pService->createCharacteristic(
-                                CHARACTERISTIC_UUID_OTA_DATA,
-                                NIMBLE_PROPERTY::WRITE_NR | NIMBLE_PROPERTY::NOTIFY 
-                             );
-    pOTADataCharacteristic->setCallbacks(new OTADataCallbacks());
-
-    pOTAStatusCharacteristic = pService->createCharacteristic(
-                                CHARACTERISTIC_UUID_OTA_STATUS,
+    if (!pServer) {
+        Serial.println("CRITICAL ERROR: Failed to create NimBLE server!");
+        criticalSystemsOK = false;
+    } else {
+        pServer->setCallbacks(new ServerCallbacks());
+        
+        NimBLEService *pService = pServer->createService(SERVICE_UUID); 
+        if (!pService) {
+            Serial.println("CRITICAL ERROR: Failed to create NimBLE service!");
+            criticalSystemsOK = false;
+        } else {
+            // Original TX Characteristic (for sending data to client)
+            pTxCharacteristic = pService->createCharacteristic(
+                                CHARACTERISTIC_UUID_TX, 
                                 NIMBLE_PROPERTY::NOTIFY
-                               );
-    
-    pOTASignatureCharacteristic = pService->createCharacteristic(
-                                CHARACTERISTIC_UUID_OTA_SIGNATURE,
-                                NIMBLE_PROPERTY::WRITE 
-                               );
-    pOTASignatureCharacteristic->setCallbacks(new OTASignatureCallbacks());
-    // --- End OTA Characteristics ---
-    
-    pService->start();
-    
-    updateDeviceInfoCharacteristic(); // Set initial device info before advertising
-    
-    NimBLEAdvertising *pAdvertising = NimBLEDevice::getAdvertising();
-    pAdvertising->addServiceUUID(SERVICE_UUID); 
-    pAdvertising->setScanResponse(false);
-    pAdvertising->setMinPreferred(0x0);
-    NimBLEDevice::startAdvertising();
-    
-    Serial.println("NimBLE Service (incl. OTA Chars) started - waiting for connections...");
-    Serial.println("Device name: Blumon_ESP32");
-    Serial.println("Advertising Service UUID: " + String(SERVICE_UUID));
-    
-    // --- Health Check: Mark app as valid if it was pending verification ---
-    // This is the point where we consider the app to have started successfully.
-    if (esp_ota_get_state_partition(running_partition, &ota_state) == ESP_OK) {
-        if (ota_state == ESP_OTA_IMG_PENDING_VERIFY) {
-            Serial.println("Setup complete. App is PENDING VERIFICATION. Marking as VALID.");
-            esp_err_t mark_valid_err = esp_ota_mark_app_valid_cancel_rollback();
-            if (mark_valid_err == ESP_OK) {
-                Serial.println("App successfully marked as valid. Rollback cancelled.");
+                              );
+            
+            // Original RX Characteristic (for receiving data from client)
+            NimBLECharacteristic* pRxCharacteristic = pService->createCharacteristic(
+                                                       CHARACTERISTIC_UUID_RX, 
+                                                       NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR
+                                                     );
+            pRxCharacteristic->setCallbacks(new CharacteristicCallbacks());
+
+            // --- New OTA Characteristics ---
+            pDeviceInfoCharacteristic = pService->createCharacteristic(
+                                        CHARACTERISTIC_UUID_DEVICE_INFO,
+                                        NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY
+                                      );
+
+            pOTAControlCharacteristic = pService->createCharacteristic(
+                                        CHARACTERISTIC_UUID_OTA_CONTROL,
+                                        NIMBLE_PROPERTY::WRITE 
+                                      );
+            pOTAControlCharacteristic->setCallbacks(new OTAControlCallbacks());
+
+            pOTADataCharacteristic = pService->createCharacteristic(
+                                        CHARACTERISTIC_UUID_OTA_DATA,
+                                        NIMBLE_PROPERTY::WRITE_NR | NIMBLE_PROPERTY::NOTIFY 
+                                     );
+            pOTADataCharacteristic->setCallbacks(new OTADataCallbacks());
+
+            pOTAStatusCharacteristic = pService->createCharacteristic(
+                                        CHARACTERISTIC_UUID_OTA_STATUS,
+                                        NIMBLE_PROPERTY::NOTIFY
+                                       );
+            
+            pOTASignatureCharacteristic = pService->createCharacteristic(
+                                        CHARACTERISTIC_UUID_OTA_SIGNATURE,
+                                        NIMBLE_PROPERTY::WRITE 
+                                       );
+            pOTASignatureCharacteristic->setCallbacks(new OTASignatureCallbacks());
+            // --- End OTA Characteristics ---
+            
+            pService->start();
+            
+            updateDeviceInfoCharacteristic(); // Set initial device info before advertising
+            
+            NimBLEAdvertising *pAdvertising = NimBLEDevice::getAdvertising();
+            pAdvertising->addServiceUUID(SERVICE_UUID); 
+            pAdvertising->setScanResponse(false);
+            pAdvertising->setMinPreferred(0x0);
+            NimBLEDevice::startAdvertising();
+            
+            Serial.println("NimBLE Service (incl. OTA Chars) started - waiting for connections...");
+            Serial.println("Device name: Blumon_ESP32");
+            Serial.println("Advertising Service UUID: " + String(SERVICE_UUID));
+        }
+    }
+
+    // --- Critical Systems Health Check and Rollback Decision ---
+    if (!criticalSystemsOK) {
+        Serial.println("CRITICAL: One or more critical systems failed to initialize!");
+        
+        // Check if we're in a rollback scenario
+        if (esp_ota_get_state_partition(running_partition, &ota_state) == ESP_OK) {
+            if (ota_state == ESP_OTA_IMG_PENDING_VERIFY) {
+                Serial.println("ROLLBACK TRIGGERED: Marking firmware as invalid due to critical system failures...");
+                esp_err_t rollback_err = esp_ota_mark_app_invalid_rollback_and_reboot();
+                if (rollback_err != ESP_OK) {
+                    Serial.printf("ERROR: Failed to trigger rollback: %s\n", esp_err_to_name(rollback_err));
+                    Serial.println("System will continue with degraded functionality...");
+                } else {
+                    Serial.println("Rollback initiated. Device should reboot to previous firmware...");
+                    // Should not reach here as device will reboot
+                }
             } else {
-                Serial.printf("Error marking app valid: %s. OTA rollback might occur on next boot if watchdog triggers.\n", esp_err_to_name(mark_valid_err));
+                Serial.println("Critical systems failed but not in pending verification state. System will continue with degraded functionality...");
             }
         } else {
-            Serial.println("Setup complete. App was not pending verification.");
+            Serial.println("Critical systems failed but could not determine OTA state. System will continue with degraded functionality...");
         }
-    } else {
-         Serial.println("Setup complete. Could not get OTA state for health check mark.");
+    }
+
+    // --- Health Check: Mark app as valid if it was pending verification and systems are OK ---
+    if (criticalSystemsOK && esp_ota_get_state_partition(running_partition, &ota_state) == ESP_OK) {
+        if (ota_state == ESP_OTA_IMG_PENDING_VERIFY) {
+            Serial.println("All critical systems initialized successfully. Marking firmware as VALID.");
+            esp_err_t mark_valid_err = esp_ota_mark_app_valid_cancel_rollback();
+            if (mark_valid_err == ESP_OK) {
+                Serial.println("Firmware successfully marked as valid. Rollback cancelled.");
+            } else {
+                Serial.printf("Error marking firmware valid: %s. OTA rollback might occur on next boot if watchdog triggers.\n", esp_err_to_name(mark_valid_err));
+            }
+        } else {
+            Serial.println("All critical systems initialized successfully. Firmware was not pending verification.");
+        }
+    } else if (criticalSystemsOK) {
+        Serial.println("All critical systems initialized successfully. Could not get OTA state for health check.");
     }
     // --- End Health Check ---
 
