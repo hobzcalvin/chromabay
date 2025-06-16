@@ -7,11 +7,8 @@
 #include "esp_ota_ops.h" // For OTA updates
 #include "esp_app_format.h" // For esp_app_desc_t and image state checks
 
-// mbedtls includes for signature verification
-#include "mbedtls/sha256.h"
-#include "mbedtls/ecdsa.h"
-#include "mbedtls/ecp.h"
-#include "mbedtls/error.h"
+// PSA Crypto API includes for signature verification
+#include "psa/crypto.h"
 
 #include "led_manager.h" // Include the new LED Manager
 #include "config_manager.h"   // Restore MessagePack config handling
@@ -76,84 +73,67 @@ uint8_t received_signature[FIRMWARE_SIGNATURE_LENGTH];
 bool signature_received = false;
 
 
-// Function to verify firmware signature using ECDSA P-256
+// Function to verify firmware signature using PSA Crypto API
 bool verifyFirmwareSignature(const uint8_t* signature, size_t sigLen, const esp_partition_t* partition, size_t firmware_size) {
     if (sigLen != FIRMWARE_SIGNATURE_LENGTH) {
         Serial.printf("Invalid signature length: %d, expected %d\n", sigLen, FIRMWARE_SIGNATURE_LENGTH);
         return false;
     }
 
-    // Initialize mbedtls contexts
-    mbedtls_ecp_group grp;
-    mbedtls_ecp_point public_key_point;
-    mbedtls_mpi r, s;
-    mbedtls_sha256_context sha_ctx;
-    
-    mbedtls_ecp_group_init(&grp);
-    mbedtls_ecp_point_init(&public_key_point);
-    mbedtls_mpi_init(&r);
-    mbedtls_mpi_init(&s);
-    mbedtls_sha256_init(&sha_ctx);
-    
+    psa_status_t status;
+    psa_key_id_t key_id;
+    psa_key_attributes_t attributes = PSA_KEY_ATTRIBUTES_INIT;
+    uint8_t firmware_hash[PSA_HASH_LENGTH(PSA_ALG_SHA_256)];
     bool verification_result = false;
-    
-    do {
-        // Load SECP256R1 curve
-        int ret = mbedtls_ecp_group_load(&grp, MBEDTLS_ECP_DP_SECP256R1);
-        if (ret != 0) {
-            Serial.printf("Failed to load ECP group: -0x%04x\n", -ret);
-            break;
+
+    // Initialize PSA Crypto
+    status = psa_crypto_init();
+    if (status != PSA_SUCCESS) {
+        Serial.printf("Failed to initialize PSA Crypto: %ld\n", status);
+        return false;
+    }
+
+    // Prepare public key in uncompressed format for PSA (0x04 + X + Y)
+    uint8_t uncompressed_key[65];
+    uncompressed_key[0] = 0x04; // Uncompressed point indicator
+    memcpy(&uncompressed_key[1], FIRMWARE_PUBLIC_KEY, 64); // Copy X + Y coordinates
+
+    // Set key attributes for ECDSA P-256 public key
+    psa_set_key_usage_flags(&attributes, PSA_KEY_USAGE_VERIFY_HASH);
+    psa_set_key_algorithm(&attributes, PSA_ALG_ECDSA(PSA_ALG_SHA_256));
+    psa_set_key_type(&attributes, PSA_KEY_TYPE_ECC_PUBLIC_KEY(PSA_ECC_FAMILY_SECP_R1));
+    psa_set_key_bits(&attributes, 256);
+
+    // Import the public key
+    status = psa_import_key(&attributes, uncompressed_key, sizeof(uncompressed_key), &key_id);
+    if (status != PSA_SUCCESS) {
+        Serial.printf("Failed to import public key: %ld\n", status);
+        goto cleanup;
+    }
+
+    // Hash the firmware data using PSA
+    {
+        psa_hash_operation_t hash_op = PSA_HASH_OPERATION_INIT;
+        status = psa_hash_setup(&hash_op, PSA_ALG_SHA_256);
+        if (status != PSA_SUCCESS) {
+            Serial.printf("Failed to setup hash operation: %ld\n", status);
+            goto cleanup_key;
         }
-        
-        // Load public key from firmware_version.h (64 bytes: X + Y coordinates)
-        // mbedtls expects uncompressed point format: 0x04 + X (32 bytes) + Y (32 bytes)
-        uint8_t uncompressed_key[65];
-        uncompressed_key[0] = 0x04; // Uncompressed point indicator
-        memcpy(&uncompressed_key[1], FIRMWARE_PUBLIC_KEY, 64); // Copy X + Y coordinates
-        
-        ret = mbedtls_ecp_point_read_binary(&grp, &public_key_point, 
-                                          uncompressed_key, sizeof(uncompressed_key));
-        if (ret != 0) {
-            Serial.printf("Failed to load public key: -0x%04x\n", -ret);
-            break;
-        }
-        
-        // Extract r and s from signature (32 bytes each)
-        // Try both big-endian (normal) and little-endian in case of endianness issues
-        ret = mbedtls_mpi_read_binary(&r, signature, 32);
-        if (ret != 0) {
-            Serial.printf("Failed to read signature r: -0x%04x\n", -ret);
-            break;
-        }
-        
-        ret = mbedtls_mpi_read_binary(&s, signature + 32, 32);
-        if (ret != 0) {
-            Serial.printf("Failed to read signature s: -0x%04x\n", -ret);
-            break;
-        }
-        
-        // Calculate hash of firmware in flash partition
-        uint8_t firmware_hash[32];
-        ret = mbedtls_sha256_starts_ret(&sha_ctx, 0); // 0 = SHA-256
-        if (ret != 0) {
-            Serial.printf("Failed to start SHA-256: -0x%04x\n", -ret);
-            break;
-        }
-        
+
         // Read firmware from partition in chunks and hash it
-        // The partition should contain the exact same bytes as the signed .bin file
         const size_t CHUNK_SIZE = 4096;
         uint8_t* chunk_buffer = (uint8_t*)malloc(CHUNK_SIZE);
         if (!chunk_buffer) {
             Serial.println("Failed to allocate chunk buffer for hashing");
-            break;
+            psa_hash_abort(&hash_op);
+            goto cleanup_key;
         }
-        
+
         size_t remaining = firmware_size;
         size_t offset = 0;
         
-        Serial.printf("Hashing %d bytes from partition starting at offset 0\n", firmware_size);
-        
+        Serial.printf("Hashing %d bytes from partition using PSA\n", firmware_size);
+
         while (remaining > 0) {
             size_t to_read = (remaining < CHUNK_SIZE) ? remaining : CHUNK_SIZE;
             
@@ -161,90 +141,86 @@ bool verifyFirmwareSignature(const uint8_t* signature, size_t sigLen, const esp_
             if (read_err != ESP_OK) {
                 Serial.printf("Failed to read partition at offset %d: %s\n", offset, esp_err_to_name(read_err));
                 free(chunk_buffer);
-                goto cleanup;
+                psa_hash_abort(&hash_op);
+                goto cleanup_key;
             }
             
-            ret = mbedtls_sha256_update_ret(&sha_ctx, chunk_buffer, to_read);
-            if (ret != 0) {
-                Serial.printf("Failed to update SHA-256: -0x%04x\n", -ret);
+            status = psa_hash_update(&hash_op, chunk_buffer, to_read);
+            if (status != PSA_SUCCESS) {
+                Serial.printf("Failed to update hash: %ld\n", status);
                 free(chunk_buffer);
-                goto cleanup;
+                psa_hash_abort(&hash_op);
+                goto cleanup_key;
             }
             
             offset += to_read;
             remaining -= to_read;
         }
-        
+
         free(chunk_buffer);
-        
-        ret = mbedtls_sha256_finish_ret(&sha_ctx, firmware_hash);
-        if (ret != 0) {
-            Serial.printf("Failed to finish SHA-256: -0x%04x\n", -ret);
-            break;
+
+        size_t hash_length;
+        status = psa_hash_finish(&hash_op, firmware_hash, sizeof(firmware_hash), &hash_length);
+        if (status != PSA_SUCCESS) {
+            Serial.printf("Failed to finish hash: %ld\n", status);
+            goto cleanup_key;
         }
-        
-        Serial.print("Firmware hash: ");
-        for (int i = 0; i < 32; i++) {
-            Serial.printf("%02x", firmware_hash[i]);
-        }
-        Serial.println();
-        
-        // Print signature for debugging
-        Serial.print("Received signature (r||s): ");
-        for (int i = 0; i < 64; i++) {
-            Serial.printf("%02x", signature[i]);
-        }
-        Serial.println();
-        
-        // Print r and s components separately for debugging
-        Serial.print("r component: ");
-        for (int i = 0; i < 32; i++) {
-            Serial.printf("%02x", signature[i]);
-        }
-        Serial.println();
-        
-        Serial.print("s component: ");
-        for (int i = 32; i < 64; i++) {
-            Serial.printf("%02x", signature[i]);
-        }
-        Serial.println();
-        
-        Serial.println("Trying signature verification with original byte order...");
-        
-        // First try: original byte order
-        ret = mbedtls_ecdsa_verify(&grp, firmware_hash, 32, &public_key_point, &r, &s);
-        if (ret == 0) {
-            Serial.println("✅ Firmware signature verification PASSED (original order)");
-            verification_result = true;
-            break;
-        } else {
-            Serial.printf("❌ Original order failed: -0x%04x\n", -ret);
-        }
-        
-        // Second try: swap r and s in case they're in wrong order
-        Serial.println("Trying signature verification with swapped r/s...");
-        ret = mbedtls_ecdsa_verify(&grp, firmware_hash, 32, &public_key_point, &s, &r);
-        if (ret == 0) {
-            Serial.println("✅ Firmware signature verification PASSED (swapped r/s)");
-            verification_result = true;
-            break;
-        } else {
-            Serial.printf("❌ Swapped r/s failed: -0x%04x\n", -ret);
-        }
-        
-        // If both fail, report the original error
-        Serial.printf("❌ Firmware signature verification FAILED: -0x%04x\n", -ret);
-        verification_result = false;
-        
-    } while (0);
+    }
+
+    // Print hash for debugging
+    Serial.print("Firmware hash: ");
+    for (int i = 0; i < 32; i++) {
+        Serial.printf("%02x", firmware_hash[i]);
+    }
+    Serial.println();
+
+    // Print signature for debugging
+    Serial.print("Received signature: ");
+    for (int i = 0; i < sigLen; i++) {
+        Serial.printf("%02x", signature[i]);
+    }
+    Serial.println();
+
+    // Verify signature using PSA
+    // First try with the signature as-is (raw r||s format)
+    status = psa_verify_hash(key_id, PSA_ALG_ECDSA(PSA_ALG_SHA_256), 
+                            firmware_hash, sizeof(firmware_hash), 
+                            signature, sigLen);
     
+    if (status == PSA_SUCCESS) {
+        Serial.println("✅ Firmware signature verification PASSED (PSA - original format)");
+        verification_result = true;
+    } else {
+        Serial.printf("❌ PSA verification failed with original format: %ld\n", status);
+        
+        // If PSA fails, try swapping r and s components (compatibility with old endianness handling)
+        if (sigLen == 64) {
+            uint8_t swapped_signature[64];
+            memcpy(swapped_signature, signature + 32, 32);      // s component first
+            memcpy(swapped_signature + 32, signature, 32);      // r component second
+            
+            Serial.println("Trying PSA verification with swapped r/s...");
+            status = psa_verify_hash(key_id, PSA_ALG_ECDSA(PSA_ALG_SHA_256), 
+                                    firmware_hash, sizeof(firmware_hash), 
+                                    swapped_signature, sigLen);
+            
+            if (status == PSA_SUCCESS) {
+                Serial.println("✅ Firmware signature verification PASSED (PSA - swapped r/s)");
+                verification_result = true;
+            } else {
+                Serial.printf("❌ PSA verification also failed with swapped r/s: %ld\n", status);
+                verification_result = false;
+            }
+        } else {
+            verification_result = false;
+        }
+    }
+
+cleanup_key:
+    psa_destroy_key(key_id);
 cleanup:
-    // Clean up mbedtls contexts
-    mbedtls_sha256_free(&sha_ctx);
-    mbedtls_mpi_free(&s);
-    mbedtls_mpi_free(&r);
-    mbedtls_ecp_point_free(&public_key_point);
-    mbedtls_ecp_group_free(&grp);
+    psa_reset_key_attributes(&attributes);
+    // Note: We don't call psa_crypto_free() here as PSA might be used elsewhere
     
     return verification_result;
 }

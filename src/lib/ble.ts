@@ -445,13 +445,17 @@ async function sendFirmwareChunk(deviceId: string, chunk: ArrayBuffer): Promise<
     }
     
     return new Promise(async (resolve, reject) => {
+      let listenerAdded = false;
       const timeoutId = setTimeout(() => {
+        if (webOTADataCharacteristic && listenerAdded) {
+          webOTADataCharacteristic.removeEventListener('characteristicvaluechanged', listener);
+        }
         reject(new Error('Timeout waiting for ACK from ESP32'));
-      }, 3000); // 3 second timeout
+      }, 5000); // Increased to 5 second timeout
       
       const listener = (event: any) => {
         clearTimeout(timeoutId);
-        if (webOTADataCharacteristic) {
+        if (webOTADataCharacteristic && listenerAdded) {
           webOTADataCharacteristic.removeEventListener('characteristicvaluechanged', listener);
         }
         const ackValue = event.target.value.getUint8(0);
@@ -459,15 +463,21 @@ async function sendFirmwareChunk(deviceId: string, chunk: ArrayBuffer): Promise<
         resolve();
       };
       
-      // Add listener for this specific chunk (will be removed manually after first event)
-      webOTADataCharacteristic.addEventListener('characteristicvaluechanged', listener);
-      
       try {
+        // Add listener BEFORE writing to avoid race condition
+        if (webOTADataCharacteristic) {
+          webOTADataCharacteristic.addEventListener('characteristicvaluechanged', listener);
+          listenerAdded = true;
+        }
+        
         console.log('[OTA] Writing chunk and waiting for ACK...');
+        if (!webOTADataCharacteristic) {
+          throw new Error('OTA Data characteristic is null');
+        }
         await webOTADataCharacteristic.writeValueWithoutResponse(dataView);
       } catch (error) {
         clearTimeout(timeoutId);
-        if (webOTADataCharacteristic) {
+        if (webOTADataCharacteristic && listenerAdded) {
           webOTADataCharacteristic.removeEventListener('characteristicvaluechanged', listener);
         }
         reject(error);
