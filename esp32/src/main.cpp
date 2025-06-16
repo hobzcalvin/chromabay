@@ -94,7 +94,6 @@ bool verifyFirmwareSignature(const uint8_t* signature, size_t sigLen, const esp_
     psa_key_id_t key_id;
     psa_key_attributes_t attributes = PSA_KEY_ATTRIBUTES_INIT;
     uint8_t firmware_hash[PSA_HASH_LENGTH(PSA_ALG_SHA_256)];
-    bool verification_result = false;
 
     // Initialize PSA Crypto
     status = psa_crypto_init();
@@ -118,135 +117,89 @@ bool verifyFirmwareSignature(const uint8_t* signature, size_t sigLen, const esp_
     status = psa_import_key(&attributes, uncompressed_key, sizeof(uncompressed_key), &key_id);
     if (status != PSA_SUCCESS) {
         Serial.printf("Failed to import public key: %ld\n", status);
-        goto cleanup;
+        psa_reset_key_attributes(&attributes);
+        return false;
     }
 
     // Hash the firmware data using PSA
-    {
-        psa_hash_operation_t hash_op = PSA_HASH_OPERATION_INIT;
-        status = psa_hash_setup(&hash_op, PSA_ALG_SHA_256);
-        if (status != PSA_SUCCESS) {
-            Serial.printf("Failed to setup hash operation: %ld\n", status);
-            goto cleanup_key;
-        }
-
-        // Read firmware from partition in chunks and hash it
-        const size_t CHUNK_SIZE = 4096;
-        uint8_t* chunk_buffer = (uint8_t*)malloc(CHUNK_SIZE);
-        if (!chunk_buffer) {
-            Serial.println("Failed to allocate chunk buffer for hashing");
-            psa_hash_abort(&hash_op);
-            goto cleanup_key;
-        }
-
-        size_t remaining = firmware_size;
-        size_t offset = 0;
-
-        while (remaining > 0) {
-            size_t to_read = (remaining < CHUNK_SIZE) ? remaining : CHUNK_SIZE;
-            
-            esp_err_t read_err = esp_partition_read(partition, offset, chunk_buffer, to_read);
-            if (read_err != ESP_OK) {
-                Serial.printf("Failed to read partition at offset %d: %s\n", offset, esp_err_to_name(read_err));
-                free(chunk_buffer);
-                psa_hash_abort(&hash_op);
-                goto cleanup_key;
-            }
-            
-            status = psa_hash_update(&hash_op, chunk_buffer, to_read);
-            if (status != PSA_SUCCESS) {
-                Serial.printf("Failed to update hash: %ld\n", status);
-                free(chunk_buffer);
-                psa_hash_abort(&hash_op);
-                goto cleanup_key;
-            }
-            
-            offset += to_read;
-            remaining -= to_read;
-        }
-
-        free(chunk_buffer);
-
-        size_t hash_length;
-        status = psa_hash_finish(&hash_op, firmware_hash, sizeof(firmware_hash), &hash_length);
-        if (status != PSA_SUCCESS) {
-            Serial.printf("Failed to finish hash: %ld\n", status);
-            goto cleanup_key;
-        }
+    psa_hash_operation_t hash_op = PSA_HASH_OPERATION_INIT;
+    status = psa_hash_setup(&hash_op, PSA_ALG_SHA_256);
+    if (status != PSA_SUCCESS) {
+        Serial.printf("Failed to setup hash operation: %ld\n", status);
+        psa_destroy_key(key_id);
+        psa_reset_key_attributes(&attributes);
+        return false;
     }
 
-    // Try multiple signature formats to determine which one works
-    // Format 1: Original signature as-is (r||s format)
+    // Read firmware from partition in chunks and hash it
+    const size_t CHUNK_SIZE = 4096;
+    uint8_t* chunk_buffer = (uint8_t*)malloc(CHUNK_SIZE);
+    if (!chunk_buffer) {
+        Serial.println("Failed to allocate chunk buffer for hashing");
+        psa_hash_abort(&hash_op);
+        psa_destroy_key(key_id);
+        psa_reset_key_attributes(&attributes);
+        return false;
+    }
+
+    size_t remaining = firmware_size;
+    size_t offset = 0;
+    bool hash_success = true;
+
+    while (remaining > 0 && hash_success) {
+        size_t to_read = (remaining < CHUNK_SIZE) ? remaining : CHUNK_SIZE;
+        
+        esp_err_t read_err = esp_partition_read(partition, offset, chunk_buffer, to_read);
+        if (read_err != ESP_OK) {
+            Serial.printf("Failed to read partition at offset %d: %s\n", offset, esp_err_to_name(read_err));
+            hash_success = false;
+            break;
+        }
+        
+        status = psa_hash_update(&hash_op, chunk_buffer, to_read);
+        if (status != PSA_SUCCESS) {
+            Serial.printf("Failed to update hash: %ld\n", status);
+            hash_success = false;
+            break;
+        }
+        
+        offset += to_read;
+        remaining -= to_read;
+    }
+
+    free(chunk_buffer);
+
+    if (!hash_success) {
+        psa_hash_abort(&hash_op);
+        psa_destroy_key(key_id);
+        psa_reset_key_attributes(&attributes);
+        return false;
+    }
+
+    size_t hash_length;
+    status = psa_hash_finish(&hash_op, firmware_hash, sizeof(firmware_hash), &hash_length);
+    if (status != PSA_SUCCESS) {
+        Serial.printf("Failed to finish hash: %ld\n", status);
+        psa_destroy_key(key_id);
+        psa_reset_key_attributes(&attributes);
+        return false;
+    }
+
+    // Verify signature (r||s format)
     status = psa_verify_hash(key_id, PSA_ALG_ECDSA(PSA_ALG_SHA_256), 
                             firmware_hash, sizeof(firmware_hash), 
                             signature, sigLen);
     
-    if (status == PSA_SUCCESS) {
-        Serial.println("Firmware signature verification PASSED (r||s format)");
-        verification_result = true;
-        goto cleanup_key;
-    }
-
-    // Format 2: Swapped r and s components
-    if (sigLen == 64) {
-        uint8_t swapped_signature[64];
-        memcpy(swapped_signature, signature + 32, 32);      // s component first
-        memcpy(swapped_signature + 32, signature, 32);      // r component second
-        
-        status = psa_verify_hash(key_id, PSA_ALG_ECDSA(PSA_ALG_SHA_256), 
-                                firmware_hash, sizeof(firmware_hash), 
-                                swapped_signature, sigLen);
-        
-        if (status == PSA_SUCCESS) {
-            Serial.println("Firmware signature verification PASSED (s||r format)");
-            verification_result = true;
-            goto cleanup_key;
-        }
-    }
-
-    // Format 3: Convert each component from little-endian to big-endian
-    uint8_t bigendian_signature[64];
-    // Reverse r component (first 32 bytes)
-    for (int i = 0; i < 32; i++) {
-        bigendian_signature[i] = signature[31 - i];
-    }
-    // Reverse s component (last 32 bytes)
-    for (int i = 0; i < 32; i++) {
-        bigendian_signature[32 + i] = signature[63 - i];
-    }
+    bool verification_result = (status == PSA_SUCCESS);
     
-    status = psa_verify_hash(key_id, PSA_ALG_ECDSA(PSA_ALG_SHA_256), 
-                            firmware_hash, sizeof(firmware_hash), 
-                            bigendian_signature, sigLen);
-    
-    if (status == PSA_SUCCESS) {
-        Serial.println("Firmware signature verification PASSED (big-endian format)");
-        verification_result = true;
-        goto cleanup_key;
+    if (verification_result) {
+        Serial.println("Firmware signature verification PASSED");
+    } else {
+        Serial.println("Firmware signature verification FAILED");
     }
 
-    // Format 4: Big-endian + swapped components
-    uint8_t bigendian_swapped[64];
-    memcpy(bigendian_swapped, bigendian_signature + 32, 32);      // s component first (big-endian)
-    memcpy(bigendian_swapped + 32, bigendian_signature, 32);      // r component second (big-endian)
-    
-    status = psa_verify_hash(key_id, PSA_ALG_ECDSA(PSA_ALG_SHA_256), 
-                            firmware_hash, sizeof(firmware_hash), 
-                            bigendian_swapped, sigLen);
-    
-    if (status == PSA_SUCCESS) {
-        Serial.println("Firmware signature verification PASSED (big-endian s||r format)");
-        verification_result = true;
-        goto cleanup_key;
-    }
-
-    // All formats failed
-    Serial.println("Firmware signature verification FAILED - all formats invalid");
-    verification_result = false;
-
-cleanup_key:
+    // Cleanup
     psa_destroy_key(key_id);
-cleanup:
     psa_reset_key_attributes(&attributes);
     
     return verification_result;
