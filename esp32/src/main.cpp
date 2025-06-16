@@ -964,10 +964,10 @@ void loop() {
         
         // Pause rainbow animation if OTA is in progress to free up resources
         if (ledMgr.getNumStrips() > 0 && ledMgr.getStrip(0) != nullptr && !ota_in_progress) { 
-            fill_rainbow(leds, NUM_LEDS, hue, 7); 
+            fill_rainbow(leds, NUM_LEDS, hue, 200); 
             pushCRGBToStrip();
             ledMgr.show();
-            hue += 10;
+            hue += 1;
         }
         
         // Print status every 5 seconds (only when OTA is not in progress)
