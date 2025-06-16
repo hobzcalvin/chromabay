@@ -25,6 +25,11 @@ jobs:
       run: |
         pip install cryptography
     
+    - name: Install mbedTLS for PSA crypto
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libmbedtls-dev
+    
     - name: Setup PlatformIO
       run: |
         pip install platformio
@@ -34,18 +39,24 @@ jobs:
       run: |
         echo "${{ secrets.ESP32_SIGNING_PRIVATE_KEY }}" > esp32-signing-private.pem
         chmod 600 esp32-signing-private.pem
+    
+    - name: Convert private key to raw format for PSA
+      run: |
+        python3 convert_key_to_raw.py esp32-signing-private.pem private_key.raw
+        
+    - name: Build PSA signing tool
+      run: |
+        gcc -Wall -std=c99 psa_sign_firmware.c -lmbedcrypto -o psa_sign_firmware
+        chmod +x psa_sign_firmware
         
     - name: Build firmware
       run: |
         cd esp32
         pio run
         
-    - name: Sign firmware
+    - name: Sign firmware with PSA crypto
       run: |
-        python scripts/sign_firmware.py \
-          esp32/.pio/build/esp32dev/firmware.bin \
-          --private-key esp32-signing-private.pem \
-          --output firmware.sig
+        ./psa_sign_firmware esp32/.pio/build/esp32dev/firmware.bin private_key.raw firmware.sig
           
     - name: Get version from tag
       id: version
@@ -65,8 +76,9 @@ jobs:
           - **`firmware.sig`** - ECDSA P-256 signature for secure OTA updates
           
           ### 🔐 Security Features:
-          - ✅ Firmware is cryptographically signed with ECDSA P-256
-          - ✅ Signature verification enforced on device during OTA
+          - ✅ Firmware is cryptographically signed with **PSA Crypto ECDSA P-256**
+          - ✅ Signature verification enforced on device during OTA using **PSA Crypto**
+          - ✅ **Complete PSA compatibility** between signing and verification
           - ✅ Tamper-proof updates prevent malicious firmware installation
           
           ### 📋 Installation:
@@ -89,6 +101,7 @@ jobs:
           - **Partition Scheme:** Dual OTA (app0/app1) with LittleFS
           - **BLE Stack:** NimBLE for efficient memory usage
           - **LED Support:** WS2812B via NeoPixelBus + FastLED
+          - **Crypto:** PSA Crypto API for signing and verification
           
         draft: false
         prerelease: false
@@ -142,14 +155,15 @@ jobs:
         git config user.name 'github-actions[bot]'
         git config user.email 'github-actions[bot]@users.noreply.github.com'
         git add .
-        git commit -m "Deploy ESP32 firmware ${{ steps.version.outputs.VERSION }} and update registry"
+        git commit -m "Deploy ESP32 firmware ${{ steps.version.outputs.VERSION }} and update registry (PSA-signed)"
         git push origin gh-pages
         
         # Clean up
         cd ..
         rm -rf gh_pages_temp
         
-    - name: Clean up private key
+    - name: Clean up private key files
       if: always()
       run: |
         rm -f esp32-signing-private.pem
+        rm -f private_key.raw

@@ -72,6 +72,17 @@ int ota_received_size = 0;
 uint8_t received_signature[FIRMWARE_SIGNATURE_LENGTH];
 bool signature_received = false;
 
+// Signature verification task variables
+TaskHandle_t signature_task_handle = nullptr;
+bool signature_verification_complete = false;
+bool signature_verification_result = false;
+
+// Structure to pass data to signature verification task
+struct SignatureVerificationData {
+    uint8_t signature[FIRMWARE_SIGNATURE_LENGTH];
+    const esp_partition_t* partition;
+    size_t firmware_size;
+};
 
 // Function to verify firmware signature using PSA Crypto API
 bool verifyFirmwareSignature(const uint8_t* signature, size_t sigLen, const esp_partition_t* partition, size_t firmware_size) {
@@ -167,63 +178,155 @@ bool verifyFirmwareSignature(const uint8_t* signature, size_t sigLen, const esp_
         }
     }
 
-    // Print hash for debugging
+    // Print debugging information
     Serial.print("Firmware hash: ");
     for (int i = 0; i < 32; i++) {
         Serial.printf("%02x", firmware_hash[i]);
     }
     Serial.println();
 
-    // Print signature for debugging
-    Serial.print("Received signature: ");
+    Serial.print("Received signature (raw): ");
     for (int i = 0; i < sigLen; i++) {
         Serial.printf("%02x", signature[i]);
     }
     Serial.println();
 
-    // Verify signature using PSA
-    // First try with the signature as-is (raw r||s format)
+    // Check if signature is already in correct format (r||s, each 32 bytes, big-endian)
+    Serial.printf("Signature format analysis:\n");
+    Serial.printf("R component (first 32 bytes): ");
+    for (int i = 0; i < 32; i++) {
+        Serial.printf("%02x", signature[i]);
+    }
+    Serial.println();
+    
+    Serial.printf("S component (last 32 bytes): ");
+    for (int i = 32; i < 64; i++) {
+        Serial.printf("%02x", signature[i]);
+    }
+    Serial.println();
+
+    // Try multiple signature formats to determine which one works
+
+    // Format 1: Original signature as-is (r||s format)
+    Serial.println("Trying Format 1: Original r||s format");
     status = psa_verify_hash(key_id, PSA_ALG_ECDSA(PSA_ALG_SHA_256), 
                             firmware_hash, sizeof(firmware_hash), 
                             signature, sigLen);
     
     if (status == PSA_SUCCESS) {
-        Serial.println("✅ Firmware signature verification PASSED (PSA - original format)");
+        Serial.println("✅ Firmware signature verification PASSED (Format 1: r||s)");
         verification_result = true;
+        goto cleanup_key;
     } else {
-        Serial.printf("❌ PSA verification failed with original format: %ld\n", status);
+        Serial.printf("❌ Format 1 failed: %ld\n", status);
+    }
+
+    // Format 2: Swapped r and s components
+    if (sigLen == 64) {
+        uint8_t swapped_signature[64];
+        memcpy(swapped_signature, signature + 32, 32);      // s component first
+        memcpy(swapped_signature + 32, signature, 32);      // r component second
         
-        // If PSA fails, try swapping r and s components (compatibility with old endianness handling)
-        if (sigLen == 64) {
-            uint8_t swapped_signature[64];
-            memcpy(swapped_signature, signature + 32, 32);      // s component first
-            memcpy(swapped_signature + 32, signature, 32);      // r component second
-            
-            Serial.println("Trying PSA verification with swapped r/s...");
-            status = psa_verify_hash(key_id, PSA_ALG_ECDSA(PSA_ALG_SHA_256), 
-                                    firmware_hash, sizeof(firmware_hash), 
-                                    swapped_signature, sigLen);
-            
-            if (status == PSA_SUCCESS) {
-                Serial.println("✅ Firmware signature verification PASSED (PSA - swapped r/s)");
-                verification_result = true;
-            } else {
-                Serial.printf("❌ PSA verification also failed with swapped r/s: %ld\n", status);
-                verification_result = false;
-            }
+        Serial.println("Trying Format 2: Swapped s||r format");
+        status = psa_verify_hash(key_id, PSA_ALG_ECDSA(PSA_ALG_SHA_256), 
+                                firmware_hash, sizeof(firmware_hash), 
+                                swapped_signature, sigLen);
+        
+        if (status == PSA_SUCCESS) {
+            Serial.println("✅ Firmware signature verification PASSED (Format 2: s||r)");
+            verification_result = true;
+            goto cleanup_key;
         } else {
-            verification_result = false;
+            Serial.printf("❌ Format 2 failed: %ld\n", status);
         }
     }
+
+    // Format 3: Convert each component from little-endian to big-endian
+    uint8_t bigendian_signature[64];
+    // Reverse r component (first 32 bytes)
+    for (int i = 0; i < 32; i++) {
+        bigendian_signature[i] = signature[31 - i];
+    }
+    // Reverse s component (last 32 bytes)
+    for (int i = 0; i < 32; i++) {
+        bigendian_signature[32 + i] = signature[63 - i];
+    }
+    
+    Serial.println("Trying Format 3: Little-endian to big-endian conversion");
+    Serial.printf("Big-endian R: ");
+    for (int i = 0; i < 32; i++) {
+        Serial.printf("%02x", bigendian_signature[i]);
+    }
+    Serial.println();
+    Serial.printf("Big-endian S: ");
+    for (int i = 32; i < 64; i++) {
+        Serial.printf("%02x", bigendian_signature[i]);
+    }
+    Serial.println();
+    
+    status = psa_verify_hash(key_id, PSA_ALG_ECDSA(PSA_ALG_SHA_256), 
+                            firmware_hash, sizeof(firmware_hash), 
+                            bigendian_signature, sigLen);
+    
+    if (status == PSA_SUCCESS) {
+        Serial.println("✅ Firmware signature verification PASSED (Format 3: big-endian)");
+        verification_result = true;
+        goto cleanup_key;
+    } else {
+        Serial.printf("❌ Format 3 failed: %ld\n", status);
+    }
+
+    // Format 4: Big-endian + swapped components
+    uint8_t bigendian_swapped[64];
+    memcpy(bigendian_swapped, bigendian_signature + 32, 32);      // s component first (big-endian)
+    memcpy(bigendian_swapped + 32, bigendian_signature, 32);      // r component second (big-endian)
+    
+    Serial.println("Trying Format 4: Big-endian + swapped (s||r)");
+    status = psa_verify_hash(key_id, PSA_ALG_ECDSA(PSA_ALG_SHA_256), 
+                            firmware_hash, sizeof(firmware_hash), 
+                            bigendian_swapped, sigLen);
+    
+    if (status == PSA_SUCCESS) {
+        Serial.println("✅ Firmware signature verification PASSED (Format 4: big-endian s||r)");
+        verification_result = true;
+        goto cleanup_key;
+    } else {
+        Serial.printf("❌ Format 4 failed: %ld\n", status);
+    }
+
+    // All formats failed
+    Serial.println("❌ All signature formats failed!");
+    verification_result = false;
 
 cleanup_key:
     psa_destroy_key(key_id);
 cleanup:
     psa_reset_key_attributes(&attributes);
-    // Note: We don't call psa_crypto_free() here as PSA might be used elsewhere
     
     return verification_result;
 }
+
+// Signature verification task (runs on separate thread with large stack)
+void signatureVerificationTask(void* parameter) {
+    SignatureVerificationData* data = (SignatureVerificationData*)parameter;
+    
+    Serial.println("OTA: Starting signature verification on dedicated task...");
+    
+    // Call the PSA signature verification with large stack
+    signature_verification_result = verifyFirmwareSignature(
+        data->signature, 
+        FIRMWARE_SIGNATURE_LENGTH, 
+        data->partition, 
+        data->firmware_size
+    );
+    
+    signature_verification_complete = true;
+    
+    // Clean up and delete this task
+    free(data);
+    vTaskDelete(nullptr);
+}
+
 
 // Function to update the Device Info characteristic
 // This should be called periodically or when relevant info changes (e.g., heap on connect)
@@ -376,9 +479,85 @@ class OTAControlCallbacks : public NimBLECharacteristicCallbacks {
 
                 // Real firmware signature verification - BEFORE esp_ota_end()
                 Serial.println("OTA: Verifying firmware signature...");
-                bool signature_is_valid = verifyFirmwareSignature(received_signature, FIRMWARE_SIGNATURE_LENGTH, update_partition, ota_received_size);
-
-                if (!signature_is_valid) {
+                
+                // Create signature verification data structure
+                SignatureVerificationData* verif_data = (SignatureVerificationData*)malloc(sizeof(SignatureVerificationData));
+                if (!verif_data) {
+                    Serial.println("OTA Error: Failed to allocate memory for signature verification!");
+                    if (pOTAStatusCharacteristic) {
+                        const char* msg = "OTA_ERR_MEMORY";
+                        pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
+                        pOTAStatusCharacteristic->notify();
+                    }
+                    esp_ota_abort(ota_handle);
+                    ota_in_progress = false;
+                    ota_handle = 0;
+                    ota_received_size = 0;
+                    signature_received = false;
+                    return;
+                }
+                
+                // Copy verification data
+                memcpy(verif_data->signature, received_signature, FIRMWARE_SIGNATURE_LENGTH);
+                verif_data->partition = update_partition;
+                verif_data->firmware_size = ota_received_size;
+                
+                // Reset verification status
+                signature_verification_complete = false;
+                signature_verification_result = false;
+                
+                // Create signature verification task with large stack (16KB)
+                BaseType_t task_created = xTaskCreate(
+                    signatureVerificationTask,
+                    "sig_verify",
+                    16384,  // 16KB stack size (much larger than BLE callback stack)
+                    verif_data,
+                    1,      // Priority
+                    &signature_task_handle
+                );
+                
+                if (task_created != pdPASS) {
+                    Serial.println("OTA Error: Failed to create signature verification task!");
+                    free(verif_data);
+                    if (pOTAStatusCharacteristic) {
+                        const char* msg = "OTA_ERR_TASK_CREATE";
+                        pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
+                        pOTAStatusCharacteristic->notify();
+                    }
+                    esp_ota_abort(ota_handle);
+                    ota_in_progress = false;
+                    ota_handle = 0;
+                    ota_received_size = 0;
+                    signature_received = false;
+                    return;
+                }
+                
+                // Wait for signature verification to complete (with timeout)
+                const int max_wait_seconds = 30;
+                int wait_count = 0;
+                
+                while (!signature_verification_complete && wait_count < (max_wait_seconds * 10)) {
+                    delay(100); // Wait 100ms
+                    wait_count++;
+                }
+                
+                if (!signature_verification_complete) {
+                    Serial.println("OTA Error: Signature verification timed out!");
+                    if (pOTAStatusCharacteristic) {
+                        const char* msg = "OTA_ERR_SIG_TIMEOUT";
+                        pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
+                        pOTAStatusCharacteristic->notify();
+                    }
+                    esp_ota_abort(ota_handle);
+                    ota_in_progress = false;
+                    ota_handle = 0;
+                    ota_received_size = 0;
+                    signature_received = false;
+                    return;
+                }
+                
+                // Check verification result
+                if (!signature_verification_result) {
                     Serial.println("OTA Error: Firmware signature verification FAILED!");
                     if (pOTAStatusCharacteristic) {
                         const char* msg = "OTA_ERR_SIG_INVALID";
@@ -392,6 +571,7 @@ class OTAControlCallbacks : public NimBLECharacteristicCallbacks {
                     signature_received = false;
                     return;
                 }
+                
                 Serial.println("OTA: Firmware signature verification PASSED.");
 
                 Serial.printf("OTA End command received. Finalizing update... (Total received: %d bytes)\n", ota_received_size);
