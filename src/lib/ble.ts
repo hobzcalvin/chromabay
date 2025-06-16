@@ -435,7 +435,6 @@ export async function sendFirmwareSignature(deviceId: string, signature: ArrayBu
   } else {
       await BleClient.write(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_OTA_SIGNATURE, dataView);
   }
-  console.log('[OTA] Firmware signature sent.');
 }
 
 // Global variable to store the OTA data characteristic for Web Bluetooth
@@ -443,7 +442,6 @@ let webOTADataCharacteristic: BluetoothRemoteGATTCharacteristic | null = null;
 
 async function sendFirmwareChunk(deviceId: string, chunk: ArrayBuffer): Promise<void> {
   const dataView = new DataView(chunk);
-  console.log(`[OTA] Sending chunk: ${chunk.byteLength} bytes`);
   
   // OTA_DATA uses WriteWithoutResponse for speed, but ESP32 notifies on same char for ACK
   if (isWeb()) {
@@ -465,8 +463,6 @@ async function sendFirmwareChunk(deviceId: string, chunk: ArrayBuffer): Promise<
         if (webOTADataCharacteristic && listenerAdded) {
           webOTADataCharacteristic.removeEventListener('characteristicvaluechanged', listener);
         }
-        const ackValue = event.target.value.getUint8(0);
-        console.log(`[OTA] Web ACK received: ${ackValue}`);
         resolve();
       };
       
@@ -477,7 +473,6 @@ async function sendFirmwareChunk(deviceId: string, chunk: ArrayBuffer): Promise<
           listenerAdded = true;
         }
         
-        console.log('[OTA] Writing chunk and waiting for ACK...');
         if (!webOTADataCharacteristic) {
           throw new Error('OTA Data characteristic is null');
         }
@@ -501,7 +496,6 @@ async function sendFirmwareChunk(deviceId: string, chunk: ArrayBuffer): Promise<
             // The ESP32 will send a notification on this characteristic as an ACK,
             // which will be picked up by the global listener in performOTAUpdate if active.
             setTimeout(() => {
-                console.log('[OTA] Native chunk sent, assuming processed after delay.');
                 resolve();
             }, 50); // e.g., 50ms delay, can be tuned. A more robust solution would wait for the ACK.
         } catch (err) {
@@ -514,7 +508,6 @@ async function sendFirmwareChunk(deviceId: string, chunk: ArrayBuffer): Promise<
 export async function startOTAStatusNotifications(deviceId: string, callback: (status: OTAUpdateStatus) => void): Promise<void> {
   console.log(`[OTA] Starting status notifications for ${deviceId}`);
   await startNotifications(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_OTA_STATUS, (stringValue) => {
-    // console.log(`[OTA Status Notification Received]: "${stringValue}"`); // Less verbose
     callback({ statusMessage: stringValue });
   });
 }
@@ -569,12 +562,10 @@ export async function performOTAUpdate(
           await webOTADataCharacteristic.startNotifications();
         }
         otaDataNotificationsStartedForAck = true;
-        console.log('[OTA] Started notifications on OTA_DATA for ACK flow control (Web)');
     } else { 
         await BleClient.startNotifications(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_OTA_DATA, (_ackValue) => {
         });
         otaDataNotificationsStartedForAck = true;
-        console.log('[OTA] Started notifications on OTA_DATA for ACK flow control (Native)');
     }
 
 
@@ -587,9 +578,7 @@ export async function performOTAUpdate(
       const chunkEnd = Math.min(offset + MAX_BLE_CHUNK_SIZE, totalSize);
       const chunk = firmwareBuffer.slice(offset, chunkEnd);
       
-      // console.log(`[OTA] Sending chunk: offset ${offset}, size ${chunk.byteLength}`);
       await sendFirmwareChunk(deviceId, chunk);
-      // console.log(`[OTA] Chunk sent, (assumed) ACK received for offset ${offset}`);
       
       offset = chunkEnd;
       const progress = Math.round((offset / totalSize) * 100);
@@ -630,11 +619,9 @@ export async function performOTAUpdate(
                 if (webOTADataCharacteristic) {
                     await webOTADataCharacteristic.stopNotifications();
                     webOTADataCharacteristic = null;
-                    console.log('[OTA] Stopped notifications on OTA_DATA (Web)');
                 }
             } else {
                 await BleClient.stopNotifications(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_OTA_DATA);
-                console.log('[OTA] Stopped notifications on OTA_DATA (Native)');
             }
         } catch (e) {
             // Ignore cleanup errors - device may have already disconnected

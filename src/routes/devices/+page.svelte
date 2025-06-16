@@ -144,7 +144,6 @@
         await handleGetDeviceInfo(); // Automatically get device info on connect
         await startOTAStatusNotifications(selectedDevice.deviceId, (status) => { // Start listening for OTA status
           otaStatus = status;
-          notifications = [`${new Date().toLocaleTimeString()} [OTA]: ${status.statusMessage}${status.progress !== undefined ? ' ('+status.progress+'%)' : ''}`, ...notifications].slice(0,20);
           if (status.isError || status.isComplete) {
             otaInProgress = false;
           }
@@ -312,6 +311,7 @@
     otaInProgress = true;
     showUpdateConfirmation = false;
     otaStatus = { statusMessage: 'Starting OTA update...', progress: 0 };
+    statusMessage = 'OTA update in progress...';
 
     // Always use GitHub Pages for firmware downloads, even during local development
     const baseUrl = 'https://hobzcalvin.github.io/blumon'; 
@@ -326,15 +326,10 @@
         signatureUrl,
         (statusUpdate) => {
           otaStatus = statusUpdate;
-          notifications = [`${new Date().toLocaleTimeString()} [OTA]: ${statusUpdate.statusMessage}${statusUpdate.progress !== undefined ? ' ('+statusUpdate.progress+'%)' : ''}`, ...notifications].slice(0,20);
           if (statusUpdate.isComplete || statusUpdate.isError) {
             otaInProgress = false;
             if (!statusUpdate.isError && (statusUpdate.statusMessage.includes("OTA_SUCCESS_REBOOTING") || statusUpdate.statusMessage.includes("Device rebooted"))) {
-              setTimeout(async () => {
-                statusMessage = "OTA complete. Device rebooted with new firmware. Please reconnect to see updated info.";
-                // Don't try to read device info immediately - device has rebooted and is disconnected
-                // User will need to reconnect manually to see the new firmware version
-              }, 3000); 
+              statusMessage = "OTA complete. Device rebooted with new firmware. Please reconnect to see updated info.";
             }
           }
         }
@@ -342,7 +337,7 @@
     } catch (error: any) {
       console.error('OTA process error:', error);
       otaStatus = { statusMessage: `OTA Error: ${error.message}`, isError: true, isComplete: true };
-      notifications = [`${new Date().toLocaleTimeString()} [OTA ERROR]: ${error.message}`, ...notifications].slice(0,20);
+      statusMessage = `OTA failed: ${error.message}`;
       otaInProgress = false;
     }
   }
@@ -580,7 +575,7 @@
 
   {#if notifications.length > 0}
     <section class="notifications">
-      <h2>ESP32 Notifications (TX & OTA Status)</h2>
+      <h2>ESP32 Notifications</h2>
       <div class="notifications-list">
         {#each notifications as notification}
           <div class="notification-item">
