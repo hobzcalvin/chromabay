@@ -440,6 +440,9 @@ export async function sendFirmwareSignature(deviceId: string, signature: ArrayBu
 // Global variable to store the OTA data characteristic for Web Bluetooth
 let webOTADataCharacteristic: BluetoothRemoteGATTCharacteristic | null = null;
 
+// Global ACK handler for mobile OTA chunks
+let globalMobileAckHandler: ((value: DataView) => void) | null = null;
+
 async function sendFirmwareChunk(deviceId: string, chunk: ArrayBuffer): Promise<void> {
   const dataView = new DataView(chunk);
   
@@ -487,18 +490,34 @@ async function sendFirmwareChunk(deviceId: string, chunk: ArrayBuffer): Promise<
     });
 
   } else {
-    // Native: Write and use a short delay. Flow control relies on ESP32 handling speed.
+    // Native: Write and wait for ACK notification via global listener
     return new Promise(async (resolve, reject) => {
-        try {
-            await BleClient.writeWithoutResponse(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_OTA_DATA, dataView);
-            // Short delay to allow ESP32 to process and to roughly pace sending.
-            // This is not true flow control but a simple pacing mechanism.
-            // The ESP32 will send a notification on this characteristic as an ACK,
-            // which will be picked up by the global listener in performOTAUpdate if active.
-            setTimeout(() => {
+        let ackReceived = false;
+        
+        const timeoutId = setTimeout(() => {
+            if (!ackReceived) {
+                reject(new Error('Timeout waiting for ACK from ESP32 (mobile)'));
+            }
+        }, 15000); // 5 second timeout
+        
+        // Set up global ACK handler 
+        const originalAckHandler = globalMobileAckHandler;
+        globalMobileAckHandler = (value: DataView) => {
+            if (!ackReceived) {
+                ackReceived = true;
+                clearTimeout(timeoutId);
+                globalMobileAckHandler = originalAckHandler; // Restore previous handler
                 resolve();
-            }, 50); // e.g., 50ms delay, can be tuned. A more robust solution would wait for the ACK.
+            }
+        };
+        
+        try {
+            // Write the chunk - ACK will be received via global listener
+            await BleClient.writeWithoutResponse(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_OTA_DATA, dataView);
+            
         } catch (err) {
+            clearTimeout(timeoutId);
+            globalMobileAckHandler = originalAckHandler; // Restore previous handler
             reject(err);
         }
     });
@@ -563,7 +582,11 @@ export async function performOTAUpdate(
         }
         otaDataNotificationsStartedForAck = true;
     } else { 
-        await BleClient.startNotifications(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_OTA_DATA, (_ackValue) => {
+        await BleClient.startNotifications(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_OTA_DATA, (ackValue) => {
+            // Call the global ACK handler if it exists (for chunk-by-chunk flow control)
+            if (globalMobileAckHandler) {
+                globalMobileAckHandler(ackValue);
+            }
         });
         otaDataNotificationsStartedForAck = true;
     }
@@ -591,15 +614,15 @@ export async function performOTAUpdate(
     await sendFirmwareSignature(deviceId, signatureBuffer);
     progressCallback({ statusMessage: 'Signature sent.' });
 
-    // 6. Send END_OTA command (may fail if ESP32 reboots immediately after signature verification)
+    // 6. Send END_OTA command to trigger signature verification and reboot
     progressCallback({ statusMessage: 'Finalizing update...' });
     try {
       await sendOTAControlCommand(deviceId, 'END_OTA');
-      progressCallback({ statusMessage: 'Update finalized. Device is rebooting with new firmware.', isComplete: true });
+      progressCallback({ statusMessage: 'Update finalized. Device should be rebooting...', isComplete: true });
     } catch (error: any) {
-      // If END_OTA fails, it might be because the ESP32 already rebooted after signature verification
-      if (error.message.includes('GATT') || error.message.includes('disconnected')) {
-        console.log('[OTA] END_OTA failed due to disconnection - this is expected if ESP32 rebooted after signature verification');
+      // If END_OTA fails, it's likely because ESP32 rebooted during signature verification
+      if (error.message.includes('GATT') || error.message.includes('disconnected') || error.message.includes('timeout')) {
+        console.log('[OTA] END_OTA failed due to disconnection/timeout - ESP32 likely rebooted during signature verification');
         progressCallback({ statusMessage: 'Update completed successfully. Device rebooted with new firmware.', isComplete: true });
       } else {
         throw error; // Re-throw if it's a different error

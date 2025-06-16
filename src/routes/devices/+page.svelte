@@ -147,11 +147,13 @@
           if (status.isError || status.isComplete) {
             otaInProgress = false;
           }
+          // Handle ESP32 reboot notification
           if (status.statusMessage.includes("OTA_SUCCESS_REBOOTING")) {
-            setTimeout(async () => {
-                statusMessage = "Device rebooted. Re-fetching info...";
-                await handleGetDeviceInfo();
-            }, 5000); 
+            otaStatus = { statusMessage: 'Update successful! Device is rebooting with new firmware...', isComplete: true };
+            otaInProgress = false;
+            statusMessage = "OTA complete! Device rebooted with new firmware. Please reconnect to see updated info.";
+          } else if (status.statusMessage.includes("OTA_VALIDATING")) {
+            otaStatus = { statusMessage: 'Validating firmware signature...', progress: 95 };
           }
         });
       }
@@ -336,8 +338,15 @@
       );
     } catch (error: any) {
       console.error('OTA process error:', error);
-      otaStatus = { statusMessage: `OTA Error: ${error.message}`, isError: true, isComplete: true };
-      statusMessage = `OTA failed: ${error.message}`;
+      // Check if the error is a write timeout after ESP32 started rebooting
+      if (error.message && error.message.includes('Write timeout') && otaStatus?.statusMessage?.includes('VALIDATING')) {
+        // This is expected - ESP32 rebooted during signature verification
+        otaStatus = { statusMessage: 'Update successful! Device rebooted with new firmware.', isComplete: true };
+        statusMessage = "OTA complete! Device rebooted with new firmware. Please reconnect to see updated info.";
+      } else {
+        otaStatus = { statusMessage: `OTA Error: ${error.message}`, isError: true, isComplete: true };
+        statusMessage = `OTA failed: ${error.message}`;
+      }
       otaInProgress = false;
     }
   }
@@ -346,7 +355,7 @@
 
 <main>
   <header>
-    <h1>🔵 Blumon</h1>
+    <h1>🔵 Blumonia</h1>
     <p class="subtitle">ESP32 Bluetooth Low Energy Monitor</p>
     <p class="company">by ReVolt Labs</p>
   </header>
