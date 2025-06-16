@@ -593,10 +593,20 @@ export async function performOTAUpdate(
     await sendFirmwareSignature(deviceId, signatureBuffer);
     progressCallback({ statusMessage: 'Signature sent.' });
 
-    // 6. Send END_OTA command
+    // 6. Send END_OTA command (may fail if ESP32 reboots immediately after signature verification)
     progressCallback({ statusMessage: 'Finalizing update...' });
-    await sendOTAControlCommand(deviceId, 'END_OTA');
-    progressCallback({ statusMessage: 'Update finalized. Waiting for device to reboot with new firmware.', isComplete: true });
+    try {
+      await sendOTAControlCommand(deviceId, 'END_OTA');
+      progressCallback({ statusMessage: 'Update finalized. Device is rebooting with new firmware.', isComplete: true });
+    } catch (error: any) {
+      // If END_OTA fails, it might be because the ESP32 already rebooted after signature verification
+      if (error.message.includes('GATT') || error.message.includes('disconnected')) {
+        console.log('[OTA] END_OTA failed due to disconnection - this is expected if ESP32 rebooted after signature verification');
+        progressCallback({ statusMessage: 'Update completed successfully. Device rebooted with new firmware.', isComplete: true });
+      } else {
+        throw error; // Re-throw if it's a different error
+      }
+    }
 
   } catch (error: any) {
     console.error('[OTA] OTA Update Failed:', error);
@@ -618,7 +628,8 @@ export async function performOTAUpdate(
                 console.log('[OTA] Stopped notifications on OTA_DATA (Native)');
             }
         } catch (e) {
-            console.warn("[OTA] Failed to stop OTA_DATA ACK notifications:", e);
+            // Ignore cleanup errors - device may have already disconnected
+            console.warn("[OTA] Failed to stop OTA_DATA ACK notifications (device may have rebooted):", e);
         }
     }
   }
