@@ -361,14 +361,21 @@ export function getConnectedDeviceCount(): number {
 
 export async function getDeviceInfo(deviceId: string): Promise<DeviceInfo> {
   console.log(`[OTA] Reading device info from ${deviceId}`);
-  const jsonString = await readCharacteristic(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_DEVICE_INFO);
   try {
-    const info = JSON.parse(jsonString) as DeviceInfo;
-    console.log('[OTA] Device Info:', info);
-    return info;
-  } catch (e) {
-    console.error('[OTA] Failed to parse device info JSON:', jsonString, e);
-    throw new Error('Invalid device info format');
+    const jsonString = await readCharacteristic(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_DEVICE_INFO);
+    try {
+      const info = JSON.parse(jsonString) as DeviceInfo;
+      console.log('[OTA] Device Info:', info);
+      return info;
+    } catch (e) {
+      console.error('[OTA] Failed to parse device info JSON:', jsonString, e);
+      throw new Error('Invalid device info format');
+    }
+  } catch (error: any) {
+    if (error.message.includes('GATT Server is disconnected') || error.message.includes('disconnected')) {
+      throw new Error('Device is disconnected. Please reconnect to read device info.');
+    }
+    throw error;
   }
 }
 
@@ -558,7 +565,9 @@ export async function performOTAUpdate(
         if (!deviceInfo?.gattServer) throw new Error('Device not connected');
         const service = await deviceInfo.gattServer.getPrimaryService(LED_SERVICE_UUID);
         webOTADataCharacteristic = await service.getCharacteristic(CHARACTERISTIC_UUID_OTA_DATA);
-        await webOTADataCharacteristic.startNotifications();
+        if (webOTADataCharacteristic) {
+          await webOTADataCharacteristic.startNotifications();
+        }
         otaDataNotificationsStartedForAck = true;
         console.log('[OTA] Started notifications on OTA_DATA for ACK flow control (Web)');
     } else { 

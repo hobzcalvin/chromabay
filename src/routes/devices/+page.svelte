@@ -329,11 +329,12 @@
           notifications = [`${new Date().toLocaleTimeString()} [OTA]: ${statusUpdate.statusMessage}${statusUpdate.progress !== undefined ? ' ('+statusUpdate.progress+'%)' : ''}`, ...notifications].slice(0,20);
           if (statusUpdate.isComplete || statusUpdate.isError) {
             otaInProgress = false;
-            if (!statusUpdate.isError && statusUpdate.statusMessage.includes("OTA_SUCCESS_REBOOTING")) {
+            if (!statusUpdate.isError && (statusUpdate.statusMessage.includes("OTA_SUCCESS_REBOOTING") || statusUpdate.statusMessage.includes("Device rebooted"))) {
               setTimeout(async () => {
-                statusMessage = "OTA complete. Device rebooting. Re-fetching info...";
-                await handleGetDeviceInfo(); 
-              }, 10000); 
+                statusMessage = "OTA complete. Device rebooted with new firmware. Please reconnect to see updated info.";
+                // Don't try to read device info immediately - device has rebooted and is disconnected
+                // User will need to reconnect manually to see the new firmware version
+              }, 3000); 
             }
           }
         }
