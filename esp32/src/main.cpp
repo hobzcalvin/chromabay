@@ -141,8 +141,6 @@ bool verifyFirmwareSignature(const uint8_t* signature, size_t sigLen, const esp_
 
         size_t remaining = firmware_size;
         size_t offset = 0;
-        
-        Serial.printf("Hashing %d bytes from partition using PSA\n", firmware_size);
 
         while (remaining > 0) {
             size_t to_read = (remaining < CHUNK_SIZE) ? remaining : CHUNK_SIZE;
@@ -177,47 +175,16 @@ bool verifyFirmwareSignature(const uint8_t* signature, size_t sigLen, const esp_
         }
     }
 
-    // Print debugging information
-    Serial.print("Firmware hash: ");
-    for (int i = 0; i < 32; i++) {
-        Serial.printf("%02x", firmware_hash[i]);
-    }
-    Serial.println();
-
-    Serial.print("Received signature (raw): ");
-    for (int i = 0; i < sigLen; i++) {
-        Serial.printf("%02x", signature[i]);
-    }
-    Serial.println();
-
-    // Check if signature is already in correct format (r||s, each 32 bytes, big-endian)
-    Serial.printf("Signature format analysis:\n");
-    Serial.printf("R component (first 32 bytes): ");
-    for (int i = 0; i < 32; i++) {
-        Serial.printf("%02x", signature[i]);
-    }
-    Serial.println();
-    
-    Serial.printf("S component (last 32 bytes): ");
-    for (int i = 32; i < 64; i++) {
-        Serial.printf("%02x", signature[i]);
-    }
-    Serial.println();
-
     // Try multiple signature formats to determine which one works
-
     // Format 1: Original signature as-is (r||s format)
-    Serial.println("Trying Format 1: Original r||s format");
     status = psa_verify_hash(key_id, PSA_ALG_ECDSA(PSA_ALG_SHA_256), 
                             firmware_hash, sizeof(firmware_hash), 
                             signature, sigLen);
     
     if (status == PSA_SUCCESS) {
-        Serial.println("✅ Firmware signature verification PASSED (Format 1: r||s)");
+        Serial.println("Firmware signature verification PASSED (r||s format)");
         verification_result = true;
         goto cleanup_key;
-    } else {
-        Serial.printf("❌ Format 1 failed: %ld\n", status);
     }
 
     // Format 2: Swapped r and s components
@@ -226,17 +193,14 @@ bool verifyFirmwareSignature(const uint8_t* signature, size_t sigLen, const esp_
         memcpy(swapped_signature, signature + 32, 32);      // s component first
         memcpy(swapped_signature + 32, signature, 32);      // r component second
         
-        Serial.println("Trying Format 2: Swapped s||r format");
         status = psa_verify_hash(key_id, PSA_ALG_ECDSA(PSA_ALG_SHA_256), 
                                 firmware_hash, sizeof(firmware_hash), 
                                 swapped_signature, sigLen);
         
         if (status == PSA_SUCCESS) {
-            Serial.println("✅ Firmware signature verification PASSED (Format 2: s||r)");
+            Serial.println("Firmware signature verification PASSED (s||r format)");
             verification_result = true;
             goto cleanup_key;
-        } else {
-            Serial.printf("❌ Format 2 failed: %ld\n", status);
         }
     }
 
@@ -251,28 +215,14 @@ bool verifyFirmwareSignature(const uint8_t* signature, size_t sigLen, const esp_
         bigendian_signature[32 + i] = signature[63 - i];
     }
     
-    Serial.println("Trying Format 3: Little-endian to big-endian conversion");
-    Serial.printf("Big-endian R: ");
-    for (int i = 0; i < 32; i++) {
-        Serial.printf("%02x", bigendian_signature[i]);
-    }
-    Serial.println();
-    Serial.printf("Big-endian S: ");
-    for (int i = 32; i < 64; i++) {
-        Serial.printf("%02x", bigendian_signature[i]);
-    }
-    Serial.println();
-    
     status = psa_verify_hash(key_id, PSA_ALG_ECDSA(PSA_ALG_SHA_256), 
                             firmware_hash, sizeof(firmware_hash), 
                             bigendian_signature, sigLen);
     
     if (status == PSA_SUCCESS) {
-        Serial.println("✅ Firmware signature verification PASSED (Format 3: big-endian)");
+        Serial.println("Firmware signature verification PASSED (big-endian format)");
         verification_result = true;
         goto cleanup_key;
-    } else {
-        Serial.printf("❌ Format 3 failed: %ld\n", status);
     }
 
     // Format 4: Big-endian + swapped components
@@ -280,21 +230,18 @@ bool verifyFirmwareSignature(const uint8_t* signature, size_t sigLen, const esp_
     memcpy(bigendian_swapped, bigendian_signature + 32, 32);      // s component first (big-endian)
     memcpy(bigendian_swapped + 32, bigendian_signature, 32);      // r component second (big-endian)
     
-    Serial.println("Trying Format 4: Big-endian + swapped (s||r)");
     status = psa_verify_hash(key_id, PSA_ALG_ECDSA(PSA_ALG_SHA_256), 
                             firmware_hash, sizeof(firmware_hash), 
                             bigendian_swapped, sigLen);
     
     if (status == PSA_SUCCESS) {
-        Serial.println("✅ Firmware signature verification PASSED (Format 4: big-endian s||r)");
+        Serial.println("Firmware signature verification PASSED (big-endian s||r format)");
         verification_result = true;
         goto cleanup_key;
-    } else {
-        Serial.printf("❌ Format 4 failed: %ld\n", status);
     }
 
     // All formats failed
-    Serial.println("❌ All signature formats failed!");
+    Serial.println("Firmware signature verification FAILED - all formats invalid");
     verification_result = false;
 
 cleanup_key:
@@ -417,18 +364,17 @@ class CharacteristicCallbacks: public NimBLECharacteristicCallbacks {
 class OTASignatureCallbacks : public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic* pCharacteristic) {
         std::string value = pCharacteristic->getValue();
-        Serial.print("OTA Signature Received: ");
         if (value.length() == FIRMWARE_SIGNATURE_LENGTH) {
             memcpy(received_signature, value.data(), FIRMWARE_SIGNATURE_LENGTH);
             signature_received = true;
-            Serial.printf("%d bytes stored.\n", value.length());
+            Serial.printf("OTA signature received (%d bytes)\n", value.length());
             if (pOTAStatusCharacteristic) {
                 const char* msg = "OTA_SIG_RECEIVED";
                 pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
                 pOTAStatusCharacteristic->notify();
             }
         } else {
-            Serial.printf("Invalid signature length %d bytes. Expected %d.\n", value.length(), FIRMWARE_SIGNATURE_LENGTH);
+            Serial.printf("OTA Error: Invalid signature length %d bytes (expected %d)\n", value.length(), FIRMWARE_SIGNATURE_LENGTH);
             signature_received = false; 
             if (pOTAStatusCharacteristic) {
                 const char* msg = "OTA_ERR_SIG_LEN";
@@ -445,9 +391,8 @@ class OTAControlCallbacks : public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic* pCharacteristic) {
         std::string value_str = pCharacteristic->getValue();
         const char* value = value_str.c_str(); 
-        Serial.print("OTA Control Received: ");
         if (strlen(value) > 0) {
-            Serial.println(value);
+            Serial.printf("OTA Control: %s\n", value);
             
             if (strcmp(value, "END_OTA") == 0) {
                 if (!ota_in_progress || ota_handle == 0) {
@@ -725,16 +670,15 @@ class OTADataCallbacks : public NimBLECharacteristicCallbacks {
 
         ota_received_size += length;
 
-        // Print progress every 10KB or so
+        // Print progress every 50KB
         static int lastReportedKB = 0;
         int currentKB = ota_received_size / 1024;
-        if (currentKB >= lastReportedKB + 10) {
+        if (currentKB >= lastReportedKB + 50) {
             lastReportedKB = currentKB;
-            Serial.printf("OTA Progress: %d KB received\n", currentKB);
+            Serial.printf("OTA: %d KB received\n", currentKB);
         }
 
         // Acknowledge chunk receipt by notifying on the same characteristic (flow control)
-        // This is what Sparkfun example does.
         uint8_t ack_payload[1] = { (uint8_t)(ota_received_size % 256) }; // Simple ACK
         pCharacteristic->setValue(ack_payload, 1); 
         pCharacteristic->notify();
@@ -760,41 +704,32 @@ void setup() {
     Serial.println("ESP32 LedManager + OTA Demo Starting...");
 
     // --- Boot-time firmware state check ---
-    Serial.printf("Current firmware version: %s\n", FIRMWARE_VERSION);
-    Serial.println("Hardware Version: " + String(HARDWARE_VERSION)); // From firmware_version.h
+    Serial.printf("Firmware version: %s\n", FIRMWARE_VERSION);
 
     const esp_partition_t *running_partition = esp_ota_get_running_partition();
     esp_ota_img_states_t ota_state;
     if (esp_ota_get_state_partition(running_partition, &ota_state) == ESP_OK) {
         if (ota_state == ESP_OTA_IMG_PENDING_VERIFY) {
-            Serial.println("Boot: Firmware is PENDING VERIFICATION - will verify critical systems and mark valid/invalid.");
+            Serial.println("Boot: Firmware PENDING VERIFICATION - checking critical systems...");
         } else if (ota_state == ESP_OTA_IMG_VALID) {
-            Serial.println("Boot: Firmware is VALID.");
+            Serial.println("Boot: Firmware VALID");
         } else if (ota_state == ESP_OTA_IMG_INVALID) {
-            Serial.println("Boot: Firmware is INVALID. This should ideally not happen if rollback is configured.");
-        } else {
-            Serial.printf("Boot: Firmware OTA state is UNDEFINED (%d).\n", ota_state);
+            Serial.println("Boot: Firmware INVALID");
         }
-    } else {
-        Serial.println("Boot: Could not get OTA state for the running partition.");
     }
-    // --- End boot-time check ---
 
     // --- Critical System Initialization with Rollback on Failure ---
     bool criticalSystemsOK = true;
 
-    Serial.println("Mounting LittleFS (critical system)...");
+    // Initialize filesystem
     if (!LittleFS.begin(true)) { 
-        Serial.println("CRITICAL ERROR: LittleFS Mount Failed!");
+        Serial.println("ERROR: LittleFS Mount Failed!");
         criticalSystemsOK = false;
     } else {
-        Serial.println("LittleFS Mounted Successfully");
-        size_t totalBytes = LittleFS.totalBytes();
-        size_t usedBytes = LittleFS.usedBytes();
-        Serial.printf("LittleFS Total: %d bytes, Used: %d bytes\n", totalBytes, usedBytes);
+        Serial.println("LittleFS mounted");
     }
 
-    // Initialize LED configuration (critical for device function)
+    // Initialize LED configuration
     LedConfig::LedStripConfig defaultStrip;
     defaultStrip.chipset     = LedConfig::LedChipset::WS2812_RGB;
     defaultStrip.pin         = LED_PIN;
@@ -803,132 +738,77 @@ void setup() {
     defaultStrip.rmtChannel  = 0;
     
     configMgr.createDefaultConfigFileIfMissing(defaultStrip);
-
     bool configLoadedAndApplied = configMgr.loadAndApplyConfiguration();
 
     // Fallback to default strip if config loading/application fails or results in no strips
     if (!configLoadedAndApplied || ledMgr.getNumStrips() == 0) {
-        if (!configLoadedAndApplied) {
-            Serial.println("Config load/apply reported failure.");
-        } else { 
-            Serial.println("Config applied but resulted in 0 LED strips.");
-        }
-        Serial.println("Falling back to built-in default LED strip configuration …");
+        Serial.println("Using fallback LED configuration");
         ledMgr.clearStrips();
         if (!ledMgr.addStrip(defaultStrip)) {
-            Serial.println("CRITICAL ERROR: Failed to add fallback LED strip!");
+            Serial.println("ERROR: Failed to add LED strip!");
             criticalSystemsOK = false;
         } else {
-            ledMgr.setGlobalBrightness(BRIGHTNESS); // Apply default brightness for fallback
+            ledMgr.setGlobalBrightness(BRIGHTNESS);
             ledMgr.begin();
         }
     } else {
-        Serial.println("Configuration successfully loaded and applied from file.");
-        ledMgr.begin(); // Brightness should have been loaded from config
+        ledMgr.begin();
     }
 
-    Serial.printf("LedManager initialized. Number of configured strips: %d\n", ledMgr.getNumStrips());
-    if (ledMgr.getNumStrips() > 0) {
-        LedConfig::LedBus* strip0 = ledMgr.getStrip(0);
-        if (strip0) {
-            const LedConfig::LedStripConfig& cfg = strip0->getConfig();
-            Serial.printf("Strip 0 Details: Pin %d, LEDs %d, Chipset %d, ColorOrder %d, RMT %d, Brightness %d\n",
-                          cfg.pin,
-                          cfg.numLeds,
-                          static_cast<int>(cfg.chipset),
-                          static_cast<int>(cfg.colorOrder),
-                          cfg.rmtChannel,
-                          strip0->getBrightness()); 
-             if (cfg.numLeds != NUM_LEDS) {
-                Serial.printf("WARNING: Strip 0 configured with %d LEDs, but main code expects NUM_LEDS = %d for CRGB buffer.\n", cfg.numLeds, NUM_LEDS);
-            }
-        }
-    } else {
-        Serial.println("CRITICAL ERROR: No LED strips are configured in LedManager after setup!");
+    if (ledMgr.getNumStrips() == 0) {
+        Serial.println("ERROR: No LED strips configured!");
         criticalSystemsOK = false;
+    } else {
+        Serial.printf("LED strips: %d\n", ledMgr.getNumStrips());
     }
     
-    // Test LED functionality (critical for device operation)
+    // Test LED functionality
     if (ledMgr.getNumStrips() > 0 && ledMgr.getStrip(0)) {
         for(int i = 0; i < ledMgr.getStrip(0)->getLength(); i++) { 
             ledMgr.setPixelColor(0, i, CRGB::Red); 
         }
         ledMgr.show();
-    } else {
-        Serial.println("CRITICAL ERROR: Cannot test LED functionality - no strips available!");
-        criticalSystemsOK = false;
-    }
-    delay(1000);
-    
-    // Clear LEDs
-    if (ledMgr.getNumStrips() > 0 && ledMgr.getStrip(0)) {
+        delay(500);
         for(int i = 0; i < ledMgr.getStrip(0)->getLength(); i++) { 
             ledMgr.setPixelColor(0, i, CRGB::Black); 
         }
         ledMgr.show();
+    } else {
+        Serial.println("ERROR: Cannot test LED functionality!");
+        criticalSystemsOK = false;
     }
     
-    Serial.println("Initializing NimBLE (critical system)...");
+    // Initialize BLE
     NimBLEDevice::init("Blumon_ESP32"); 
-    
     pServer = NimBLEDevice::createServer();
     if (!pServer) {
-        Serial.println("CRITICAL ERROR: Failed to create NimBLE server!");
+        Serial.println("ERROR: Failed to create BLE server!");
         criticalSystemsOK = false;
     } else {
         pServer->setCallbacks(new ServerCallbacks());
         
         NimBLEService *pService = pServer->createService(SERVICE_UUID); 
         if (!pService) {
-            Serial.println("CRITICAL ERROR: Failed to create NimBLE service!");
+            Serial.println("ERROR: Failed to create BLE service!");
             criticalSystemsOK = false;
         } else {
-            // Original TX Characteristic (for sending data to client)
-            pTxCharacteristic = pService->createCharacteristic(
-                                CHARACTERISTIC_UUID_TX, 
-                                NIMBLE_PROPERTY::NOTIFY
-                              );
-            
-            // Original RX Characteristic (for receiving data from client)
-            NimBLECharacteristic* pRxCharacteristic = pService->createCharacteristic(
-                                                       CHARACTERISTIC_UUID_RX, 
-                                                       NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR
-                                                     );
+            // Create characteristics
+            pTxCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_TX, NIMBLE_PROPERTY::NOTIFY);
+            NimBLECharacteristic* pRxCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_RX, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR);
             pRxCharacteristic->setCallbacks(new CharacteristicCallbacks());
 
-            // --- New OTA Characteristics ---
-            pDeviceInfoCharacteristic = pService->createCharacteristic(
-                                        CHARACTERISTIC_UUID_DEVICE_INFO,
-                                        NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY
-                                      );
-
-            pOTAControlCharacteristic = pService->createCharacteristic(
-                                        CHARACTERISTIC_UUID_OTA_CONTROL,
-                                        NIMBLE_PROPERTY::WRITE 
-                                      );
+            // OTA Characteristics
+            pDeviceInfoCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_DEVICE_INFO, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY);
+            pOTAControlCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_OTA_CONTROL, NIMBLE_PROPERTY::WRITE);
             pOTAControlCharacteristic->setCallbacks(new OTAControlCallbacks());
-
-            pOTADataCharacteristic = pService->createCharacteristic(
-                                        CHARACTERISTIC_UUID_OTA_DATA,
-                                        NIMBLE_PROPERTY::WRITE_NR | NIMBLE_PROPERTY::NOTIFY 
-                                     );
+            pOTADataCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_OTA_DATA, NIMBLE_PROPERTY::WRITE_NR | NIMBLE_PROPERTY::NOTIFY);
             pOTADataCharacteristic->setCallbacks(new OTADataCallbacks());
-
-            pOTAStatusCharacteristic = pService->createCharacteristic(
-                                        CHARACTERISTIC_UUID_OTA_STATUS,
-                                        NIMBLE_PROPERTY::NOTIFY
-                                       );
-            
-            pOTASignatureCharacteristic = pService->createCharacteristic(
-                                        CHARACTERISTIC_UUID_OTA_SIGNATURE,
-                                        NIMBLE_PROPERTY::WRITE 
-                                       );
+            pOTAStatusCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_OTA_STATUS, NIMBLE_PROPERTY::NOTIFY);
+            pOTASignatureCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_OTA_SIGNATURE, NIMBLE_PROPERTY::WRITE);
             pOTASignatureCharacteristic->setCallbacks(new OTASignatureCallbacks());
-            // --- End OTA Characteristics ---
             
             pService->start();
-            
-            updateDeviceInfoCharacteristic(); // Set initial device info before advertising
+            updateDeviceInfoCharacteristic();
             
             NimBLEAdvertising *pAdvertising = NimBLEDevice::getAdvertising();
             pAdvertising->addServiceUUID(SERVICE_UUID); 
@@ -936,56 +816,37 @@ void setup() {
             pAdvertising->setMinPreferred(0x0);
             NimBLEDevice::startAdvertising();
             
-            Serial.println("NimBLE Service (incl. OTA Chars) started - waiting for connections...");
-            Serial.println("Device name: Blumon_ESP32");
-            Serial.println("Advertising Service UUID: " + String(SERVICE_UUID));
+            Serial.println("BLE services started");
         }
     }
 
     // --- Critical Systems Health Check and Rollback Decision ---
     if (!criticalSystemsOK) {
-        Serial.println("CRITICAL: One or more critical systems failed to initialize!");
+        Serial.println("CRITICAL: System initialization failed!");
         
-        // Check if we're in a rollback scenario
         if (esp_ota_get_state_partition(running_partition, &ota_state) == ESP_OK) {
             if (ota_state == ESP_OTA_IMG_PENDING_VERIFY) {
-                Serial.println("ROLLBACK TRIGGERED: Marking firmware as invalid due to critical system failures...");
+                Serial.println("Triggering firmware rollback...");
                 esp_err_t rollback_err = esp_ota_mark_app_invalid_rollback_and_reboot();
                 if (rollback_err != ESP_OK) {
-                    Serial.printf("ERROR: Failed to trigger rollback: %s\n", esp_err_to_name(rollback_err));
-                    Serial.println("System will continue with degraded functionality...");
-                } else {
-                    Serial.println("Rollback initiated. Device should reboot to previous firmware...");
-                    // Should not reach here as device will reboot
+                    Serial.printf("ERROR: Rollback failed: %s\n", esp_err_to_name(rollback_err));
                 }
-            } else {
-                Serial.println("Critical systems failed but not in pending verification state. System will continue with degraded functionality...");
             }
-        } else {
-            Serial.println("Critical systems failed but could not determine OTA state. System will continue with degraded functionality...");
         }
     }
 
-    // --- Health Check: Mark app as valid if it was pending verification and systems are OK ---
+    // --- Mark firmware as valid if all systems OK ---
     if (criticalSystemsOK && esp_ota_get_state_partition(running_partition, &ota_state) == ESP_OK) {
         if (ota_state == ESP_OTA_IMG_PENDING_VERIFY) {
-            Serial.println("All critical systems initialized successfully. Marking firmware as VALID.");
+            Serial.println("All systems OK - marking firmware as valid");
             esp_err_t mark_valid_err = esp_ota_mark_app_valid_cancel_rollback();
-            if (mark_valid_err == ESP_OK) {
-                Serial.println("Firmware successfully marked as valid. Rollback cancelled.");
-            } else {
-                Serial.printf("Error marking firmware valid: %s. OTA rollback might occur on next boot if watchdog triggers.\n", esp_err_to_name(mark_valid_err));
+            if (mark_valid_err != ESP_OK) {
+                Serial.printf("Warning: Failed to mark firmware valid: %s\n", esp_err_to_name(mark_valid_err));
             }
-        } else {
-            Serial.println("All critical systems initialized successfully. Firmware was not pending verification.");
         }
-    } else if (criticalSystemsOK) {
-        Serial.println("All critical systems initialized successfully. Could not get OTA state for health check.");
     }
-    // --- End Health Check ---
 
-    Serial.println("Setup complete - Starting rainbow animation");
-    Serial.printf("Free heap: %d bytes\n", ESP.getFreeHeap());
+    Serial.println("Setup complete");
 }
 
 unsigned long lastHeapUpdateTime = 0;
@@ -1005,37 +866,24 @@ void loop() {
             ledMgr.show();
             hue += 1;
         }
-        
-        // Print status every 5 seconds (only when OTA is not in progress)
-        static unsigned long lastStatus = 0;
-        if (currentTime - lastStatus >= 5000 && !ota_in_progress) {
-            lastStatus = currentTime;
-            uint8_t currentBrightness = 0;
-            if (ledMgr.getNumStrips() > 0 && ledMgr.getStrip(0) != nullptr) {
-                currentBrightness = ledMgr.getStrip(0)->getBrightness(); 
-            }
-            Serial.printf("Rainbow running - Hue: %d, Brightness: %d, Free heap: %d bytes, BLE: %s, Strips: %d\n", 
-                         hue, currentBrightness, ESP.getFreeHeap(), deviceConnected ? "Connected" : "Disconnected", ledMgr.getNumStrips());
-        }
     }
 
     // Periodically update device info characteristic (for heap value)
     if (currentTime - lastHeapUpdateTime >= heapUpdateInterval) {
         lastHeapUpdateTime = currentTime;
-        if (deviceConnected) { // Only update if connected to potentially save power/CPU
+        if (deviceConnected) {
             updateDeviceInfoCharacteristic();
         }
     }
     
     // Handle BLE connection changes
     if (!deviceConnected && oldDeviceConnected) {
-        Serial.println("Client disconnected, advertising should restart automatically if configured.");
         oldDeviceConnected = deviceConnected;
     }
     if (deviceConnected && !oldDeviceConnected) {
-        Serial.println("Client reconnected.");
+        Serial.println("BLE client connected");
         oldDeviceConnected = deviceConnected;
     }
 
-    delay(1); // Small delay to allow other tasks (like BLE stack) to run
+    delay(1);
 }
