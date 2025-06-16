@@ -5,7 +5,6 @@
 #include <NimBLEServer.h>
 #include <NimBLEUtils.h>
 #include "esp_ota_ops.h" // For OTA updates
-#include "esp_app_format.h" // For esp_app_desc_t and image state checks
 
 // PSA Crypto API includes for signature verification
 #include "psa/crypto.h"
@@ -761,8 +760,7 @@ void setup() {
     Serial.println("ESP32 LedManager + OTA Demo Starting...");
 
     // --- Boot-time firmware state check ---
-    const esp_app_desc_t *app_desc = esp_ota_get_app_description();
-    Serial.printf("Current firmware version: %s\n", app_desc->version);
+    Serial.printf("Current firmware version: %s\n", FIRMWARE_VERSION);
     Serial.println("Hardware Version: " + String(HARDWARE_VERSION)); // From firmware_version.h
 
     const esp_partition_t *running_partition = esp_ota_get_running_partition();
@@ -964,7 +962,7 @@ void loop() {
         
         // Pause rainbow animation if OTA is in progress to free up resources
         if (ledMgr.getNumStrips() > 0 && ledMgr.getStrip(0) != nullptr && !ota_in_progress) { 
-            fill_rainbow(leds, NUM_LEDS, hue, 200); 
+            fill_rainbow(leds, NUM_LEDS, hue, 1); 
             pushCRGBToStrip();
             ledMgr.show();
             hue += 1;
