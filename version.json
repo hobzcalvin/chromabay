@@ -1,7 +1,7 @@
 {
-  "version": "v0.0.37",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.37.zip",
-  "buildDate": "2025-06-14 06:57:23 UTC",
-  "commitHash": "2c3da9fe525b7e1dde01ce9238082a4c982c4f19",
-  "commitMessage": "Fix web bluetooth"
+  "version": "v0.0.38",
+  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.38.zip",
+  "buildDate": "2025-06-17 07:06:02 UTC",
+  "commitHash": "20653d17a8980cf81ecef1869fbda86f573870d7",
+  "commitMessage": "fix: app release script should only use app version tags, not firmware tags"
 }
