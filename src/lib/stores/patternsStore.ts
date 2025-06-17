@@ -52,6 +52,19 @@ function createDefaultPattern(): SerializedPattern {
   };
 }
 
+// Create empty pattern with just output node
+function createEmptyPattern(): SerializedPattern {
+  const seconds = getSecondsSinceApril19();
+  const name = `My Pattern ${seconds}`;
+  return {
+    nodes: [{ t: "output", o: 1 }],
+    meta: {
+      output: 1,
+      name
+    }
+  };
+}
+
 // Load patterns from preferences/localStorage
 export async function loadPatterns() {
   try {
@@ -61,10 +74,23 @@ export async function loadPatterns() {
       const patternsData: SerializedPattern[] = JSON.parse(value);
       patterns.set(patternsData);
       
-      // Set the first pattern as current if there is one
-      if (patternsData.length > 0) {
+      // Only set the first pattern as current if no current pattern is already set
+      const current = getCurrentPattern();
+      if (patternsData.length > 0 && !current) {
         currentPattern.set(patternsData[0]);
         currentPatternName.set(patternsData[0].meta?.name || 'Unnamed Pattern');
+        console.log('🎯 Set first pattern as current:', patternsData[0].meta?.name);
+      } else if (current && patternsData.length > 0) {
+        // Verify the current pattern still exists in the loaded patterns
+        const currentExists = patternsData.some(p => p.meta?.name === current.meta?.name);
+        if (!currentExists) {
+          // Current pattern was deleted, switch to first available
+          currentPattern.set(patternsData[0]);
+          currentPatternName.set(patternsData[0].meta?.name || 'Unnamed Pattern');
+          console.log('🔄 Current pattern no longer exists, switched to:', patternsData[0].meta?.name);
+        } else {
+          console.log('👍 Keeping current pattern:', current.meta?.name);
+        }
       }
       console.log('✅ Loaded patterns:', patternsData.length, 'patterns from', useWebFallback ? 'localStorage' : 'Capacitor Preferences');
     } else {
@@ -146,6 +172,10 @@ export async function saveCurrentPattern(serializedPattern: SerializedPattern, n
       if (name) {
         currentPatternName.set(name);
       }
+      
+      // Mark pattern as clean after saving
+      const { markPatternClean } = await import('$lib/flowStore');
+      markPatternClean();
     }
   } catch (error) {
     console.error('❌ Error saving current pattern:', error);
@@ -232,10 +262,10 @@ export async function deleteCurrentPattern() {
     const currentName = current.meta?.name || 'Unnamed Pattern';
     const filteredPatterns = existingPatterns.filter(p => p.meta?.name !== currentName);
     
-    // If no patterns left, create a default one
+    // If no patterns left, create an empty one  
     if (filteredPatterns.length === 0) {
-      const defaultPattern = createDefaultPattern();
-      filteredPatterns.push(defaultPattern);
+      const emptyPattern = createEmptyPattern();
+      filteredPatterns.push(emptyPattern);
     }
     
     // Save back to storage
@@ -279,5 +309,44 @@ export function patternNameExists(name: string): boolean {
     return allPatterns.some(p => p.meta?.name === name);
   } catch {
     return false;
+  }
+}
+
+// Delete a pattern by name (for patterns list page)
+export async function deletePatternByName(patternName: string) {
+  try {
+    // Get current patterns
+    const { value } = await storage.get({ key: PATTERNS_KEY });
+    const existingPatterns: SerializedPattern[] = value ? JSON.parse(value) : [];
+    
+    // Remove the pattern by name
+    const filteredPatterns = existingPatterns.filter(p => p.meta?.name !== patternName);
+    
+    // If no patterns left, create an empty one
+    if (filteredPatterns.length === 0) {
+      const emptyPattern = createEmptyPattern();
+      filteredPatterns.push(emptyPattern);
+    }
+    
+    // Save back to storage
+    await storage.set({
+      key: PATTERNS_KEY,
+      value: JSON.stringify(filteredPatterns)
+    });
+    
+    // Update stores
+    patterns.set(filteredPatterns);
+    
+    // If the deleted pattern was the current one, switch to the first pattern
+    const current = getCurrentPattern();
+    if (current && current.meta?.name === patternName) {
+      currentPattern.set(filteredPatterns[0]);
+      currentPatternName.set(filteredPatterns[0].meta?.name || 'Unnamed Pattern');
+    }
+    
+    console.log('🗑️ Deleted pattern:', patternName);
+  } catch (error) {
+    console.error('❌ Error deleting pattern by name:', error);
+    throw error;
   }
 } 

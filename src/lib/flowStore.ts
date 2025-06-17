@@ -707,8 +707,41 @@ export function createNodeFromType(nodeType: NodeDefinition, id: string, positio
 export const flowNodes = writable<Node[]>([]);
 export const flowEdges = writable<Edge[]>([]);
 
+// Subscribe to changes to check dirty state
+let debounceTimeout: ReturnType<typeof setTimeout> | null = null;
+function debounceCheckDirty() {
+  if (debounceTimeout) clearTimeout(debounceTimeout);
+  debounceTimeout = setTimeout(checkPatternDirty, 100);
+}
+
+flowNodes.subscribe(() => debounceCheckDirty());
+flowEdges.subscribe(() => debounceCheckDirty());
+nodeParameters.subscribe(() => debounceCheckDirty());
+
 // Keep track of next available ID
 export const nextNodeId = writable(3);
+
+// Dirty state tracking
+export const isDirty = writable<boolean>(false);
+let originalPatternState: string | null = null;
+
+// Mark pattern as clean (after save or load)
+export function markPatternClean(): void {
+  const currentState = JSON.stringify(serializeCurrentPattern());
+  originalPatternState = currentState;
+  isDirty.set(false);
+}
+
+// Check if pattern is dirty
+export function checkPatternDirty(): void {
+  if (originalPatternState === null) {
+    isDirty.set(false);
+    return;
+  }
+  
+  const currentState = JSON.stringify(serializeCurrentPattern());
+  isDirty.set(currentState !== originalPatternState);
+}
 
 // Shared store for node outputs so nodes can access each other's rendered data
 export const nodeOutputs = writable<Map<string, ImageData>>(new Map());
@@ -804,6 +837,9 @@ export function loadSerializedPattern(serializedPattern: SerializedPattern): voi
   const numericIds = nodes.map(n => parseInt(n.id.replace(/\D+/g, ''), 10)).filter(v => !isNaN(v));
   const maxId = numericIds.length ? Math.max(...numericIds) : 0;
   nextNodeId.set(maxId + 1);
+  
+  // Mark pattern as clean after loading
+  markPatternClean();
 }
 
 // Initialize flow with default pattern if no patterns exist
@@ -827,6 +863,26 @@ export function initializeDefaultPattern(): void {
   flowNodes.set(defaultNodes);
   flowEdges.set(defaultEdges);
   nextNodeId.set(3);
+  
+  // Mark as clean after initialization
+  markPatternClean();
+}
+
+// Initialize an empty pattern with just the output node (for when all patterns are deleted)
+export function initializeEmptyPattern(): void {
+  // Reset all stores first
+  nodeParameters.set(new Map());
+  
+  // Create default output node only
+  const outputNode: Node = createNodeFromType(NODE_TYPES[0], '1', { x: LANES.CENTER, y: 250 });
+
+  // Set the stores with just the output node
+  flowNodes.set([outputNode]);
+  flowEdges.set([]);
+  nextNodeId.set(2);
+  
+  // Mark as clean after initialization
+  markPatternClean();
 }
 
 export function getPatternSizeEstimate(): number {

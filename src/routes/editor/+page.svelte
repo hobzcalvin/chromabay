@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { tick, onMount } from 'svelte';
+  import { tick, onMount, onDestroy } from 'svelte';
   import { SvelteFlow, Controls, Background, BaseEdge, MarkerType, Position, type Node, type Edge, type Connection, useSvelteFlow, useViewport, getOutgoers } from '@xyflow/svelte';
   import '@xyflow/svelte/dist/style.css';
-  import { flowNodes, flowEdges, nextNodeId, LANES, NODE_TYPES, createNodeFromType, getNodeDefinition, isValidConnectionWithBuffers, initializeDefaultPattern, loadSerializedPattern } from '$lib/flowStore';
+  import { flowNodes, flowEdges, nextNodeId, LANES, NODE_TYPES, createNodeFromType, getNodeDefinition, isValidConnectionWithBuffers, initializeDefaultPattern, loadSerializedPattern, isDirty } from '$lib/flowStore';
   import PatternNode from '$lib/PatternNode.svelte';
   import NodeParameterEditor from '$lib/components/NodeParameterEditor.svelte';
   import PatternActions from '$lib/components/PatternActions.svelte';
@@ -26,6 +26,22 @@
       // Fallback to default pattern on error
       initializeDefaultPattern();
     }
+    
+    // Add beforeunload handler to warn about unsaved changes
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if ($isDirty) {
+        const message = 'You have unsaved changes to your pattern. Are you sure you want to leave?';
+        event.preventDefault();
+        event.returnValue = message;
+        return message;
+      }
+    };
+    
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
   });
   
   // Get SvelteFlow hooks
