@@ -25,16 +25,56 @@
   
   const dispatch = createEventDispatcher();
   
-  // Calculate angle from value (0-360 degrees)
+  // Audio knob range: 7 o'clock (210°) to 5 o'clock (150°)
+  const MIN_ANGLE = 210; // 7 o'clock position (min value)
+  const MAX_ANGLE = 150; // 5 o'clock position (max value)
+  const ANGLE_RANGE = 300; // 300 degrees counterclockwise (210° to 150° the long way)
+  
+  // Calculate angle from value (210° to 150° counterclockwise for audio knob)
   function valueToAngle(val: number): number {
     const normalized = (val - min) / (max - min);
-    return normalized * 360;
+    // Go counterclockwise from 210° for 300°
+    let angle = MIN_ANGLE + normalized * ANGLE_RANGE;
+    // Handle wrap-around
+    if (angle >= 360) angle -= 360;
+    return angle;
   }
   
-  // Calculate value from angle
-  function angleToValue(angle: number): number {
-    const normalized = (angle % 360) / 360;
-    return min + normalized * (max - min);
+  // Calculate value from angle, returns null if outside valid range
+  function angleToValue(angle: number): number | null {
+    // Normalize angle to 0-360 range
+    angle = ((angle % 360) + 360) % 360;
+    
+    // Add tolerance for easier min/max value access
+    const tolerance = 10;
+    
+    // Calculate distance from MIN_ANGLE (210°) going counterclockwise
+    let angleDistance;
+    
+    if (angle >= MIN_ANGLE) {
+      // From 210° to 360°
+      angleDistance = angle - MIN_ANGLE;
+    } else {
+      // From 0° to angle (continuing counterclockwise from 360°)
+      angleDistance = (360 - MIN_ANGLE) + angle;
+    }
+    
+    // Special case: check if we're close to min value from the "backward" direction
+    // (e.g., angles like 200°, 190° should give us min value)
+    if (angle < MIN_ANGLE && angle > MIN_ANGLE - tolerance) {
+      return min;
+    }
+    
+    // Check if we're within the valid range (with tolerance at the end)
+    if (angleDistance <= ANGLE_RANGE + tolerance) {
+      // Clamp angleDistance to the actual range to prevent going beyond min/max
+      const clampedDistance = Math.min(angleDistance, ANGLE_RANGE);
+      const progress = clampedDistance / ANGLE_RANGE;
+      return min + progress * (max - min);
+    } else {
+      // Outside valid range, return null to indicate invalid position
+      return null;
+    }
   }
   
   // Get mouse position relative to center
@@ -63,9 +103,12 @@
     } else {
       isDragging = true;
       const angle = getMouseAngle(event);
-      const newValue = Math.round(angleToValue(angle) / step) * step;
-      value = Math.max(min, Math.min(max, newValue));
-      dispatch('change', value);
+      const newValue = angleToValue(angle);
+      if (newValue !== null) {
+        const steppedValue = Math.round(newValue / step) * step;
+        value = Math.max(min, Math.min(max, steppedValue));
+        dispatch('change', value);
+      }
     }
     
     dispatch('start');
@@ -89,9 +132,12 @@
     
     if (isDragging) {
       const angle = getMouseAngle(event);
-      const newValue = Math.round(angleToValue(angle) / step) * step;
-      value = Math.max(min, Math.min(max, newValue));
-      dispatch('change', value);
+      const newValue = angleToValue(angle);
+      if (newValue !== null) {
+        const steppedValue = Math.round(newValue / step) * step;
+        value = Math.max(min, Math.min(max, steppedValue));
+        dispatch('change', value);
+      }
     }
   }
   
