@@ -1,11 +1,32 @@
 <script lang="ts">
-  import { tick } from 'svelte';
+  import { tick, onMount } from 'svelte';
   import { SvelteFlow, Controls, Background, BaseEdge, MarkerType, Position, type Node, type Edge, type Connection, useSvelteFlow, useViewport, getOutgoers } from '@xyflow/svelte';
   import '@xyflow/svelte/dist/style.css';
-  import { flowNodes, flowEdges, nextNodeId, LANES, NODE_TYPES, createNodeFromType, getNodeDefinition, isValidConnectionWithBuffers } from '$lib/flowStore';
+  import { flowNodes, flowEdges, nextNodeId, LANES, NODE_TYPES, createNodeFromType, getNodeDefinition, isValidConnectionWithBuffers, initializeDefaultPattern, loadSerializedPattern } from '$lib/flowStore';
   import PatternNode from '$lib/PatternNode.svelte';
   import NodeParameterEditor from '$lib/components/NodeParameterEditor.svelte';
-  import PatternSerializationPanel from '$lib/components/PatternSerializationPanel.svelte';
+  import PatternActions from '$lib/components/PatternActions.svelte';
+  import { loadPatterns, currentPattern } from '$lib/stores/patternsStore';
+  // Hidden for now: import PatternSerializationPanel from '$lib/components/PatternSerializationPanel.svelte';
+  
+  // Initialize patterns on mount
+  onMount(async () => {
+    try {
+      await loadPatterns();
+      // Load the current pattern into the flow editor
+      const current = $currentPattern;
+      if (current) {
+        loadSerializedPattern(current);
+      } else {
+        // Fallback to default pattern
+        initializeDefaultPattern();
+      }
+    } catch (error) {
+      console.error('Failed to load patterns:', error);
+      // Fallback to default pattern on error
+      initializeDefaultPattern();
+    }
+  });
   
   // Get SvelteFlow hooks
   const { screenToFlowPosition, setViewport } = useSvelteFlow();
@@ -27,9 +48,14 @@
   let deleteConfirmState = $state(false);
   let deleteTimeout: ReturnType<typeof setTimeout> | undefined = $state(undefined);
   
-  // Reactive check for active node
-  const activeNode = $derived(parameterEditor ? $flowNodes.find(n => n.id === parameterEditor!.id) : null);
-  const showParameterEditor = $derived(parameterEditor !== null && activeNode !== undefined);
+  // Reactive check for active node - ensure we have a valid node with proper data
+  const activeNode = $derived.by(() => {
+    if (!parameterEditor) return null;
+    const node = $flowNodes.find(n => n.id === parameterEditor!.id);
+    // Only return the node if it has valid data structure
+    return (node && node.data && node.data.type) ? node : null;
+  });
+  const showParameterEditor = $derived(parameterEditor !== null && activeNode !== null);
   
   // Define custom node types
   const nodeTypes = {
@@ -343,9 +369,8 @@
 <main>
   <div class="header">
     <h1>🎯 Pattern Editor</h1>
-    <p>Design your LED patterns visually</p>
     
-
+    <PatternActions />
     
     <div class="dropdown-container">
       <select 
@@ -374,7 +399,7 @@
     </div>
   </div>
   
-  <PatternSerializationPanel />
+  <!-- PatternSerializationPanel is hidden for now -->
   
   <div class="flow-container" bind:this={flowContainer} bind:clientWidth bind:clientHeight onmousemove={handleFlowMouseMove} role="application">
     <SvelteFlow 
@@ -420,19 +445,21 @@
       />
       
       <!-- Always-rendered Parameter Editor with CSS visibility -->
-      <NodeParameterEditor 
-        node={activeNode || $flowNodes[0]} 
-        nodeElement={document.body}
-        viewport={{ x: 0, y: 0, zoom: 1 }}
-        visible={showParameterEditor}
-        top={parameterEditor?.top}
-        left={parameterEditor?.left}
-        right={parameterEditor?.right}
-        bottom={parameterEditor?.bottom}
-        bind:deleteConfirmState
-        bind:deleteTimeout
-        onClose={closeParameterEditor}
-      />
+      {#if activeNode}
+        <NodeParameterEditor 
+          node={activeNode} 
+          nodeElement={document.body}
+          viewport={{ x: 0, y: 0, zoom: 1 }}
+          visible={showParameterEditor}
+          top={parameterEditor?.top}
+          left={parameterEditor?.left}
+          right={parameterEditor?.right}
+          bottom={parameterEditor?.bottom}
+          bind:deleteConfirmState
+          bind:deleteTimeout
+          onClose={closeParameterEditor}
+        />
+      {/if}
     </SvelteFlow>
   </div>
 </main>

@@ -9,6 +9,8 @@ PODS:
   - CapacitorCordova (7.2.0)
   - CapacitorPluginIosWebviewConfigurator (0.0.1):
     - Capacitor
+  - CapacitorPreferences (7.0.1):
+    - Capacitor
   - CapawesomeCapacitorLiveUpdate (7.2.0):
     - Alamofire (~> 5.9)
     - Capacitor
@@ -21,6 +23,7 @@ DEPENDENCIES:
   - "CapacitorCommunityBluetoothLe (from `../../node_modules/@capacitor-community/bluetooth-le`)"
   - "CapacitorCordova (from `../../node_modules/@capacitor/ios`)"
   - CapacitorPluginIosWebviewConfigurator (from `../../node_modules/capacitor-plugin-ios-webview-configurator`)
+  - "CapacitorPreferences (from `../../node_modules/@capacitor/preferences`)"
   - "CapawesomeCapacitorLiveUpdate (from `../../node_modules/@capawesome/capacitor-live-update`)"
 
 SPEC REPOS:
@@ -39,6 +42,8 @@ EXTERNAL SOURCES:
     :path: "../../node_modules/@capacitor/ios"
   CapacitorPluginIosWebviewConfigurator:
     :path: "../../node_modules/capacitor-plugin-ios-webview-configurator"
+  CapacitorPreferences:
+    :path: "../../node_modules/@capacitor/preferences"
   CapawesomeCapacitorLiveUpdate:
     :path: "../../node_modules/@capawesome/capacitor-live-update"
 
@@ -49,9 +54,10 @@ SPEC CHECKSUMS:
   CapacitorCommunityBluetoothLe: 3a65ed12464f16189772c1a8c247cb0b91186114
   CapacitorCordova: 5967b9ba03915ef1d585469d6e31f31dc49be96f
   CapacitorPluginIosWebviewConfigurator: e9b8058ea655ad498672c1ac535031c0d64053fd
+  CapacitorPreferences: 6c98117d4d7508034a4af9db64d6b26fc75d7b94
   CapawesomeCapacitorLiveUpdate: 4589d25437c980a8be605523557097ad1118ba91
   SSZipArchive: 62d4947b08730e4cda640473b0066d209ff033c9
 
-PODFILE CHECKSUM: b703c52e0f1e6a8ef59bf0d33f31afb5a280ce94
+PODFILE CHECKSUM: 91fb09467d621f38d30e679e5938647a490766b4
 
 COCOAPODS: 1.16.2

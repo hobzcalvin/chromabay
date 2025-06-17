@@ -703,24 +703,9 @@ export function createNodeFromType(nodeType: NodeDefinition, id: string, positio
   };
 }
 
-// Define initial nodes for the pattern editor with lane positioning and fixed width
-const initialNodes: Node[] = [
-  createNodeFromType(NODE_TYPES[1], '1', { x: LANES.CENTER, y: 100 }),        // First pattern node (index 1)
-  createNodeFromType(NODE_TYPES[0], '2', { x: LANES.CENTER, y: 250 })         // Output node (index 0)
-];
-
-// Define initial edges with better styling
-const initialEdges: Edge[] = [
-  { 
-    id: 'e1-2', 
-    source: '1', 
-    target: '2', 
-  }
-];
-
-// Create persistent stores for nodes and edges
-export const flowNodes = writable<Node[]>(initialNodes);
-export const flowEdges = writable<Edge[]>(initialEdges);
+// Create persistent stores for nodes and edges - will be initialized from patterns
+export const flowNodes = writable<Node[]>([]);
+export const flowEdges = writable<Edge[]>([]);
 
 // Keep track of next available ID
 export const nextNodeId = writable(3);
@@ -819,6 +804,29 @@ export function loadSerializedPattern(serializedPattern: SerializedPattern): voi
   const numericIds = nodes.map(n => parseInt(n.id.replace(/\D+/g, ''), 10)).filter(v => !isNaN(v));
   const maxId = numericIds.length ? Math.max(...numericIds) : 0;
   nextNodeId.set(maxId + 1);
+}
+
+// Initialize flow with default pattern if no patterns exist
+export function initializeDefaultPattern(): void {
+  // Create default nodes
+  const defaultNodes: Node[] = [
+    createNodeFromType(NODE_TYPES[1], '1', { x: LANES.CENTER, y: 100 }),        // First pattern node (rainbow)
+    createNodeFromType(NODE_TYPES[0], '2', { x: LANES.CENTER, y: 250 })         // Output node
+  ];
+
+  // Create default edge
+  const defaultEdges: Edge[] = [
+    { 
+      id: 'e1-2', 
+      source: '1', 
+      target: '2', 
+    }
+  ];
+
+  // Set the stores
+  flowNodes.set(defaultNodes);
+  flowEdges.set(defaultEdges);
+  nextNodeId.set(3);
 }
 
 export function getPatternSizeEstimate(): number {
