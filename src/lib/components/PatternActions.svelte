@@ -9,6 +9,9 @@
     patternNameExists
   } from '$lib/stores/patternsStore';
   
+  // Props for Add Node functionality
+  let { showAddNodeDropdown = $bindable(false), addNodeDropdownRef = $bindable(), handleAddNode, NODE_TYPES } = $props();
+  
   // Action dropdown state
   let showDropdown = $state(false);
   let dropdownRef: HTMLDivElement;
@@ -140,27 +143,52 @@
     Pattern: <strong>{patternName}</strong>
   </div>
   
-  <div class="actions-dropdown" bind:this={dropdownRef}>
-    <button
-      class="actions-button"
-      onclick={() => showDropdown = !showDropdown}
-      aria-expanded={showDropdown}
-    >
-      Actions
-      <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
-        <path d="M6 9L1 4h10z"/>
-      </svg>
-    </button>
+  <div class="buttons-container">
+    <div class="actions-dropdown" bind:this={dropdownRef}>
+      <button
+        class="actions-button"
+        onclick={() => showDropdown = !showDropdown}
+        aria-expanded={showDropdown}
+      >
+        Actions
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+          <path d="M6 9L1 4h10z"/>
+        </svg>
+      </button>
+      
+      {#if showDropdown}
+        <div class="dropdown-menu">
+          <button onclick={handleSave}>💾 Save</button>
+          <button onclick={handleSaveAs}>📋 Save As...</button>
+          <button onclick={handleRename}>✏️ Rename...</button>
+          <hr />
+          <button onclick={handleDelete} class="delete-action">🗑️ Delete</button>
+        </div>
+      {/if}
+    </div>
     
-    {#if showDropdown}
-      <div class="dropdown-menu">
-        <button onclick={handleSave}>💾 Save</button>
-        <button onclick={handleSaveAs}>📋 Save As...</button>
-        <button onclick={handleRename}>✏️ Rename...</button>
-        <hr />
-        <button onclick={handleDelete} class="delete-action">🗑️ Delete</button>
-      </div>
-    {/if}
+    <div class="add-node-dropdown" bind:this={addNodeDropdownRef}>
+      <button
+        class="add-node-button"
+        onclick={() => showAddNodeDropdown = !showAddNodeDropdown}
+        aria-expanded={showAddNodeDropdown}
+      >
+        ➕ Add Node
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+          <path d="M6 9L1 4h10z"/>
+        </svg>
+      </button>
+      
+      {#if showAddNodeDropdown}
+        <div class="dropdown-menu">
+          {#each NODE_TYPES.slice(1) as nodeType}
+            <button onclick={() => handleAddNode(nodeType)}>
+              {nodeType.name}
+            </button>
+          {/each}
+        </div>
+      {/if}
+    </div>
   </div>
 </div>
 
@@ -223,6 +251,7 @@
     align-items: center;
     gap: 1rem;
     margin-bottom: 1rem;
+    flex-wrap: wrap;
   }
   
   .pattern-name {
@@ -234,11 +263,17 @@
     color: #333;
   }
   
-  .actions-dropdown {
+  .buttons-container {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  
+  .actions-dropdown, .add-node-dropdown {
     position: relative;
   }
   
-  .actions-button {
+  .actions-button, .add-node-button {
     display: flex;
     align-items: center;
     gap: 0.5rem;
@@ -249,20 +284,21 @@
     cursor: pointer;
     font-size: 0.875rem;
     transition: all 0.2s ease;
+    color: #374151;
   }
   
-  .actions-button:hover {
+  .actions-button:hover, .add-node-button:hover {
     background: #e5e5e5;
   }
   
-  .actions-button[aria-expanded="true"] {
+  .actions-button[aria-expanded="true"], .add-node-button[aria-expanded="true"] {
     background: #e5e5e5;
   }
   
   .dropdown-menu {
     position: absolute;
     top: 100%;
-    right: 0;
+    left: 0;
     background: white;
     border: 1px solid #ddd;
     border-radius: 0.5rem;
@@ -274,7 +310,7 @@
   .dropdown-menu button {
     display: block;
     width: 100%;
-    padding: 0.75rem 1rem;
+    padding: 0.25rem 1rem;
     text-align: left;
     background: none;
     border: none;

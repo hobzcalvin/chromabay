@@ -48,6 +48,10 @@
   let deleteConfirmState = $state(false);
   let deleteTimeout: ReturnType<typeof setTimeout> | undefined = $state(undefined);
   
+  // Add Pattern Node dropdown state
+  let showAddNodeDropdown = $state(false);
+  let addNodeDropdownRef: HTMLDivElement;
+  
   // Reactive check for active node - ensure we have a valid node with proper data
   const activeNode = $derived.by(() => {
     if (!parameterEditor) return null;
@@ -253,6 +257,31 @@
     });
   }
 
+  // Handle add node from dropdown
+  function handleAddNode(nodeType: typeof NODE_TYPES[0]) {
+    createNode(nodeType);
+    showAddNodeDropdown = false;
+  }
+
+  // Close dropdown when clicking outside
+  function handleAddNodeOutsideClick(event: MouseEvent) {
+    if (addNodeDropdownRef && !addNodeDropdownRef.contains(event.target as HTMLElement)) {
+      showAddNodeDropdown = false;
+    }
+  }
+
+  $effect(() => {
+    if (showAddNodeDropdown) {
+      document.addEventListener('click', handleAddNodeOutsideClick);
+    } else {
+      document.removeEventListener('click', handleAddNodeOutsideClick);
+    }
+    
+    return () => {
+      document.removeEventListener('click', handleAddNodeOutsideClick);
+    };
+  });
+
   // Handle edge click to delete edge
   function onEdgeClick(event: any) {
     const edge = event.edge;
@@ -370,33 +399,12 @@
   <div class="header">
     <h1>🎯 Pattern Editor</h1>
     
-    <PatternActions />
-    
-    <div class="dropdown-container">
-      <select 
-        class="dropdown-select"
-        onchange={(e) => {
-          const target = e.target as HTMLSelectElement;
-          if (!target) return;
-          const selectedIndex = target.selectedIndex - 1; // -1 because first option is placeholder
-          if (selectedIndex >= 0) {
-            // Add 1 to skip the output node at index 0
-            const nodeType = NODE_TYPES[selectedIndex + 1];
-            if (nodeType) {
-              createNode(nodeType);
-            }
-            target.selectedIndex = 0; // Reset to placeholder
-          }
-        }}
-      >
-        <option value="">➕ Add Pattern Node</option>
-        {#each NODE_TYPES.slice(1) as nodeType}
-          <option value={nodeType.name}>
-            {nodeType.name}
-          </option>
-        {/each}
-      </select>
-    </div>
+    <PatternActions 
+      bind:showAddNodeDropdown 
+      bind:addNodeDropdownRef 
+      {handleAddNode}
+      {NODE_TYPES}
+    />
   </div>
   
   <!-- PatternSerializationPanel is hidden for now -->
@@ -493,45 +501,7 @@
     opacity: 0.9;
   }
   
-  .dropdown-container {
-    position: absolute;
-    right: 0;
-    top: 50%;
-    transform: translateY(-50%);
-    z-index: 10000; /* High z-index to ensure it's above SvelteFlow */
-  }
-  
-  .dropdown-select {
-    background: white;
-    color: #374151;
-    border: 2px solid #d1d5db;
-    padding: 0.5rem 0.75rem;
-    border-radius: 6px;
-    font-size: 0.9rem;
-    cursor: pointer;
-    min-width: 180px;
-    position: relative;
-    z-index: 10001;
-    font-family: inherit;
-    appearance: menulist; /* Standard dropdown appearance */
-  }
-  
-  .dropdown-select:hover {
-    border-color: #9ca3af;
-  }
-  
-  .dropdown-select:focus {
-    outline: none;
-    border-color: #10b981;
-    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
-  }
-  
-  .dropdown-select option {
-    background: white;
-    color: #374151;
-    padding: 0.5rem;
-    font-weight: normal;
-  }
+
   
   .flow-container {
     flex: 1;
