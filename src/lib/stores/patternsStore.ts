@@ -178,7 +178,17 @@ export async function renameCurrentPattern(newName: string) {
   try {
     const current = getCurrentPattern();
     
-    if (current) {
+    if (!current) return;
+    
+    const oldName = current.meta?.name || 'Unnamed Pattern';
+    
+    // Get current patterns
+    const { value } = await storage.get({ key: PATTERNS_KEY });
+    const existingPatterns: SerializedPattern[] = value ? JSON.parse(value) : [];
+    
+    // Find and update the pattern by old name
+    const existingIndex = existingPatterns.findIndex(p => p.meta?.name === oldName);
+    if (existingIndex >= 0) {
       const updatedPattern: SerializedPattern = {
         nodes: current.nodes,
         meta: {
@@ -187,9 +197,19 @@ export async function renameCurrentPattern(newName: string) {
         }
       };
       
-      await savePattern(updatedPattern);
+      existingPatterns[existingIndex] = updatedPattern;
+      
+      // Save back to storage
+      await storage.set({
+        key: PATTERNS_KEY,
+        value: JSON.stringify(existingPatterns)
+      });
+      
+      // Update stores
+      patterns.set(existingPatterns);
       currentPattern.set(updatedPattern);
       currentPatternName.set(newName);
+      console.log('✏️ Renamed pattern from:', oldName, 'to:', newName);
     }
   } catch (error) {
     console.error('❌ Error renaming pattern:', error);

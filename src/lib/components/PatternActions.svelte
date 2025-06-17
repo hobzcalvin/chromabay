@@ -19,7 +19,6 @@
   // Dialog states
   let showSaveAsDialog = $state(false);
   let showRenameDialog = $state(false);
-  let showDeleteDialog = $state(false);
   
   // Dialog inputs
   let saveAsName = $state('');
@@ -73,7 +72,9 @@
   }
   
   function handleDelete() {
-    showDeleteDialog = true;
+    if (window.confirm(`Are you sure you want to delete "${patternName}"?\n\nThis action cannot be undone.`)) {
+      confirmDelete();
+    }
     showDropdown = false;
   }
   
@@ -122,7 +123,6 @@
   async function confirmDelete() {
     try {
       await deleteCurrentPattern();
-      showDeleteDialog = false;
     } catch (error: any) {
       console.error('Failed to delete pattern:', error);
       alert('Failed to delete pattern: ' + (error?.message || 'Unknown error'));
@@ -132,7 +132,6 @@
   function cancelDialog() {
     showSaveAsDialog = false;
     showRenameDialog = false;
-    showDeleteDialog = false;
     saveAsName = '';
     renameName = '';
   }
@@ -230,20 +229,7 @@
   </div>
 {/if}
 
-<!-- Delete Dialog -->
-{#if showDeleteDialog}
-  <div class="dialog-overlay">
-    <div class="dialog">
-      <h3>Delete Pattern</h3>
-      <p>Are you sure you want to delete "<strong>{patternName}</strong>"?</p>
-      <p class="warning">This action cannot be undone.</p>
-      <div class="dialog-actions">
-        <button onclick={cancelDialog}>Cancel</button>
-        <button onclick={confirmDelete} class="delete-button">Delete</button>
-      </div>
-    </div>
-  </div>
-{/if}
+
 
 <style>
   .pattern-actions {
