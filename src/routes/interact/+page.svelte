@@ -1,9 +1,16 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import PatternRenderer from '$lib/components/PatternRenderer.svelte';
+  import RotaryKnob from '$lib/components/RotaryKnob.svelte';
 
   let showNotification = true;
   let notificationVisible = true;
+  let knobValue = 50;
+
+  function handleKnobChange(event: CustomEvent<number>) {
+    knobValue = event.detail;
+    console.log('Knob value:', knobValue);
+  }
 
   onMount(() => {
     // Start fade out after 2 seconds, then hide after transition
@@ -20,6 +27,18 @@
 <!-- Full-screen pattern renderer -->
 <PatternRenderer fullscreen={true} />
 
+<!-- Rotary knob overlay -->
+<div class="knob-overlay">
+  <RotaryKnob
+    bind:value={knobValue}
+    min={0}
+    max={100}
+    step={0.1}
+    size={250}
+    on:change={handleKnobChange}
+  />
+</div>
+
 <!-- Temporary notification -->
 {#if showNotification}
   <div class="notification" class:fade-out={!notificationVisible}>
@@ -28,9 +47,18 @@
 {/if}
 
 <style>
-  .notification {
+  .knob-overlay {
     position: fixed;
     top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 10;
+    pointer-events: auto;
+  }
+
+  .notification {
+    position: fixed;
+    top: 20%;
     left: 50%;
     transform: translate(-50%, -50%);
     background-color: rgba(0, 0, 0, 0.8);
