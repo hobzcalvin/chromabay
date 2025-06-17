@@ -53,8 +53,8 @@ if [ "$AHEAD" -gt 0 ]; then
     echo -e "${BLUE}🚀 Will push local commits to origin before creating release...${NC}"
 fi
 
-# Get current version
-CURRENT_VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+# Get current version (only app versions starting with 'v' but not 'fwv')
+CURRENT_VERSION=$(git tag --sort=-version:refname | grep "^v[0-9]" | grep -v "^fwv" | head -1 || echo "v0.0.0")
 echo -e "${BLUE}📋 Current version: ${YELLOW}$CURRENT_VERSION${NC}"
 
 # Determine new version
