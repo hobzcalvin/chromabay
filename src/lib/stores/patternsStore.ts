@@ -136,7 +136,7 @@ export async function saveCurrentPattern(serializedPattern: SerializedPattern, n
       const updatedPattern: SerializedPattern = {
         nodes: serializedPattern.nodes,
         meta: {
-          output: serializedPattern.meta?.output || 1,
+          output: serializedPattern.meta?.output ?? 1,
           name: name || current.meta?.name || 'Unnamed Pattern'
         }
       };
@@ -159,7 +159,7 @@ export async function saveAsPattern(serializedPattern: SerializedPattern, name: 
     const newPattern: SerializedPattern = {
       nodes: serializedPattern.nodes,
       meta: {
-        output: serializedPattern.meta?.output || 1,
+        output: serializedPattern.meta?.output ?? 1,
         name
       }
     };
@@ -182,7 +182,7 @@ export async function renameCurrentPattern(newName: string) {
       const updatedPattern: SerializedPattern = {
         nodes: current.nodes,
         meta: {
-          output: current.meta?.output || 1,
+          output: current.meta?.output ?? 1,
           name: newName
         }
       };

@@ -652,9 +652,12 @@ export function deserializePattern(
     // Find the maximum dependency level to place output node at the bottom
     const maxLevel = Math.max(...Array.from(dependencyLevels.values())) + 1;
     
-    // Position output node at the bottom center
+    // Find the correct lane for the output node based on the final output buffer
+    const finalOutputBuffer = serializedPattern.meta?.output !== undefined ? serializedPattern.meta.output : 0;
+    
+    // Position output node in the same lane as the final output buffer
     const outputNode = createNodeFromType(outputDef, outputNodeId, {
-      x: LANES.CENTER,
+      x: getLaneFromBuffer(finalOutputBuffer),
       y: 50 + maxLevel * (NODE_HEIGHT + VERTICAL_SPACING)
     });
     
@@ -665,7 +668,6 @@ export function deserializePattern(
     svelteFlowNodes.push(outputNode);
     
     // Find the node that outputs to the final output buffer
-    const finalOutputBuffer = serializedPattern.meta?.output !== undefined ? serializedPattern.meta.output : 0;
     
     // Find the last node that writes to this buffer
     let sourceForOutput: string | undefined;
