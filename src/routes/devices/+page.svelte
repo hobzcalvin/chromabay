@@ -355,7 +355,7 @@
 
 <main>
   <header>
-    <h1>🔵 Blumonia</h1>
+    <h1>🔵 Blumon</h1>
     <p class="subtitle">ESP32 Bluetooth Low Energy Monitor</p>
     <p class="company">by ReVolt Labs</p>
   </header>
