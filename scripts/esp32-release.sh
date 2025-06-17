@@ -82,15 +82,10 @@ if [ "$AHEAD" -gt 0 ]; then
     echo -e "${BLUE}🚀 Will push local commits to origin before creating release...${NC}"
 fi
 
-# Get current version from firmware_version.h
-if [ ! -f "$ESP32_VERSION_FILE" ]; then
-  echo -e "${RED}❌ Error: Version file '$ESP32_VERSION_FILE' not found.${NC}"
-  exit 1
-fi
-
-CURRENT_VERSION=$(grep "#define $VERSION_DEFINE_PATTERN" "$ESP32_VERSION_FILE" | sed 's/.*"\(.*\)".*/\1/')
+# Get current version from git tags (only firmware versions starting with 'fwv')
+CURRENT_VERSION=$(git tag --sort=-version:refname | grep "^fwv" | head -1 || echo "fwv0.0.0")
 if [ -z "$CURRENT_VERSION" ]; then
-    echo -e "${RED}❌ Error: Could not extract version from '$ESP32_VERSION_FILE'${NC}"
+    echo -e "${RED}❌ Error: Could not find any firmware version tags (fwv*)${NC}"
     exit 1
 fi
 
