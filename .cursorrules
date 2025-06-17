@@ -1,0 +1,12 @@
+# Cursor Rules for Blumon Project
+
+## Development Server
+- NEVER run `npm run dev` - the user handles this themselves
+- The project is set up with hot reload, so changes will be reflected automatically
+- Focus on making code changes and let the user manage the dev server
+
+## Code Style
+- Use TypeScript for type safety
+- Follow Svelte 5 best practices
+- Use proper event typing for CustomEvent handlers
+- Maintain clean, readable code structure 
