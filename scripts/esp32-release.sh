@@ -57,11 +57,12 @@ if [ "$CURRENT_BRANCH" != "main" ]; then
     exit 1
 fi
 
-# Check if working directory is clean
-if [ -n "$(git status --porcelain)" ]; then
-    echo -e "${RED}❌ Error: Working directory is not clean${NC}"
-    echo -e "${YELLOW}Please commit or stash your changes before creating a release${NC}"
-    git status --short
+# Check if there are staged changes (which should be committed before release)
+STAGED_CHANGES=$(git diff --cached --name-only)
+if [ -n "$STAGED_CHANGES" ]; then
+    echo -e "${RED}❌ Error: You have staged changes that haven't been committed${NC}"
+    echo -e "${YELLOW}Please commit your staged changes before creating a release:${NC}"
+    git diff --cached --name-status
     exit 1
 fi
 
