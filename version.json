@@ -1,7 +1,7 @@
 {
-  "version": "v0.0.38",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.38.zip",
-  "buildDate": "2025-06-17 07:06:02 UTC",
-  "commitHash": "20653d17a8980cf81ecef1869fbda86f573870d7",
-  "commitMessage": "fix: app release script should only use app version tags, not firmware tags"
+  "version": "v0.0.39",
+  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.39.zip",
+  "buildDate": "2025-06-18 20:07:54 UTC",
+  "commitHash": "ca4ac00228e27447461726a4ec2cda3324e8c8d9",
+  "commitMessage": "like audio"
 }
