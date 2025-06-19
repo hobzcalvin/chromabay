@@ -94,6 +94,24 @@
     return angle;
   }
   
+  // Get touch position relative to center (same logic as mouse)
+  function getTouchAngle(event: TouchEvent): number {
+    const rect = svgElement.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    
+    const touch = event.touches[0] || event.changedTouches[0];
+    const deltaX = touch.clientX - centerX;
+    const deltaY = touch.clientY - centerY;
+    
+    // Calculate angle in degrees (0-360)
+    let angle = Math.atan2(deltaY, deltaX) * (180 / Math.PI);
+    // Convert to 0-360 range and offset by 90 degrees to start at top
+    angle = (angle + 90 + 360) % 360;
+    
+    return angle;
+  }
+  
   // Handle mouse down
   function handleMouseDown(event: MouseEvent) {
     if (preciseMode) {
@@ -114,6 +132,31 @@
     dispatch('start');
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
+  }
+  
+  // Handle touch start
+  function handleTouchStart(event: TouchEvent) {
+    event.preventDefault(); // Prevent scrolling and other touch behaviors
+    
+    if (preciseMode) {
+      isDragging = false;
+      dragDistance = 0;
+      const touch = event.touches[0];
+      startMousePos = { x: touch.clientX, y: touch.clientY };
+    } else {
+      isDragging = true;
+      const angle = getTouchAngle(event);
+      const newValue = angleToValue(angle);
+      if (newValue !== null) {
+        const steppedValue = Math.round(newValue / step) * step;
+        value = Math.max(min, Math.min(max, steppedValue));
+        dispatch('change', value);
+      }
+    }
+    
+    dispatch('start');
+    document.addEventListener('touchmove', handleTouchMove, { passive: false });
+    document.addEventListener('touchend', handleTouchEnd);
   }
   
   // Handle mouse move
@@ -141,6 +184,34 @@
     }
   }
   
+  // Handle touch move
+  function handleTouchMove(event: TouchEvent) {
+    event.preventDefault(); // Prevent scrolling
+    
+    if (preciseMode && !isDragging) {
+      // Calculate drag distance to unlock
+      const touch = event.touches[0];
+      const distance = Math.sqrt(
+        Math.pow(touch.clientX - startMousePos.x, 2) +
+        Math.pow(touch.clientY - startMousePos.y, 2)
+      );
+      
+      if (distance > unlockDistance) {
+        isDragging = true;
+      }
+    }
+    
+    if (isDragging) {
+      const angle = getTouchAngle(event);
+      const newValue = angleToValue(angle);
+      if (newValue !== null) {
+        const steppedValue = Math.round(newValue / step) * step;
+        value = Math.max(min, Math.min(max, steppedValue));
+        dispatch('change', value);
+      }
+    }
+  }
+  
   // Handle mouse up
   function handleMouseUp() {
     isDragging = false;
@@ -148,6 +219,15 @@
     dispatch('end');
     document.removeEventListener('mousemove', handleMouseMove);
     document.removeEventListener('mouseup', handleMouseUp);
+  }
+  
+  // Handle touch end
+  function handleTouchEnd() {
+    isDragging = false;
+    dragDistance = 0;
+    dispatch('end');
+    document.removeEventListener('touchmove', handleTouchMove);
+    document.removeEventListener('touchend', handleTouchEnd);
   }
   
   // Reactive values
@@ -187,6 +267,7 @@
 <svg 
   bind:this={svgElement}
   on:mousedown={handleMouseDown}
+  on:touchstart={handleTouchStart}
   class="rotary-knob {isDragging ? 'dragging' : ''}"
   xmlns="http://www.w3.org/2000/svg" 
   xmlns:xlink="http://www.w3.org/1999/xlink" 

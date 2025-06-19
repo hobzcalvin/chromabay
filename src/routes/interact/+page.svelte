@@ -5,11 +5,17 @@
 
   let showNotification = true;
   let notificationVisible = true;
-  let knobValue = 50;
+  let knobValue1 = 50;
+  let knobValue2 = 75;
 
-  function handleKnobChange(event: CustomEvent<number>) {
-    knobValue = event.detail;
-    console.log('Knob value:', knobValue);
+  function handleKnob1Change(event: CustomEvent<number>) {
+    knobValue1 = event.detail;
+    console.log('Knob 1 value:', knobValue1);
+  }
+
+  function handleKnob2Change(event: CustomEvent<number>) {
+    knobValue2 = event.detail;
+    console.log('Knob 2 value:', knobValue2);
   }
 
   onMount(() => {
@@ -27,16 +33,33 @@
 <!-- Full-screen pattern renderer -->
 <PatternRenderer fullscreen={true} />
 
-<!-- Rotary knob overlay -->
-<div class="knob-overlay">
-  <RotaryKnob
-    bind:value={knobValue}
-    min={0}
-    max={100}
-    step={0.1}
-    size={250}
-    on:change={handleKnobChange}
-  />
+<!-- Rotary knobs overlay -->
+<div class="knobs-overlay">
+  <div class="knob-container">
+    <RotaryKnob
+      bind:value={knobValue1}
+      min={0}
+      max={100}
+      step={0.1}
+      size={200}
+      preciseMode={false}
+      on:change={handleKnob1Change}
+    />
+    <div class="knob-label">Speed</div>
+  </div>
+  
+  <div class="knob-container">
+    <RotaryKnob
+      bind:value={knobValue2}
+      min={0}
+      max={100}
+      step={0.1}
+      size={200}
+      preciseMode={false}
+      on:change={handleKnob2Change}
+    />
+    <div class="knob-label">Intensity</div>
+  </div>
 </div>
 
 <!-- Temporary notification -->
@@ -47,13 +70,48 @@
 {/if}
 
 <style>
-  .knob-overlay {
+  .knobs-overlay {
     position: fixed;
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
     z-index: 10;
     pointer-events: auto;
+    display: flex;
+    gap: 60px;
+    align-items: center;
+  }
+
+  .knob-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .knob-label {
+    color: white;
+    font-size: 18px;
+    font-weight: 500;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8);
+    text-align: center;
+    pointer-events: none;
+  }
+
+  /* Responsive design for mobile */
+  @media (max-width: 768px) {
+    .knobs-overlay {
+      flex-direction: column;
+      gap: 40px;
+    }
+    
+    .knob-container {
+      gap: 12px;
+    }
+    
+    .knob-label {
+      font-size: 16px;
+    }
   }
 
   .notification {
