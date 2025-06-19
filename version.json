@@ -1,7 +1,7 @@
 {
-  "version": "v0.0.39",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.39.zip",
-  "buildDate": "2025-06-18 20:07:54 UTC",
-  "commitHash": "ca4ac00228e27447461726a4ec2cda3324e8c8d9",
-  "commitMessage": "like audio"
+  "version": "v0.0.40",
+  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.40.zip",
+  "buildDate": "2025-06-19 03:28:11 UTC",
+  "commitHash": "25b76b32859a4b61188232db3b910b5d54dc8c8c",
+  "commitMessage": "knob fixes"
 }
