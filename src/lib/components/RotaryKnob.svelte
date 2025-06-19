@@ -19,11 +19,16 @@
   let isDragging: boolean = false;
   let dragDistance: number = 0;
   let startMousePos: Point = { x: 0, y: 0 };
+  let startValue: number = 0;
   let centerPoint: Point = { x: 0, y: 0 };
   let svgElement: SVGSVGElement;
   let containerElement: HTMLDivElement;
   
   const dispatch = createEventDispatcher();
+  
+  // Sensitivity settings
+  const VERTICAL_SENSITIVITY = 0.2; // Main control: more change per pixel (less pixels needed)
+  const HORIZONTAL_SENSITIVITY = 1; // Fine control: same as old vertical sensitivity
   
   // Audio knob range: 7 o'clock (210°) to 5 o'clock (150°)
   const MIN_ANGLE = 210; // 7 o'clock position (min value)
@@ -112,22 +117,25 @@
     return angle;
   }
   
+  // Calculate angular difference, handling wrap-around
+  function getAngleDifference(startAngle: number, currentAngle: number): number {
+    let diff = currentAngle - startAngle;
+    
+    // Handle wrap-around for smoother rotation
+    if (diff > 180) {
+      diff -= 360;
+    } else if (diff < -180) {
+      diff += 360;
+    }
+    
+    return diff;
+  }
+  
   // Handle mouse down
   function handleMouseDown(event: MouseEvent) {
-    if (preciseMode) {
-      isDragging = false;
-      dragDistance = 0;
-      startMousePos = { x: event.clientX, y: event.clientY };
-    } else {
-      isDragging = true;
-      const angle = getMouseAngle(event);
-      const newValue = angleToValue(angle);
-      if (newValue !== null) {
-        const steppedValue = Math.round(newValue / step) * step;
-        value = Math.max(min, Math.min(max, steppedValue));
-        dispatch('change', value);
-      }
-    }
+    isDragging = true;
+    startMousePos = { x: event.clientX, y: event.clientY };
+    startValue = value;
     
     dispatch('start');
     document.addEventListener('mousemove', handleMouseMove);
@@ -138,21 +146,10 @@
   function handleTouchStart(event: TouchEvent) {
     event.preventDefault(); // Prevent scrolling and other touch behaviors
     
-    if (preciseMode) {
-      isDragging = false;
-      dragDistance = 0;
-      const touch = event.touches[0];
-      startMousePos = { x: touch.clientX, y: touch.clientY };
-    } else {
-      isDragging = true;
-      const angle = getTouchAngle(event);
-      const newValue = angleToValue(angle);
-      if (newValue !== null) {
-        const steppedValue = Math.round(newValue / step) * step;
-        value = Math.max(min, Math.min(max, steppedValue));
-        dispatch('change', value);
-      }
-    }
+    isDragging = true;
+    const touch = event.touches[0];
+    startMousePos = { x: touch.clientX, y: touch.clientY };
+    startValue = value;
     
     dispatch('start');
     document.addEventListener('touchmove', handleTouchMove, { passive: false });
@@ -161,24 +158,28 @@
   
   // Handle mouse move
   function handleMouseMove(event: MouseEvent) {
-    if (preciseMode && !isDragging) {
-      // Calculate drag distance to unlock
-      const distance = Math.sqrt(
-        Math.pow(event.clientX - startMousePos.x, 2) +
-        Math.pow(event.clientY - startMousePos.y, 2)
-      );
-      
-      if (distance > unlockDistance) {
-        isDragging = true;
-      }
-    }
-    
     if (isDragging) {
-      const angle = getMouseAngle(event);
-      const newValue = angleToValue(angle);
-      if (newValue !== null) {
-        const steppedValue = Math.round(newValue / step) * step;
-        value = Math.max(min, Math.min(max, steppedValue));
+      const deltaY = startMousePos.y - event.clientY; // Inverted: up is positive
+      const deltaX = event.clientX - startMousePos.x; // Right is positive
+      
+      // Calculate value change based on vertical movement
+      const verticalChange = (deltaY / VERTICAL_SENSITIVITY) * (step || 1);
+      
+      // Calculate precision adjustment based on horizontal movement
+      const horizontalChange = (deltaX / HORIZONTAL_SENSITIVITY) * (step || 1);
+      
+      // Combine both movements
+      const totalChange = verticalChange + horizontalChange;
+      let newValue = startValue + totalChange;
+      
+      // Clamp to min/max bounds
+      newValue = Math.max(min, Math.min(max, newValue));
+      
+      // Apply step
+      const steppedValue = Math.round(newValue / step) * step;
+      
+      if (Math.abs(steppedValue - value) >= step * 0.01) { // Small threshold to prevent micro-updates
+        value = steppedValue;
         dispatch('change', value);
       }
     }
@@ -188,25 +189,29 @@
   function handleTouchMove(event: TouchEvent) {
     event.preventDefault(); // Prevent scrolling
     
-    if (preciseMode && !isDragging) {
-      // Calculate drag distance to unlock
-      const touch = event.touches[0];
-      const distance = Math.sqrt(
-        Math.pow(touch.clientX - startMousePos.x, 2) +
-        Math.pow(touch.clientY - startMousePos.y, 2)
-      );
-      
-      if (distance > unlockDistance) {
-        isDragging = true;
-      }
-    }
-    
     if (isDragging) {
-      const angle = getTouchAngle(event);
-      const newValue = angleToValue(angle);
-      if (newValue !== null) {
-        const steppedValue = Math.round(newValue / step) * step;
-        value = Math.max(min, Math.min(max, steppedValue));
+      const touch = event.touches[0];
+      const deltaY = startMousePos.y - touch.clientY; // Inverted: up is positive
+      const deltaX = touch.clientX - startMousePos.x; // Right is positive
+      
+      // Calculate value change based on vertical movement
+      const verticalChange = (deltaY / VERTICAL_SENSITIVITY) * (step || 1);
+      
+      // Calculate precision adjustment based on horizontal movement
+      const horizontalChange = (deltaX / HORIZONTAL_SENSITIVITY) * (step || 1);
+      
+      // Combine both movements
+      const totalChange = verticalChange + horizontalChange;
+      let newValue = startValue + totalChange;
+      
+      // Clamp to min/max bounds
+      newValue = Math.max(min, Math.min(max, newValue));
+      
+      // Apply step
+      const steppedValue = Math.round(newValue / step) * step;
+      
+      if (Math.abs(steppedValue - value) >= step * 0.01) { // Small threshold to prevent micro-updates
+        value = steppedValue;
         dispatch('change', value);
       }
     }
