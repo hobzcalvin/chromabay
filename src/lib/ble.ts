@@ -1,5 +1,7 @@
 import { BleClient, numbersToDataView, dataViewToNumbers, dataViewToText, textToDataView } from '@capacitor-community/bluetooth-le';
 import { Capacitor } from '@capacitor/core';
+import { encode as msgpackEncode } from '@msgpack/msgpack';
+import { serializeCurrentPattern } from './flowStore';
 
 /**
  * Check if we're running in a web browser
@@ -23,6 +25,9 @@ const CHARACTERISTIC_UUID_OTA_CONTROL = "a0be83e8-8dc9-47f0-ab40-b19721d20ed1";
 const CHARACTERISTIC_UUID_OTA_DATA    = "a0be83e9-8dc9-47f0-ab40-b19721d20ed1";
 const CHARACTERISTIC_UUID_OTA_STATUS  = "a0be83ea-8dc9-47f0-ab40-b19721d20ed1";
 const CHARACTERISTIC_UUID_OTA_SIGNATURE = "a0be83eb-8dc9-47f0-ab40-b19721d20ed1";
+
+// Pattern Sync Characteristic - for sending messagepack-encoded patterns
+const CHARACTERISTIC_UUID_PATTERN_SYNC = "a0be83ec-8dc9-47f0-ab40-b19721d20ed1";
 
 const MAX_BLE_CHUNK_SIZE = 500; // Should match ESP32's definition
 
@@ -651,5 +656,70 @@ export async function performOTAUpdate(
             console.warn("[OTA] Failed to stop OTA_DATA ACK notifications (device may have rebooted):", e);
         }
     }
+  }
+}
+
+// === PATTERN SYNCHRONIZATION ===
+
+/**
+ * Sends a messagepack-encoded pattern to all connected devices
+ */
+export async function syncPatternToAllDevices(): Promise<void> {
+  console.log('Syncing current pattern to all connected devices...');
+  
+  if (connectedDevices.size === 0) {
+    console.log('No devices connected, skipping pattern sync');
+    return;
+  }
+
+  try {
+    // Serialize the current pattern
+    const serializedPattern = serializeCurrentPattern();
+    
+    // Encode as MessagePack
+    const msgpackData = msgpackEncode(serializedPattern);
+    const dataView = new DataView(msgpackData.buffer, msgpackData.byteOffset, msgpackData.byteLength);
+    
+    console.log(`Pattern serialized: ${msgpackData.byteLength} bytes`);
+    
+    // Send to all connected devices
+    const syncPromises = Array.from(connectedDevices.keys()).map(async (deviceId) => {
+      try {
+        console.log(`Sending pattern to device ${deviceId}`);
+        await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_PATTERN_SYNC, dataView);
+        console.log(`Pattern sent successfully to device ${deviceId}`);
+      } catch (error) {
+        console.error(`Failed to send pattern to device ${deviceId}:`, error);
+      }
+    });
+    
+    // Wait for all devices to complete
+    await Promise.allSettled(syncPromises);
+    console.log('Pattern sync completed for all devices');
+    
+  } catch (error) {
+    console.error('Error during pattern sync:', error);
+    throw error;
+  }
+}
+
+/**
+ * Writes binary data to a BLE characteristic
+ */
+async function writeCharacteristicBinary(deviceId: string, serviceUuid: string, characteristicUuid: string, dataView: DataView): Promise<void> {
+  try {
+    if (isWeb()) {
+      const deviceInfo = connectedDevices.get(deviceId);
+      if (!deviceInfo?.gattServer) throw new Error('Device not connected');
+      const service = await deviceInfo.gattServer.getPrimaryService(serviceUuid);
+      const characteristic = await service.getCharacteristic(characteristicUuid);
+      await characteristic.writeValueWithResponse(dataView);
+    } else {
+      await BleClient.write(deviceId, serviceUuid, characteristicUuid, dataView);
+    }
+    console.log(`Successfully wrote binary data to characteristic ${characteristicUuid}`);
+  } catch (error) {
+    console.error(`Error writing binary data to characteristic ${characteristicUuid}:`, error);
+    throw error;
   }
 }

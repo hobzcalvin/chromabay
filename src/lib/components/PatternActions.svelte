@@ -8,6 +8,7 @@
     deleteCurrentPattern,
     patternNameExists
   } from '$lib/stores/patternsStore';
+  import { syncPatternToAllDevices } from '$lib/ble';
   
   // Props for Add Node functionality
   let { showAddNodeDropdown = $bindable(false), addNodeDropdownRef = $bindable(), handleAddNode, NODE_TYPES } = $props();
@@ -52,6 +53,12 @@
     try {
       const serialized = serializeCurrentPattern(patternName);
       await saveCurrentPattern(serialized);
+      // Sync pattern to all connected devices
+      try {
+        await syncPatternToAllDevices();
+      } catch (error) {
+        console.error('Failed to sync pattern to devices:', error);
+      }
       showDropdown = false;
     } catch (error: any) {
       console.error('Failed to save pattern:', error);
@@ -92,6 +99,12 @@
     try {
       const serialized = serializeCurrentPattern(saveAsName.trim());
       await saveAsPattern(serialized, saveAsName.trim());
+      // Sync pattern to all connected devices
+      try {
+        await syncPatternToAllDevices();
+      } catch (syncError) {
+        console.error('Failed to sync pattern to devices:', syncError);
+      }
       showSaveAsDialog = false;
       saveAsName = '';
     } catch (error: any) {
@@ -112,6 +125,12 @@
     
     try {
       await renameCurrentPattern(renameName.trim());
+      // Sync pattern to all connected devices
+      try {
+        await syncPatternToAllDevices();
+      } catch (syncError) {
+        console.error('Failed to sync pattern to devices:', syncError);
+      }
       showRenameDialog = false;
       renameName = '';
     } catch (error: any) {

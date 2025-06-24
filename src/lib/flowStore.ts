@@ -811,6 +811,7 @@ export function deleteNode(nodeId: string): void {
 // Pattern serialization imports and utilities
 import type { SerializedPattern } from './patternSerializer';
 import { serializePattern, deserializePattern, estimatePatternSize, compressPattern } from './patternSerializer';
+import { syncPatternToAllDevices } from './ble';
 
 // Pattern serialization utilities
 export function serializeCurrentPattern(patternName?: string): SerializedPattern {
@@ -894,3 +895,40 @@ export function getPatternForBLE(): string {
   const pattern = serializeCurrentPattern();
   return compressPattern(pattern);
 }
+
+// Automatic pattern sync when pattern changes
+let lastPatternHash: string | null = null;
+let syncTimeout: NodeJS.Timeout | null = null;
+
+function syncPatternIfChanged() {
+  try {
+    const currentPattern = serializeCurrentPattern();
+    const currentHash = JSON.stringify(currentPattern);
+    
+    if (lastPatternHash && lastPatternHash !== currentHash) {
+      // Clear existing timeout if any
+      if (syncTimeout) {
+        clearTimeout(syncTimeout);
+      }
+      
+      // Debounce pattern sync to avoid excessive calls during editing
+      syncTimeout = setTimeout(async () => {
+        try {
+          await syncPatternToAllDevices();
+          console.log('Pattern auto-synced to devices');
+        } catch (error) {
+          console.error('Failed to auto-sync pattern:', error);
+        }
+      }, 500); // 500ms debounce
+    }
+    
+    lastPatternHash = currentHash;
+  } catch (error) {
+    console.error('Error in pattern sync check:', error);
+  }
+}
+
+// Subscribe to pattern changes for auto-sync
+flowNodes.subscribe(() => syncPatternIfChanged());
+flowEdges.subscribe(() => syncPatternIfChanged());
+nodeParameters.subscribe(() => syncPatternIfChanged());

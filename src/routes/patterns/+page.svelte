@@ -5,6 +5,7 @@
   import { patterns, loadPatterns, switchToPattern, currentPatternName } from '$lib/stores/patternsStore';
   import PatternPreview from '$lib/components/PatternPreview.svelte';
   import type { SerializedPattern } from '$lib/patternSerializer';
+  import { syncPatternToAllDevices } from '$lib/ble';
   
   let patternsList: SerializedPattern[] = [];
   let currentName = '';
@@ -28,6 +29,14 @@
       // Load pattern into flow editor for interact page
       const { loadSerializedPattern } = await import('$lib/flowStore');
       loadSerializedPattern(pattern);
+      
+      // Sync pattern to all connected devices
+      try {
+        await syncPatternToAllDevices();
+      } catch (error) {
+        console.error('Failed to sync pattern to devices:', error);
+      }
+      
       goto(`${base}/interact`);
     }
   }
@@ -138,7 +147,7 @@
         >
           <div class="pattern-content">
             <div class="preview-container">
-              <PatternPreview {pattern} width={80} height={80} />
+              <PatternPreview {pattern} size={80} />
               {#if isCurrentPattern}
                 <div class="current-badge">Current</div>
               {/if}

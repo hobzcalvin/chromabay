@@ -39,6 +39,8 @@ LedConfig::ConfigManager configMgr(ledMgr);
 #define CHARACTERISTIC_UUID_OTA_STATUS  "a0be83ea-8dc9-47f0-ab40-b19721d20ed1"
 #define CHARACTERISTIC_UUID_OTA_SIGNATURE "a0be83eb-8dc9-47f0-ab40-b19721d20ed1"
 
+// Pattern Sync Characteristic - for receiving messagepack-encoded patterns
+#define CHARACTERISTIC_UUID_PATTERN_SYNC "a0be83ec-8dc9-47f0-ab40-b19721d20ed1"
 
 // OTA Constants
 #define MAX_BLE_CHUNK_SIZE 500 
@@ -53,6 +55,13 @@ NimBLECharacteristic* pOTADataCharacteristic = nullptr;
 NimBLECharacteristic* pOTAStatusCharacteristic = nullptr;
 NimBLECharacteristic* pOTASignatureCharacteristic = nullptr;
 
+// Pattern Sync Characteristic
+NimBLECharacteristic* pPatternSyncCharacteristic = nullptr;
+
+// Pattern Storage
+static uint8_t* patternBuffer = nullptr;
+static size_t patternBufferSize = 0;
+static bool newPatternAvailable = false;
 
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
@@ -638,6 +647,70 @@ class OTADataCallbacks : public NimBLECharacteristicCallbacks {
     }
 };
 
+// Pattern Sync Callbacks - for receiving messagepack-encoded patterns
+class PatternSyncCallbacks : public NimBLECharacteristicCallbacks {
+    void onWrite(NimBLECharacteristic* pCharacteristic) {
+        std::string rxValue = pCharacteristic->getValue();
+        
+        if (rxValue.length() > 0) {
+            Serial.printf("Pattern Sync: Received %d bytes\n", rxValue.length());
+            
+            // Free existing pattern buffer if it exists
+            if (patternBuffer != nullptr) {
+                free(patternBuffer);
+                patternBuffer = nullptr;
+                patternBufferSize = 0;
+            }
+            
+            // Allocate new buffer and copy pattern data
+            patternBufferSize = rxValue.length();
+            patternBuffer = (uint8_t*)malloc(patternBufferSize);
+            
+            if (patternBuffer != nullptr) {
+                memcpy(patternBuffer, rxValue.data(), patternBufferSize);
+                newPatternAvailable = true;
+                Serial.println("Pattern Sync: Pattern received and stored successfully");
+            } else {
+                Serial.println("Pattern Sync: Failed to allocate memory for pattern");
+                patternBufferSize = 0;
+            }
+        }
+    }
+};
+
+// Function to process received pattern data
+void processReceivedPattern() {
+    if (!newPatternAvailable || patternBuffer == nullptr) {
+        return;
+    }
+    
+    Serial.println("Processing received pattern...");
+    
+    // Initialize MessagePack reader
+    mpack_reader_t reader;
+    mpack_reader_init_data(&reader, (const char*)patternBuffer, patternBufferSize);
+    
+    // For now, just validate that we can read the MessagePack data
+    // Later this will be expanded to actually parse and apply the pattern
+    mpack_tag_t tag = mpack_read_tag(&reader);
+    
+    if (mpack_reader_error(&reader) != mpack_ok) {
+        Serial.printf("MessagePack error: %s\n", mpack_error_to_string(mpack_reader_error(&reader)));
+    } else {
+        Serial.printf("MessagePack root type: %s\n", mpack_type_to_string(tag.type));
+        if (tag.type == mpack_type_map) {
+            Serial.printf("Pattern map has %d entries\n", tag.v.n);
+        }
+        Serial.println("Pattern MessagePack data is valid and ready for parsing");
+    }
+    
+    mpack_reader_destroy(&reader);
+    
+    // Mark pattern as processed
+    newPatternAvailable = false;
+    
+    Serial.println("Pattern processing completed");
+}
 
 void pushCRGBToStrip() {
     if (ledMgr.getNumStrips() > 0) { 
@@ -759,12 +832,16 @@ void setup() {
             pOTASignatureCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_OTA_SIGNATURE, NIMBLE_PROPERTY::WRITE);
             pOTASignatureCharacteristic->setCallbacks(new OTASignatureCallbacks());
             
+            // Pattern Sync Characteristic
+            pPatternSyncCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_PATTERN_SYNC, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY);
+            pPatternSyncCharacteristic->setCallbacks(new PatternSyncCallbacks());
+            
             pService->start();
             updateDeviceInfoCharacteristic();
             
             NimBLEAdvertising *pAdvertising = NimBLEDevice::getAdvertising();
             pAdvertising->addServiceUUID(SERVICE_UUID); 
-            pAdvertising->setScanResponse(false);
+            pAdvertising->setScanResponse(true);  // Enable scan response for more space
             pAdvertising->setMinPreferred(0x0);
             NimBLEDevice::startAdvertising();
             
@@ -819,6 +896,9 @@ void loop() {
             hue += 1;
         }
     }
+
+    // Process received patterns
+    processReceivedPattern();
 
     // Periodically update device info characteristic (for heap value)
     if (currentTime - lastHeapUpdateTime >= heapUpdateInterval) {
