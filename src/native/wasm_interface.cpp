@@ -112,4 +112,34 @@ void call_rainbow_pattern(PatternContext* ctx) {
     rainbow_pattern(ctx);
 }
 
+EMSCRIPTEN_KEEPALIVE
+void call_gradient_pattern(PatternContext* ctx) {
+    if (!ctx) return;
+    gradient_pattern(ctx);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void call_moving_blob_pattern(PatternContext* ctx) {
+    if (!ctx) return;
+    moving_blob_pattern(ctx);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void call_sparkle_pattern(PatternContext* ctx) {
+    if (!ctx) return;
+    sparkle_pattern(ctx);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void call_strobe_pattern(PatternContext* ctx) {
+    if (!ctx) return;
+    strobe_pattern(ctx);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void call_perlin_noise_pattern(PatternContext* ctx) {
+    if (!ctx) return;
+    perlin_noise_pattern(ctx);
+}
+
 } // extern "C" 

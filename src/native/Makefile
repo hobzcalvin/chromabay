@@ -12,7 +12,7 @@ INCLUDES = -I.
 FASTLED_SRC = FastLED/src
 
 # Source files
-SOURCES = fastled_compat.cpp patterns/rainbow.cpp
+SOURCES = fastled_compat.cpp pattern_registry.cpp patterns/rainbow.cpp patterns/gradient.cpp patterns/moving_blob.cpp patterns/sparkle.cpp patterns/strobe.cpp patterns/perlin_noise.cpp
 HEADERS = fastled_patterns.h
 
 # Test executable
@@ -21,9 +21,9 @@ TEST_SOURCES = tests/test_runner.cpp $(SOURCES)
 
 # WASM build
 WASM_TARGET = ../lib/wasm/fastled_patterns.js
-WASM_SOURCES = patterns/rainbow.cpp fastled_compat.cpp wasm_interface.cpp
+WASM_SOURCES = pattern_registry.cpp patterns/rainbow.cpp patterns/gradient.cpp patterns/moving_blob.cpp patterns/sparkle.cpp patterns/strobe.cpp patterns/perlin_noise.cpp fastled_compat.cpp wasm_interface.cpp
 EMCC_FLAGS = -O3 -s WASM=1 \
-	-s EXPORTED_FUNCTIONS='["_create_context", "_destroy_context", "_set_timing", "_set_parameters", "_get_output_buffer", "_get_buffer_size", "_call_rainbow_pattern", "_malloc", "_free"]' \
+	-s EXPORTED_FUNCTIONS='["_create_context", "_destroy_context", "_set_timing", "_set_parameters", "_get_output_buffer", "_get_buffer_size", "_call_rainbow_pattern", "_call_gradient_pattern", "_call_moving_blob_pattern", "_call_sparkle_pattern", "_call_strobe_pattern", "_call_perlin_noise_pattern", "_malloc", "_free"]' \
 	-s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap", "setValue", "getValue", "HEAPU8"]' \
 	-s ALLOW_MEMORY_GROWTH=1 \
 	-s MODULARIZE=1 \

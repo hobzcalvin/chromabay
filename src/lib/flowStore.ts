@@ -173,14 +173,19 @@ async function tryRenderNativePattern(
       getNodeParameter(nodeId, param.name, param.default)
     );
     
+    // Convert parameters array to object
+    const paramObj: any = {};
+    nativePattern.params.forEach((param, index) => {
+      paramObj[param.name] = parameters[index];
+    });
+    
     // Call the native WASM pattern
     return await renderNativePattern(
-      patternType,
+      patternType.replace('native_', ''), // Remove native_ prefix
       width,
       height,
-      totalTime,
-      deltaTime,
-      parameters
+      totalTime * 1000, // Convert to milliseconds
+      paramObj
     );
   } catch (error) {
     console.warn('Native pattern render failed:', error);

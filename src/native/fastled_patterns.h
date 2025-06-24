@@ -84,10 +84,9 @@ extern "C" {
     void moving_blob_pattern(PatternContext* ctx);
     void strobe_pattern(PatternContext* ctx);
     void sparkle_pattern(PatternContext* ctx);
-    void blend_pattern(PatternContext* ctx);
 }
 
-// Pattern registry
+// Pattern registry (defined in pattern_registry.cpp)
 extern const PatternDefinition PATTERN_DEFINITIONS[];
 extern const uint32_t PATTERN_COUNT;
 

@@ -10,6 +10,11 @@ interface WasmModule {
     _get_output_buffer(contextPtr: number): number;
     _get_buffer_size(contextPtr: number): number;
     _call_rainbow_pattern(contextPtr: number): void;
+    _call_gradient_pattern(contextPtr: number): void;
+    _call_moving_blob_pattern(contextPtr: number): void;
+    _call_sparkle_pattern(contextPtr: number): void;
+    _call_strobe_pattern(contextPtr: number): void;
+    _call_perlin_noise_pattern(contextPtr: number): void;
     
     // Memory access
     HEAPU8: Uint8Array;
@@ -32,6 +37,62 @@ export const NATIVE_PATTERN_DEFINITIONS = [
       { label: 'Saturation', name: 'saturation', type: 'float', default: 255.0, min: 0.0, max: 255.0 },
       { label: 'Value', name: 'value', type: 'float', default: 255.0, min: 0.0, max: 255.0 },
       { label: 'Angle', name: 'angle', type: 'range', default: 0, min: 0, max: 360 }
+    ]
+  },
+  {
+    name: 'Gradient (Native)',
+    type: 'native_gradient',
+    params: [
+      { label: 'Angle', name: 'angle', type: 'range', default: 0, min: 0, max: 360 },
+      { label: 'Start Hue', name: 'start_hue', type: 'float', default: 0.0, min: 0.0, max: 255.0 },
+      { label: 'End Hue', name: 'end_hue', type: 'float', default: 255.0, min: 0.0, max: 255.0 },
+      { label: 'Saturation', name: 'saturation', type: 'float', default: 255.0, min: 0.0, max: 255.0 },
+      { label: 'Value', name: 'value', type: 'float', default: 255.0, min: 0.0, max: 255.0 }
+    ]
+  },
+  {
+    name: 'Moving Blob (Native)',
+    type: 'native_moving_blob',
+    params: [
+      { label: 'Speed', name: 'speed', type: 'float', default: 30.0, min: 0.0, max: 100.0 },
+      { label: 'Blob Size', name: 'blob_size', type: 'float', default: 0.3, min: 0.1, max: 1.0 },
+      { label: 'Hue', name: 'hue', type: 'float', default: 0.0, min: 0.0, max: 255.0 },
+      { label: 'Saturation', name: 'saturation', type: 'float', default: 255.0, min: 0.0, max: 255.0 },
+      { label: 'Value', name: 'value', type: 'float', default: 255.0, min: 0.0, max: 255.0 }
+    ]
+  },
+  {
+    name: 'Sparkle (Native)',
+    type: 'native_sparkle',
+    params: [
+      { label: 'Density', name: 'density', type: 'float', default: 0.1, min: 0.0, max: 1.0 },
+      { label: 'Fade Rate', name: 'fade_rate', type: 'float', default: 0.95, min: 0.5, max: 0.99 },
+      { label: 'Hue', name: 'hue', type: 'float', default: 255.0, min: 0.0, max: 255.0 },
+      { label: 'Saturation', name: 'saturation', type: 'float', default: 255.0, min: 0.0, max: 255.0 },
+      { label: 'Value', name: 'value', type: 'float', default: 255.0, min: 0.0, max: 255.0 }
+    ]
+  },
+  {
+    name: 'Strobe (Native)',
+    type: 'native_strobe',
+    params: [
+      { label: 'Rate (Hz)', name: 'rate', type: 'float', default: 2.0, min: 0.1, max: 20.0 },
+      { label: 'Duty Cycle', name: 'duty_cycle', type: 'float', default: 0.1, min: 0.01, max: 0.9 },
+      { label: 'Hue', name: 'hue', type: 'float', default: 0.0, min: 0.0, max: 255.0 },
+      { label: 'Saturation', name: 'saturation', type: 'float', default: 0.0, min: 0.0, max: 255.0 },
+      { label: 'Value', name: 'value', type: 'float', default: 255.0, min: 0.0, max: 255.0 }
+    ]
+  },
+  {
+    name: 'Perlin Noise (Native)',
+    type: 'native_perlin_noise',
+    params: [
+      { label: 'Scale', name: 'scale', type: 'float', default: 4.0, min: 1.0, max: 20.0 },
+      { label: 'Speed', name: 'speed', type: 'float', default: 50.0, min: 0.0, max: 200.0 },
+      { label: 'Base Hue', name: 'hue_base', type: 'float', default: 0.0, min: 0.0, max: 255.0 },
+      { label: 'Hue Range', name: 'hue_range', type: 'float', default: 60.0, min: 0.0, max: 255.0 },
+      { label: 'Saturation', name: 'saturation', type: 'float', default: 255.0, min: 0.0, max: 255.0 },
+      { label: 'Value', name: 'value', type: 'float', default: 255.0, min: 0.0, max: 255.0 }
     ]
   }
 ];
@@ -150,13 +211,91 @@ export class FastLEDWasmPatternRunner {
         
         return imageData;
     }
+
+    runGradientPattern(): ImageData | null {
+        if (!this.contextPtr) return null;
+        this.module._call_gradient_pattern(this.contextPtr);
+        return this.getImageData();
+    }
+
+    runMovingBlobPattern(): ImageData | null {
+        if (!this.contextPtr) return null;
+        this.module._call_moving_blob_pattern(this.contextPtr);
+        return this.getImageData();
+    }
+
+    runSparklePattern(): ImageData | null {
+        if (!this.contextPtr) return null;
+        this.module._call_sparkle_pattern(this.contextPtr);
+        return this.getImageData();
+    }
+
+    runStrobePattern(): ImageData | null {
+        if (!this.contextPtr) return null;
+        this.module._call_strobe_pattern(this.contextPtr);
+        return this.getImageData();
+    }
+
+    runPerlinNoisePattern(): ImageData | null {
+        if (!this.contextPtr) return null;
+        this.module._call_perlin_noise_pattern(this.contextPtr);
+        return this.getImageData();
+    }
+
+    private getImageData(): ImageData | null {
+        if (!this.contextPtr) return null;
+        
+        // Get the output buffer
+        const bufferPtr = this.module._get_output_buffer(this.contextPtr);
+        if (!bufferPtr) return null;
+        
+        // Get buffer size and create ImageData
+        const bufferSize = this.module._get_buffer_size(this.contextPtr);
+        const rgbData = new Uint8Array(this.module.HEAPU8.buffer, bufferPtr, bufferSize);
+        
+        // Convert RGB to RGBA for ImageData
+        const imageData = new ImageData(this.width, this.height);
+        for (let i = 0; i < this.width * this.height; i++) {
+            const rgbIndex = i * 3;
+            const rgbaIndex = i * 4;
+            
+            imageData.data[rgbaIndex] = rgbData[rgbIndex];     // R
+            imageData.data[rgbaIndex + 1] = rgbData[rgbIndex + 1]; // G
+            imageData.data[rgbaIndex + 2] = rgbData[rgbIndex + 2]; // B
+            imageData.data[rgbaIndex + 3] = 255; // A (fully opaque)
+        }
+        
+        return imageData;
+    }
 }
 
 export interface NativePatternParams {
+    // Rainbow parameters
     speed?: number;
     saturation?: number;
     value?: number;
     angle?: number;
+    
+    // Gradient parameters
+    start_hue?: number;
+    end_hue?: number;
+    
+    // Moving blob parameters
+    blob_size?: number;
+    hue?: number;
+    
+    // Sparkle parameters
+    density?: number;
+    fade_rate?: number;
+    
+    // Strobe parameters
+    rate?: number;
+    duty_cycle?: number;
+    
+    // Perlin noise parameters
+    scale?: number;
+    hue_base?: number;
+    hue_range?: number;
 }
 
 export async function renderNativePattern(
@@ -176,7 +315,7 @@ export async function renderNativePattern(
             // Set timing
             runner.setTiming(timestamp, 16); // Assume 16ms delta time (~60fps)
             
-            // Set parameters based on pattern
+            // Set parameters and call appropriate pattern based on pattern name
             if (patternName === 'rainbow') {
                 const paramValues = [
                     params.speed ?? 50.0,
@@ -186,6 +325,57 @@ export async function renderNativePattern(
                 ];
                 runner.setParameters(paramValues);
                 return runner.runRainbowPattern();
+            } else if (patternName === 'gradient') {
+                const paramValues = [
+                    params.angle ?? 0.0,
+                    params.start_hue ?? 0.0,
+                    params.end_hue ?? 255.0,
+                    params.saturation ?? 255.0,
+                    params.value ?? 255.0
+                ];
+                runner.setParameters(paramValues);
+                return runner.runGradientPattern();
+            } else if (patternName === 'moving_blob') {
+                const paramValues = [
+                    params.speed ?? 30.0,
+                    params.blob_size ?? 0.3,
+                    params.hue ?? 0.0,
+                    params.saturation ?? 255.0,
+                    params.value ?? 255.0
+                ];
+                runner.setParameters(paramValues);
+                return runner.runMovingBlobPattern();
+            } else if (patternName === 'sparkle') {
+                const paramValues = [
+                    params.density ?? 0.1,
+                    params.fade_rate ?? 0.95,
+                    params.hue ?? 255.0,
+                    params.saturation ?? 255.0,
+                    params.value ?? 255.0
+                ];
+                runner.setParameters(paramValues);
+                return runner.runSparklePattern();
+            } else if (patternName === 'strobe') {
+                const paramValues = [
+                    params.rate ?? 2.0,
+                    params.duty_cycle ?? 0.1,
+                    params.hue ?? 0.0,
+                    params.saturation ?? 0.0,
+                    params.value ?? 255.0
+                ];
+                runner.setParameters(paramValues);
+                return runner.runStrobePattern();
+            } else if (patternName === 'perlin_noise') {
+                const paramValues = [
+                    params.scale ?? 4.0,
+                    params.speed ?? 50.0,
+                    params.hue_base ?? 0.0,
+                    params.hue_range ?? 60.0,
+                    params.saturation ?? 255.0,
+                    params.value ?? 255.0
+                ];
+                runner.setParameters(paramValues);
+                return runner.runPerlinNoisePattern();
             }
             
             return null;
