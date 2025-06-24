@@ -76,7 +76,7 @@ typedef struct {
     void (*pattern_func)(PatternContext* ctx);
 } PatternDefinition;
 
-// Pattern function declarations
+// Operator function declarations
 extern "C" {
     void rainbow_pattern(PatternContext* ctx);
     void gradient_pattern(PatternContext* ctx);
@@ -85,6 +85,14 @@ extern "C" {
     void strobe_pattern(PatternContext* ctx);
     void sparkle_pattern(PatternContext* ctx);
 }
+
+// Operator parameter array declarations
+extern const PatternParameter rainbow_params[];
+extern const PatternParameter gradient_params[];
+extern const PatternParameter moving_blob_params[];
+extern const PatternParameter sparkle_params[];
+extern const PatternParameter strobe_params[];
+extern const PatternParameter perlin_noise_params[];
 
 // Pattern registry (defined in pattern_registry.cpp)
 extern const PatternDefinition PATTERN_DEFINITIONS[];

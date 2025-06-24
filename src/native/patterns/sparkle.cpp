@@ -1,5 +1,14 @@
 #include "../fastled_patterns.h"
 
+// Sparkle operator parameter definitions
+const PatternParameter sparkle_params[] = {
+    {"density", "Density", "float", 0.1f, 0.0f, 1.0f, nullptr, 0},
+    {"fade_rate", "Fade Rate", "float", 0.95f, 0.5f, 0.99f, nullptr, 0},
+    {"hue", "Hue", "float", 255.0f, 0.0f, 255.0f, nullptr, 0}, // 255 = random
+    {"saturation", "Saturation", "float", 255.0f, 0.0f, 255.0f, nullptr, 0},
+    {"value", "Value", "float", 255.0f, 0.0f, 255.0f, nullptr, 0}
+};
+
 // Simple pseudo-random number generator (since we can't use stdlib rand in WASM easily)
 static uint32_t sparkle_seed = 12345;
 

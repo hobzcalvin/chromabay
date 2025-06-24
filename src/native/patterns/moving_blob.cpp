@@ -1,5 +1,14 @@
 #include "../fastled_patterns.h"
 
+// Moving Blob operator parameter definitions
+const PatternParameter moving_blob_params[] = {
+    {"speed", "Speed", "float", 30.0f, 0.0f, 100.0f, nullptr, 0},
+    {"blob_size", "Blob Size", "float", 0.3f, 0.1f, 1.0f, nullptr, 0},
+    {"hue", "Hue", "float", 0.0f, 0.0f, 255.0f, nullptr, 0},
+    {"saturation", "Saturation", "float", 255.0f, 0.0f, 255.0f, nullptr, 0},
+    {"value", "Value", "float", 255.0f, 0.0f, 255.0f, nullptr, 0}
+};
+
 void moving_blob_pattern(PatternContext* ctx) {
     // Get parameters
     float speed = ctx->param_count > 0 ? ctx->parameters[0] : 30.0f;

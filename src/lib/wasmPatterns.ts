@@ -1,5 +1,5 @@
-// FastLED WASM Pattern Interface
-// Provides TypeScript bindings for calling native FastLED patterns compiled to WASM
+// FastLED WASM Operator Interface
+// Provides TypeScript bindings for calling native FastLED operators compiled to WASM
 
 // WASM module interface
 interface WasmModule {
@@ -27,8 +27,8 @@ interface WasmModule {
 let wasmModule: WasmModule | null = null;
 let wasmLoadPromise: Promise<WasmModule> | null = null;
 
-// Pattern definitions (matches the C++ patterns)
-export const NATIVE_PATTERN_DEFINITIONS = [
+// Operator definitions (matches the C++ operators)
+export const NATIVE_OPERATOR_DEFINITIONS = [
   {
     name: 'Rainbow (Native)',
     type: 'native_rainbow',
@@ -127,8 +127,8 @@ export async function loadWasmModule(): Promise<WasmModule> {
     return wasmLoadPromise;
 }
 
-// Pattern runner that manages WASM calls
-export class FastLEDWasmPatternRunner {
+// Operator runner that manages WASM calls
+export class FastLEDWasmOperatorRunner {
     private module: WasmModule;
     private contextPtr: number = 0;
     private paramsPtr: number = 0;
@@ -269,7 +269,7 @@ export class FastLEDWasmPatternRunner {
     }
 }
 
-export interface NativePatternParams {
+export interface NativeOperatorParams {
     // Rainbow parameters
     speed?: number;
     saturation?: number;
@@ -298,18 +298,18 @@ export interface NativePatternParams {
     hue_range?: number;
 }
 
-export async function renderNativePattern(
+export async function renderNativeOperator(
     patternName: string,
     width: number,
     height: number,
     timestamp: number,
-    params: NativePatternParams = {}
+    params: NativeOperatorParams = {}
 ): Promise<ImageData | null> {
     try {
         const module = await loadWasmModule();
         
         // Create a temporary pattern runner
-        const runner = new FastLEDWasmPatternRunner(module, width, height);
+        const runner = new FastLEDWasmOperatorRunner(module, width, height);
         
         try {
             // Set timing

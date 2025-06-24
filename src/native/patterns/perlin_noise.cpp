@@ -1,5 +1,15 @@
 #include "../fastled_patterns.h"
 
+// Perlin Noise operator parameter definitions
+const PatternParameter perlin_noise_params[] = {
+    {"scale", "Scale", "float", 4.0f, 1.0f, 20.0f, nullptr, 0},
+    {"speed", "Speed", "float", 50.0f, 0.0f, 200.0f, nullptr, 0},
+    {"hue_base", "Base Hue", "float", 0.0f, 0.0f, 255.0f, nullptr, 0},
+    {"hue_range", "Hue Range", "float", 60.0f, 0.0f, 255.0f, nullptr, 0},
+    {"saturation", "Saturation", "float", 255.0f, 0.0f, 255.0f, nullptr, 0},
+    {"value", "Value", "float", 255.0f, 0.0f, 255.0f, nullptr, 0}
+};
+
 // Simplified noise function (not true Perlin noise, but similar organic feel)
 static float simple_noise(float x, float y, float t) {
     // Simple multi-octave noise using sine functions

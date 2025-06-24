@@ -1,6 +1,6 @@
 import { writable } from 'svelte/store';
 import type { Node, Edge, Connection } from '@xyflow/svelte';
-import { NATIVE_PATTERN_DEFINITIONS, renderNativePattern } from './wasmPatterns';
+import { NATIVE_OPERATOR_DEFINITIONS, renderNativeOperator } from './wasmPatterns';
 
 // Global start time for synchronized animations across all nodes
 export const globalStartTime = writable<number>(performance.now());
@@ -165,7 +165,7 @@ async function tryRenderNativePattern(
   nodeId: string
 ): Promise<ImageData | null> {
   try {
-    const nativePattern = NATIVE_PATTERN_DEFINITIONS.find(p => p.type === patternType);
+    const nativePattern = NATIVE_OPERATOR_DEFINITIONS.find(p => p.type === patternType);
     if (!nativePattern) return null;
     
     // Extract parameter values for this node
@@ -179,8 +179,8 @@ async function tryRenderNativePattern(
       paramObj[param.name] = parameters[index];
     });
     
-    // Call the native WASM pattern
-    return await renderNativePattern(
+    // Call the native WASM operator
+    return await renderNativeOperator(
       patternType.replace('native_', ''), // Remove native_ prefix
       width,
       height,
@@ -600,8 +600,8 @@ export const NODE_TYPES: NodeDefinition[] = [
     }
   },
   
-  // Add native FastLED patterns
-  ...NATIVE_PATTERN_DEFINITIONS.map(nativePattern => ({
+  // Add native FastLED operators
+  ...NATIVE_OPERATOR_DEFINITIONS.map(nativePattern => ({
     name: nativePattern.name,
     type: nativePattern.type,
     params: nativePattern.params.map(param => ({
