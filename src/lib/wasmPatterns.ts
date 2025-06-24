@@ -109,15 +109,51 @@ export async function loadWasmModule(): Promise<WasmModule> {
     
     wasmLoadPromise = new Promise<WasmModule>(async (resolve, reject) => {
         try {
-            // Import the WASM module with its initialization function
-            // @ts-ignore - WASM module is built at runtime
-            const wasmFactory = await import('/wasm/fastled_patterns.js');
+            // Check if FastLEDPatterns is already available (script already loaded)
+            const existingFactory = (window as any).FastLEDPatterns;
+            if (existingFactory) {
+                try {
+                    const module = await existingFactory();
+                    wasmModule = module as WasmModule;
+                    resolve(wasmModule);
+                    return;
+                } catch (error) {
+                    console.error('Failed to initialize existing WASM module:', error);
+                    reject(error);
+                    return;
+                }
+            }
             
-            // Initialize the module
-            const module = await wasmFactory.default();
+            // Use dynamic script loading instead of import() to avoid Vite restrictions
+            const script = document.createElement('script');
+            script.src = '/wasm/fastled_patterns.js';
+            script.type = 'text/javascript';
             
-            wasmModule = module as WasmModule;
-            resolve(wasmModule);
+            script.onload = async () => {
+                try {
+                    // The script should have defined a global function
+                    // Check if FastLEDPatterns is available on window
+                    const wasmFactory = (window as any).FastLEDPatterns;
+                    if (!wasmFactory) {
+                        throw new Error('FastLEDPatterns factory not found on window');
+                    }
+                    
+                    // Initialize the module
+                    const module = await wasmFactory();
+                    
+                    wasmModule = module as WasmModule;
+                    resolve(wasmModule);
+                } catch (error) {
+                    console.error('Failed to initialize WASM module:', error);
+                    reject(error);
+                }
+            };
+            
+            script.onerror = () => {
+                reject(new Error('Failed to load WASM script'));
+            };
+            
+            document.head.appendChild(script);
         } catch (error) {
             console.error('Failed to load WASM module:', error);
             reject(error);

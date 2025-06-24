@@ -10,22 +10,26 @@
   // Hidden for now: import PatternSerializationPanel from '$lib/components/PatternSerializationPanel.svelte';
   
   // Initialize patterns on mount
-  onMount(async () => {
-    try {
-      await loadPatterns();
-      // Load the current pattern into the flow editor
-      const current = $currentPattern;
-      if (current) {
-        loadSerializedPattern(current);
-      } else {
-        // Fallback to default pattern
+  onMount(() => {
+    const initializeAsync = async () => {
+      try {
+        await loadPatterns();
+        // Load the current pattern into the flow editor
+        const current = $currentPattern;
+        if (current) {
+          loadSerializedPattern(current);
+        } else {
+          // Fallback to default pattern
+          initializeDefaultPattern();
+        }
+      } catch (error) {
+        console.error('Failed to load patterns:', error);
+        // Fallback to default pattern on error
         initializeDefaultPattern();
       }
-    } catch (error) {
-      console.error('Failed to load patterns:', error);
-      // Fallback to default pattern on error
-      initializeDefaultPattern();
-    }
+    };
+    
+    initializeAsync();
     
     // Add beforeunload handler to warn about unsaved changes
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -66,7 +70,7 @@
   
   // Add Pattern Node dropdown state
   let showAddNodeDropdown = $state(false);
-  let addNodeDropdownRef: HTMLDivElement;
+  let addNodeDropdownRef = $state<HTMLDivElement>();
   
   // Reactive check for active node - ensure we have a valid node with proper data
   const activeNode = $derived.by(() => {
