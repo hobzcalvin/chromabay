@@ -173,14 +173,12 @@ public:
 
         for (uint32_t i = 0; i < root_map_count; ++i) {
             char key_buffer[32]; // Max key length + null terminator
-            // Use mpack_expect_str_buf and ensure null termination for safety,
-            // though mpack_expect_str_buf should handle it if bufsize is correct.
-            mpack_expect_str_buf(&reader, key_buffer, sizeof(key_buffer));
+            // Use mpack_expect_cstr instead of mpack_expect_str_buf to ensure proper null termination
+            mpack_expect_cstr(&reader, key_buffer, sizeof(key_buffer));
             if (mpack_reader_error(&reader) != mpack_ok) {
                  Serial.println(F("[ConfigManager] Error reading map key string."));
                  mpack_reader_destroy(&reader); delete[] fileBuffer; return loadedConfig;
             }
-            // key_buffer is now null-terminated by mpack_expect_str_buf if successful and fits.
 
             if (strcmp(key_buffer, ConfigKeys::VERSION) == 0) {
                 loadedConfig.fileVersion = mpack_expect_u8(&reader);
@@ -207,7 +205,8 @@ public:
                     if (mpack_reader_error(&reader) != mpack_ok) { /* error handling */ mpack_reader_destroy(&reader); delete[] fileBuffer; return loadedConfig;}
 
                     for (uint32_t k_idx = 0; k_idx < strip_map_count; ++k_idx) {
-                        mpack_expect_str_buf(&reader, key_buffer, sizeof(key_buffer));
+                        // Fix: Use mpack_expect_cstr for proper null termination
+                        mpack_expect_cstr(&reader, key_buffer, sizeof(key_buffer));
                         if (mpack_reader_error(&reader) != mpack_ok) { /* error handling */ mpack_reader_destroy(&reader); delete[] fileBuffer; return loadedConfig;}
 
                         if (strcmp(key_buffer, ConfigKeys::CHIPSET) == 0) {
@@ -286,9 +285,31 @@ public:
         FullLedConfiguration loadedConfig = loadConfigurationFromFile(filePath, &loadSuccess);
 
         if (loadSuccess) {
+            // Validate that the loaded config has at least one strip
+            if (loadedConfig.strips.empty()) {
+                Serial.println(F("[ConfigManager] Loaded config has no strips defined. Using fallback."));
+                return false;
+            }
+            
+            // Validate strip configurations
+            bool hasValidStrip = false;
+            for (const auto& strip : loadedConfig.strips) {
+                if (strip.numLeds > 0 && strip.pin < 40) { // Basic validation
+                    hasValidStrip = true;
+                    break;
+                }
+            }
+            
+            if (!hasValidStrip) {
+                Serial.println(F("[ConfigManager] No valid strips in loaded config. Using fallback."));
+                return false;
+            }
+            
+            Serial.printf("[ConfigManager] Applying config: %d strips, brightness %d\n", 
+                         loadedConfig.strips.size(), loadedConfig.globalBrightness);
             return applyConfiguration(loadedConfig);
         }
-        Serial.println(F("[ConfigManager] Failed to load configuration file. Applying default or keeping existing."));
+        Serial.println(F("[ConfigManager] Failed to load configuration file. Using fallback."));
         return false;
     }
     
@@ -307,24 +328,22 @@ public:
     }
 
     bool ensureValidConfigFile(const LedStripConfig& defaultStrip, const char* filePath = DEFAULT_CONFIG_FILENAME) {
-        // Check if file exists and is valid
+        // Check if file exists and has reasonable size
         if (LittleFS.exists(filePath)) {
             File configFile = LittleFS.open(filePath, FILE_READ);
             if (configFile) {
                 size_t fileSize = configFile.size();
                 configFile.close();
                 
-                if (fileSize > 0) {
-                    // File exists and is not empty, try to load it to check if it's valid
-                    bool loadSuccess = false;
-                    loadConfigurationFromFile(filePath, &loadSuccess);
-                    if (loadSuccess) {
-                        Serial.println(F("[ConfigManager] Valid config file found."));
-                        return true;
-                    }
-                    Serial.println(F("[ConfigManager] Config file exists but is invalid, overwriting with defaults."));
-                } else {
+                if (fileSize > 0 && fileSize <= 4096) {
+                    // File exists and has reasonable size, assume it's valid for now
+                    // The actual validation will happen during loadAndApplyConfiguration()
+                    Serial.println(F("[ConfigManager] Config file found."));
+                    return true;
+                } else if (fileSize == 0) {
                     Serial.println(F("[ConfigManager] Config file exists but is empty, writing defaults."));
+                } else {
+                    Serial.println(F("[ConfigManager] Config file too large, overwriting with defaults."));
                 }
             }
         } else {

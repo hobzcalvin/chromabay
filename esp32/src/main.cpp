@@ -703,10 +703,8 @@ void setup() {
             criticalSystemsOK = false;
         } else {
             ledMgr.setGlobalBrightness(BRIGHTNESS);
-            ledMgr.begin();
+            ledMgr.begin(); // Initialize the LED hardware driver
         }
-    } else {
-        ledMgr.begin();
     }
 
     if (ledMgr.getNumStrips() == 0) {
@@ -815,10 +813,10 @@ void loop() {
         
         // Pause rainbow animation if OTA is in progress to free up resources
         if (ledMgr.getNumStrips() > 0 && ledMgr.getStrip(0) != nullptr && !ota_in_progress) { 
-            fill_rainbow(leds, NUM_LEDS, hue, 1); 
+            fill_rainbow(leds, NUM_LEDS, hue, 10); 
             pushCRGBToStrip();
             ledMgr.show();
-            hue += 10;
+            hue += 1;
         }
     }
 
