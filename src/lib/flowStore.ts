@@ -1,5 +1,6 @@
 import { writable } from 'svelte/store';
 import type { Node, Edge, Connection } from '@xyflow/svelte';
+import { NATIVE_PATTERN_DEFINITIONS, renderNativePattern } from './wasmPatterns';
 
 // Global start time for synchronized animations across all nodes
 export const globalStartTime = writable<number>(performance.now());
@@ -152,6 +153,39 @@ export interface NodeDefinition {
   type: string;
   params: Parameter[];
   render: (context: RenderContext) => void;
+}
+
+// Helper function to try rendering with native WASM patterns
+async function tryRenderNativePattern(
+  patternType: string, 
+  totalTime: number, 
+  deltaTime: number, 
+  width: number, 
+  height: number, 
+  nodeId: string
+): Promise<ImageData | null> {
+  try {
+    const nativePattern = NATIVE_PATTERN_DEFINITIONS.find(p => p.type === patternType);
+    if (!nativePattern) return null;
+    
+    // Extract parameter values for this node
+    const parameters = nativePattern.params.map(param => 
+      getNodeParameter(nodeId, param.name, param.default)
+    );
+    
+    // Call the native WASM pattern
+    return await renderNativePattern(
+      patternType,
+      width,
+      height,
+      totalTime,
+      deltaTime,
+      parameters
+    );
+  } catch (error) {
+    console.warn('Native pattern render failed:', error);
+    return null;
+  }
 }
 
 // Define LED pattern node types with their render functions
@@ -559,7 +593,45 @@ export const NODE_TYPES: NodeDefinition[] = [
         ctx.putImageData(imageData, 0, 0);
       }
     }
-  }
+  },
+  
+  // Add native FastLED patterns
+  ...NATIVE_PATTERN_DEFINITIONS.map(nativePattern => ({
+    name: nativePattern.name,
+    type: nativePattern.type,
+    params: nativePattern.params.map(param => ({
+      label: param.label,
+      name: param.name,
+      type: param.type as ParameterType,
+      default: param.default,
+      min: param.min,
+      max: param.max
+    })),
+    render: ({ ctx, totalTime, deltaTime, width, height, nodeId }: RenderContext) => {
+      // For native patterns, we'll render a placeholder that shows they're loading
+      // The actual native rendering will be handled elsewhere
+      ctx.fillStyle = '#333';
+      ctx.fillRect(0, 0, width, height);
+      
+      // Draw loading text
+      ctx.fillStyle = '#fff';
+      ctx.font = '10px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('Native Pattern', width / 2, height / 2 - 5);
+      ctx.fillText('(Loading WASM)', width / 2, height / 2 + 8);
+      
+      // Try to render with WASM if available
+      tryRenderNativePattern(nativePattern.type, totalTime, deltaTime, width, height, nodeId)
+        .then((imageData: ImageData | null) => {
+          if (imageData) {
+            ctx.putImageData(imageData, 0, 0);
+          }
+        })
+        .catch(() => {
+          // Already showing placeholder, no need to handle error
+        });
+    }
+  }))
 ];
 
 // Helper function to get node definition by type
