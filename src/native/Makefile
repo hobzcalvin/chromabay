@@ -1,11 +1,29 @@
 # FastLED Pattern Build System
 # Builds patterns with FastLED-compatible code for both WASM and ESP32
 
-# Emscripten configuration
-EMCC = emcc
-EMCC_FLAGS = -O3 \
-	-s WASM=1 \
-	-s EXPORTED_FUNCTIONS='["_create_context", "_destroy_context", "_set_timing", "_set_parameters", "_set_pattern_state", "_set_input_buffer", "_get_output_buffer", "_call_pattern", "_call_rainbow_pattern", "_malloc", "_free"]' \
+# Configuration
+CC = gcc
+CXX = g++
+CFLAGS = -Wall -Wextra -g -DNATIVE_BUILD
+CXXFLAGS = -Wall -Wextra -g -std=c++17 -DNATIVE_BUILD
+INCLUDES = -I.
+
+# FastLED library path
+FASTLED_SRC = FastLED/src
+
+# Source files
+SOURCES = fastled_compat.cpp patterns/rainbow.cpp
+HEADERS = fastled_patterns.h
+
+# Test executable
+TEST_TARGET = test_runner
+TEST_SOURCES = tests/test_runner.cpp $(SOURCES)
+
+# WASM build
+WASM_TARGET = ../lib/wasm/fastled_patterns.js
+WASM_SOURCES = patterns/rainbow.cpp fastled_compat.cpp wasm_interface.cpp
+EMCC_FLAGS = -O3 -s WASM=1 \
+	-s EXPORTED_FUNCTIONS='["_create_context", "_destroy_context", "_set_timing", "_set_parameters", "_get_output_buffer", "_get_buffer_size", "_call_rainbow_pattern", "_malloc", "_free"]' \
 	-s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap", "setValue", "getValue", "HEAPU8"]' \
 	-s ALLOW_MEMORY_GROWTH=1 \
 	-s MODULARIZE=1 \
@@ -15,44 +33,33 @@ EMCC_FLAGS = -O3 \
 	-D__EMSCRIPTEN__ \
 	-std=c++17
 
-# Our pattern sources (no FastLED dependency for WASM)
-PATTERN_SOURCES = \
-	patterns/rainbow.cpp \
-	fastled_compat.cpp \
-	wasm_interface.cpp
-
-# Output paths
-WASM_OUTPUT_DIR = ../lib/wasm
-WASM_OUTPUT = $(WASM_OUTPUT_DIR)/fastled_patterns
-
 # Default target
-.PHONY: all wasm clean test
+all: test
 
-all: wasm
+# Test build for native development
+test: $(TEST_TARGET)
 
-# Build WASM module
-wasm: $(WASM_OUTPUT).js
+$(TEST_TARGET): $(TEST_SOURCES) $(HEADERS)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) $(TEST_SOURCES) -o $(TEST_TARGET)
 
-$(WASM_OUTPUT).js: $(PATTERN_SOURCES) fastled_patterns.h
-	@mkdir -p $(WASM_OUTPUT_DIR)
-	$(EMCC) $(EMCC_FLAGS) $(PATTERN_SOURCES) -o $(WASM_OUTPUT).js
-	@echo "WASM build complete: $(WASM_OUTPUT).js"
+# WASM build for web
+wasm: $(WASM_TARGET)
 
-# Test build (native compilation for testing with real FastLED)
-test: test_runner
-	./test_runner
-
-test_runner: test_runner.cpp $(PATTERN_SOURCES) fastled_patterns.h
-	@echo "Native test build requires FastLED library installation"
-	@echo "This would link against real FastLED for ESP32 testing"
+$(WASM_TARGET): $(WASM_SOURCES) $(HEADERS)
+	@mkdir -p ../lib/wasm
+	emcc $(EMCC_FLAGS) $(WASM_SOURCES) -o $(WASM_TARGET)
+	@echo "Copying WASM files to static directory..."
+	@mkdir -p ../../static/wasm
+	@cp ../lib/wasm/fastled_patterns.js ../../static/wasm/
+	@cp ../lib/wasm/fastled_patterns.wasm ../../static/wasm/
 
 # Clean build artifacts
 clean:
-	rm -rf $(WASM_OUTPUT_DIR)
-	rm -f test_runner
+	rm -rf ../lib/wasm
+	rm -f $(TEST_TARGET)
 	@echo "Cleaned build artifacts"
 
-# Install emscripten dependencies
+# Install emscripten
 install-emscripten:
 	@echo "To install Emscripten:"
 	@echo "1. git clone https://github.com/emscripten-core/emsdk.git"

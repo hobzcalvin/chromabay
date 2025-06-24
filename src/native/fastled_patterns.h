@@ -40,25 +40,17 @@ uint16_t beat16(uint16_t beats_per_minute, uint32_t timebase = 0);
 #include <FastLED.h>
 #endif
 
-// Point structure for display coordinates
+// Pattern context structure with 2D buffer
 typedef struct {
-    float x;        // X coordinate in unit square (0.0 to 1.0)
-    float y;        // Y coordinate in unit square (0.0 to 1.0)
-    uint32_t index; // Index into CRGB buffer
-} DisplayPoint;
-
-// Pattern context structure
-typedef struct {
-    DisplayPoint* points;     // Array of display points
-    uint32_t point_count;     // Number of points
-    CRGB* color_buffer;       // Main color buffer
+    CRGB* color_buffer;       // 2D color buffer (width * height)
     CRGB* input_buffer1;      // First input buffer (for blend operations)
     CRGB* input_buffer2;      // Second input buffer (for blend operations)
+    uint32_t width;           // Buffer width in pixels
+    uint32_t height;          // Buffer height in pixels
     uint32_t timestamp_ms;    // Current timestamp in milliseconds
     uint32_t delta_time_ms;   // Time since last call in milliseconds
     bool is_starting;         // True if pattern is being initialized
     bool is_ending;           // True if pattern is being cleaned up
-    float aspect_ratio;       // Display aspect ratio (width/height)
     float* parameters;        // Array of parameter values
     uint32_t param_count;     // Number of parameters
 } PatternContext;
@@ -99,36 +91,49 @@ extern "C" {
 extern const PatternDefinition PATTERN_DEFINITIONS[];
 extern const uint32_t PATTERN_COUNT;
 
-// Utility functions
-inline void set_point_color(PatternContext* ctx, uint32_t point_index, CRGB color) {
-    if (point_index < ctx->point_count) {
-        uint32_t buffer_index = ctx->points[point_index].index;
-        ctx->color_buffer[buffer_index] = color;
+// Utility functions for 2D buffer access
+inline void set_pixel(PatternContext* ctx, uint32_t x, uint32_t y, CRGB color) {
+    if (x < ctx->width && y < ctx->height) {
+        ctx->color_buffer[y * ctx->width + x] = color;
     }
 }
 
-inline CRGB get_point_color(PatternContext* ctx, uint32_t point_index) {
-    if (point_index < ctx->point_count) {
-        uint32_t buffer_index = ctx->points[point_index].index;
-        return ctx->color_buffer[buffer_index];
+inline CRGB get_pixel(PatternContext* ctx, uint32_t x, uint32_t y) {
+    if (x < ctx->width && y < ctx->height) {
+        return ctx->color_buffer[y * ctx->width + x];
     }
     return CRGB(0, 0, 0);
 }
 
-inline CRGB get_input1_color(PatternContext* ctx, uint32_t point_index) {
-    if (ctx->input_buffer1 && point_index < ctx->point_count) {
-        uint32_t buffer_index = ctx->points[point_index].index;
-        return ctx->input_buffer1[buffer_index];
+inline CRGB get_input1_pixel(PatternContext* ctx, uint32_t x, uint32_t y) {
+    if (ctx->input_buffer1 && x < ctx->width && y < ctx->height) {
+        return ctx->input_buffer1[y * ctx->width + x];
     }
     return CRGB(0, 0, 0);
 }
 
-inline CRGB get_input2_color(PatternContext* ctx, uint32_t point_index) {
-    if (ctx->input_buffer2 && point_index < ctx->point_count) {
-        uint32_t buffer_index = ctx->points[point_index].index;
-        return ctx->input_buffer2[buffer_index];
+inline CRGB get_input2_pixel(PatternContext* ctx, uint32_t x, uint32_t y) {
+    if (ctx->input_buffer2 && x < ctx->width && y < ctx->height) {
+        return ctx->input_buffer2[y * ctx->width + x];
     }
     return CRGB(0, 0, 0);
+}
+
+// Utility function to get normalized coordinates (0.0 to 1.0)
+inline float get_normalized_x(PatternContext* ctx, uint32_t x) {
+    return (float)x / (float)(ctx->width - 1);
+}
+
+inline float get_normalized_y(PatternContext* ctx, uint32_t y) {
+    return (float)y / (float)(ctx->height - 1);
+}
+
+// Clear the entire buffer
+inline void clear_buffer(PatternContext* ctx, CRGB color = CRGB(0, 0, 0)) {
+    uint32_t total_pixels = ctx->width * ctx->height;
+    for (uint32_t i = 0; i < total_pixels; i++) {
+        ctx->color_buffer[i] = color;
+    }
 }
 
 #endif // FASTLED_PATTERNS_H 

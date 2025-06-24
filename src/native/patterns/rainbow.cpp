@@ -18,56 +18,47 @@ static bool rainbow_initialized = false;
 static uint32_t rainbow_start_time = 0;
 
 void rainbow_pattern(PatternContext* ctx) {
-    // Initialize if needed
-    if (ctx->is_starting || !rainbow_initialized) {
-        rainbow_start_time = ctx->timestamp_ms;
-        rainbow_initialized = true;
-    }
-    
-    // Cleanup if needed
-    if (ctx->is_ending) {
-        rainbow_initialized = false;
-        return;
-    }
-    
-    // Extract parameters
-    float speed = (ctx->param_count > 0) ? ctx->parameters[0] : 0.1f;
-    float saturation = (ctx->param_count > 1) ? ctx->parameters[1] : 1.0f;
-    float value = (ctx->param_count > 2) ? ctx->parameters[2] : 1.0f;
-    float angle = (ctx->param_count > 3) ? ctx->parameters[3] : 0.0f;
-    
-    // Scale parameters to FastLED ranges
-    speed *= 3.0f; // Scale for reasonable animation speed
-    uint8_t sat_8bit = (uint8_t)(saturation * 255);
-    uint8_t val_8bit = (uint8_t)(value * 255);
+    // Get parameters
+    float speed = ctx->param_count > 0 ? ctx->parameters[0] : 50.0f;
+    float saturation = ctx->param_count > 1 ? ctx->parameters[1] : 255.0f;
+    float value = ctx->param_count > 2 ? ctx->parameters[2] : 255.0f;
+    float angle = ctx->param_count > 3 ? ctx->parameters[3] : 0.0f;
     
     // Convert angle to radians
     float angle_rad = angle * M_PI / 180.0f;
-    float cos_angle = cosf(angle_rad);
-    float sin_angle = sinf(angle_rad);
+    float cos_angle = cos(angle_rad);
+    float sin_angle = sin(angle_rad);
     
-    // Time-based hue offset using FastLED's beat functions
-    // Use elapsed time since start for consistent timing
-    uint32_t elapsed_time = ctx->timestamp_ms - rainbow_start_time;
-    uint8_t time_offset = beat8((uint16_t)(speed * 60), elapsed_time);
+    // Get time-based hue offset
+    uint8_t hue_offset = beat8(speed);
     
-    // Process each point
-    for (uint32_t i = 0; i < ctx->point_count; i++) {
-        float x = ctx->points[i].x;
-        float y = ctx->points[i].y;
-        
-        // Apply rotation to coordinates
-        float rotated_x = x * cos_angle - y * sin_angle;
-        
-        // Calculate hue based on rotated position and time
-        uint8_t hue = time_offset + (uint8_t)(rotated_x * 255);
-        
-        // Convert HSV to RGB using FastLED
-        CHSV hsv_color(hue, sat_8bit, val_8bit);
-        CRGB color = hsv_color; // FastLED automatic conversion
-        
-        // Set pixel in buffer
-        set_point_color(ctx, i, color);
+    // Loop through all pixels in the 2D buffer
+    for (uint32_t y = 0; y < ctx->height; y++) {
+        for (uint32_t x = 0; x < ctx->width; x++) {
+            // Get normalized coordinates (0.0 to 1.0)
+            float norm_x = get_normalized_x(ctx, x);
+            float norm_y = get_normalized_y(ctx, y);
+            
+            // Center the coordinates around 0.5
+            float centered_x = norm_x - 0.5f;
+            float centered_y = norm_y - 0.5f;
+            
+            // Apply rotation
+            float rotated_x = centered_x * cos_angle - centered_y * sin_angle;
+            float rotated_y = centered_x * sin_angle + centered_y * cos_angle;
+            
+            // Use the rotated X coordinate to determine hue
+            // Scale from -0.5 to 0.5 to 0 to 255
+            uint8_t base_hue = (uint8_t)((rotated_x + 0.5f) * 255.0f);
+            uint8_t final_hue = base_hue + hue_offset;
+            
+            // Create HSV color and convert to RGB
+            CHSV hsv_color(final_hue, (uint8_t)saturation, (uint8_t)value);
+            CRGB rgb_color = hsv_color;
+            
+            // Set the pixel
+            set_pixel(ctx, x, y, rgb_color);
+        }
     }
 }
 

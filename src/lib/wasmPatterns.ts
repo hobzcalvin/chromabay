@@ -2,33 +2,25 @@
 // Provides TypeScript bindings for calling native FastLED patterns compiled to WASM
 
 // WASM module interface
-interface FastLEDWasmModule {
-  ccall: (funcName: string, returnType: string, argTypes: string[], args: any[]) => any;
-  cwrap: (funcName: string, returnType: string, argTypes: string[]) => Function;
-  _malloc: (size: number) => number;
-  _free: (ptr: number) => void;
-  HEAPU8: Uint8Array;
-  HEAPF32: Float32Array;
+interface WasmModule {
+    _create_context(width: number, height: number): number;
+    _destroy_context(contextPtr: number): void;
+    _set_timing(contextPtr: number, timestamp: number, deltaTime: number): void;
+    _set_parameters(contextPtr: number, paramsPtr: number, paramCount: number): void;
+    _get_output_buffer(contextPtr: number): number;
+    _get_buffer_size(contextPtr: number): number;
+    _call_rainbow_pattern(contextPtr: number): void;
+    
+    // Memory access
+    HEAPU8: Uint8Array;
+    HEAPU32: Uint32Array;
+    HEAPF32: Float32Array;
+    _malloc(size: number): number;
+    _free(ptr: number): void;
 }
 
-// Module loading state
-let wasmModule: FastLEDWasmModule | null = null;
-let moduleLoading: Promise<FastLEDWasmModule> | null = null;
-
-// Function wrappers
-interface WasmFunctions {
-  createContext: (width: number, height: number, maxParams: number) => number;
-  destroyContext: () => void;
-  setTiming: (timestampMs: number, deltaTimeMs: number) => void;
-  setParameters: (paramsPtr: number, paramCount: number) => void;
-  setPatternState: (isStarting: boolean, isEnding: boolean) => void;
-  setInputBuffer: (rgbDataPtr: number, bufferIndex: number, size: number) => void;
-  getOutputBuffer: () => number;
-  callPattern: (patternNamePtr: number) => void;
-  callRainbowPattern: () => void;
-}
-
-let wasmFunctions: WasmFunctions | null = null;
+let wasmModule: WasmModule | null = null;
+let wasmLoadPromise: Promise<WasmModule> | null = null;
 
 // Pattern definitions (matches the C++ patterns)
 export const NATIVE_PATTERN_DEFINITIONS = [
@@ -36,184 +28,177 @@ export const NATIVE_PATTERN_DEFINITIONS = [
     name: 'Rainbow (Native)',
     type: 'native_rainbow',
     params: [
-      { label: 'Speed', name: 'speed', type: 'float', default: 0.1, min: 0.0, max: 1.0 },
-      { label: 'Saturation', name: 'saturation', type: 'float', default: 1.0, min: 0.0, max: 1.0 },
-      { label: 'Value', name: 'value', type: 'float', default: 1.0, min: 0.0, max: 1.0 },
+      { label: 'Speed', name: 'speed', type: 'float', default: 50.0, min: 0.0, max: 200.0 },
+      { label: 'Saturation', name: 'saturation', type: 'float', default: 255.0, min: 0.0, max: 255.0 },
+      { label: 'Value', name: 'value', type: 'float', default: 255.0, min: 0.0, max: 255.0 },
       { label: 'Angle', name: 'angle', type: 'range', default: 0, min: 0, max: 360 }
     ]
   }
 ];
 
 // Load WASM module
-async function loadWasmModule(): Promise<FastLEDWasmModule> {
-  if (wasmModule) return wasmModule;
-  
-  if (moduleLoading) return moduleLoading;
-  
-  moduleLoading = (async () => {
-    try {
-      // Dynamic import of the actual WASM module from static assets
-      // Use dynamic loading to avoid TypeScript module resolution issues
-      const response = await fetch('/wasm/fastled_patterns.js');
-      const moduleText = await response.text();
-      const moduleBlob = new Blob([moduleText], { type: 'application/javascript' });
-      const moduleUrl = URL.createObjectURL(moduleBlob);
-      const FastLEDPatterns = (await import(moduleUrl)).default;
-      const module = await FastLEDPatterns() as FastLEDWasmModule;
-      wasmModule = module;
-      
-      // Wrap the exported functions for easier calling
-      wasmFunctions = {
-        createContext: module.cwrap('create_context', 'number', ['number', 'number', 'number']) as (width: number, height: number, maxParams: number) => number,
-        destroyContext: module.cwrap('destroy_context', 'void', []) as () => void,
-        setTiming: module.cwrap('set_timing', 'void', ['number', 'number']) as (timestampMs: number, deltaTimeMs: number) => void,
-        setParameters: module.cwrap('set_parameters', 'void', ['number', 'number']) as (paramsPtr: number, paramCount: number) => void,
-        setPatternState: module.cwrap('set_pattern_state', 'void', ['boolean', 'boolean']) as (isStarting: boolean, isEnding: boolean) => void,
-        setInputBuffer: module.cwrap('set_input_buffer', 'void', ['number', 'number', 'number']) as (rgbDataPtr: number, bufferIndex: number, size: number) => void,
-        getOutputBuffer: module.cwrap('get_output_buffer', 'number', []) as () => number,
-        callPattern: module.cwrap('call_pattern', 'void', ['number']) as (patternNamePtr: number) => void,
-        callRainbowPattern: module.cwrap('call_rainbow_pattern', 'void', []) as () => void
-      };
-      
-      console.log('FastLED WASM module loaded successfully');
-      return wasmModule;
-    } catch (error) {
-      console.error('Failed to load FastLED WASM module:', error);
-      throw error;
+export async function loadWasmModule(): Promise<WasmModule> {
+    if (wasmModule) {
+        return wasmModule;
     }
-  })();
-  
-  return moduleLoading;
+    
+    if (wasmLoadPromise) {
+        return wasmLoadPromise;
+    }
+    
+    wasmLoadPromise = new Promise<WasmModule>(async (resolve, reject) => {
+        try {
+            // Import the WASM module with its initialization function
+            // @ts-ignore - WASM module is built at runtime
+            const wasmFactory = await import('/wasm/fastled_patterns.js');
+            
+            // Initialize the module
+            const module = await wasmFactory.default();
+            
+            wasmModule = module as WasmModule;
+            resolve(wasmModule);
+        } catch (error) {
+            console.error('Failed to load WASM module:', error);
+            reject(error);
+        }
+    });
+    
+    return wasmLoadPromise;
 }
 
 // Pattern runner that manages WASM calls
 export class FastLEDWasmPatternRunner {
-  private contextPtr: number = 0;
-  private width: number = 0;
-  private height: number = 0;
-  private initialized = false;
-  private lastTimestamp = 0;
-  private patternStartTime = 0;
-  
-  async initialize(width: number, height: number): Promise<void> {
-    await loadWasmModule();
-    
-    if (!wasmModule || !wasmFunctions) {
-      throw new Error('WASM module not ready');
+    private module: WasmModule;
+    private contextPtr: number = 0;
+    private paramsPtr: number = 0;
+    private width: number;
+    private height: number;
+
+    constructor(module: WasmModule, width: number, height: number) {
+        this.module = module;
+        this.width = width;
+        this.height = height;
+        this.contextPtr = this.module._create_context(width, height);
+        if (!this.contextPtr) {
+            throw new Error('Failed to create WASM pattern context');
+        }
     }
-    
-    // Clean up any existing context
-    if (this.contextPtr !== 0) {
-      wasmFunctions.destroyContext();
+
+    destroy() {
+        if (this.contextPtr) {
+            this.module._destroy_context(this.contextPtr);
+            this.contextPtr = 0;
+        }
+        if (this.paramsPtr) {
+            this.module._free(this.paramsPtr);
+            this.paramsPtr = 0;
+        }
     }
-    
-    // Create new context
-    this.contextPtr = wasmFunctions.createContext(width, height, 16);
-    this.width = width;
-    this.height = height;
-    this.initialized = true;
-    this.lastTimestamp = performance.now();
-    this.patternStartTime = this.lastTimestamp;
-    
-    console.log(`FastLED WASM context initialized: ${width}x${height}`);
-  }
-  
-  async renderPattern(
-    patternType: string,
-    totalTime: number,
-    deltaTime: number,
-    parameters: number[]
-  ): Promise<ImageData> {
-    if (!this.initialized || !wasmModule || !wasmFunctions) {
-      throw new Error('WASM pattern runner not initialized');
+
+    setTiming(timestamp: number, deltaTime: number) {
+        if (!this.contextPtr) return;
+        this.module._set_timing(this.contextPtr, timestamp, deltaTime);
     }
-    
-    const currentTime = performance.now();
-    const timestampMs = Math.floor(currentTime - this.patternStartTime);
-    const deltaTimeMs = Math.floor(currentTime - this.lastTimestamp);
-    this.lastTimestamp = currentTime;
-    
-    // Set timing
-    wasmFunctions.setTiming(timestampMs, deltaTimeMs);
-    
-    // Set parameters
-    if (parameters.length > 0) {
-      const paramPtr = wasmModule._malloc(parameters.length * 4); // float32
-      const paramArray = new Float32Array(wasmModule.HEAPU8.buffer, paramPtr, parameters.length);
-      paramArray.set(parameters);
-      wasmFunctions.setParameters(paramPtr, parameters.length);
-      wasmModule._free(paramPtr);
+
+    setParameters(params: number[]) {
+        if (!this.contextPtr) return;
+        
+        // Free existing parameters
+        if (this.paramsPtr) {
+            this.module._free(this.paramsPtr);
+            this.paramsPtr = 0;
+        }
+        
+        if (params.length > 0) {
+            // Allocate memory for parameters
+            this.paramsPtr = this.module._malloc(params.length * 4); // 4 bytes per float
+            if (this.paramsPtr) {
+                // Copy parameters to WASM memory
+                const paramArray = new Float32Array(this.module.HEAPU8.buffer, this.paramsPtr, params.length);
+                paramArray.set(params);
+                
+                this.module._set_parameters(this.contextPtr, this.paramsPtr, params.length);
+            }
+        }
     }
-    
-    // Call the appropriate pattern
-    if (patternType === 'native_rainbow') {
-      wasmFunctions.callRainbowPattern();
-    } else {
-      // For other patterns, use string-based calling
-      const patternNamePtr = wasmModule._malloc(patternType.length + 1);
-      const patternNameArray = new Uint8Array(wasmModule.HEAPU8.buffer, patternNamePtr, patternType.length + 1);
-      for (let i = 0; i < patternType.length; i++) {
-        patternNameArray[i] = patternType.charCodeAt(i);
-      }
-      patternNameArray[patternType.length] = 0; // null terminator
-      wasmFunctions.callPattern(patternNamePtr);
-      wasmModule._free(patternNamePtr);
+
+    runRainbowPattern(): ImageData | null {
+        if (!this.contextPtr) return null;
+        
+        // Call the pattern function
+        this.module._call_rainbow_pattern(this.contextPtr);
+        
+        // Get the output buffer
+        const bufferPtr = this.module._get_output_buffer(this.contextPtr);
+        if (!bufferPtr) return null;
+        
+        // Get buffer size and create ImageData
+        const bufferSize = this.module._get_buffer_size(this.contextPtr);
+        const rgbData = new Uint8Array(this.module.HEAPU8.buffer, bufferPtr, bufferSize);
+        
+        // Convert RGB to RGBA for ImageData
+        const imageData = new ImageData(this.width, this.height);
+        for (let i = 0; i < this.width * this.height; i++) {
+            const rgbIndex = i * 3;
+            const rgbaIndex = i * 4;
+            
+            imageData.data[rgbaIndex] = rgbData[rgbIndex];     // R
+            imageData.data[rgbaIndex + 1] = rgbData[rgbIndex + 1]; // G
+            imageData.data[rgbaIndex + 2] = rgbData[rgbIndex + 2]; // B
+            imageData.data[rgbaIndex + 3] = 255; // A (fully opaque)
+        }
+        
+        return imageData;
     }
-    
-    // Get output buffer
-    const outputPtr = wasmFunctions.getOutputBuffer();
-    if (!outputPtr) {
-      throw new Error('Failed to get WASM output buffer');
-    }
-    
-    // Convert RGB data to ImageData
-    const pixelCount = this.width * this.height;
-    const rgbData = new Uint8Array(wasmModule.HEAPU8.buffer, outputPtr, pixelCount * 3);
-    
-    const imageData = new ImageData(this.width, this.height);
-    for (let i = 0; i < pixelCount; i++) {
-      const srcOffset = i * 3;
-      const dstOffset = i * 4;
-      
-      imageData.data[dstOffset] = rgbData[srcOffset];         // R
-      imageData.data[dstOffset + 1] = rgbData[srcOffset + 1]; // G
-      imageData.data[dstOffset + 2] = rgbData[srcOffset + 2]; // B
-      imageData.data[dstOffset + 3] = 255;                    // A
-    }
-    
-    return imageData;
-  }
-  
-  cleanup(): void {
-    if (this.contextPtr !== 0 && wasmFunctions) {
-      wasmFunctions.destroyContext();
-      this.contextPtr = 0;
-    }
-    this.initialized = false;
-  }
 }
 
-// Global pattern runner instance
-const globalWasmRunner = new FastLEDWasmPatternRunner();
+export interface NativePatternParams {
+    speed?: number;
+    saturation?: number;
+    value?: number;
+    angle?: number;
+}
 
-// Convenience function for use in flowStore
 export async function renderNativePattern(
-  patternType: string,
-  width: number,
-  height: number,
-  totalTime: number,
-  deltaTime: number,
-  parameters: number[]
-): Promise<ImageData> {
-  // Initialize if needed
-  if (!globalWasmRunner['initialized']) {
-    await globalWasmRunner.initialize(width, height);
-  }
-  
-  return globalWasmRunner.renderPattern(patternType, totalTime, deltaTime, parameters);
+    patternName: string,
+    width: number,
+    height: number,
+    timestamp: number,
+    params: NativePatternParams = {}
+): Promise<ImageData | null> {
+    try {
+        const module = await loadWasmModule();
+        
+        // Create a temporary pattern runner
+        const runner = new FastLEDWasmPatternRunner(module, width, height);
+        
+        try {
+            // Set timing
+            runner.setTiming(timestamp, 16); // Assume 16ms delta time (~60fps)
+            
+            // Set parameters based on pattern
+            if (patternName === 'rainbow') {
+                const paramValues = [
+                    params.speed ?? 50.0,
+                    params.saturation ?? 255.0,
+                    params.value ?? 255.0,
+                    params.angle ?? 0.0
+                ];
+                runner.setParameters(paramValues);
+                return runner.runRainbowPattern();
+            }
+            
+            return null;
+        } finally {
+            runner.destroy();
+        }
+    } catch (error) {
+        console.error('Error rendering native pattern:', error);
+        return null;
+    }
 }
 
 // Initialize WASM module on first import (but don't await it)
 loadWasmModule().catch(error => {
-  console.warn('FastLED WASM module failed to load on startup:', error);
+    console.warn('FastLED WASM module failed to load on startup:', error);
 }); 
