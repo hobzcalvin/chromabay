@@ -38,6 +38,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Generate WASM operator bindings
+        run: npm run wasm:generate
+
       - name: Generate version info
         id: version
         run: |

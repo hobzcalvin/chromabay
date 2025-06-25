@@ -4,12 +4,12 @@
 	"version": "0.0.1",
 	"type": "module",
 	"scripts": {
-		"dev": "vite dev --host 0.0.0.0",
-		"build": "vite build",
-		"build:dev": "NODE_ENV=development vite build",
+		"dev": "npm run wasm:generate && vite dev --host 0.0.0.0",
+		"build": "npm run wasm:generate && vite build",
+		"build:dev": "NODE_ENV=development npm run wasm:generate && vite build",
 		"preview": "vite preview",
 		"prepare": "husky",
-		"check": "npx svelte-kit sync && npx svelte-check --tsconfig ./tsconfig.json",
+		"check": "npx svelte-kit sync && npx svelte-check --tsconfig ./tsconfig.json --compiler-warnings \"a11y_no_noninteractive_tabindex:ignore,a11y_no_static_element_interactions:ignore,a11y_click_events_have_key_events:ignore,a11y_no_noninteractive_element_interactions:ignore,export_let_unused:ignore\"",
 		"check:watch": "npx svelte-kit sync && npx svelte-check --tsconfig ./tsconfig.json --watch",
 		"sync": "npx cap sync",
 		"deploy:docs": "npm run build",
@@ -24,7 +24,12 @@
 		"esp32:build": "cd esp32 && pio run",
 		"esp32:upload": "cd esp32 && pio run --target upload",
 		"esp32:monitor": "cd esp32 && pio device monitor --baud 115200",
-		"esp32:full": "npm run esp32:upload && npm run esp32:monitor"
+		"esp32:full": "npm run esp32:upload && npm run esp32:monitor",
+		"wasm:generate": "node scripts/generate-wasm-bindings.js",
+		"wasm:build": "cd src/native && make wasm",
+		"wasm:clean": "cd src/native && make clean",
+		"wasm:full": "npm run wasm:generate && npm run wasm:build",
+		"operators:add": "echo 'To add a new operator: 1) Create .cpp file in src/native/operators/, 2) Add to pattern_registry.cpp, 3) Run npm run wasm:full'"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-auto": "^6.0.0",

@@ -1,6 +1,6 @@
 import { writable } from 'svelte/store';
 import type { Node, Edge, Connection } from '@xyflow/svelte';
-import { NATIVE_OPERATOR_DEFINITIONS, renderNativeOperator } from './wasmPatterns';
+import { NATIVE_OPERATOR_DEFINITIONS, renderNativeOperator } from './wasmOperators';
 
 // Global start time for synchronized animations across all nodes
 export const globalStartTime = writable<number>(performance.now());
@@ -181,7 +181,7 @@ async function tryRenderNativePattern(
     
     // Call the native WASM operator
     return await renderNativeOperator(
-      patternType.replace('native_', ''), // Remove native_ prefix
+      patternType.replace('native_', '') as import('./wasmOperators').OperatorType, // Remove native_ prefix and cast to correct type
       width,
       height,
       totalTime * 1000, // Convert to milliseconds
@@ -622,8 +622,7 @@ export const NODE_TYPES: NodeDefinition[] = [
       ctx.fillStyle = '#fff';
       ctx.font = '10px monospace';
       ctx.textAlign = 'center';
-      ctx.fillText('Native Pattern', width / 2, height / 2 - 5);
-      ctx.fillText('(Loading WASM)', width / 2, height / 2 + 8);
+      ctx.fillText('Ø', width / 2, height / 2);
       
       // Try to render with WASM if available
       tryRenderNativePattern(nativePattern.type, totalTime, deltaTime, width, height, nodeId)

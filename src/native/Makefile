@@ -12,7 +12,7 @@ INCLUDES = -I.
 FASTLED_SRC = FastLED/src
 
 # Source files
-SOURCES = pattern_registry.cpp patterns/rainbow.cpp patterns/gradient.cpp patterns/moving_blob.cpp patterns/sparkle.cpp patterns/strobe.cpp patterns/perlin_noise.cpp
+SOURCES = pattern_registry.cpp operators/rainbow.cpp operators/gradient.cpp operators/moving_blob.cpp operators/sparkle.cpp operators/strobe.cpp operators/perlin_noise.cpp
 HEADERS = fastled_patterns.h
 
 # Test executable
@@ -20,8 +20,8 @@ TEST_TARGET = test_runner
 TEST_SOURCES = tests/test_runner.cpp $(SOURCES)
 
 # WASM build
-WASM_TARGET = ../lib/wasm/fastled_patterns.js
-WASM_SOURCES = pattern_registry.cpp patterns/rainbow.cpp patterns/gradient.cpp patterns/moving_blob.cpp patterns/sparkle.cpp patterns/strobe.cpp patterns/perlin_noise.cpp wasm_interface.cpp
+WASM_TARGET = ../../static/wasm/fastled_patterns.js
+WASM_SOURCES = pattern_registry.cpp operators/rainbow.cpp operators/gradient.cpp operators/moving_blob.cpp operators/sparkle.cpp operators/strobe.cpp operators/perlin_noise.cpp wasm_interface.cpp
 EMCC_FLAGS = -O3 -s WASM=1 \
 	-s EXPORTED_FUNCTIONS='["_create_context", "_destroy_context", "_set_timing", "_set_parameters", "_get_output_buffer", "_get_buffer_size", "_call_rainbow_pattern", "_call_gradient_pattern", "_call_moving_blob_pattern", "_call_sparkle_pattern", "_call_strobe_pattern", "_call_perlin_noise_pattern", "_malloc", "_free"]' \
 	-s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap", "setValue", "getValue", "HEAPU8"]' \
@@ -46,16 +46,14 @@ $(TEST_TARGET): $(TEST_SOURCES) $(HEADERS)
 wasm: $(WASM_TARGET)
 
 $(WASM_TARGET): $(WASM_SOURCES) $(HEADERS)
-	@mkdir -p ../lib/wasm
-	emcc $(EMCC_FLAGS) $(WASM_SOURCES) -o $(WASM_TARGET)
-	@echo "Copying WASM files to static directory..."
 	@mkdir -p ../../static/wasm
-	@cp ../lib/wasm/fastled_patterns.js ../../static/wasm/
-	@cp ../lib/wasm/fastled_patterns.wasm ../../static/wasm/
+	emcc $(EMCC_FLAGS) $(WASM_SOURCES) -o $(WASM_TARGET)
+	@echo "WASM files built to static/wasm/"
 
 # Clean build artifacts
 clean:
-	rm -rf ../lib/wasm
+	rm -f ../../static/wasm/fastled_patterns.js
+	rm -f ../../static/wasm/fastled_patterns.wasm
 	rm -f $(TEST_TARGET)
 	@echo "Cleaned build artifacts"
 
