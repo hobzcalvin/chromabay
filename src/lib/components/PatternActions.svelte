@@ -433,20 +433,5 @@
     cursor: not-allowed;
   }
   
-  .delete-button {
-    background: #dc2626 !important;
-    border-color: #dc2626 !important;
-    color: white !important;
-  }
-  
-  .delete-button:hover {
-    background: #b91c1c !important;
-    border-color: #b91c1c !important;
-  }
-  
-  .warning {
-    color: #dc2626;
-    font-size: 0.875rem;
-    margin: 0.5rem 0;
-  }
+
 </style> 
