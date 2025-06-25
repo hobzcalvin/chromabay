@@ -11,8 +11,8 @@
   export let min: number = 0;
   export let max: number = 100;
   export let step: number = 1;
-  export let unlockDistance: number = 50;
-  export let preciseMode: boolean = true;
+  export const unlockDistance: number = 50;
+  export const preciseMode: boolean = true;
   export let size: number = 200;
   
   // State
@@ -266,7 +266,12 @@
 <div 
   bind:this={containerElement}
   class="rotary-knob-container"
+  role="slider"
   tabindex="0"
+  aria-valuenow={value}
+  aria-valuemin={min}
+  aria-valuemax={max}
+  aria-label="Rotary knob control"
   style="width: {size}px; height: {size}px;"
 >
 <svg 
@@ -274,6 +279,8 @@
   on:mousedown={handleMouseDown}
   on:touchstart={handleTouchStart}
   class="rotary-knob {isDragging ? 'dragging' : ''}"
+  role="img"
+  aria-hidden="true"
   xmlns="http://www.w3.org/2000/svg" 
   xmlns:xlink="http://www.w3.org/1999/xlink" 
   width="207px" 

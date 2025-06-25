@@ -7,15 +7,7 @@ const config = {
 	// for more information about preprocessors
 	preprocess: vitePreprocess(),
 	
-	// Disable accessibility warnings - we handle UX appropriately for our use case
-	onwarn: (warning, handler) => {
-		// Skip accessibility warnings
-		if (warning.code.startsWith('a11y_')) return;
-		// Skip unused export warnings for component props
-		if (warning.code === 'export_let_unused') return;
-		// Handle other warnings normally
-		handler(warning);
-	},
+
 
 	kit: {
 		// adapter-auto only supports some environments, see https://kit.svelte.dev/docs/adapter-auto for a list.

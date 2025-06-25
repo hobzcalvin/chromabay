@@ -9,7 +9,7 @@
 		"build:dev": "NODE_ENV=development npm run wasm:generate && vite build",
 		"preview": "vite preview",
 		"prepare": "husky",
-		"check": "npx svelte-kit sync && npx svelte-check --tsconfig ./tsconfig.json --compiler-warnings \"a11y_no_noninteractive_tabindex:ignore,a11y_no_static_element_interactions:ignore,a11y_click_events_have_key_events:ignore,a11y_no_noninteractive_element_interactions:ignore,export_let_unused:ignore\"",
+		"check": "npx svelte-kit sync && npx svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "npx svelte-kit sync && npx svelte-check --tsconfig ./tsconfig.json --watch",
 		"sync": "npx cap sync",
 		"deploy:docs": "npm run build",

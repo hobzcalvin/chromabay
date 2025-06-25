@@ -114,9 +114,18 @@
       swipeStates = { ...swipeStates };
     }
   }
+
+  // Handle keyboard events for accessibility
+  function handleDocumentKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape') {
+      handleDocumentClick(); // Close any open swipe reveals
+    }
+  }
 </script>
 
-<main class="patterns-page" onclick={handleDocumentClick}>
+<!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+<div onclick={handleDocumentClick} onkeydown={handleDocumentKeydown} role="application" class="app-wrapper">
+<main class="patterns-page">
   <div class="header">
     <h1>🎨 Patterns</h1>
     <p class="subtitle">Tap to interact • Pencil to edit • Swipe left to delete</p>
@@ -140,10 +149,19 @@
           class="pattern-item" 
           class:current={isCurrentPattern}
           class:swiped={swipeState?.isSwipeRevealed}
+          role="button"
+          tabindex="0"
           onclick={() => handlePatternTap(pattern)}
+          onkeydown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              handlePatternTap(pattern);
+            }
+          }}
           ontouchstart={(e) => handleTouchStart(e, patternName)}
           ontouchmove={(e) => handleTouchMove(e, patternName)}
           ontouchend={(e) => handleTouchEnd(e, patternName)}
+          aria-label="Select pattern {patternName}"
         >
           <div class="pattern-content">
             <div class="preview-container">
@@ -183,8 +201,13 @@
     </div>
   {/if}
 </main>
+</div>
 
 <style>
+  .app-wrapper {
+    min-height: 100vh;
+  }
+  
   .patterns-page {
     padding: 1rem;
     max-width: 600px;
