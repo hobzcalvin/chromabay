@@ -120,7 +120,7 @@
       return updatedNodes;
     });
 
-    console.log("$flowNodes", JSON.stringify($flowNodes, null, 2), "$flowEdges", JSON.stringify($flowEdges, null, 2));
+
   }
   
   // Validate all connections and remove any that violate buffer constraints
@@ -239,7 +239,6 @@
   
   // Close parameter editor
   function closeParameterEditor() {
-    console.log('closeParameterEditor');
     // Reset delete confirmation state and clear timeout
     deleteConfirmState = false;
     if (deleteTimeout) clearTimeout(deleteTimeout);

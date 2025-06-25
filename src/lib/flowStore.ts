@@ -991,7 +991,7 @@ function syncPatternIfChanged() {
       syncTimeout = setTimeout(async () => {
         try {
           await syncPatternToAllDevices();
-          console.log('Pattern auto-synced to devices');
+          // Logging is now handled in the BLE module based on device connection status
         } catch (error) {
           console.error('Failed to auto-sync pattern:', error);
         }

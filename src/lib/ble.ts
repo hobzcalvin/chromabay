@@ -665,12 +665,12 @@ export async function performOTAUpdate(
  * Sends a messagepack-encoded pattern to all connected devices
  */
 export async function syncPatternToAllDevices(): Promise<void> {
-  console.log('Syncing current pattern to all connected devices...');
-  
   if (connectedDevices.size === 0) {
-    console.log('No devices connected, skipping pattern sync');
+    // Silently skip when no devices are connected to reduce log noise
     return;
   }
+  
+  console.log('Syncing current pattern to all connected devices...');
 
   try {
     // Serialize the current pattern
@@ -695,7 +695,7 @@ export async function syncPatternToAllDevices(): Promise<void> {
     
     // Wait for all devices to complete
     await Promise.allSettled(syncPromises);
-    console.log('Pattern sync completed for all devices');
+    console.log(`Pattern sync completed for ${connectedDevices.size} device(s)`);
     
   } catch (error) {
     console.error('Error during pattern sync:', error);
