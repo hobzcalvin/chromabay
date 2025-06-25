@@ -3,8 +3,8 @@
 /**
  * Auto-generate native C++ code from operator definitions
  * This script parses the C++ operator files and generates:
- * - fastled_patterns.h (operator declarations)
- * - pattern_registry.cpp (operator registry)
+ * - fastled_operators.h (operator declarations)
+ * - operator_registry.cpp (operator registry)
  * - wasm_interface.cpp (WASM interface)
  * - Updates Makefile to use dynamic file listing
  */
@@ -32,7 +32,7 @@ function parseOperatorInfo(filePath) {
         ).join(' ');
     
     // Find parameter array definition
-    const paramArrayRegex = new RegExp(`(?:static\\s+)?const PatternParameter ${operatorName}_params\\[\\]\\s*=\\s*{([\\s\\S]*?)};`, 's');
+    const paramArrayRegex = new RegExp(`(?:static\\s+)?const OperatorParameter ${operatorName}_params\\[\\]\\s*=\\s*{([\\s\\S]*?)};`, 's');
     const match = content.match(paramArrayRegex);
     
     let paramCount = 0;
@@ -46,7 +46,7 @@ function parseOperatorInfo(filePath) {
         operatorName,
         displayName,
         paramCount,
-        functionName: `${operatorName}_pattern`,
+        functionName: `${operatorName}_operator`,
         paramsArrayName: `${operatorName}_params`
     };
 }
@@ -54,11 +54,11 @@ function parseOperatorInfo(filePath) {
 // Generate fastled_patterns.h
 function generateHeaderFile(operators) {
     const functionDeclarations = operators.map(op => 
-        `    void ${op.functionName}(PatternContext* ctx);`
+        `    void ${op.functionName}(OperatorContext* ctx);`
     ).join('\n');
     
     const paramDeclarations = operators.map(op =>
-        `extern const PatternParameter ${op.paramsArrayName}[];`
+        `extern const OperatorParameter ${op.paramsArrayName}[];`
     ).join('\n');
 
     return `// Auto-generated operator header file
@@ -69,16 +69,18 @@ function generateHeaderFile(operators) {
 // Operator function declarations and parameter arrays are auto-generated from 
 // the individual operator source files.
 
-#ifndef FASTLED_PATTERNS_H
-#define FASTLED_PATTERNS_H
+#ifndef FASTLED_OPERATORS_H
+#define FASTLED_OPERATORS_H
 
 #include <stdint.h>
 #include <stdbool.h>
 #include <cmath>
 
+#if defined(__EMSCRIPTEN__) || defined(NATIVE_BUILD)
+// WASM or native test build - provide essential FastLED-compatible types and functions
 #ifdef __EMSCRIPTEN__
-// WASM build - provide essential FastLED-compatible types and functions
 #include <emscripten.h>
+#endif
 
 // CRGB color type (compatible with FastLED)
 struct CRGB {
@@ -124,7 +126,7 @@ typedef struct {
     bool is_ending;           // True if operator is being cleaned up
     float* parameters;        // Array of parameter values
     uint32_t param_count;     // Number of parameters
-} PatternContext;
+} OperatorContext;
 
 // Parameter definition structure
 typedef struct {
@@ -136,16 +138,16 @@ typedef struct {
     float max_value;
     const char** options;     // For select type parameters
     uint32_t option_count;
-} PatternParameter;
+} OperatorParameter;
 
 // Operator definition structure
 typedef struct {
     const char* name;
     const char* type;
-    const PatternParameter* parameters;
+    const OperatorParameter* parameters;
     uint32_t param_count;
-    void (*pattern_func)(PatternContext* ctx);
-} PatternDefinition;
+    void (*operator_func)(OperatorContext* ctx);
+} OperatorDefinition;
 
 // Auto-generated operator function declarations
 extern "C" {
@@ -155,32 +157,32 @@ ${functionDeclarations}
 // Auto-generated operator parameter array declarations
 ${paramDeclarations}
 
-// Operator registry (defined in pattern_registry.cpp)
-extern const PatternDefinition PATTERN_DEFINITIONS[];
-extern const uint32_t PATTERN_COUNT;
+// Operator registry (defined in operator_registry.cpp)
+extern const OperatorDefinition OPERATOR_DEFINITIONS[];
+extern const uint32_t OPERATOR_COUNT;
 
 // Utility functions for 2D buffer access
-inline void set_pixel(PatternContext* ctx, uint32_t x, uint32_t y, CRGB color) {
+inline void set_pixel(OperatorContext* ctx, uint32_t x, uint32_t y, CRGB color) {
     if (x < ctx->width && y < ctx->height) {
         ctx->color_buffer[y * ctx->width + x] = color;
     }
 }
 
-inline CRGB get_pixel(PatternContext* ctx, uint32_t x, uint32_t y) {
+inline CRGB get_pixel(OperatorContext* ctx, uint32_t x, uint32_t y) {
     if (x < ctx->width && y < ctx->height) {
         return ctx->color_buffer[y * ctx->width + x];
     }
     return CRGB(0, 0, 0);
 }
 
-inline CRGB get_input1_pixel(PatternContext* ctx, uint32_t x, uint32_t y) {
+inline CRGB get_input1_pixel(OperatorContext* ctx, uint32_t x, uint32_t y) {
     if (ctx->input_buffer1 && x < ctx->width && y < ctx->height) {
         return ctx->input_buffer1[y * ctx->width + x];
     }
     return CRGB(0, 0, 0);
 }
 
-inline CRGB get_input2_pixel(PatternContext* ctx, uint32_t x, uint32_t y) {
+inline CRGB get_input2_pixel(OperatorContext* ctx, uint32_t x, uint32_t y) {
     if (ctx->input_buffer2 && x < ctx->width && y < ctx->height) {
         return ctx->input_buffer2[y * ctx->width + x];
     }
@@ -188,27 +190,27 @@ inline CRGB get_input2_pixel(PatternContext* ctx, uint32_t x, uint32_t y) {
 }
 
 // Utility function to get normalized coordinates (0.0 to 1.0)
-inline float get_normalized_x(PatternContext* ctx, uint32_t x) {
+inline float get_normalized_x(OperatorContext* ctx, uint32_t x) {
     return (float)x / (float)(ctx->width - 1);
 }
 
-inline float get_normalized_y(PatternContext* ctx, uint32_t y) {
+inline float get_normalized_y(OperatorContext* ctx, uint32_t y) {
     return (float)y / (float)(ctx->height - 1);
 }
 
 // Clear the entire buffer
-inline void clear_buffer(PatternContext* ctx, CRGB color = CRGB(0, 0, 0)) {
+inline void clear_buffer(OperatorContext* ctx, CRGB color = CRGB(0, 0, 0)) {
     uint32_t total_pixels = ctx->width * ctx->height;
     for (uint32_t i = 0; i < total_pixels; i++) {
         ctx->color_buffer[i] = color;
     }
 }
 
-#endif // FASTLED_PATTERNS_H
+#endif // FASTLED_OPERATORS_H
 `;
 }
 
-// Generate pattern_registry.cpp
+// Generate operator_registry.cpp
 function generateRegistryFile(operators) {
     const registryEntries = operators.map(op =>
         `    {"${op.displayName}", "${op.operatorName}", ${op.paramsArrayName}, ${op.paramCount}, ${op.functionName}}`
@@ -221,14 +223,14 @@ function generateRegistryFile(operators) {
 // This file contains the registry of all available FastLED operators.
 // The registry is automatically built from the individual operator source files.
 
-#include "fastled_patterns.h"
+#include "fastled_operators.h"
 
 // Auto-generated operator registry - parameters are defined alongside their functions
-const PatternDefinition PATTERN_DEFINITIONS[] = {
+const OperatorDefinition OPERATOR_DEFINITIONS[] = {
 ${registryEntries}
 };
 
-const uint32_t PATTERN_COUNT = sizeof(PATTERN_DEFINITIONS) / sizeof(PatternDefinition);
+const uint32_t OPERATOR_COUNT = sizeof(OPERATOR_DEFINITIONS) / sizeof(OperatorDefinition);
 `;
 }
 
@@ -236,32 +238,32 @@ const uint32_t PATTERN_COUNT = sizeof(PATTERN_DEFINITIONS) / sizeof(PatternDefin
 function generateWasmInterface(operators) {
     const callFunctions = operators.map(op => `
 EMSCRIPTEN_KEEPALIVE
-void call_${op.operatorName}_pattern(PatternContext* ctx) {
+void call_${op.operatorName}_operator(OperatorContext* ctx) {
     if (!ctx) return;
     ${op.functionName}(ctx);
 }`).join('\n');
 
-    const exportedFunctions = operators.map(op => `"_call_${op.operatorName}_pattern"`).join(', ');
+    const exportedFunctions = operators.map(op => `"_call_${op.operatorName}_operator"`).join(', ');
 
     return `// Auto-generated WASM interface
 // DO NOT EDIT - Generated by scripts/generate-native-code.js
 // Run 'npm run wasm:generate' to regenerate this file
 //
 // This file provides the WASM interface for FastLED operators.
-// Each operator gets a corresponding call_X_pattern function that can be invoked from JavaScript.
+// Each operator gets a corresponding call_X_operator function that can be invoked from JavaScript.
 
-#include "fastled_patterns.h"
+#include "fastled_operators.h"
 #include <emscripten.h>
 #include <cstring>
 #include <cstdlib>
 
-static PatternContext* g_context = nullptr;
+static OperatorContext* g_context = nullptr;
 
 extern "C" {
 
 EMSCRIPTEN_KEEPALIVE
-PatternContext* create_context(uint32_t width, uint32_t height) {
-    PatternContext* ctx = (PatternContext*)malloc(sizeof(PatternContext));
+OperatorContext* create_context(uint32_t width, uint32_t height) {
+    OperatorContext* ctx = (OperatorContext*)malloc(sizeof(OperatorContext));
     if (!ctx) return nullptr;
     
     // Allocate 2D color buffer
@@ -292,7 +294,7 @@ PatternContext* create_context(uint32_t width, uint32_t height) {
 }
 
 EMSCRIPTEN_KEEPALIVE
-void destroy_context(PatternContext* ctx) {
+void destroy_context(OperatorContext* ctx) {
     if (!ctx) return;
     
     if (ctx->color_buffer) {
@@ -316,7 +318,7 @@ void destroy_context(PatternContext* ctx) {
 }
 
 EMSCRIPTEN_KEEPALIVE
-void set_timing(PatternContext* ctx, uint32_t timestamp_ms, uint32_t delta_time_ms) {
+void set_timing(OperatorContext* ctx, uint32_t timestamp_ms, uint32_t delta_time_ms) {
     if (!ctx) return;
     ctx->timestamp_ms = timestamp_ms;
     ctx->delta_time_ms = delta_time_ms;
@@ -324,7 +326,7 @@ void set_timing(PatternContext* ctx, uint32_t timestamp_ms, uint32_t delta_time_
 }
 
 EMSCRIPTEN_KEEPALIVE
-void set_parameters(PatternContext* ctx, float* params, uint32_t param_count) {
+void set_parameters(OperatorContext* ctx, float* params, uint32_t param_count) {
     if (!ctx) return;
     
     // Free existing parameters
@@ -345,7 +347,7 @@ void set_parameters(PatternContext* ctx, float* params, uint32_t param_count) {
 }
 
 EMSCRIPTEN_KEEPALIVE
-uint8_t* get_output_buffer(PatternContext* ctx) {
+uint8_t* get_output_buffer(OperatorContext* ctx) {
     if (!ctx || !ctx->color_buffer) return nullptr;
     
     // Return pointer to the raw RGB data
@@ -353,7 +355,7 @@ uint8_t* get_output_buffer(PatternContext* ctx) {
 }
 
 EMSCRIPTEN_KEEPALIVE
-uint32_t get_buffer_size(PatternContext* ctx) {
+uint32_t get_buffer_size(OperatorContext* ctx) {
     if (!ctx) return 0;
     return ctx->width * ctx->height * 3; // 3 bytes per pixel (RGB)
 }
@@ -376,20 +378,20 @@ function updateMakefile(operators) {
     // Replace hardcoded SOURCES with dynamic listing
     content = content.replace(
         /SOURCES = .*/,
-        'SOURCES = pattern_registry.cpp $(wildcard operators/*.cpp)'
+        'SOURCES = operator_registry.cpp $(wildcard operators/*.cpp) fastled_compat.cpp'
     );
     
     // Replace hardcoded WASM_SOURCES with dynamic listing
     content = content.replace(
         /WASM_SOURCES = .*/,
-        'WASM_SOURCES = pattern_registry.cpp $(wildcard operators/*.cpp) wasm_interface.cpp'
+        'WASM_SOURCES = operator_registry.cpp $(wildcard operators/*.cpp) wasm_interface.cpp fastled_compat.cpp'
     );
     
     // Generate auto-generated exported functions list
     const exportedFunctions = [
         '"_create_context"', '"_destroy_context"', '"_set_timing"', '"_set_parameters"',
         '"_get_output_buffer"', '"_get_buffer_size"', '"_malloc"', '"_free"',
-        ...operators.map(op => `"_call_${op.operatorName}_pattern"`)
+        ...operators.map(op => `"_call_${op.operatorName}_operator"`)
     ];
     
     // Replace hardcoded EXPORTED_FUNCTIONS with auto-generated list
@@ -436,14 +438,14 @@ function main() {
     const makefileContent = updateMakefile(operators);
     
     // Write files
-    fs.writeFileSync(path.join(NATIVE_DIR, 'fastled_patterns.h'), headerContent);
-    fs.writeFileSync(path.join(NATIVE_DIR, 'pattern_registry.cpp'), registryContent);
+    fs.writeFileSync(path.join(NATIVE_DIR, 'fastled_operators.h'), headerContent);
+    fs.writeFileSync(path.join(NATIVE_DIR, 'operator_registry.cpp'), registryContent);
     fs.writeFileSync(path.join(NATIVE_DIR, 'wasm_interface.cpp'), wasmContent);
     fs.writeFileSync(path.join(NATIVE_DIR, 'Makefile'), makefileContent);
     
     console.log('✅ Generated native C++ files:');
-    console.log('   - fastled_patterns.h');
-    console.log('   - pattern_registry.cpp');
+    console.log('   - fastled_operators.h');
+    console.log('   - operator_registry.cpp');
     console.log('   - wasm_interface.cpp');
     console.log('   - Updated Makefile');
     
@@ -451,7 +453,7 @@ function main() {
     const exportedFunctions = [
         '"_create_context"', '"_destroy_context"', '"_set_timing"', '"_set_parameters"',
         '"_get_output_buffer"', '"_get_buffer_size"', '"_malloc"', '"_free"',
-        ...operators.map(op => `"_call_${op.operatorName}_pattern"`)
+        ...operators.map(op => `"_call_${op.operatorName}_operator"`)
     ];
     
     console.log('\n📤 WASM exported functions:');

@@ -1,23 +1,23 @@
-#include "../fastled_patterns.h"
+#include "../fastled_operators.h"
 #include <cmath>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
 
-// Rainbow pattern parameters
-static const PatternParameter rainbow_params[] = {
+// Rainbow operator parameters
+const OperatorParameter rainbow_params[] = {
     {"speed", "Speed", "float", 0.1f, 0.0f, 1.0f, nullptr, 0},
     {"saturation", "Saturation", "float", 1.0f, 0.0f, 1.0f, nullptr, 0},
     {"value", "Value", "float", 1.0f, 0.0f, 1.0f, nullptr, 0},
     {"angle", "Angle", "float", 0.0f, 0.0f, 360.0f, nullptr, 0}
 };
 
-// Static variables for pattern state
+// Static variables for operator state
 static bool rainbow_initialized = false;
 static uint32_t rainbow_start_time = 0;
 
-void rainbow_pattern(PatternContext* ctx) {
+void rainbow_operator(OperatorContext* ctx) {
     // Get parameters
     float speed = ctx->param_count > 0 ? ctx->parameters[0] : 50.0f;
     float saturation = ctx->param_count > 1 ? ctx->parameters[1] : 255.0f;
@@ -45,7 +45,7 @@ void rainbow_pattern(PatternContext* ctx) {
             
             // Apply rotation
             float rotated_x = centered_x * cos_angle - centered_y * sin_angle;
-            float rotated_y = centered_x * sin_angle + centered_y * cos_angle;
+            // float rotated_y = centered_x * sin_angle + centered_y * cos_angle; // Unused for this operator
             
             // Use the rotated X coordinate to determine hue
             // Scale from -0.5 to 0.5 to 0 to 255
@@ -62,11 +62,4 @@ void rainbow_pattern(PatternContext* ctx) {
     }
 }
 
-// Export pattern definition
-extern "C" const PatternDefinition RAINBOW_PATTERN = {
-    "Rainbow (Native)",
-    "native_rainbow",
-    rainbow_params,
-    sizeof(rainbow_params) / sizeof(PatternParameter),
-    rainbow_pattern
-}; 
+// Note: Operator definition is auto-generated in operator_registry.cpp 

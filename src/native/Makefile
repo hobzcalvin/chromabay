@@ -13,18 +13,18 @@ INCLUDES = -I.
 FASTLED_SRC = FastLED/src
 
 # Source files
-SOURCES = pattern_registry.cpp $(wildcard operators/*.cpp)
-HEADERS = fastled_patterns.h
+SOURCES = operator_registry.cpp $(wildcard operators/*.cpp) fastled_compat.cpp
+HEADERS = fastled_operators.h
 
 # Test executable
-TEST_TARGET = test_runner
-TEST_SOURCES = tests/test_runner.cpp $(SOURCES)
+TEST_TARGET = test_operators
+TEST_SOURCES = test_operators.cpp $(SOURCES)
 
 # WASM build
 WASM_TARGET = ../../static/wasm/fastled_patterns.js
-WASM_SOURCES = pattern_registry.cpp $(wildcard operators/*.cpp) wasm_interface.cpp
+WASM_SOURCES = operator_registry.cpp $(wildcard operators/*.cpp) wasm_interface.cpp fastled_compat.cpp
 EMCC_FLAGS = -O3 -s WASM=1 \
-	-s EXPORTED_FUNCTIONS='["_create_context", "_destroy_context", "_set_timing", "_set_parameters", "_get_output_buffer", "_get_buffer_size", "_malloc", "_free", "_call_gradient_pattern", "_call_moving_blob_pattern", "_call_perlin_noise_pattern", "_call_rainbow_pattern", "_call_sparkle_pattern", "_call_strobe_pattern"]' \
+	-s EXPORTED_FUNCTIONS='["_create_context", "_destroy_context", "_set_timing", "_set_parameters", "_get_output_buffer", "_get_buffer_size", "_malloc", "_free", "_call_gradient_operator", "_call_moving_blob_operator", "_call_perlin_noise_operator", "_call_rainbow_operator", "_call_sparkle_operator", "_call_strobe_operator"]' \
 	-s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap", "setValue", "getValue", "HEAPU8"]' \
 	-s ALLOW_MEMORY_GROWTH=1 \
 	-s MODULARIZE=1 \
@@ -71,7 +71,7 @@ help:
 	@echo ""
 	@echo "Targets:"
 	@echo "  wasm              Build WebAssembly module"
-	@echo "  test              Build and run native test"
+	@echo "  test              Build and run operator tests"
 	@echo "  clean             Clean build artifacts"
 	@echo "  install-emscripten Show Emscripten install instructions"
 	@echo "  help              Show this help" 

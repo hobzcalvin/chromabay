@@ -26,7 +26,7 @@ function parseOperatorParams(filePath) {
     
     // Find parameter array definition (handle both const and static const)
     // Use a more sophisticated regex to handle nested braces
-    const paramArrayRegex = new RegExp(`(?:static\\s+)?const PatternParameter ${operatorName}_params\\[\\]\\s*=\\s*{([\\s\\S]*?)};`, 's');
+    const paramArrayRegex = new RegExp(`(?:static\\s+)?const OperatorParameter ${operatorName}_params\\[\\]\\s*=\\s*{([\\s\\S]*?)};`, 's');
     const match = content.match(paramArrayRegex);
     
     if (!match) {
@@ -74,11 +74,11 @@ ${op.params.map(param => `      { label: '${param.label}', name: '${param.name}'
     ]
   }`).join(',\n');
 
-    const wasmCalls = operators.map(op => `    _call_${op.operatorName}_pattern(contextPtr: number): void;`).join('\n');
+    const wasmCalls = operators.map(op => `    _call_${op.operatorName}_operator(contextPtr: number): void;`).join('\n');
     
     const runnerMethods = operators.map(op => `    async run${op.displayName.replace(/\s+/g, '')}(): Promise<ImageData | null> {
         if (!this.contextPtr) return null;
-        this.module._call_${op.operatorName}_pattern(this.contextPtr);
+        this.module._call_${op.operatorName}_operator(this.contextPtr);
         return this.getImageData();
     }`).join('\n\n');
 

@@ -3,20 +3,20 @@
 // Run 'npm run wasm:generate' to regenerate this file
 //
 // This file provides the WASM interface for FastLED operators.
-// Each operator gets a corresponding call_X_pattern function that can be invoked from JavaScript.
+// Each operator gets a corresponding call_X_operator function that can be invoked from JavaScript.
 
-#include "fastled_patterns.h"
+#include "fastled_operators.h"
 #include <emscripten.h>
 #include <cstring>
 #include <cstdlib>
 
-static PatternContext* g_context = nullptr;
+static OperatorContext* g_context = nullptr;
 
 extern "C" {
 
 EMSCRIPTEN_KEEPALIVE
-PatternContext* create_context(uint32_t width, uint32_t height) {
-    PatternContext* ctx = (PatternContext*)malloc(sizeof(PatternContext));
+OperatorContext* create_context(uint32_t width, uint32_t height) {
+    OperatorContext* ctx = (OperatorContext*)malloc(sizeof(OperatorContext));
     if (!ctx) return nullptr;
     
     // Allocate 2D color buffer
@@ -47,7 +47,7 @@ PatternContext* create_context(uint32_t width, uint32_t height) {
 }
 
 EMSCRIPTEN_KEEPALIVE
-void destroy_context(PatternContext* ctx) {
+void destroy_context(OperatorContext* ctx) {
     if (!ctx) return;
     
     if (ctx->color_buffer) {
@@ -71,7 +71,7 @@ void destroy_context(PatternContext* ctx) {
 }
 
 EMSCRIPTEN_KEEPALIVE
-void set_timing(PatternContext* ctx, uint32_t timestamp_ms, uint32_t delta_time_ms) {
+void set_timing(OperatorContext* ctx, uint32_t timestamp_ms, uint32_t delta_time_ms) {
     if (!ctx) return;
     ctx->timestamp_ms = timestamp_ms;
     ctx->delta_time_ms = delta_time_ms;
@@ -79,7 +79,7 @@ void set_timing(PatternContext* ctx, uint32_t timestamp_ms, uint32_t delta_time_
 }
 
 EMSCRIPTEN_KEEPALIVE
-void set_parameters(PatternContext* ctx, float* params, uint32_t param_count) {
+void set_parameters(OperatorContext* ctx, float* params, uint32_t param_count) {
     if (!ctx) return;
     
     // Free existing parameters
@@ -100,7 +100,7 @@ void set_parameters(PatternContext* ctx, float* params, uint32_t param_count) {
 }
 
 EMSCRIPTEN_KEEPALIVE
-uint8_t* get_output_buffer(PatternContext* ctx) {
+uint8_t* get_output_buffer(OperatorContext* ctx) {
     if (!ctx || !ctx->color_buffer) return nullptr;
     
     // Return pointer to the raw RGB data
@@ -108,7 +108,7 @@ uint8_t* get_output_buffer(PatternContext* ctx) {
 }
 
 EMSCRIPTEN_KEEPALIVE
-uint32_t get_buffer_size(PatternContext* ctx) {
+uint32_t get_buffer_size(OperatorContext* ctx) {
     if (!ctx) return 0;
     return ctx->width * ctx->height * 3; // 3 bytes per pixel (RGB)
 }
@@ -116,42 +116,42 @@ uint32_t get_buffer_size(PatternContext* ctx) {
 // Auto-generated operator call functions
 
 EMSCRIPTEN_KEEPALIVE
-void call_gradient_pattern(PatternContext* ctx) {
+void call_gradient_operator(OperatorContext* ctx) {
     if (!ctx) return;
-    gradient_pattern(ctx);
+    gradient_operator(ctx);
 }
 
 EMSCRIPTEN_KEEPALIVE
-void call_moving_blob_pattern(PatternContext* ctx) {
+void call_moving_blob_operator(OperatorContext* ctx) {
     if (!ctx) return;
-    moving_blob_pattern(ctx);
+    moving_blob_operator(ctx);
 }
 
 EMSCRIPTEN_KEEPALIVE
-void call_perlin_noise_pattern(PatternContext* ctx) {
+void call_perlin_noise_operator(OperatorContext* ctx) {
     if (!ctx) return;
-    perlin_noise_pattern(ctx);
+    perlin_noise_operator(ctx);
 }
 
 EMSCRIPTEN_KEEPALIVE
-void call_rainbow_pattern(PatternContext* ctx) {
+void call_rainbow_operator(OperatorContext* ctx) {
     if (!ctx) return;
-    rainbow_pattern(ctx);
+    rainbow_operator(ctx);
 }
 
 EMSCRIPTEN_KEEPALIVE
-void call_sparkle_pattern(PatternContext* ctx) {
+void call_sparkle_operator(OperatorContext* ctx) {
     if (!ctx) return;
-    sparkle_pattern(ctx);
+    sparkle_operator(ctx);
 }
 
 EMSCRIPTEN_KEEPALIVE
-void call_strobe_pattern(PatternContext* ctx) {
+void call_strobe_operator(OperatorContext* ctx) {
     if (!ctx) return;
-    strobe_pattern(ctx);
+    strobe_operator(ctx);
 }
 
 } // extern "C"
 
 // Note: Exported functions for Emscripten build:
-// ["_call_gradient_pattern", "_call_moving_blob_pattern", "_call_perlin_noise_pattern", "_call_rainbow_pattern", "_call_sparkle_pattern", "_call_strobe_pattern", "_create_context", "_destroy_context", "_set_timing", "_set_parameters", "_get_output_buffer", "_get_buffer_size", "_malloc", "_free"]
+// ["_call_gradient_operator", "_call_moving_blob_operator", "_call_perlin_noise_operator", "_call_rainbow_operator", "_call_sparkle_operator", "_call_strobe_operator", "_create_context", "_destroy_context", "_set_timing", "_set_parameters", "_get_output_buffer", "_get_buffer_size", "_malloc", "_free"]

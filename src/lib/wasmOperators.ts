@@ -12,12 +12,12 @@ interface WasmModule {
     _set_parameters(contextPtr: number, paramsPtr: number, paramCount: number): void;
     _get_output_buffer(contextPtr: number): number;
     _get_buffer_size(contextPtr: number): number;
-    _call_gradient_pattern(contextPtr: number): void;
-    _call_moving_blob_pattern(contextPtr: number): void;
-    _call_perlin_noise_pattern(contextPtr: number): void;
-    _call_rainbow_pattern(contextPtr: number): void;
-    _call_sparkle_pattern(contextPtr: number): void;
-    _call_strobe_pattern(contextPtr: number): void;
+    _call_gradient_operator(contextPtr: number): void;
+    _call_moving_blob_operator(contextPtr: number): void;
+    _call_perlin_noise_operator(contextPtr: number): void;
+    _call_rainbow_operator(contextPtr: number): void;
+    _call_sparkle_operator(contextPtr: number): void;
+    _call_strobe_operator(contextPtr: number): void;
     
     // Memory access
     HEAPU8: Uint8Array;
@@ -220,37 +220,37 @@ export class FastLEDWasmOperatorRunner {
 
     async runGradient(): Promise<ImageData | null> {
         if (!this.contextPtr) return null;
-        this.module._call_gradient_pattern(this.contextPtr);
+        this.module._call_gradient_operator(this.contextPtr);
         return this.getImageData();
     }
 
     async runMovingBlob(): Promise<ImageData | null> {
         if (!this.contextPtr) return null;
-        this.module._call_moving_blob_pattern(this.contextPtr);
+        this.module._call_moving_blob_operator(this.contextPtr);
         return this.getImageData();
     }
 
     async runPerlinNoise(): Promise<ImageData | null> {
         if (!this.contextPtr) return null;
-        this.module._call_perlin_noise_pattern(this.contextPtr);
+        this.module._call_perlin_noise_operator(this.contextPtr);
         return this.getImageData();
     }
 
     async runRainbow(): Promise<ImageData | null> {
         if (!this.contextPtr) return null;
-        this.module._call_rainbow_pattern(this.contextPtr);
+        this.module._call_rainbow_operator(this.contextPtr);
         return this.getImageData();
     }
 
     async runSparkle(): Promise<ImageData | null> {
         if (!this.contextPtr) return null;
-        this.module._call_sparkle_pattern(this.contextPtr);
+        this.module._call_sparkle_operator(this.contextPtr);
         return this.getImageData();
     }
 
     async runStrobe(): Promise<ImageData | null> {
         if (!this.contextPtr) return null;
-        this.module._call_strobe_pattern(this.contextPtr);
+        this.module._call_strobe_operator(this.contextPtr);
         return this.getImageData();
     }
 

@@ -1,7 +1,7 @@
-#include "../fastled_patterns.h"
+#include "../fastled_operators.h"
 
 // Moving Blob operator parameter definitions
-const PatternParameter moving_blob_params[] = {
+const OperatorParameter moving_blob_params[] = {
     {"speed", "Speed", "float", 30.0f, 0.0f, 100.0f, nullptr, 0},
     {"blob_size", "Blob Size", "float", 0.3f, 0.1f, 1.0f, nullptr, 0},
     {"hue", "Hue", "float", 0.0f, 0.0f, 255.0f, nullptr, 0},
@@ -9,7 +9,7 @@ const PatternParameter moving_blob_params[] = {
     {"value", "Value", "float", 255.0f, 0.0f, 255.0f, nullptr, 0}
 };
 
-void moving_blob_pattern(PatternContext* ctx) {
+void moving_blob_operator(OperatorContext* ctx) {
     // Get parameters
     float speed = ctx->param_count > 0 ? ctx->parameters[0] : 30.0f;
     float blob_size = ctx->param_count > 1 ? ctx->parameters[1] : 0.3f;
@@ -21,7 +21,7 @@ void moving_blob_pattern(PatternContext* ctx) {
     clear_buffer(ctx, CRGB(0, 0, 0));
     
     // Calculate blob positions based on time
-    float time_scale = speed / 60.0f; // Convert to reasonable time scale
+    // float time_scale = speed / 60.0f; // Convert to reasonable time scale (unused)
     float time_offset = beat16(speed) / 65535.0f * 2.0f * M_PI;
     
     // Create multiple blobs

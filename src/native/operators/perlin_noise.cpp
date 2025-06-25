@@ -1,7 +1,7 @@
-#include "../fastled_patterns.h"
+#include "../fastled_operators.h"
 
 // Perlin Noise operator parameter definitions
-const PatternParameter perlin_noise_params[] = {
+const OperatorParameter perlin_noise_params[] = {
     {"scale", "Scale", "float", 4.0f, 1.0f, 20.0f, nullptr, 0},
     {"speed", "Speed", "float", 50.0f, 0.0f, 200.0f, nullptr, 0},
     {"hue_base", "Base Hue", "float", 0.0f, 0.0f, 255.0f, nullptr, 0},
@@ -28,7 +28,7 @@ static float simple_noise(float x, float y, float t) {
     return (noise + 1.0f) * 0.5f;
 }
 
-void perlin_noise_pattern(PatternContext* ctx) {
+void perlin_noise_operator(OperatorContext* ctx) {
     // Get parameters
     float scale = ctx->param_count > 0 ? ctx->parameters[0] : 4.0f; // Noise scale
     float speed = ctx->param_count > 1 ? ctx->parameters[1] : 50.0f; // Animation speed

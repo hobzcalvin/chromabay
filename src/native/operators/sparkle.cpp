@@ -1,7 +1,7 @@
-#include "../fastled_patterns.h"
+#include "../fastled_operators.h"
 
 // Sparkle operator parameter definitions
-const PatternParameter sparkle_params[] = {
+const OperatorParameter sparkle_params[] = {
     {"density", "Density", "float", 0.1f, 0.0f, 1.0f, nullptr, 0},
     {"fade_rate", "Fade Rate", "float", 0.95f, 0.5f, 0.99f, nullptr, 0},
     {"hue", "Hue", "float", 255.0f, 0.0f, 255.0f, nullptr, 0}, // 255 = random
@@ -17,7 +17,7 @@ static uint32_t sparkle_random() {
     return sparkle_seed;
 }
 
-void sparkle_pattern(PatternContext* ctx) {
+void sparkle_operator(OperatorContext* ctx) {
     // Get parameters
     float density = ctx->param_count > 0 ? ctx->parameters[0] : 0.1f; // 0.0 to 1.0
     float fade_rate = ctx->param_count > 1 ? ctx->parameters[1] : 0.95f; // 0.0 to 1.0
@@ -48,41 +48,38 @@ void sparkle_pattern(PatternContext* ctx) {
     uint32_t total_pixels = ctx->width * ctx->height;
     uint32_t sparkles_to_add = (uint32_t)(total_pixels * density);
     
+    // Simplified sparkle algorithm - just add sparkles without complex conditions
+    sparkles_to_add = (sparkles_to_add > total_pixels / 4) ? total_pixels / 4 : sparkles_to_add;
+    
     for (uint32_t i = 0; i < sparkles_to_add; i++) {
         // Random position
         uint32_t x = sparkle_random() % ctx->width;
-        uint32_t y = sparkle_random() % ctx->width; // Use width for both to avoid bias
-        y = y % ctx->height; // Then clamp to height
+        uint32_t y = sparkle_random() % ctx->height;
         
-        // Only add sparkle if pixel is currently dim
-        CRGB current_color = get_pixel(ctx, x, y);
-        uint8_t brightness = (current_color.r + current_color.g + current_color.b) / 3;
-        
-        if (brightness < 50) { // Only sparkle on dim pixels
-            // Determine sparkle hue
-            float sparkle_hue;
-            if (hue >= 255.0f) {
-                // Random hue
-                sparkle_hue = (sparkle_random() % 256);
-            } else {
-                // Use specified hue with some variation
-                float hue_variation = (sparkle_random() % 41) - 20; // ±20 hue units
-                sparkle_hue = hue + hue_variation;
-                while (sparkle_hue < 0.0f) sparkle_hue += 255.0f;
-                while (sparkle_hue > 255.0f) sparkle_hue -= 255.0f;
-            }
-            
-            // Create sparkle with random intensity
-            float intensity = 0.5f + (sparkle_random() % 128) / 255.0f; // 0.5 to 1.0
-            
-            CHSV sparkle_hsv(
-                (uint8_t)sparkle_hue,
-                (uint8_t)saturation,
-                (uint8_t)(value * intensity)
-            );
-            CRGB sparkle_color = sparkle_hsv;
-            
-            set_pixel(ctx, x, y, sparkle_color);
+        // Determine sparkle hue
+        float sparkle_hue;
+        if (hue >= 255.0f) {
+            // Random hue
+            sparkle_hue = (sparkle_random() % 256);
+        } else {
+            // Use specified hue with some variation
+            float hue_variation = (sparkle_random() % 41) - 20; // ±20 hue units
+            sparkle_hue = hue + hue_variation;
+            // Safe modulo instead of while loops
+            if (sparkle_hue < 0.0f) sparkle_hue = 0.0f;
+            if (sparkle_hue > 255.0f) sparkle_hue = 255.0f;
         }
+        
+        // Create sparkle with random intensity
+        float intensity = 0.5f + (sparkle_random() % 128) / 255.0f; // 0.5 to 1.0
+        
+        CHSV sparkle_hsv(
+            (uint8_t)sparkle_hue,
+            (uint8_t)saturation,
+            (uint8_t)(value * intensity)
+        );
+        CRGB sparkle_color = sparkle_hsv;
+        
+        set_pixel(ctx, x, y, sparkle_color);
     }
 } 

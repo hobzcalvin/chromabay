@@ -1,7 +1,7 @@
-#include "../fastled_patterns.h"
+#include "../fastled_operators.h"
 
 // Gradient operator parameter definitions
-const PatternParameter gradient_params[] = {
+const OperatorParameter gradient_params[] = {
     {"angle", "Angle", "float", 0.0f, 0.0f, 360.0f, nullptr, 0},
     {"start_hue", "Start Hue", "float", 0.0f, 0.0f, 255.0f, nullptr, 0},
     {"end_hue", "End Hue", "float", 255.0f, 0.0f, 255.0f, nullptr, 0},
@@ -9,7 +9,7 @@ const PatternParameter gradient_params[] = {
     {"value", "Value", "float", 255.0f, 0.0f, 255.0f, nullptr, 0}
 };
 
-void gradient_pattern(PatternContext* ctx) {
+void gradient_operator(OperatorContext* ctx) {
     // Get parameters
     float angle = ctx->param_count > 0 ? ctx->parameters[0] : 0.0f;
     float start_hue = ctx->param_count > 1 ? ctx->parameters[1] : 0.0f;

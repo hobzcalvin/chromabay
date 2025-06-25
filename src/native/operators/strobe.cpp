@@ -1,7 +1,7 @@
-#include "../fastled_patterns.h"
+#include "../fastled_operators.h"
 
 // Strobe operator parameter definitions
-const PatternParameter strobe_params[] = {
+const OperatorParameter strobe_params[] = {
     {"rate", "Rate (Hz)", "float", 2.0f, 0.1f, 20.0f, nullptr, 0},
     {"duty_cycle", "Duty Cycle", "float", 0.1f, 0.01f, 0.9f, nullptr, 0},
     {"hue", "Hue", "float", 0.0f, 0.0f, 255.0f, nullptr, 0},
@@ -9,7 +9,7 @@ const PatternParameter strobe_params[] = {
     {"value", "Value", "float", 255.0f, 0.0f, 255.0f, nullptr, 0}
 };
 
-void strobe_pattern(PatternContext* ctx) {
+void strobe_operator(OperatorContext* ctx) {
     // Get parameters
     float rate = ctx->param_count > 0 ? ctx->parameters[0] : 2.0f; // Flashes per second
     float duty_cycle = ctx->param_count > 1 ? ctx->parameters[1] : 0.1f; // 0.0 to 1.0 (fraction of time ON)

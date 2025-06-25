@@ -29,7 +29,9 @@
 		"wasm:build": "cd src/native && make wasm",
 		"wasm:clean": "cd src/native && make clean",
 		"wasm:full": "npm run wasm:generate && npm run wasm:build",
-		"operators:add": "echo 'To add a new operator: 1) Create .cpp file in src/native/operators/, 2) Add to pattern_registry.cpp, 3) Run npm run wasm:full'"
+		"operators:add": "echo 'To add a new operator: 1) Create .cpp file in src/native/operators/, 2) Run npm run wasm:generate to auto-generate registry, 3) Run npm run wasm:build'",
+		"operators:test": "cd src/native && make test && ./test_operators",
+		"operators:test-build": "cd src/native && make test"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-auto": "^6.0.0",

@@ -6,16 +6,18 @@
 // Operator function declarations and parameter arrays are auto-generated from 
 // the individual operator source files.
 
-#ifndef FASTLED_PATTERNS_H
-#define FASTLED_PATTERNS_H
+#ifndef FASTLED_OPERATORS_H
+#define FASTLED_OPERATORS_H
 
 #include <stdint.h>
 #include <stdbool.h>
 #include <cmath>
 
+#if defined(__EMSCRIPTEN__) || defined(NATIVE_BUILD)
+// WASM or native test build - provide essential FastLED-compatible types and functions
 #ifdef __EMSCRIPTEN__
-// WASM build - provide essential FastLED-compatible types and functions
 #include <emscripten.h>
+#endif
 
 // CRGB color type (compatible with FastLED)
 struct CRGB {
@@ -61,7 +63,7 @@ typedef struct {
     bool is_ending;           // True if operator is being cleaned up
     float* parameters;        // Array of parameter values
     uint32_t param_count;     // Number of parameters
-} PatternContext;
+} OperatorContext;
 
 // Parameter definition structure
 typedef struct {
@@ -73,61 +75,61 @@ typedef struct {
     float max_value;
     const char** options;     // For select type parameters
     uint32_t option_count;
-} PatternParameter;
+} OperatorParameter;
 
 // Operator definition structure
 typedef struct {
     const char* name;
     const char* type;
-    const PatternParameter* parameters;
+    const OperatorParameter* parameters;
     uint32_t param_count;
-    void (*pattern_func)(PatternContext* ctx);
-} PatternDefinition;
+    void (*operator_func)(OperatorContext* ctx);
+} OperatorDefinition;
 
 // Auto-generated operator function declarations
 extern "C" {
-    void gradient_pattern(PatternContext* ctx);
-    void moving_blob_pattern(PatternContext* ctx);
-    void perlin_noise_pattern(PatternContext* ctx);
-    void rainbow_pattern(PatternContext* ctx);
-    void sparkle_pattern(PatternContext* ctx);
-    void strobe_pattern(PatternContext* ctx);
+    void gradient_operator(OperatorContext* ctx);
+    void moving_blob_operator(OperatorContext* ctx);
+    void perlin_noise_operator(OperatorContext* ctx);
+    void rainbow_operator(OperatorContext* ctx);
+    void sparkle_operator(OperatorContext* ctx);
+    void strobe_operator(OperatorContext* ctx);
 }
 
 // Auto-generated operator parameter array declarations
-extern const PatternParameter gradient_params[];
-extern const PatternParameter moving_blob_params[];
-extern const PatternParameter perlin_noise_params[];
-extern const PatternParameter rainbow_params[];
-extern const PatternParameter sparkle_params[];
-extern const PatternParameter strobe_params[];
+extern const OperatorParameter gradient_params[];
+extern const OperatorParameter moving_blob_params[];
+extern const OperatorParameter perlin_noise_params[];
+extern const OperatorParameter rainbow_params[];
+extern const OperatorParameter sparkle_params[];
+extern const OperatorParameter strobe_params[];
 
-// Operator registry (defined in pattern_registry.cpp)
-extern const PatternDefinition PATTERN_DEFINITIONS[];
-extern const uint32_t PATTERN_COUNT;
+// Operator registry (defined in operator_registry.cpp)
+extern const OperatorDefinition OPERATOR_DEFINITIONS[];
+extern const uint32_t OPERATOR_COUNT;
 
 // Utility functions for 2D buffer access
-inline void set_pixel(PatternContext* ctx, uint32_t x, uint32_t y, CRGB color) {
+inline void set_pixel(OperatorContext* ctx, uint32_t x, uint32_t y, CRGB color) {
     if (x < ctx->width && y < ctx->height) {
         ctx->color_buffer[y * ctx->width + x] = color;
     }
 }
 
-inline CRGB get_pixel(PatternContext* ctx, uint32_t x, uint32_t y) {
+inline CRGB get_pixel(OperatorContext* ctx, uint32_t x, uint32_t y) {
     if (x < ctx->width && y < ctx->height) {
         return ctx->color_buffer[y * ctx->width + x];
     }
     return CRGB(0, 0, 0);
 }
 
-inline CRGB get_input1_pixel(PatternContext* ctx, uint32_t x, uint32_t y) {
+inline CRGB get_input1_pixel(OperatorContext* ctx, uint32_t x, uint32_t y) {
     if (ctx->input_buffer1 && x < ctx->width && y < ctx->height) {
         return ctx->input_buffer1[y * ctx->width + x];
     }
     return CRGB(0, 0, 0);
 }
 
-inline CRGB get_input2_pixel(PatternContext* ctx, uint32_t x, uint32_t y) {
+inline CRGB get_input2_pixel(OperatorContext* ctx, uint32_t x, uint32_t y) {
     if (ctx->input_buffer2 && x < ctx->width && y < ctx->height) {
         return ctx->input_buffer2[y * ctx->width + x];
     }
@@ -135,20 +137,20 @@ inline CRGB get_input2_pixel(PatternContext* ctx, uint32_t x, uint32_t y) {
 }
 
 // Utility function to get normalized coordinates (0.0 to 1.0)
-inline float get_normalized_x(PatternContext* ctx, uint32_t x) {
+inline float get_normalized_x(OperatorContext* ctx, uint32_t x) {
     return (float)x / (float)(ctx->width - 1);
 }
 
-inline float get_normalized_y(PatternContext* ctx, uint32_t y) {
+inline float get_normalized_y(OperatorContext* ctx, uint32_t y) {
     return (float)y / (float)(ctx->height - 1);
 }
 
 // Clear the entire buffer
-inline void clear_buffer(PatternContext* ctx, CRGB color = CRGB(0, 0, 0)) {
+inline void clear_buffer(OperatorContext* ctx, CRGB color = CRGB(0, 0, 0)) {
     uint32_t total_pixels = ctx->width * ctx->height;
     for (uint32_t i = 0; i < total_pixels; i++) {
         ctx->color_buffer[i] = color;
     }
 }
 
-#endif // FASTLED_PATTERNS_H
+#endif // FASTLED_OPERATORS_H

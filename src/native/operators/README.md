@@ -5,7 +5,7 @@ This directory contains FastLED-compatible operators that run both on ESP32 and 
 ## How It Works
 
 1. **Single Source of Truth**: Parameter definitions are in the C++ files alongside the operator functions
-2. **Auto-Generation**: TypeScript bindings are auto-generated from C++ source
+2. **Auto-Generation**: ALL other files are auto-generated from C++ source (registry, headers, WASM interface, TypeScript bindings)
 3. **Cross-Platform**: Same code compiles for ESP32 (native FastLED) and WASM (browser)
 
 ## Adding a New Operator
@@ -13,24 +13,23 @@ This directory contains FastLED-compatible operators that run both on ESP32 and 
 1. Create `my_operator.cpp` in this directory
 2. Define parameters at the top:
    ```cpp
-   static const PatternParameter my_operator_params[] = {
+   static const OperatorParameter my_operator_params[] = {
        {"speed", "Speed", "float", 1.0f, 0.0f, 10.0f, nullptr, 0},
        {"hue", "Hue", "float", 0.0f, 0.0f, 255.0f, nullptr, 0}
    };
    ```
 3. Implement the operator function:
    ```cpp
-   void my_operator_pattern(PatternContext* ctx) {
+   void my_operator_operator(OperatorContext* ctx) {
        float speed = ctx->param_count > 0 ? ctx->parameters[0] : 1.0f;
        float hue = ctx->param_count > 1 ? ctx->parameters[1] : 0.0f;
        // ... operator implementation
    }
    ```
-4. Add to `../pattern_registry.cpp`:
-   ```cpp
-   {"My Operator", "my_operator", my_operator_params, 2, my_operator_pattern}
-   ```
-5. Run `npm run wasm:full` to regenerate bindings and build WASM
+4. Run `npm run wasm:generate` to auto-generate ALL supporting files
+5. Run `npm run wasm:build` to build WASM
+
+**That's it!** No manual registry editing needed - everything is auto-generated from your operator source file.
 
 ## Development Workflow
 
