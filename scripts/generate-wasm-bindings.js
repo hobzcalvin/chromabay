@@ -138,8 +138,8 @@ export async function loadWasmModule(): Promise<WasmModule> {
     
     wasmLoadPromise = new Promise<WasmModule>(async (resolve, reject) => {
         try {
-            // Check if FastLEDPatterns is already available (script already loaded)
-            const existingFactory = (window as any).FastLEDPatterns;
+            // Check if FastLEDOperators is already available (script already loaded)
+            const existingFactory = (window as any).FastLEDOperators;
             if (existingFactory) {
                 try {
                     const module = await existingFactory();
@@ -155,14 +155,14 @@ export async function loadWasmModule(): Promise<WasmModule> {
             
             // Use dynamic script loading instead of import() to avoid Vite restrictions
             const script = document.createElement('script');
-            script.src = '/wasm/fastled_patterns.js';
+            script.src = '/wasm/fastled_operators.js';
             script.type = 'text/javascript';
             
             script.onload = async () => {
                 try {
-                    const wasmFactory = (window as any).FastLEDPatterns;
+                    const wasmFactory = (window as any).FastLEDOperators;
                     if (!wasmFactory) {
-                        throw new Error('FastLEDPatterns factory not found on window');
+                        throw new Error('FastLEDOperators factory not found on window');
                     }
                     
                     const module = await wasmFactory();
@@ -372,7 +372,7 @@ function main() {
     console.log(`Generated ${OUTPUT_FILE}`);
     
     // Clean up old file
-    const oldFile = path.join(__dirname, '../src/lib/wasmPatterns.ts');
+    const oldFile = path.join(__dirname, '../src/lib/wasmOperators.ts');
     if (fs.existsSync(oldFile)) {
         fs.unlinkSync(oldFile);
         console.log(`Removed old file: ${oldFile}`);

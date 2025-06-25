@@ -155,9 +155,9 @@ export interface NodeDefinition {
   render: (context: RenderContext) => void;
 }
 
-// Helper function to try rendering with native WASM patterns
-async function tryRenderNativePattern(
-  patternType: string, 
+// Helper function to try rendering with native WASM operators
+async function tryRenderNativeOperator(
+  operatorType: string, 
   totalTime: number, 
   deltaTime: number, 
   width: number, 
@@ -165,36 +165,36 @@ async function tryRenderNativePattern(
   nodeId: string
 ): Promise<ImageData | null> {
   try {
-    const nativePattern = NATIVE_OPERATOR_DEFINITIONS.find(p => p.type === patternType);
-    if (!nativePattern) return null;
-    
-    // Extract parameter values for this node
-    const parameters = nativePattern.params.map(param => 
-      getNodeParameter(nodeId, param.name, param.default)
-    );
-    
-    // Convert parameters array to object
-    const paramObj: any = {};
-    nativePattern.params.forEach((param, index) => {
-      paramObj[param.name] = parameters[index];
-    });
-    
-    // Call the native WASM operator
-    return await renderNativeOperator(
-      patternType.replace('native_', '') as import('./wasmOperators').OperatorType, // Remove native_ prefix and cast to correct type
+      const nativeOperator = NATIVE_OPERATOR_DEFINITIONS.find(p => p.type === operatorType);
+  if (!nativeOperator) return null;
+  
+  // Extract parameter values for this node
+  const parameters = nativeOperator.params.map(param => 
+    getNodeParameter(nodeId, param.name, param.default)
+  );
+  
+  // Convert parameters array to object
+  const paramObj: any = {};
+  nativeOperator.params.forEach((param, index) => {
+    paramObj[param.name] = parameters[index];
+  });
+  
+  // Call the native WASM operator
+  return await renderNativeOperator(
+    operatorType.replace('native_', '') as import('./wasmOperators').OperatorType, // Remove native_ prefix and cast to correct type
       width,
       height,
       totalTime * 1000, // Convert to milliseconds
       paramObj
     );
   } catch (error) {
-    console.warn('Native pattern render failed:', error);
+    console.warn('Native operator render failed:', error);
     return null;
   }
 }
 
-// Define LED pattern node types with their render functions
-// Note: Output is first (index 0) so it's not shown in dropdown, pattern nodes start from index 1
+// Define LED operator node types with their render functions
+// Note: Output is first (index 0) so it's not shown in dropdown, operator nodes start from index 1
 export const NODE_TYPES: NodeDefinition[] = [
   {
     name: 'Output',
@@ -601,10 +601,10 @@ export const NODE_TYPES: NodeDefinition[] = [
   },
   
   // Add native FastLED operators
-  ...NATIVE_OPERATOR_DEFINITIONS.map(nativePattern => ({
-    name: nativePattern.name,
-    type: nativePattern.type,
-    params: nativePattern.params.map(param => ({
+  ...NATIVE_OPERATOR_DEFINITIONS.map(nativeOperator => ({
+    name: nativeOperator.name,
+    type: nativeOperator.type,
+    params: nativeOperator.params.map(param => ({
       label: param.label,
       name: param.name,
       type: param.type as ParameterType,
@@ -625,7 +625,7 @@ export const NODE_TYPES: NodeDefinition[] = [
       ctx.fillText('Ø', width / 2, height / 2);
       
       // Try to render with WASM if available
-      tryRenderNativePattern(nativePattern.type, totalTime, deltaTime, width, height, nodeId)
+      tryRenderNativeOperator(nativeOperator.type, totalTime, deltaTime, width, height, nodeId)
         .then((imageData: ImageData | null) => {
           if (imageData) {
             ctx.putImageData(imageData, 0, 0);
@@ -923,7 +923,7 @@ export function loadSerializedPattern(serializedPattern: SerializedPattern): voi
 export function initializeDefaultPattern(): void {
   // Create default nodes
   const defaultNodes: Node[] = [
-    createNodeFromType(NODE_TYPES[1], '1', { x: LANES.CENTER, y: 100 }),        // First pattern node (rainbow)
+    createNodeFromType(NODE_TYPES[1], '1', { x: LANES.CENTER, y: 100 }),        // First operator node (rainbow)
     createNodeFromType(NODE_TYPES[0], '2', { x: LANES.CENTER, y: 250 })         // Output node
   ];
 

@@ -51,7 +51,7 @@ function parseOperatorInfo(filePath) {
     };
 }
 
-// Generate fastled_patterns.h
+// Generate fastled_operators.h
 function generateHeaderFile(operators) {
     const functionDeclarations = operators.map(op => 
         `    void ${op.functionName}(OperatorContext* ctx);`

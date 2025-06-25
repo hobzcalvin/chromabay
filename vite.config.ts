@@ -10,7 +10,7 @@ function fastledWasmPlugin() {
 		name: 'fastled-wasm',
 		buildStart() {
 			const wasmDir = path.resolve('src/lib/wasm');
-			const wasmFile = path.join(wasmDir, 'fastled_patterns.js');
+			const wasmFile = path.join(wasmDir, 'fastled_operators.js');
 			const nativeDir = path.resolve('src/native');
 			
 			// Check if WASM files exist
@@ -90,6 +90,6 @@ export default defineConfig({
 	},
 	// Enable proper WASM loading
 	optimizeDeps: {
-		exclude: ['./wasm/fastled_patterns.js']
+		exclude: ['./wasm/fastled_operators.js']
 	}
 });
