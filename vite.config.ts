@@ -9,24 +9,21 @@ function fastledWasmPlugin() {
 	return {
 		name: 'fastled-wasm',
 		buildStart() {
-			const wasmDir = path.resolve('src/lib/wasm');
-			const wasmFile = path.join(wasmDir, 'fastled_operators.js');
 			const nativeDir = path.resolve('src/native');
 			
-			// Check if WASM files exist
-			if (!existsSync(wasmFile)) {
-				console.log('FastLED WASM module not found, attempting to build...');
-				try {
-					execSync('make wasm', { 
-						cwd: nativeDir, 
-						stdio: 'inherit'
-					});
-					console.log('FastLED WASM module built successfully');
-				} catch (error) {
-					console.warn('Failed to build FastLED WASM module:', error);
-					console.warn('Make sure emscripten is installed and in PATH');
-					console.warn('Run: cd src/native && make install-emscripten');
-				}
+			// Always rebuild WASM to ensure it's up to date
+			console.log('🔧 Building FastLED WASM module...');
+			try {
+				// Ensure emscripten is set up first
+				execSync('npm run setup:emscripten', { stdio: 'inherit' });
+				execSync('make wasm', { 
+					cwd: nativeDir, 
+					stdio: 'inherit'
+				});
+				console.log('✅ FastLED WASM module built successfully');
+			} catch (error) {
+				console.error('❌ Failed to build FastLED WASM module:', error);
+				throw error; // Fail the build if WASM can't be built
 			}
 		},
 		// Watch native files for changes
@@ -35,19 +32,20 @@ function fastledWasmPlugin() {
 			server.watcher.add(nativeGlob);
 			server.watcher.on('change', (file: string) => {
 				if (file.includes('src/native/')) {
-					console.log('Native file changed, rebuilding WASM...');
+					console.log('🔧 Native file changed, rebuilding WASM...');
 					try {
+						execSync('npm run setup:emscripten', { stdio: 'inherit' });
 						execSync('make wasm', { 
 							cwd: path.resolve('src/native'), 
 							stdio: 'inherit'
 						});
-						console.log('FastLED WASM module rebuilt');
+						console.log('✅ FastLED WASM module rebuilt');
 						// Trigger HMR
 						server.ws.send({
 							type: 'full-reload'
 						});
 					} catch (error) {
-						console.error('Failed to rebuild WASM:', error);
+						console.error('❌ WASM rebuild failed:', error);
 					}
 				}
 			});

@@ -48,7 +48,12 @@ wasm: $(WASM_TARGET)
 
 $(WASM_TARGET): $(WASM_SOURCES) $(HEADERS)
 	@mkdir -p ../../static/wasm
-	emcc $(EMCC_FLAGS) $(WASM_SOURCES) -o $(WASM_TARGET)
+	@if command -v emcc >/dev/null 2>&1; then \
+		emcc $(EMCC_FLAGS) $(WASM_SOURCES) -o $(WASM_TARGET); \
+	else \
+		echo "❌ emcc not found. Run 'npm run setup:emscripten' first."; \
+		exit 1; \
+	fi
 	@echo "WASM files built to static/wasm/"
 
 # Clean build artifacts

@@ -27,3 +27,6 @@ vite.config.ts.timestamp-*
 keys/
 *.pem
 *.sig
+
+# Emscripten SDK (use Homebrew instead)
+emsdk/

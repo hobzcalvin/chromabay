@@ -8,6 +8,7 @@ ESP32 Bluetooth Low Energy Monitor built with SvelteKit + Capacitor.
 - **Cross-Platform**: Web (Chrome/Edge), iOS, and Android support
 - **Real-time Communication**: Read, write, and receive notifications from ESP32
 - **Service Discovery**: Automatically discover all BLE services and characteristics
+- **LED Pattern Engine**: Real-time WebAssembly-powered LED effects
 - **Modern UI**: Beautiful, responsive interface with real-time status indicators
 - **Live Updates** - Push updates to mobile apps without app store releases
 
@@ -69,13 +70,10 @@ The deployed app displays build information in the footer:
 ### Local Development
 
 ```bash
-# Install dependencies
+# Install dependencies (automatically sets up Emscripten)
 npm install
 
-# Initialize SvelteKit (required for fresh checkouts)
-npx svelte-kit sync
-
-# Start development server
+# Start development server (auto-builds WebAssembly modules)
 npm run dev
 
 # Build for production
@@ -84,6 +82,45 @@ npm run build
 # Preview production build
 npm run preview
 ```
+
+### LED Operator Development
+
+Blumon includes a powerful LED pattern engine with C++ operators compiled to WebAssembly:
+
+```bash
+# Test all operators (catches crashes, infinite loops, parameter issues)
+npm run operators:test
+
+# Add a new operator - just create a .cpp file in src/native/operators/
+npm run operators:add
+
+# Generate bindings after adding operators
+npm run wasm:generate
+```
+
+**Available Operators:**
+- `rainbow` - Animated rainbow colors
+- `gradient` - Color gradients  
+- `sparkle` - Random sparkles
+- `strobe` - Strobe effects
+- `moving_blob` - Moving color blobs
+- `perlin_noise` - Perlin noise patterns
+
+**Adding New Operators:**
+1. Create `src/native/operators/my_operator.cpp`:
+```cpp
+#include "../fastled_operators.h"
+
+void my_operator(OperatorContext& ctx) {
+    float speed = ctx.getParam("speed", 1.0f);
+    
+    for (int i = 0; i < ctx.num_leds; i++) {
+        ctx.leds[i] = CHSV(ctx.time * speed, 255, 255);
+    }
+}
+```
+2. Run `npm run wasm:generate` - automatically generates registry and TypeScript bindings
+3. Operator is immediately available in the browser with hot reload
 
 ### Mobile Development
 
@@ -134,6 +171,7 @@ pServer->getAdvertising()->start();
 ## 📖 Tech Stack
 
 - **Frontend**: SvelteKit, TypeScript, Vite
+- **LED Engine**: C++ operators compiled to WebAssembly with Emscripten
 - **Mobile**: Capacitor
 - **BLE**: Capacitor Community Bluetooth LE plugin + Web Bluetooth API
 - **Deployment**: GitHub Actions → GitHub Pages
