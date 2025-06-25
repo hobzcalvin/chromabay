@@ -45,6 +45,27 @@ struct CHSV {
 uint8_t beat8(uint16_t beats_per_minute, uint32_t timebase = 0);
 uint16_t beat16(uint16_t beats_per_minute, uint32_t timebase = 0);
 
+// FastLED-compatible noise functions
+uint8_t inoise8(uint16_t x, uint16_t y = 0, uint16_t z = 0);
+uint16_t inoise16(uint16_t x, uint16_t y = 0, uint16_t z = 0);
+
+// FastLED-compatible math functions
+uint8_t scale8(uint8_t i, uint8_t scale);
+uint16_t scale16(uint16_t i, uint16_t scale);
+uint8_t sin8(uint8_t theta);
+uint8_t cos8(uint8_t theta);
+uint8_t random8();
+uint8_t random8(uint8_t max);
+uint16_t random16();
+uint16_t random16(uint16_t max);
+uint8_t qadd8(uint8_t a, uint8_t b);
+uint8_t qsub8(uint8_t a, uint8_t b);
+uint8_t dim8_raw(uint8_t x);
+uint8_t brighten8_raw(uint8_t x);
+
+// FastLED-compatible blend functions
+CRGB blend(const CRGB& a, const CRGB& b, uint8_t amount);
+
 #else
 // ESP32 build - use standard FastLED
 #include <FastLED.h>

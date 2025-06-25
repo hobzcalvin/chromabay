@@ -70,9 +70,9 @@ export const NATIVE_OPERATOR_DEFINITIONS = [
     name: 'Rainbow (Native)',
     type: 'native_rainbow',
     params: [
-      { label: 'Speed', name: 'speed', type: 'float', default: 0.1, min: 0, max: 1 },
-      { label: 'Saturation', name: 'saturation', type: 'float', default: 1, min: 0, max: 1 },
-      { label: 'Value', name: 'value', type: 'float', default: 1, min: 0, max: 1 },
+      { label: 'Speed', name: 'speed', type: 'float', default: 120, min: 10, max: 500 },
+      { label: 'Saturation', name: 'saturation', type: 'float', default: 255, min: 0, max: 255 },
+      { label: 'Value', name: 'value', type: 'float', default: 255, min: 0, max: 255 },
       { label: 'Angle', name: 'angle', type: 'float', default: 0, min: 0, max: 360 }
     ]
   },

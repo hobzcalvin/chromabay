@@ -88,16 +88,78 @@ uint16_t beat16(uint16_t beats_per_minute, uint32_t timebase) {
     return (ms * 65536UL) / beat_ms;
 }
 
-// Basic noise function (simplified Perlin noise)
+// Improved noise function (simplified Perlin-like noise)
+static float fade(float t) {
+    return t * t * t * (t * (t * 6 - 15) + 10);
+}
+
+static float lerp(float a, float b, float t) {
+    return a + t * (b - a);
+}
+
+static float grad(uint32_t hash, float x, float y, float z) {
+    uint32_t h = hash & 15;
+    float u = h < 8 ? x : y;
+    float v = h < 4 ? y : h == 12 || h == 14 ? x : z;
+    return ((h & 1) == 0 ? u : -u) + ((h & 2) == 0 ? v : -v);
+}
+
 uint8_t inoise8(uint16_t x, uint16_t y, uint16_t z) {
-    // Simplified noise function - replace with proper implementation if needed
-    uint32_t hash = x * 2654435761U + y * 2246822519U + z * 3266489917U;
-    return (hash >> 24) & 0xFF;
+    // Scale down coordinates
+    float fx = (float)x / 256.0f;
+    float fy = (float)y / 256.0f;
+    float fz = (float)z / 256.0f;
+    
+    // Find unit cube that contains point
+    int X = (int)floor(fx) & 255;
+    int Y = (int)floor(fy) & 255;
+    int Z = (int)floor(fz) & 255;
+    
+    // Find relative x,y,z of point in cube
+    fx -= floor(fx);
+    fy -= floor(fy);
+    fz -= floor(fz);
+    
+    // Compute fade curves for each of x,y,z
+    float u = fade(fx);
+    float v = fade(fy);
+    float w = fade(fz);
+    
+    // Hash coordinates of the 8 cube corners
+    uint32_t A = (X * 2654435761U) & 0xFFFFFF;
+    uint32_t AA = (A + Y * 2246822519U) & 0xFFFFFF;
+    uint32_t AB = (A + (Y + 1) * 2246822519U) & 0xFFFFFF;
+    uint32_t B = ((X + 1) * 2654435761U) & 0xFFFFFF;
+    uint32_t BA = (B + Y * 2246822519U) & 0xFFFFFF;
+    uint32_t BB = (B + (Y + 1) * 2246822519U) & 0xFFFFFF;
+    
+    uint32_t AAA = (AA + Z * 3266489917U) & 0xFFFFFF;
+    uint32_t AAB = (AA + (Z + 1) * 3266489917U) & 0xFFFFFF;
+    uint32_t ABA = (AB + Z * 3266489917U) & 0xFFFFFF;
+    uint32_t ABB = (AB + (Z + 1) * 3266489917U) & 0xFFFFFF;
+    uint32_t BAA = (BA + Z * 3266489917U) & 0xFFFFFF;
+    uint32_t BAB = (BA + (Z + 1) * 3266489917U) & 0xFFFFFF;
+    uint32_t BBA = (BB + Z * 3266489917U) & 0xFFFFFF;
+    uint32_t BBB = (BB + (Z + 1) * 3266489917U) & 0xFFFFFF;
+    
+    // Add blended results from 8 corners of cube
+    float res = lerp(lerp(lerp(grad(AAA, fx, fy, fz),
+                              grad(BAA, fx-1, fy, fz), u),
+                         lerp(grad(ABA, fx, fy-1, fz),
+                              grad(BBA, fx-1, fy-1, fz), u), v),
+                    lerp(lerp(grad(AAB, fx, fy, fz-1),
+                              grad(BAB, fx-1, fy, fz-1), u),
+                         lerp(grad(ABB, fx, fy-1, fz-1),
+                              grad(BBB, fx-1, fy-1, fz-1), u), v), w);
+    
+    // Convert to 0-255 range
+    return (uint8_t)((res + 1.0f) * 127.5f);
 }
 
 uint16_t inoise16(uint16_t x, uint16_t y, uint16_t z) {
-    uint32_t hash = x * 2654435761U + y * 2246822519U + z * 3266489917U;
-    return (hash >> 16) & 0xFFFF;
+    // Use the 8-bit version and expand to 16-bit
+    uint8_t noise8 = inoise8(x, y, z);
+    return (uint16_t)noise8 << 8 | noise8;
 }
 
 // Scale functions

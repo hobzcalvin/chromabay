@@ -7,19 +7,17 @@
 
 // Rainbow operator parameters
 const OperatorParameter rainbow_params[] = {
-    {"speed", "Speed", "float", 0.1f, 0.0f, 1.0f, nullptr, 0},
-    {"saturation", "Saturation", "float", 1.0f, 0.0f, 1.0f, nullptr, 0},
-    {"value", "Value", "float", 1.0f, 0.0f, 1.0f, nullptr, 0},
+    {"speed", "Speed", "float", 120.0f, 10.0f, 500.0f, nullptr, 0},
+    {"saturation", "Saturation", "float", 255.0f, 0.0f, 255.0f, nullptr, 0},
+    {"value", "Value", "float", 255.0f, 0.0f, 255.0f, nullptr, 0},
     {"angle", "Angle", "float", 0.0f, 0.0f, 360.0f, nullptr, 0}
 };
 
-// Static variables for operator state
-static bool rainbow_initialized = false;
-static uint32_t rainbow_start_time = 0;
+// No static variables needed for this operator
 
 void rainbow_operator(OperatorContext* ctx) {
     // Get parameters
-    float speed = ctx->param_count > 0 ? ctx->parameters[0] : 50.0f;
+    float speed = ctx->param_count > 0 ? ctx->parameters[0] : 120.0f;
     float saturation = ctx->param_count > 1 ? ctx->parameters[1] : 255.0f;
     float value = ctx->param_count > 2 ? ctx->parameters[2] : 255.0f;
     float angle = ctx->param_count > 3 ? ctx->parameters[3] : 0.0f;
@@ -29,8 +27,9 @@ void rainbow_operator(OperatorContext* ctx) {
     float cos_angle = cos(angle_rad);
     float sin_angle = sin(angle_rad);
     
-    // Get time-based hue offset
-    uint8_t hue_offset = beat8(speed);
+    // Get time-based hue offset with much more aggressive speed scaling
+    // Scale speed to make it much more responsive (speed * 20 for fast animation)
+    uint8_t hue_offset = beat8((uint16_t)(speed * 20.0f));
     
     // Loop through all pixels in the 2D buffer
     for (uint32_t y = 0; y < ctx->height; y++) {

@@ -159,17 +159,17 @@
               <input 
                 id={inputId}
                 type="range" 
-                min="0" 
-                max="1" 
-                step="0.01"
+                min={param.min || 0} 
+                max={param.max || 100} 
+                step="0.1"
                 value={getParameterValue(param)}
-                oninput={(e) => handleFloatChange(param, e)}
-                onchange={(e) => handleFloatChange(param, e)}
+                oninput={(e) => handleRangeChange(param, e)}
+                onchange={(e) => handleRangeChange(param, e)}
                 ontouchstart={(e) => e.stopPropagation()}
                 ontouchmove={(e) => e.stopPropagation()}
                 ontouchend={(e) => e.stopPropagation()}
               />
-              <span class="value-display">{getParameterValue(param).toFixed(2)}</span>
+              <span class="value-display">{getParameterValue(param).toFixed(1)}</span>
             </div>
           {:else if param.type === 'range'}
             <div class="range-control">

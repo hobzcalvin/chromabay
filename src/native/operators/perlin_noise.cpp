@@ -10,23 +10,7 @@ const OperatorParameter perlin_noise_params[] = {
     {"value", "Value", "float", 255.0f, 0.0f, 255.0f, nullptr, 0}
 };
 
-// Simplified noise function (not true Perlin noise, but similar organic feel)
-static float simple_noise(float x, float y, float t) {
-    // Simple multi-octave noise using sine functions
-    float noise = 0.0f;
-    
-    // First octave
-    noise += 0.5f * sin(x * 2.0f + t * 0.01f) * cos(y * 2.0f + t * 0.01f);
-    
-    // Second octave
-    noise += 0.25f * sin(x * 4.0f + t * 0.02f) * cos(y * 4.0f + t * 0.02f);
-    
-    // Third octave
-    noise += 0.125f * sin(x * 8.0f + t * 0.03f) * cos(y * 8.0f + t * 0.03f);
-    
-    // Normalize to [0, 1]
-    return (noise + 1.0f) * 0.5f;
-}
+// No custom noise function needed - using FastLED's inoise8()
 
 void perlin_noise_operator(OperatorContext* ctx) {
     // Get parameters
@@ -37,27 +21,30 @@ void perlin_noise_operator(OperatorContext* ctx) {
     float saturation = ctx->param_count > 4 ? ctx->parameters[4] : 255.0f;
     float value = ctx->param_count > 5 ? ctx->parameters[5] : 255.0f;
     
-    // Time factor for animation
-    float time_factor = ctx->timestamp_ms * speed * 0.001f;
+    // Time factor for animation (scale for FastLED noise)
+    uint16_t time_factor = (uint16_t)(ctx->timestamp_ms * speed * 0.01f);
+    
+    // Scale factor for noise coordinates
+    uint16_t noise_scale = (uint16_t)(scale * 1000.0f);
     
     // Loop through all pixels
     for (uint32_t y = 0; y < ctx->height; y++) {
         for (uint32_t x = 0; x < ctx->width; x++) {
-            // Get normalized coordinates and scale them
-            float norm_x = get_normalized_x(ctx, x) * scale;
-            float norm_y = get_normalized_y(ctx, y) * scale;
+            // Get normalized coordinates and scale them for FastLED noise
+            uint16_t noise_x = (uint16_t)(get_normalized_x(ctx, x) * noise_scale);
+            uint16_t noise_y = (uint16_t)(get_normalized_y(ctx, y) * noise_scale);
             
-            // Generate noise value
-            float noise_val = simple_noise(norm_x, norm_y, time_factor);
+            // Generate noise value using FastLED's inoise8
+            uint8_t noise_val = inoise8(noise_x, noise_y, time_factor);
             
             // Map noise to hue
-            float hue = hue_base + (noise_val * hue_range);
+            float hue = hue_base + ((float)noise_val / 255.0f * hue_range);
             while (hue > 255.0f) hue -= 255.0f;
             while (hue < 0.0f) hue += 255.0f;
             
             // Generate second noise layer for brightness variation
-            float brightness_noise = simple_noise(norm_x * 0.5f, norm_y * 0.5f, time_factor * 0.7f);
-            float brightness = value * (0.3f + 0.7f * brightness_noise);
+            uint8_t brightness_noise = inoise8(noise_x / 2, noise_y / 2, time_factor / 2);
+            float brightness = value * (0.3f + 0.7f * (float)brightness_noise / 255.0f);
             
             // Create HSV color
             CHSV hsv_color((uint8_t)hue, (uint8_t)saturation, (uint8_t)brightness);
