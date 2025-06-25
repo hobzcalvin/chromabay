@@ -375,16 +375,16 @@ function updateMakefile(operators) {
     const makefilePath = path.join(NATIVE_DIR, 'Makefile');
     let content = fs.readFileSync(makefilePath, 'utf8');
     
-    // Replace hardcoded SOURCES with dynamic listing
+    // Replace hardcoded SOURCES with dynamic listing (but not FASTLED_SOURCES line)
     content = content.replace(
-        /SOURCES = .*/,
-        'SOURCES = operator_registry.cpp $(wildcard operators/*.cpp) fastled_compat.cpp'
+        /^SOURCES = .*$/m,
+        'SOURCES = operator_registry.cpp $(wildcard operators/*.cpp) $(FASTLED_SOURCES)'
     );
     
     // Replace hardcoded WASM_SOURCES with dynamic listing
     content = content.replace(
-        /WASM_SOURCES = .*/,
-        'WASM_SOURCES = operator_registry.cpp $(wildcard operators/*.cpp) wasm_interface.cpp fastled_compat.cpp'
+        /^WASM_SOURCES = .*$/m,
+        'WASM_SOURCES = operator_registry.cpp $(wildcard operators/*.cpp) wasm_interface.cpp $(FASTLED_SOURCES)'
     );
     
     // Generate auto-generated exported functions list

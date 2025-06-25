@@ -12,8 +12,11 @@ INCLUDES = -I.
 # FastLED library path
 FASTLED_SRC = FastLED/src
 
+# Minimal FastLED compatibility layer
+FASTLED_SOURCES = fastled_minimal.cpp
+
 # Source files
-SOURCES = operator_registry.cpp $(wildcard operators/*.cpp) fastled_compat.cpp
+SOURCES = operator_registry.cpp $(wildcard operators/*.cpp) $(FASTLED_SOURCES)
 HEADERS = fastled_operators.h
 
 # Test executable
@@ -22,17 +25,22 @@ TEST_SOURCES = test_operators.cpp $(SOURCES)
 
 # WASM build
 WASM_TARGET = ../../static/wasm/fastled_operators.js
-WASM_SOURCES = operator_registry.cpp $(wildcard operators/*.cpp) wasm_interface.cpp fastled_compat.cpp
+WASM_SOURCES = operator_registry.cpp $(wildcard operators/*.cpp) wasm_interface.cpp $(FASTLED_SOURCES)
 EMCC_FLAGS = -O3 -s WASM=1 \
 	-s EXPORTED_FUNCTIONS='["_create_context", "_destroy_context", "_set_timing", "_set_parameters", "_get_output_buffer", "_get_buffer_size", "_malloc", "_free", "_call_gradient_operator", "_call_moving_blob_operator", "_call_perlin_noise_operator", "_call_rainbow_operator", "_call_sparkle_operator", "_call_strobe_operator"]' \
 	-s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap", "setValue", "getValue", "HEAPU8"]' \
 	-s ALLOW_MEMORY_GROWTH=1 \
 	-s MODULARIZE=1 \
 	-s EXPORT_NAME='FastLEDOperators' \
+	-s ENVIRONMENT='web' \
+	-s SINGLE_FILE=0 \
 	-s USE_WEBGL2=0 \
 	-s USE_GLFW=0 \
+	-s STANDALONE_WASM=0 \
+	-lm \
 	-D__EMSCRIPTEN__ \
-	-std=c++17
+	-std=c++17 \
+	$(INCLUDES)
 
 # Default target
 all: test
