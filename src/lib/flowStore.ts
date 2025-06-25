@@ -613,7 +613,7 @@ export const NODE_TYPES: NodeDefinition[] = [
       max: param.max
     })),
     render: ({ ctx, totalTime, deltaTime, width, height, nodeId }: RenderContext) => {
-      // For native patterns, we'll render a placeholder that shows they're loading
+      // For native operators, we'll render a placeholder that shows they're loading
       // The actual native rendering will be handled elsewhere
       ctx.fillStyle = '#333';
       ctx.fillRect(0, 0, width, height);

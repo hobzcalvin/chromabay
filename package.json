@@ -25,7 +25,7 @@
 		"esp32:upload": "cd esp32 && pio run --target upload",
 		"esp32:monitor": "cd esp32 && pio device monitor --baud 115200",
 		"esp32:full": "npm run esp32:upload && npm run esp32:monitor",
-		"wasm:generate": "node scripts/generate-wasm-bindings.js",
+		"wasm:generate": "node scripts/generate-native-code.js && node scripts/generate-wasm-bindings.js",
 		"wasm:build": "cd src/native && make wasm",
 		"wasm:clean": "cd src/native && make clean",
 		"wasm:full": "npm run wasm:generate && npm run wasm:build",
