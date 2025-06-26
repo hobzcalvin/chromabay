@@ -35,6 +35,7 @@ interface WasmModule {
 
 let wasmModule: WasmModule | null = null;
 let wasmLoadPromise: Promise<WasmModule> | null = null;
+let activeRunner: FastLEDWasmOperatorRunner | null = null;
 
 // Operator definitions (auto-generated from C++ source)
 export const NATIVE_OPERATOR_DEFINITIONS = [
@@ -188,8 +189,8 @@ export async function loadWasmModule(): Promise<WasmModule> {
                     }
                     
                     const module = await wasmFactory();
-                    wasmModule = module as WasmModule;
-                    resolve(wasmModule);
+                    // wasmModule = module as WasmModule;  // Don't cache during debugging
+                    resolve(module as WasmModule);
                 } catch (error) {
                     console.error('Failed to initialize WASM module:', error);
                     reject(error);
@@ -228,6 +229,23 @@ export class FastLEDWasmOperatorRunner {
         }
     }
 
+    // Helper to check if memory views are valid and refresh if needed
+    private ensureValidMemory(): boolean {
+        try {
+            // Test if memory views are accessible
+            if (!this.module.HEAPU8 || !this.module.HEAPU8.buffer) {
+                console.warn('WASM memory views invalid, attempting refresh...');
+                return false;
+            }
+            // Try to access the buffer to see if it throws
+            const testAccess = this.module.HEAPU8.byteLength;
+            return true;
+        } catch (error) {
+            console.warn('WASM memory access failed, memory may be invalid:', error);
+            return false;
+        }
+    }
+
     destroy() {
         if (this.contextPtr) {
             this.module._destroy_context(this.contextPtr);
@@ -246,6 +264,11 @@ export class FastLEDWasmOperatorRunner {
 
     setParameters(params: number[]) {
         if (!this.contextPtr) return;
+        
+        if (!this.ensureValidMemory()) {
+            console.error('Cannot set parameters: WASM memory is invalid');
+            return;
+        }
         
         // Free existing parameter buffer
         if (this.paramsPtr) {
@@ -388,6 +411,11 @@ export class FastLEDWasmOperatorRunner {
         if (!this.contextPtr) return null;
         
         try {
+            if (!this.ensureValidMemory()) {
+                console.error('Cannot get image data: WASM memory is invalid');
+                return null;
+            }
+            
             const bufferPtr = this.module._get_output_buffer(this.contextPtr);
             const bufferSize = this.module._get_buffer_size(this.contextPtr);
             
@@ -453,7 +481,15 @@ export async function renderNativeOperator(
 ): Promise<ImageData | null> {
     try {
         const module = await loadWasmModule();
+        
+        // Clean up any existing runner to avoid conflicts
+        if (activeRunner) {
+            activeRunner.destroy();
+            activeRunner = null;
+        }
+        
         const runner = new FastLEDWasmOperatorRunner(module, width, height);
+        activeRunner = runner;
         
         // Set timing
         runner.setTiming(timestamp, 16.67); // Assume ~60fps
@@ -521,6 +557,7 @@ export async function renderNativeOperator(
         }
         
         runner.destroy();
+        activeRunner = null;
         return result;
         
     } catch (error) {
