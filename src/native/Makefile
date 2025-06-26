@@ -60,6 +60,9 @@ wasm:
 	if [ ! -f $(WASM_TARGET) ]; then \
 		echo "🔧 WASM target doesn't exist, building..."; \
 		REBUILD_NEEDED=1; \
+	elif [ -f $(WASM_TARGET) ] && [ $$(stat -f%z $(WASM_TARGET) 2>/dev/null || echo 0) -lt 1000 ]; then \
+		echo "🔧 WASM target appears corrupted (too small), rebuilding..."; \
+		REBUILD_NEEDED=1; \
 	elif [ -n "$$(find operator_registry.cpp wasm_interface.cpp $(FASTLED_SOURCES) $(HEADERS) operators/ -newer $(WASM_TARGET) 2>/dev/null)" ]; then \
 		echo "🔧 Source files changed, rebuilding WASM..."; \
 		REBUILD_NEEDED=1; \
