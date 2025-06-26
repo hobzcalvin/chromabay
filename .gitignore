@@ -30,3 +30,7 @@ keys/
 
 # Emscripten SDK (use Homebrew instead)
 emsdk/
+
+# Native build artifacts
+src/native/test_operators
+src/native/test_operators.dSYM/
