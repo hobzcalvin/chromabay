@@ -223,7 +223,7 @@ export function serializePattern(
     if (incoming.length === 0) return false;
 
     // Single-input node
-    if (n.data.type !== 'blend') {
+    if (n.data.type !== 'blend' && n.data.type !== 'native_blend') {
       const srcNode = allNodes.find(nd => nd.id === incoming[0].source);
       return srcNode ? getNodeLaneBuffer(srcNode) === outBuf : false;
     }

@@ -190,8 +190,6 @@ async function tryRenderNativeOperator(
   if (getInputNodes && getNodeOutput) {
     const inputNodes = getInputNodes();
     
-
-    
     if (operatorType === 'native_blend') {
       // Blend operator uses dual inputs
       if (inputNodes.input1) {
@@ -227,7 +225,7 @@ async function tryRenderNativeOperator(
   
   return result;
   } catch (error) {
-    console.warn('Native operator render failed:', error);
+    console.error('Native operator render failed:', error);
     return null;
   }
 }
@@ -669,6 +667,13 @@ export const NODE_TYPES: NodeDefinition[] = [
         .then((imageData: ImageData | null) => {
           if (imageData) {
             ctx.putImageData(imageData, 0, 0);
+            
+            // CRITICAL: Update the node output store after WASM rendering completes
+            const outputData = ctx.getImageData(0, 0, width, height);
+            nodeOutputs.update(outputs => {
+              outputs.set(nodeId, outputData);
+              return outputs;
+            });
           }
         })
         .catch((error) => {

@@ -51,24 +51,37 @@ test: $(TEST_TARGET)
 $(TEST_TARGET): $(TEST_SOURCES) $(HEADERS)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) $(TEST_SOURCES) -o $(TEST_TARGET)
 
-# WASM build for web
-wasm: $(WASM_TARGET)
-
-$(WASM_TARGET): $(WASM_SOURCES) $(HEADERS)
+# WASM build for web  
+.PHONY: wasm
+wasm:
 	@mkdir -p ../../static/wasm
-	@if command -v emcc >/dev/null 2>&1; then \
-		EM_NODE_JS=$$(which node) emcc $(EMCC_FLAGS) $(WASM_SOURCES) -o $(WASM_TARGET); \
+	@# Always check if rebuild is needed since wildcards don't work well with Make dependencies
+	@REBUILD_NEEDED=0; \
+	if [ ! -f $(WASM_TARGET) ]; then \
+		echo "🔧 WASM target doesn't exist, building..."; \
+		REBUILD_NEEDED=1; \
+	elif [ -n "$$(find operator_registry.cpp wasm_interface.cpp $(FASTLED_SOURCES) $(HEADERS) operators/ -newer $(WASM_TARGET) 2>/dev/null)" ]; then \
+		echo "🔧 Source files changed, rebuilding WASM..."; \
+		REBUILD_NEEDED=1; \
+	fi; \
+	if [ $$REBUILD_NEEDED -eq 1 ]; then \
+		if command -v emcc >/dev/null 2>&1; then \
+			EM_NODE_JS=$$(which node) emcc $(EMCC_FLAGS) $(WASM_SOURCES) -o $(WASM_TARGET); \
+			echo "✅ WASM files built to static/wasm/"; \
+		else \
+			echo "❌ emcc not found. Run 'npm run setup:emscripten' first."; \
+			exit 1; \
+		fi; \
 	else \
-		echo "❌ emcc not found. Run 'npm run setup:emscripten' first."; \
-		exit 1; \
+		echo "✅ WASM is up to date"; \
 	fi
-	@echo "WASM files built to static/wasm/"
 
 # Clean build artifacts
 clean:
 	rm -f ../../static/wasm/fastled_operators.js
 	rm -f ../../static/wasm/fastled_operators.wasm
 	rm -f $(TEST_TARGET)
+	rm -f test_operators.dSYM/Contents/Resources/DWARF/test_operators
 	@echo "Cleaned build artifacts"
 
 # Install emscripten

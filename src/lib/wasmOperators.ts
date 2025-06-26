@@ -487,27 +487,37 @@ export async function renderNativeOperator(
         let result: ImageData | null = null;
         switch (operatorName) {
         case 'blend':
-            return await runner.runBlend();
+            result = await runner.runBlend();
+            break;
         case 'chase':
-            return await runner.runChase();
+            result = await runner.runChase();
+            break;
         case 'fade':
-            return await runner.runFade();
+            result = await runner.runFade();
+            break;
         case 'gradient':
-            return await runner.runGradient();
+            result = await runner.runGradient();
+            break;
         case 'moving_blob':
-            return await runner.runMovingBlob();
+            result = await runner.runMovingBlob();
+            break;
         case 'perlin_noise':
-            return await runner.runPerlinNoise();
+            result = await runner.runPerlinNoise();
+            break;
         case 'rainbow':
-            return await runner.runRainbow();
+            result = await runner.runRainbow();
+            break;
         case 'raindrops':
-            return await runner.runRaindrops();
+            result = await runner.runRaindrops();
+            break;
         case 'sparkle':
-            return await runner.runSparkle();
+            result = await runner.runSparkle();
+            break;
         case 'strobe':
-            return await runner.runStrobe();
-            default:
-                throw new Error(`Unhandled operator: ${operatorName}`);
+            result = await runner.runStrobe();
+            break;
+        default:
+            throw new Error(`Unhandled operator: ${operatorName}`);
         }
         
         runner.destroy();

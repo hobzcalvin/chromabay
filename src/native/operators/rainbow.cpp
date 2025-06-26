@@ -16,15 +16,43 @@ const OperatorParameter rainbow_params[] = {
 // No static variables needed for this operator
 
 void rainbow_operator(OperatorContext* ctx) {
-    // Simple test: create a fixed rainbow pattern
+    // Get parameters
+    float speed = ctx->param_count > 0 ? ctx->parameters[0] : 120.0f;
+    float saturation = ctx->param_count > 1 ? ctx->parameters[1] : 255.0f;
+    float value = ctx->param_count > 2 ? ctx->parameters[2] : 255.0f;
+    float angle = ctx->param_count > 3 ? ctx->parameters[3] : 0.0f;
+    
+    // Convert angle to radians
+    float angle_rad = angle * M_PI / 180.0f;
+    float cos_angle = cos(angle_rad);
+    float sin_angle = sin(angle_rad);
+    
+    // Get time-based hue offset with much more aggressive speed scaling
+    // Scale speed to make it much more responsive (speed * 20 for fast animation)
+    uint8_t hue_offset = beat8((uint16_t)(speed * 20.0f));
+    
     // Loop through all pixels in the 2D buffer
     for (uint32_t y = 0; y < ctx->height; y++) {
         for (uint32_t x = 0; x < ctx->width; x++) {
-            // Create a simple horizontal rainbow
-            uint8_t hue = (uint8_t)((float)x / (float)ctx->width * 255.0f);
+            // Get normalized coordinates (0.0 to 1.0)
+            float norm_x = get_normalized_x(ctx, x);
+            float norm_y = get_normalized_y(ctx, y);
             
-            // Create HSV color with full saturation and brightness
-            CHSV hsv_color(hue, 255, 255);
+            // Center the coordinates around 0.5
+            float centered_x = norm_x - 0.5f;
+            float centered_y = norm_y - 0.5f;
+            
+            // Apply rotation
+            float rotated_x = centered_x * cos_angle - centered_y * sin_angle;
+            // float rotated_y = centered_x * sin_angle + centered_y * cos_angle; // Unused for this operator
+            
+            // Use the rotated X coordinate to determine hue
+            // Scale from -0.5 to 0.5 to 0 to 255
+            uint8_t base_hue = (uint8_t)((rotated_x + 0.5f) * 255.0f);
+            uint8_t final_hue = base_hue + hue_offset;
+            
+            // Create HSV color and convert to RGB
+            CHSV hsv_color(final_hue, (uint8_t)saturation, (uint8_t)value);
             CRGB rgb_color = hsv_color;
             
             // Set the pixel

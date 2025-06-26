@@ -95,11 +95,15 @@
     }
     
     // Store this node's output for other nodes to use
-    const outputData = ctx.getImageData(0, 0, textureWidth, textureHeight);
-    nodeOutputs.update(outputs => {
-      outputs.set(id, outputData);
-      return outputs;
-    });
+    // Note: Native operators handle their own output storage after WASM rendering completes
+    const isNativeOperator = nodeType.startsWith('native_');
+    if (!isNativeOperator) {
+      const outputData = ctx.getImageData(0, 0, textureWidth, textureHeight);
+      nodeOutputs.update(outputs => {
+        outputs.set(id, outputData);
+        return outputs;
+      });
+    }
   }
   
   onDestroy(() => {
