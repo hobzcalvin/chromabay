@@ -35,13 +35,12 @@ interface WasmModule {
 
 let wasmModule: WasmModule | null = null;
 let wasmLoadPromise: Promise<WasmModule> | null = null;
-let activeRunner: FastLEDWasmOperatorRunner | null = null;
 
 // Operator definitions (auto-generated from C++ source)
 export const NATIVE_OPERATOR_DEFINITIONS = [
   {
-    name: 'Blend (Native)',
-    type: 'native_blend',
+    name: 'Blend',
+    type: 'blend',
     params: [
       { label: 'Opacity', name: 'opacity', type: 'float', default: 0.5, min: 0, max: 1 },
       { label: 'Blend Mode', name: 'blend_mode', type: 'select', default: 0, min: 0, max: 5, options: [{"value":"0","label":"normal"},{"value":"1","label":"add"},{"value":"2","label":"multiply"},{"value":"3","label":"screen"},{"value":"4","label":"overlay"},{"value":"5","label":"difference"}] },
@@ -49,8 +48,8 @@ export const NATIVE_OPERATOR_DEFINITIONS = [
     ]
   },
   {
-    name: 'Chase (Native)',
-    type: 'native_chase',
+    name: 'Chase',
+    type: 'chase',
     params: [
       { label: 'Speed', name: 'speed', type: 'float', default: 20, min: 5, max: 100 },
       { label: 'Size', name: 'size', type: 'float', default: 4, min: 1, max: 20 },
@@ -60,8 +59,8 @@ export const NATIVE_OPERATOR_DEFINITIONS = [
     ]
   },
   {
-    name: 'Fade (Native)',
-    type: 'native_fade',
+    name: 'Fade',
+    type: 'fade',
     params: [
       { label: 'Speed', name: 'speed', type: 'float', default: 1, min: 0.1, max: 10 },
       { label: 'Hue', name: 'hue', type: 'float', default: 30, min: 0, max: 255 },
@@ -70,8 +69,8 @@ export const NATIVE_OPERATOR_DEFINITIONS = [
     ]
   },
   {
-    name: 'Gradient (Native)',
-    type: 'native_gradient',
+    name: 'Gradient',
+    type: 'gradient',
     params: [
       { label: 'Angle', name: 'angle', type: 'float', default: 0, min: 0, max: 360 },
       { label: 'Start Hue', name: 'start_hue', type: 'float', default: 0, min: 0, max: 255 },
@@ -81,8 +80,8 @@ export const NATIVE_OPERATOR_DEFINITIONS = [
     ]
   },
   {
-    name: 'Moving Blob (Native)',
-    type: 'native_moving_blob',
+    name: 'Moving Blob',
+    type: 'moving_blob',
     params: [
       { label: 'Speed', name: 'speed', type: 'float', default: 30, min: 0, max: 100 },
       { label: 'Blob Size', name: 'blob_size', type: 'float', default: 0.3, min: 0.1, max: 1 },
@@ -92,8 +91,8 @@ export const NATIVE_OPERATOR_DEFINITIONS = [
     ]
   },
   {
-    name: 'Perlin Noise (Native)',
-    type: 'native_perlin_noise',
+    name: 'Perlin Noise',
+    type: 'perlin_noise',
     params: [
       { label: 'Scale', name: 'scale', type: 'float', default: 4, min: 1, max: 20 },
       { label: 'Speed', name: 'speed', type: 'float', default: 50, min: 0, max: 200 },
@@ -104,8 +103,8 @@ export const NATIVE_OPERATOR_DEFINITIONS = [
     ]
   },
   {
-    name: 'Rainbow (Native)',
-    type: 'native_rainbow',
+    name: 'Rainbow',
+    type: 'rainbow',
     params: [
       { label: 'Speed', name: 'speed', type: 'float', default: 120, min: 10, max: 500 },
       { label: 'Saturation', name: 'saturation', type: 'float', default: 255, min: 0, max: 255 },
@@ -114,8 +113,8 @@ export const NATIVE_OPERATOR_DEFINITIONS = [
     ]
   },
   {
-    name: 'Raindrops (Native)',
-    type: 'native_raindrops',
+    name: 'Raindrops',
+    type: 'raindrops',
     params: [
       { label: 'Speed', name: 'speed', type: 'float', default: 50, min: 10, max: 200 },
       { label: 'Count', name: 'count', type: 'float', default: 8, min: 2, max: 32 },
@@ -126,8 +125,8 @@ export const NATIVE_OPERATOR_DEFINITIONS = [
     ]
   },
   {
-    name: 'Sparkle (Native)',
-    type: 'native_sparkle',
+    name: 'Sparkle',
+    type: 'sparkle',
     params: [
       { label: 'Density', name: 'density', type: 'float', default: 0.1, min: 0, max: 1 },
       { label: 'Fade Rate', name: 'fade_rate', type: 'float', default: 0.95, min: 0.5, max: 0.99 },
@@ -137,8 +136,8 @@ export const NATIVE_OPERATOR_DEFINITIONS = [
     ]
   },
   {
-    name: 'Strobe (Native)',
-    type: 'native_strobe',
+    name: 'Strobe',
+    type: 'strobe',
     params: [
       { label: 'Rate (Hz)', name: 'rate', type: 'float', default: 2, min: 0.1, max: 20 },
       { label: 'Duty Cycle', name: 'duty_cycle', type: 'float', default: 0.1, min: 0.01, max: 0.9 },
@@ -189,8 +188,8 @@ export async function loadWasmModule(): Promise<WasmModule> {
                     }
                     
                     const module = await wasmFactory();
-                    // wasmModule = module as WasmModule;  // Don't cache during debugging
-                    resolve(module as WasmModule);
+                    wasmModule = module as WasmModule;
+                    resolve(wasmModule);
                 } catch (error) {
                     console.error('Failed to initialize WASM module:', error);
                     reject(error);
@@ -229,23 +228,6 @@ export class FastLEDWasmOperatorRunner {
         }
     }
 
-    // Helper to check if memory views are valid and refresh if needed
-    private ensureValidMemory(): boolean {
-        try {
-            // Test if memory views are accessible
-            if (!this.module.HEAPU8 || !this.module.HEAPU8.buffer) {
-                console.warn('WASM memory views invalid, attempting refresh...');
-                return false;
-            }
-            // Try to access the buffer to see if it throws
-            const testAccess = this.module.HEAPU8.byteLength;
-            return true;
-        } catch (error) {
-            console.warn('WASM memory access failed, memory may be invalid:', error);
-            return false;
-        }
-    }
-
     destroy() {
         if (this.contextPtr) {
             this.module._destroy_context(this.contextPtr);
@@ -264,11 +246,6 @@ export class FastLEDWasmOperatorRunner {
 
     setParameters(params: number[]) {
         if (!this.contextPtr) return;
-        
-        if (!this.ensureValidMemory()) {
-            console.error('Cannot set parameters: WASM memory is invalid');
-            return;
-        }
         
         // Free existing parameter buffer
         if (this.paramsPtr) {
@@ -411,11 +388,6 @@ export class FastLEDWasmOperatorRunner {
         if (!this.contextPtr) return null;
         
         try {
-            if (!this.ensureValidMemory()) {
-                console.error('Cannot get image data: WASM memory is invalid');
-                return null;
-            }
-            
             const bufferPtr = this.module._get_output_buffer(this.contextPtr);
             const bufferSize = this.module._get_buffer_size(this.contextPtr);
             
@@ -481,22 +453,14 @@ export async function renderNativeOperator(
 ): Promise<ImageData | null> {
     try {
         const module = await loadWasmModule();
-        
-        // Clean up any existing runner to avoid conflicts
-        if (activeRunner) {
-            activeRunner.destroy();
-            activeRunner = null;
-        }
-        
         const runner = new FastLEDWasmOperatorRunner(module, width, height);
-        activeRunner = runner;
         
         // Set timing
         runner.setTiming(timestamp, 16.67); // Assume ~60fps
         
         // Find operator definition
         const operatorDef = NATIVE_OPERATOR_DEFINITIONS.find(def => 
-            def.type === `native_${operatorName}`
+            def.type === operatorName
         );
         
         if (!operatorDef) {
@@ -523,41 +487,30 @@ export async function renderNativeOperator(
         let result: ImageData | null = null;
         switch (operatorName) {
         case 'blend':
-            result = await runner.runBlend();
-            break;
+            return await runner.runBlend();
         case 'chase':
-            result = await runner.runChase();
-            break;
+            return await runner.runChase();
         case 'fade':
-            result = await runner.runFade();
-            break;
+            return await runner.runFade();
         case 'gradient':
-            result = await runner.runGradient();
-            break;
+            return await runner.runGradient();
         case 'moving_blob':
-            result = await runner.runMovingBlob();
-            break;
+            return await runner.runMovingBlob();
         case 'perlin_noise':
-            result = await runner.runPerlinNoise();
-            break;
+            return await runner.runPerlinNoise();
         case 'rainbow':
-            result = await runner.runRainbow();
-            break;
+            return await runner.runRainbow();
         case 'raindrops':
-            result = await runner.runRaindrops();
-            break;
+            return await runner.runRaindrops();
         case 'sparkle':
-            result = await runner.runSparkle();
-            break;
+            return await runner.runSparkle();
         case 'strobe':
-            result = await runner.runStrobe();
-            break;
-        default:
-            throw new Error(`Unhandled operator: ${operatorName}`);
+            return await runner.runStrobe();
+            default:
+                throw new Error(`Unhandled operator: ${operatorName}`);
         }
         
         runner.destroy();
-        activeRunner = null;
         return result;
         
     } catch (error) {

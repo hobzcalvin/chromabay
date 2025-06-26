@@ -166,64 +166,60 @@ async function tryRenderNativeOperator(
   getNodeOutput?: (nodeId: string) => ImageData | null,
   getInputNodes?: () => any
 ): Promise<ImageData | null> {
-  try {
-    const nativeOperator = NATIVE_OPERATOR_DEFINITIONS.find(p => p.type === operatorType);
-    if (!nativeOperator) {
-      return null;
-    }
-  
-  // Extract parameter values for this node
-  const parameters = nativeOperator.params.map(param => 
+  const nativeOperator = NATIVE_OPERATOR_DEFINITIONS.find(p => p.type === operatorType);
+  if (!nativeOperator) {
+    console.warn(`Native operator not found: ${operatorType}`);
+    return null;
+  }
+
+  // Map parameters from node to native operator format
+  const parameters = nativeOperator.params.map(param =>
     getNodeParameter(nodeId, param.name, param.default)
   );
-  
-  // Convert parameters array to object
-  const paramObj: any = {};
+
+  // Extract input buffers for blend operations
   nativeOperator.params.forEach((param, index) => {
-    paramObj[param.name] = parameters[index];
+    const value = getNodeParameter(nodeId, param.name, param.default);
+    parameters[index] = value;
   });
-  
-  // Get input buffers for all operators
+
   let inputBuffer1: ImageData | null = null;
   let inputBuffer2: ImageData | null = null;
-  
-  if (getInputNodes && getNodeOutput) {
-    const inputNodes = getInputNodes();
-    
-    if (operatorType === 'native_blend') {
-      // Blend operator uses dual inputs
-      if (inputNodes.input1) {
-        inputBuffer1 = getNodeOutput(inputNodes.input1.id);
-      }
-      if (inputNodes.input2) {
-        inputBuffer2 = getNodeOutput(inputNodes.input2.id);
-      }
-    } else {
-      // All other operators use single input (first available input)
-      if (inputNodes.input1) {
-        inputBuffer1 = getNodeOutput(inputNodes.input1.id);
-      } else if (inputNodes.input2) {
-        inputBuffer1 = getNodeOutput(inputNodes.input2.id);
-      } else if (inputNodes.input) {
-        // Handle legacy input structure
-        inputBuffer1 = getNodeOutput(inputNodes.input.id);
-      }
+
+  // Handle input buffers for blend operations
+  if (operatorType === 'blend') {
+    const inputs = getInputNodes?.() || {};
+    if (inputs.input1) {
+      inputBuffer1 = getNodeOutput?.(inputs.input1.id) || null;
+    }
+    if (inputs.input2) {
+      inputBuffer2 = getNodeOutput?.(inputs.input2.id) || null;
+    }
+  } else {
+    // For non-blend operations, pass single input as first buffer
+    const inputs = getInputNodes?.() || {};
+    if (inputs.input) {
+      inputBuffer1 = getNodeOutput?.(inputs.input.id) || null;
     }
   }
-  
-  // Call the native WASM operator
-  const operatorName = operatorType.replace('native_', '');
-  const result = await renderNativeOperator(
-    operatorName as import('./wasmOperators').OperatorType, // Remove native_ prefix and cast to correct type
-    width,
-    height,
-    totalTime * 1000, // Convert to milliseconds
-    paramObj,
-    inputBuffer1,
-    inputBuffer2
-  );
-  
-  return result;
+
+  try {
+    // Call the native WASM operator
+    const operatorName = operatorType as import('./wasmOperators').OperatorType;
+    const result = await renderNativeOperator(
+      operatorName, // Use the operator type directly 
+      width,
+      height,
+      totalTime * 1000, // Convert to milliseconds
+      parameters.reduce((acc, val, idx) => {
+        const paramName = nativeOperator.params[idx].name as keyof import('./wasmOperators').NativeOperatorParams;
+        acc[paramName] = val;
+        return acc;
+      }, {} as import('./wasmOperators').NativeOperatorParams),
+      inputBuffer1,
+      inputBuffer2
+    );
+    return result;
   } catch (error) {
     console.error('Native operator render failed:', error);
     return null;
@@ -241,403 +237,8 @@ export const NODE_TYPES: NodeDefinition[] = [
       // Output node doesn't render anything - it just passes through input
     }
   },
-  {
-    name: 'Rainbow',
-    type: 'rainbow',
-    params: [
-      { label: 'Speed', name: 'speed', type: 'float', default: 0.1 },
-      { label: 'Saturation', name: 'saturation', type: 'float', default: 1.0 },
-      { label: 'Value', name: 'value', type: 'float', default: 1.0 },
-      { label: 'Angle', name: 'angle', type: 'range', default: 0, min: 0, max: 360 }
-    ],
-    render: ({ ctx, totalTime, width, height, nodeId }) => {
-      const speed = getNodeParameter(nodeId, 'speed', 0.1) * 3; // Scale down for reasonable animation speed
-      const saturation = getNodeParameter(nodeId, 'saturation', 1.0);
-      const value = getNodeParameter(nodeId, 'value', 1.0);
-      const angle = getNodeParameter(nodeId, 'angle', 0);
-      
-      // Convert angle to radians
-      const angleRad = (angle * Math.PI) / 180;
-      const cosAngle = Math.cos(angleRad);
-      const sinAngle = Math.sin(angleRad);
-      
-      for (let x = 0; x < width; x++) {
-        for (let y = 0; y < height; y++) {
-          // Apply rotation to coordinates
-          const rotatedX = x * cosAngle - y * sinAngle;
-          const rotatedY = x * sinAngle + y * cosAngle;
-          
-          // Use rotated X coordinate for hue calculation
-          const hue = ((rotatedX / width) + totalTime * speed) % 1;
-          const [r, g, b] = hsvToRgb(Math.abs(hue), saturation, value);
-          ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
-          ctx.fillRect(x, y, 1, 1);
-        }
-      }
-    }
-  },
-  {
-    name: 'Gradient',
-    type: 'gradient',
-    params: [
-      { label: 'Color 1', name: 'color1', type: 'color', default: '#3b82f6' },
-      { label: 'Color 2', name: 'color2', type: 'color', default: '#8b5cf6' },
-      { label: 'Speed', name: 'speed', type: 'range', default: 10, min: 0, max: 100 },
-      { label: 'Angle', name: 'angle', type: 'range', default: 0, min: 0, max: 360 }
-    ],
-    render: ({ ctx, totalTime, width, height, nodeId }) => {
-      const color1 = getNodeParameter(nodeId, 'color1', '#3b82f6');
-      const color2 = getNodeParameter(nodeId, 'color2', '#8b5cf6');
-      const speed = getNodeParameter(nodeId, 'speed', 10) / 10;
-      const angle = getNodeParameter(nodeId, 'angle', 0);
-      
-      // Convert angle to radians and calculate gradient direction
-      const angleRad = (angle * Math.PI) / 180;
-      const gradientLength = Math.sqrt(width * width + height * height);
-      
-      // Calculate gradient endpoints based on angle
-      const centerX = width / 2;
-      const centerY = height / 2;
-      const halfLength = gradientLength / 2;
-      
-      const x1 = centerX - Math.cos(angleRad) * halfLength;
-      const y1 = centerY - Math.sin(angleRad) * halfLength;
-      const x2 = centerX + Math.cos(angleRad) * halfLength;
-      const y2 = centerY + Math.sin(angleRad) * halfLength;
-      
-      // Animate by shifting the gradient colors
-      const timeOffset = totalTime * speed;
-      const gradient = ctx.createLinearGradient(x1, y1, x2, y2);
-      
-      // Create multiple color stops to animate the gradient
-      const stops = 10;
-      for (let i = 0; i <= stops; i++) {
-        const position = i / stops;
-        const animatedPosition = (position + timeOffset) % 2;
-        
-        // Oscillate between the two colors
-        let color;
-        if (animatedPosition <= 1) {
-          // Blend from color1 to color2
-          const blend = animatedPosition;
-          const [r1, g1, b1] = hexToRgb(color1);
-          const [r2, g2, b2] = hexToRgb(color2);
-          const r = Math.round(r1 * (1 - blend) + r2 * blend);
-          const g = Math.round(g1 * (1 - blend) + g2 * blend);
-          const b = Math.round(b1 * (1 - blend) + b2 * blend);
-          color = `rgb(${r}, ${g}, ${b})`;
-        } else {
-          // Blend from color2 back to color1
-          const blend = animatedPosition - 1;
-          const [r1, g1, b1] = hexToRgb(color2);
-          const [r2, g2, b2] = hexToRgb(color1);
-          const r = Math.round(r1 * (1 - blend) + r2 * blend);
-          const g = Math.round(g1 * (1 - blend) + g2 * blend);
-          const b = Math.round(b1 * (1 - blend) + b2 * blend);
-          color = `rgb(${r}, ${g}, ${b})`;
-        }
-        
-        gradient.addColorStop(position, color);
-      }
-      
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, width, height);
-    }
-  },
-  {
-    name: 'Perlin Noise',
-    type: 'perlin_noise',
-    params: [
-      { label: 'Speed', name: 'speed', type: 'range', default: 50, min: 1, max: 200 },
-      { label: 'Scale', name: 'scale', type: 'float', default: 0.3 },
-      { label: 'Intensity', name: 'intensity', type: 'float', default: 1.0 },
-      { label: 'Octaves', name: 'octaves', type: 'integer', default: 3, min: 1, max: 6 }
-    ],
-    render: ({ ctx, totalTime, width, height, nodeId }) => {
-      // Ensure all parameters are initialized for this node
-      ensureNodeParametersInitialized(nodeId, 'perlin_noise');
-      
-      const speed = getNodeParameter(nodeId, 'speed', 50) / 10;
-      const scale = getNodeParameter(nodeId, 'scale', 0.3);
-      const intensity = getNodeParameter(nodeId, 'intensity', 1.0);
-      const octaves = getNodeParameter(nodeId, 'octaves', 3);
-      
-      // Create more complex noise with multiple octaves
-      for (let x = 0; x < width; x += 1) {
-        for (let y = 0; y < height; y += 1) {
-          let noise = 0;
-          let amplitude = 1;
-          let frequency = scale;
-          let maxValue = 0; // Used for normalizing result to 0-1
-          
-          // Layer multiple noise octaves for more realistic noise
-          for (let i = 0; i < octaves; i++) {
-            // Use multiple sine/cosine layers with different phases for more chaotic noise
-            const n1 = Math.sin(x * frequency + totalTime * speed) * Math.cos(y * frequency + totalTime * speed * 0.7);
-            const n2 = Math.sin(x * frequency * 1.3 + totalTime * speed * 1.5) * Math.cos(y * frequency * 0.8 + totalTime * speed * 0.9);
-            const n3 = Math.sin(x * frequency * 0.6 + totalTime * speed * 2.1) * Math.cos(y * frequency * 1.7 + totalTime * speed * 1.3);
-            
-            const layerNoise = (n1 + n2 * 0.5 + n3 * 0.25) / 1.75; // Mix the layers
-            noise += layerNoise * amplitude;
-            maxValue += amplitude;
-            
-            amplitude *= 0.5; // Each octave has half the amplitude
-            frequency *= 2.0; // Each octave has double the frequency
-          }
-          
-          // Normalize and apply intensity
-          noise = (noise / maxValue); // Now ranges from -1 to 1
-          const alpha = Math.abs(noise) * intensity; // Use absolute value for brightness
-          
-          // Use the noise to create grayscale values instead of just alpha
-          const brightness = Math.max(0, Math.min(1, (noise + 1) * 0.5 * intensity));
-          const colorValue = Math.round(brightness * 255);
-          
-          ctx.fillStyle = `rgb(${colorValue}, ${colorValue}, ${colorValue})`;
-          ctx.fillRect(x, y, 1, 1);
-        }
-      }
-    }
-  },
-  {
-    name: 'Moving Blob',
-    type: 'moving_blob',
-    params: [
-      { label: 'Speed', name: 'speed', type: 'float', default: 2.0 },
-      { label: 'Size', name: 'size', type: 'float', default: 0.25 },
-      { label: 'Color', name: 'color', type: 'color', default: '#ffffff' }
-    ],
-    render: ({ ctx, totalTime, width, height, nodeId }) => {
-      const speed = getNodeParameter(nodeId, 'speed', 2.0);
-      const size = getNodeParameter(nodeId, 'size', 0.25);
-      const color = getNodeParameter(nodeId, 'color', '#ffffff');
-      
-      const centerX = width/2 + Math.sin(totalTime * speed) * (width * 0.2);
-      const centerY = height/2 + Math.cos(totalTime * speed * 0.75) * (height * 0.2);
-      const innerRadius = Math.min(width, height) * 0.06;
-      const outerRadius = Math.min(width, height) * size;
-      const radialGradient = ctx.createRadialGradient(centerX, centerY, innerRadius, centerX, centerY, outerRadius);
-      radialGradient.addColorStop(0, color);
-      radialGradient.addColorStop(1, 'transparent');
-      ctx.fillStyle = radialGradient;
-      ctx.fillRect(0, 0, width, height);
-    }
-  },
-  {
-    name: 'Raindrops',
-    type: 'raindrops',
-    params: [
-      { label: 'Speed', name: 'speed', type: 'range', default: 50, min: 10, max: 200 },
-      { label: 'Count', name: 'count', type: 'integer', default: 8, min: 2, max: 32 },
-      { label: 'Size', name: 'size', type: 'float', default: 0.025 },
-      { label: 'Color', name: 'color', type: 'color', default: '#ffffff' }
-    ],
-    render: ({ ctx, totalTime, width, height, nodeId }) => {
-      const speed = getNodeParameter(nodeId, 'speed', 50);
-      const count = getNodeParameter(nodeId, 'count', 8);
-      const size = getNodeParameter(nodeId, 'size', 0.025);
-      const color = getNodeParameter(nodeId, 'color', '#ffffff');
-      
-      const dropCount = Math.floor(width / (width / count));
-      for (let i = 0; i < dropCount; i++) {
-        const x = (i * (width / dropCount) + width / (dropCount * 2)) % width;
-        const y = ((totalTime * speed + i * 10) % (height + 10)) - 10;
-        if (y >= 0 && y <= height) {
-          ctx.fillStyle = color;
-          ctx.beginPath();
-          const dropWidth = width * size;
-          const dropHeight = height * 0.08;
-          ctx.ellipse(x, y, dropWidth, dropHeight, 0, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
-    }
-  },
-  {
-    name: 'Strobe',
-    type: 'strobe',
-    params: [
-      { label: 'Frequency', name: 'frequency', type: 'range', default: 8, min: 1, max: 30 },
-      { label: 'Intensity', name: 'intensity', type: 'float', default: 0.8 },
-      { label: 'Color', name: 'color', type: 'color', default: '#ffffff' }
-    ],
-    render: ({ ctx, totalTime, width, height, nodeId }) => {
-      const frequency = getNodeParameter(nodeId, 'frequency', 8);
-      const intensity = getNodeParameter(nodeId, 'intensity', 0.8);
-      const color = getNodeParameter(nodeId, 'color', '#ffffff');
-      
-      const strobeValue = Math.sin(totalTime * frequency) > 0.7 ? 1 : 0;
-      if (strobeValue > 0) {
-        const [r, g, b] = hexToRgb(color);
-        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${intensity})`;
-        ctx.fillRect(0, 0, width, height);
-      }
-    }
-  },
-  {
-    name: 'Sparkle',
-    type: 'sparkle',
-    params: [
-      { label: 'Speed', name: 'speed', type: 'float', default: 3.0 },
-      { label: 'Count', name: 'count', type: 'integer', default: 10, min: 3, max: 50 },
-      { label: 'Size', name: 'size', type: 'float', default: 0.025 },
-      { label: 'Color', name: 'color', type: 'color', default: '#ffffff' }
-    ],
-    render: ({ ctx, totalTime, width, height, nodeId }) => {
-      const speed = getNodeParameter(nodeId, 'speed', 3.0);
-      const count = getNodeParameter(nodeId, 'count', 10);
-      const size = getNodeParameter(nodeId, 'size', 0.025);
-      const color = getNodeParameter(nodeId, 'color', '#ffffff');
-      
-      const sparkleCount = Math.floor(width / (width / count));
-      for (let i = 0; i < sparkleCount; i++) {
-        // Make sparkle positions move around randomly
-        const baseX = (width / sparkleCount) * i;
-        const baseY = height / 2;
-        const x = baseX + Math.sin(totalTime * speed + i * 1.7) * (width * 0.1);
-        const y = baseY + Math.cos(totalTime * speed * 0.5 + i * 2.3) * (height * 0.3);
-        const alpha = Math.abs(Math.sin(totalTime * speed + i * 0.8)) * 0.8 + 0.2;
-        ctx.globalAlpha = alpha;
-        ctx.fillStyle = color;
-        ctx.beginPath();
-        const sparkleRadius = Math.min(width, height) * size;
-        ctx.arc(x, y, sparkleRadius, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.globalAlpha = 1;
-    }
-  },
-  {
-    name: 'Fade',
-    type: 'fade',
-    params: [
-      { label: 'Speed', name: 'speed', type: 'float', default: 1.0 },
-      { label: 'Color', name: 'color', type: 'color', default: '#ff6b35' }
-    ],
-    render: ({ ctx, totalTime, width, height, nodeId }) => {
-      const speed = getNodeParameter(nodeId, 'speed', 1.0);
-      const color = getNodeParameter(nodeId, 'color', '#ff6b35');
-      
-      const fadeIntensity = (Math.sin(totalTime * speed) + 1) * 0.5;
-      ctx.globalAlpha = fadeIntensity;
-      ctx.fillStyle = color;
-      ctx.fillRect(0, 0, width, height);
-      ctx.globalAlpha = 1;
-    }
-  },
-  {
-    name: 'Chase',
-    type: 'chase',
-    params: [
-      { label: 'Speed', name: 'speed', type: 'range', default: 20, min: 5, max: 100 },
-      { label: 'Size', name: 'size', type: 'integer', default: 4, min: 1, max: 20 },
-      { label: 'Color', name: 'color', type: 'color', default: '#ffffff' }
-    ],
-    render: ({ ctx, totalTime, width, height, nodeId }) => {
-      const speed = getNodeParameter(nodeId, 'speed', 20);
-      const size = getNodeParameter(nodeId, 'size', 4);
-      const color = getNodeParameter(nodeId, 'color', '#ffffff');
-      
-      const position = (totalTime * speed) % width;
-      ctx.fillStyle = color;
-      ctx.fillRect(position, 0, size, height); // Full vertical bar instead of circle
-    }
-  },
-  {
-    name: 'Blend',
-    type: 'blend',
-    params: [
-      { label: 'Opacity', name: 'opacity', type: 'float', default: 0.5 },
-      { label: 'Blend Mode', name: 'blendMode', type: 'select', default: 'normal', options: [
-        { value: 'normal', label: 'Normal' },
-        { value: 'add', label: 'Add' },
-        { value: 'multiply', label: 'Multiply' },
-        { value: 'screen', label: 'Screen' },
-        { value: 'overlay', label: 'Overlay' },
-        { value: 'difference', label: 'Difference' }
-      ]}
-    ],
-    render: ({ ctx, width, height, getInputNodes, getNodeOutput, nodeId }) => {
-      const opacity = getNodeParameter(nodeId, 'opacity', 0.5);
-      const blendMode = getNodeParameter(nodeId, 'blendMode', 'normal');
-      const inputs = getInputNodes();
-      const input1Data = inputs.input1 ? getNodeOutput(inputs.input1.id) : null;
-      const input2Data = inputs.input2 ? getNodeOutput(inputs.input2.id) : null;
-      
-      if (input1Data || input2Data) {
-        // Create blend effect
-        const imageData = ctx.createImageData(width, height);
-        const data = imageData.data;
-        
-        for (let i = 0; i < data.length; i += 4) {
-          let r1 = 0, g1 = 0, b1 = 0, a1 = 255;
-          let r2 = 0, g2 = 0, b2 = 0, a2 = 255;
-          
-          if (input1Data) {
-            r1 = input1Data.data[i];
-            g1 = input1Data.data[i + 1];
-            b1 = input1Data.data[i + 2];
-            a1 = input1Data.data[i + 3];
-          }
-          
-          if (input2Data) {
-            r2 = input2Data.data[i];
-            g2 = input2Data.data[i + 1];
-            b2 = input2Data.data[i + 2];
-            a2 = input2Data.data[i + 3];
-          }
-          
-          // Apply blend mode
-          let r, g, b;
-          
-          switch (blendMode) {
-            case 'add':
-              r = Math.min(255, r1 + r2 * opacity);
-              g = Math.min(255, g1 + g2 * opacity);
-              b = Math.min(255, b1 + b2 * opacity);
-              break;
-            case 'multiply':
-              r = Math.min(255, r1 * (1 - opacity) + (r1 * r2 / 255) * opacity);
-              g = Math.min(255, g1 * (1 - opacity) + (g1 * g2 / 255) * opacity);
-              b = Math.min(255, b1 * (1 - opacity) + (b1 * b2 / 255) * opacity);
-              break;
-            case 'screen':
-              r = Math.min(255, r1 * (1 - opacity) + (255 - (255 - r1) * (255 - r2) / 255) * opacity);
-              g = Math.min(255, g1 * (1 - opacity) + (255 - (255 - g1) * (255 - g2) / 255) * opacity);
-              b = Math.min(255, b1 * (1 - opacity) + (255 - (255 - b1) * (255 - b2) / 255) * opacity);
-              break;
-            case 'overlay':
-              const overlayR = r1 < 128 ? 2 * r1 * r2 / 255 : 255 - 2 * (255 - r1) * (255 - r2) / 255;
-              const overlayG = g1 < 128 ? 2 * g1 * g2 / 255 : 255 - 2 * (255 - g1) * (255 - g2) / 255;
-              const overlayB = b1 < 128 ? 2 * b1 * b2 / 255 : 255 - 2 * (255 - b1) * (255 - b2) / 255;
-              r = Math.min(255, r1 * (1 - opacity) + overlayR * opacity);
-              g = Math.min(255, g1 * (1 - opacity) + overlayG * opacity);
-              b = Math.min(255, b1 * (1 - opacity) + overlayB * opacity);
-              break;
-            case 'difference':
-              r = Math.min(255, r1 * (1 - opacity) + Math.abs(r1 - r2) * opacity);
-              g = Math.min(255, g1 * (1 - opacity) + Math.abs(g1 - g2) * opacity);
-              b = Math.min(255, b1 * (1 - opacity) + Math.abs(b1 - b2) * opacity);
-              break;
-            default: // normal
-              r = Math.min(255, r1 * (1 - opacity) + r2 * opacity);
-              g = Math.min(255, g1 * (1 - opacity) + g2 * opacity);
-              b = Math.min(255, b1 * (1 - opacity) + b2 * opacity);
-              break;
-          }
-          
-          data[i] = r;
-          data[i + 1] = g;
-          data[i + 2] = b;
-          data[i + 3] = 255;
-        }
-        
-        ctx.putImageData(imageData, 0, 0);
-      }
-    }
-  },
   
-  // Add native FastLED operators
+  // Convert native FastLED operators to the simplified format
   ...NATIVE_OPERATOR_DEFINITIONS.map(nativeOperator => ({
     name: nativeOperator.name,
     type: nativeOperator.type,
@@ -730,7 +331,7 @@ export function validateBufferConnection(connection: Edge | Connection, nodes: N
   }
   
   // Special rules for blend nodes
-  if (target.data.type === 'blend' || target.data.type === 'native_blend') {
+      if (target.data.type === 'blend') {
     const targetHandleId = connection.targetHandle;
     
     // For blend node's second input (input-2), must be from different buffer
@@ -757,7 +358,7 @@ export function isValidConnectionWithBuffers(connection: Edge | Connection, node
   
   // Check existing connection limits
   const targetHandleId = connection.targetHandle;
-  const isBlendNode = target.data.type === 'blend' || target.data.type === 'native_blend';
+  const isBlendNode = target.data.type === 'blend';
   
   if (isBlendNode) {
     // For blend nodes, each handle can only have one connection
@@ -884,7 +485,7 @@ export function deleteNode(nodeId: string): void {
   if (!nodeToDelete) return;
   
   // Check if it's a blend node
-  const isBlendNode = nodeToDelete.data.type === 'blend' || nodeToDelete.data.type === 'native_blend';
+  const isBlendNode = nodeToDelete.data.type === 'blend';
   
   // Get edges connected to this node
   const inputEdges = currentEdges.filter(edge => edge.target === nodeId);

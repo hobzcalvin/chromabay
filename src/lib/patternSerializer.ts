@@ -216,14 +216,20 @@ export function serializePattern(
     const incoming = allEdges.filter(e => e.target === n.id);
 
     /* ------------------------------------------------------------------
-     * A node that has **no incoming edges** is a generator.  Generators
+     * A blend or filter node can have at most one input that feeds into
+     * the same buffer the node writes to (a.k.a. read-modify-write 
+     * pattern).  
+     *
+     * Source operator nodes like perlin_noise, rainbow, etc. have no
+     * inputs at all, so this function would return `incoming.length === 0`
+     * which would return `false` as expected. Source operators should
      * never overwrite a buffer they read from because they do not read
      * anything at all, so we can return early.
      * ------------------------------------------------------------------ */
     if (incoming.length === 0) return false;
 
     // Single-input node
-    if (n.data.type !== 'blend' && n.data.type !== 'native_blend') {
+    if (n.data.type !== 'blend') {
       const srcNode = allNodes.find(nd => nd.id === incoming[0].source);
       return srcNode ? getNodeLaneBuffer(srcNode) === outBuf : false;
     }
@@ -257,7 +263,7 @@ export function serializePattern(
 
   /* ------------------------------------------------------------------
    * The topological sort above already respects real data dependencies.
-   * Extra re-ordering for “buffer overwrite” was too aggressive and
+   * Extra re-ordering for "buffer overwrite" was too aggressive and
    * broke valid dependency chains (e.g. putting a blend before the
    * Raindrops node it actually needs).  We bring it back in a *scoped*
    * manner: nodes are only re-ordered **within the same dependency
@@ -380,7 +386,7 @@ export function serializePattern(
     const inputEdges = allEdges.filter(edge => edge.target === node.id);
     if (inputEdges.length > 0) {
       // For blend nodes, handle dual inputs
-      if (node.data.type === 'blend' || node.data.type === 'native_blend') {
+      if (node.data.type === 'blend') {
         const input1Edge = inputEdges.find(e => e.targetHandle === 'input-1' || e.targetHandle === 'input');
         const input2Edge = inputEdges.find(e => e.targetHandle === 'input-2');
         
@@ -627,7 +633,7 @@ export function deserializePattern(
     }
     
     // Create edge for secondary input (blend nodes only)
-    if ((sNode.t === 'blend' || sNode.t === 'native_blend') && sNode.i2 !== undefined) {
+    if ((sNode.t === 'blend') && sNode.i2 !== undefined) {
       // Find the source node by looking backwards for the most recent node that outputs to this buffer
       const sourceIndex = findSourceNodeIndex(serializedPattern.nodes, targetIndex, sNode.i2);
       

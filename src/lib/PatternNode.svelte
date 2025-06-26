@@ -22,7 +22,7 @@
     const edges = $flowEdges.filter(edge => edge.target === id);
     const nodes = $flowNodes;
     
-    if (nodeType === 'blend' || nodeType === 'native_blend') {
+    if (nodeType === 'blend') {
       // For blend nodes, get both inputs
       const input1Edge = edges.find(e => e.targetHandle === 'input-1');
       const input2Edge = edges.find(e => e.targetHandle === 'input-2');
@@ -95,15 +95,12 @@
     }
     
     // Store this node's output for other nodes to use
-    // Note: Native operators handle their own output storage after WASM rendering completes
-    const isNativeOperator = nodeType.startsWith('native_');
-    if (!isNativeOperator) {
-      const outputData = ctx.getImageData(0, 0, textureWidth, textureHeight);
-      nodeOutputs.update(outputs => {
-        outputs.set(id, outputData);
-        return outputs;
-      });
-    }
+    // Note: All operators now handle their own output storage after WASM rendering completes
+    const outputData = ctx.getImageData(0, 0, textureWidth, textureHeight);
+    nodeOutputs.update(outputs => {
+      outputs.set(id, outputData);
+      return outputs;
+    });
   }
   
   onDestroy(() => {
@@ -117,7 +114,7 @@
     });
   });
   
-  const isBlendNode = nodeType === 'blend' || nodeType === 'native_blend';
+  const isBlendNode = nodeType === 'blend';
   const isOutputNode = nodeType === 'output';
   
   // Debug parameter availability

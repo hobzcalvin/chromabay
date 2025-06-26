@@ -19,6 +19,11 @@ FASTLED_SOURCES = fastled_minimal.cpp
 SOURCES = operator_registry.cpp $(wildcard operators/*.cpp) $(FASTLED_SOURCES)
 HEADERS = fastled_operators.h
 
+# Generation dependencies
+OPERATOR_SOURCES = $(wildcard operators/*.cpp)
+GENERATION_SCRIPTS = ../../scripts/generate-native-code.js ../../scripts/generate-wasm-bindings.js
+WASM_BINDING_OUTPUT = ../../src/lib/wasmOperators.ts
+
 # Test executable
 TEST_TARGET = test_operators
 TEST_SOURCES = test_operators.cpp $(SOURCES)
@@ -55,28 +60,13 @@ $(TEST_TARGET): $(TEST_SOURCES) $(HEADERS)
 .PHONY: wasm
 wasm:
 	@mkdir -p ../../static/wasm
-	@# Always check if rebuild is needed since wildcards don't work well with Make dependencies
-	@REBUILD_NEEDED=0; \
-	if [ ! -f $(WASM_TARGET) ]; then \
-		echo "🔧 WASM target doesn't exist, building..."; \
-		REBUILD_NEEDED=1; \
-	elif [ -f $(WASM_TARGET) ] && [ $$(stat -f%z $(WASM_TARGET) 2>/dev/null || echo 0) -lt 1000 ]; then \
-		echo "🔧 WASM target appears corrupted (too small), rebuilding..."; \
-		REBUILD_NEEDED=1; \
-	elif [ -n "$$(find operator_registry.cpp wasm_interface.cpp $(FASTLED_SOURCES) $(HEADERS) operators/ -newer $(WASM_TARGET) 2>/dev/null)" ]; then \
-		echo "🔧 Source files changed, rebuilding WASM..."; \
-		REBUILD_NEEDED=1; \
-	fi; \
-	if [ $$REBUILD_NEEDED -eq 1 ]; then \
-		if command -v emcc >/dev/null 2>&1; then \
-			EM_NODE_JS=$$(which node) emcc $(EMCC_FLAGS) $(WASM_SOURCES) -o $(WASM_TARGET); \
-			echo "✅ WASM files built to static/wasm/"; \
-		else \
-			echo "❌ emcc not found. Run 'npm run setup:emscripten' first."; \
-			exit 1; \
-		fi; \
+	@echo "🔧 Building WASM (always rebuild for consistency)..."
+	@if command -v emcc >/dev/null 2>&1; then \
+		EM_NODE_JS=$$(which node) emcc $(EMCC_FLAGS) $(WASM_SOURCES) -o $(WASM_TARGET); \
+		echo "✅ WASM files built to static/wasm/"; \
 	else \
-		echo "✅ WASM is up to date"; \
+		echo "❌ emcc not found. Run 'npm run setup:emscripten' first."; \
+		exit 1; \
 	fi
 
 # Clean build artifacts

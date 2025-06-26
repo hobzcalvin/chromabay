@@ -96,8 +96,8 @@ function generateTypeScript(operators) {
     const operatorTypes = operators.map(op => `'${op.operatorName}'`).join(' | ');
     
     const operatorDefinitions = operators.map(op => `  {
-    name: '${op.displayName} (Native)',
-    type: 'native_${op.operatorName}',
+    name: '${op.displayName}',
+    type: '${op.operatorName}',
     params: [
 ${op.params.map(param => {
     let paramDef = `      { label: '${param.label}', name: '${param.name}', type: '${param.type}', default: ${param.default}, min: ${param.min}, max: ${param.max}`;

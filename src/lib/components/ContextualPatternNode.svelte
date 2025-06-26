@@ -36,7 +36,7 @@
     const edges = $flowEdges.filter(edge => edge.target === id);
     const nodes = $flowNodes;
     
-    if (nodeType === 'blend' || nodeType === 'native_blend') {
+    if (nodeType === 'blend') {
       // For blend nodes, get both inputs
       const input1Edge = edges.find(e => e.targetHandle === 'input-1');
       const input2Edge = edges.find(e => e.targetHandle === 'input-2');
@@ -127,7 +127,7 @@
     });
   });
   
-  const isBlendNode = nodeType === 'blend' || nodeType === 'native_blend';
+  const isBlendNode = nodeType === 'blend';
   const isOutputNode = nodeType === 'output';
 </script>
 
