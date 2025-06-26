@@ -399,7 +399,7 @@ export async function renderNativeOperator(
         
         // Find operator definition
         const operatorDef = NATIVE_OPERATOR_DEFINITIONS.find(def => 
-            def.type === \`native_\${operatorName}\`
+            def.type === \`\${operatorName}\`
         );
         
         if (!operatorDef) {
