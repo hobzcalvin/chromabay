@@ -1,7 +1,7 @@
 {
-  "version": "v0.0.44",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.44.zip",
-  "buildDate": "2025-06-26 06:20:07 UTC",
-  "commitHash": "519f30337e2a028f2f49c4dc2cbcf001e5522ed4",
-  "commitMessage": "try fixing emscripten in ci"
+  "version": "v0.0.45",
+  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.45.zip",
+  "buildDate": "2025-06-26 16:43:24 UTC",
+  "commitHash": "a4ca25ddfe1587c894a82b65e98dea7c39e0fa4c",
+  "commitMessage": "Pattern rendering on esp32"
 }
