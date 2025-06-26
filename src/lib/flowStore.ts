@@ -162,11 +162,15 @@ async function tryRenderNativeOperator(
   deltaTime: number, 
   width: number, 
   height: number, 
-  nodeId: string
+  nodeId: string,
+  getNodeOutput?: (nodeId: string) => ImageData | null,
+  getInputNodes?: () => any
 ): Promise<ImageData | null> {
   try {
-      const nativeOperator = NATIVE_OPERATOR_DEFINITIONS.find(p => p.type === operatorType);
-  if (!nativeOperator) return null;
+    const nativeOperator = NATIVE_OPERATOR_DEFINITIONS.find(p => p.type === operatorType);
+    if (!nativeOperator) {
+      return null;
+    }
   
   // Extract parameter values for this node
   const parameters = nativeOperator.params.map(param => 
@@ -179,14 +183,49 @@ async function tryRenderNativeOperator(
     paramObj[param.name] = parameters[index];
   });
   
+  // Get input buffers for all operators
+  let inputBuffer1: ImageData | null = null;
+  let inputBuffer2: ImageData | null = null;
+  
+  if (getInputNodes && getNodeOutput) {
+    const inputNodes = getInputNodes();
+    
+
+    
+    if (operatorType === 'native_blend') {
+      // Blend operator uses dual inputs
+      if (inputNodes.input1) {
+        inputBuffer1 = getNodeOutput(inputNodes.input1.id);
+      }
+      if (inputNodes.input2) {
+        inputBuffer2 = getNodeOutput(inputNodes.input2.id);
+      }
+    } else {
+      // All other operators use single input (first available input)
+      if (inputNodes.input1) {
+        inputBuffer1 = getNodeOutput(inputNodes.input1.id);
+      } else if (inputNodes.input2) {
+        inputBuffer1 = getNodeOutput(inputNodes.input2.id);
+      } else if (inputNodes.input) {
+        // Handle legacy input structure
+        inputBuffer1 = getNodeOutput(inputNodes.input.id);
+      }
+    }
+  }
+  
   // Call the native WASM operator
-  return await renderNativeOperator(
-    operatorType.replace('native_', '') as import('./wasmOperators').OperatorType, // Remove native_ prefix and cast to correct type
-      width,
-      height,
-      totalTime * 1000, // Convert to milliseconds
-      paramObj
-    );
+  const operatorName = operatorType.replace('native_', '');
+  const result = await renderNativeOperator(
+    operatorName as import('./wasmOperators').OperatorType, // Remove native_ prefix and cast to correct type
+    width,
+    height,
+    totalTime * 1000, // Convert to milliseconds
+    paramObj,
+    inputBuffer1,
+    inputBuffer2
+  );
+  
+  return result;
   } catch (error) {
     console.warn('Native operator render failed:', error);
     return null;
@@ -610,9 +649,10 @@ export const NODE_TYPES: NodeDefinition[] = [
       type: param.type as ParameterType,
       default: param.default,
       min: param.min,
-      max: param.max
+      max: param.max,
+      options: param.options
     })),
-    render: ({ ctx, totalTime, deltaTime, width, height, nodeId }: RenderContext) => {
+    render: ({ ctx, totalTime, deltaTime, width, height, nodeId, getInputNodes, getNodeOutput }: RenderContext) => {
       // For native operators, we'll render a placeholder that shows they're loading
       // The actual native rendering will be handled elsewhere
       ctx.fillStyle = '#333';
@@ -625,14 +665,14 @@ export const NODE_TYPES: NodeDefinition[] = [
       ctx.fillText('Ø', width / 2, height / 2);
       
       // Try to render with WASM if available
-      tryRenderNativeOperator(nativeOperator.type, totalTime, deltaTime, width, height, nodeId)
+      tryRenderNativeOperator(nativeOperator.type, totalTime, deltaTime, width, height, nodeId, getNodeOutput, getInputNodes)
         .then((imageData: ImageData | null) => {
           if (imageData) {
             ctx.putImageData(imageData, 0, 0);
           }
         })
-        .catch(() => {
-          // Already showing placeholder, no need to handle error
+        .catch((error) => {
+          console.error(`Error rendering ${nativeOperator.type}:`, error);
         });
     }
   }))
@@ -685,7 +725,7 @@ export function validateBufferConnection(connection: Edge | Connection, nodes: N
   }
   
   // Special rules for blend nodes
-  if (target.data.type === 'blend') {
+  if (target.data.type === 'blend' || target.data.type === 'native_blend') {
     const targetHandleId = connection.targetHandle;
     
     // For blend node's second input (input-2), must be from different buffer
@@ -712,7 +752,7 @@ export function isValidConnectionWithBuffers(connection: Edge | Connection, node
   
   // Check existing connection limits
   const targetHandleId = connection.targetHandle;
-  const isBlendNode = target.data.type === 'blend';
+  const isBlendNode = target.data.type === 'blend' || target.data.type === 'native_blend';
   
   if (isBlendNode) {
     // For blend nodes, each handle can only have one connection
@@ -839,7 +879,7 @@ export function deleteNode(nodeId: string): void {
   if (!nodeToDelete) return;
   
   // Check if it's a blend node
-  const isBlendNode = nodeToDelete.data.type === 'blend';
+  const isBlendNode = nodeToDelete.data.type === 'blend' || nodeToDelete.data.type === 'native_blend';
   
   // Get edges connected to this node
   const inputEdges = currentEdges.filter(edge => edge.target === nodeId);

@@ -37,20 +37,49 @@ function parseOperatorParams(filePath) {
     const paramContent = match[1];
     const params = [];
     
-    // Parse individual parameter definitions
-    const paramRegex = /{\s*"([^"]+)",\s*"([^"]+)",\s*"([^"]+)",\s*([\d.f-]+),\s*([\d.f-]+),\s*([\d.f-]+),\s*nullptr,\s*0\s*}/g;
+    // Parse individual parameter definitions - handle both nullptr,0 and options array
+    const paramRegex = /{\s*"([^"]+)",\s*"([^"]+)",\s*"([^"]+)",\s*([\d.f-]+),\s*([\d.f-]+),\s*([\d.f-]+),\s*([^,]+),\s*(\d+)\s*}/g;
     let paramMatch;
     
     while ((paramMatch = paramRegex.exec(paramContent)) !== null) {
-        const [, name, label, type, defaultVal, minVal, maxVal] = paramMatch;
-        params.push({
+        const [, name, label, type, defaultVal, minVal, maxVal, options, optionCount] = paramMatch;
+        
+        let paramType = type === 'float' ? 'float' : type === 'int' ? 'range' : type;
+        let paramOptions = undefined;
+        
+        // If it's a select type, extract the options
+        if (type === 'select' && options !== 'nullptr') {
+            // Find the options array definition
+            const optionsArrayName = options.trim();
+            const optionsRegex = new RegExp(`const char\\* ${optionsArrayName}\\[\\]\\s*=\\s*{([^}]+)}`, 's');
+            const optionsMatch = content.match(optionsRegex);
+            
+            if (optionsMatch) {
+                const optionsContent = optionsMatch[1];
+                const optionsList = optionsContent.match(/"([^"]+)"/g);
+                if (optionsList) {
+                    paramOptions = optionsList.map(opt => ({
+                        value: optionsList.indexOf(opt).toString(),
+                        label: opt.replace(/"/g, '')
+                    }));
+                }
+            }
+        }
+        
+        const param = {
             name,
             label,
-            type: type === 'float' ? 'float' : type === 'int' ? 'range' : type,
+            type: paramType,
             default: parseFloat(defaultVal.replace('f', '')),
             min: parseFloat(minVal.replace('f', '')),
             max: parseFloat(maxVal.replace('f', ''))
-        });
+        };
+        
+        if (paramOptions) {
+            param.options = paramOptions;
+        }
+        
+        params.push(param);
     }
     
     return {
@@ -70,7 +99,14 @@ function generateTypeScript(operators) {
     name: '${op.displayName} (Native)',
     type: 'native_${op.operatorName}',
     params: [
-${op.params.map(param => `      { label: '${param.label}', name: '${param.name}', type: '${param.type}', default: ${param.default}, min: ${param.min}, max: ${param.max} }`).join(',\n')}
+${op.params.map(param => {
+    let paramDef = `      { label: '${param.label}', name: '${param.name}', type: '${param.type}', default: ${param.default}, min: ${param.min}, max: ${param.max}`;
+    if (param.options) {
+        paramDef += `, options: ${JSON.stringify(param.options)}`;
+    }
+    paramDef += ' }';
+    return paramDef;
+}).join(',\n')}
     ]
   }`).join(',\n');
 
@@ -108,6 +144,8 @@ interface WasmModule {
     _set_parameters(contextPtr: number, paramsPtr: number, paramCount: number): void;
     _get_output_buffer(contextPtr: number): number;
     _get_buffer_size(contextPtr: number): number;
+    _set_input_buffer1(contextPtr: number, bufferPtr: number): void;
+    _set_input_buffer2(contextPtr: number, bufferPtr: number): void;
 ${wasmCalls}
     
     // Memory access
@@ -244,6 +282,64 @@ export class FastLEDWasmOperatorRunner {
         this.module._set_parameters(this.contextPtr, this.paramsPtr, params.length);
     }
 
+    setInputBuffer1(imageData: ImageData | null) {
+        if (!this.contextPtr) return;
+        
+        if (!imageData) {
+            this.module._set_input_buffer1(this.contextPtr, 0);
+            return;
+        }
+        
+        // Allocate buffer for RGB data
+        const rgbSize = this.width * this.height * 3;
+        const bufferPtr = this.module._malloc(rgbSize);
+        
+        // Convert RGBA to RGB
+        const rgbBuffer = new Uint8Array(this.module.HEAPU8.buffer, bufferPtr, rgbSize);
+        for (let i = 0; i < this.width * this.height; i++) {
+            const rgbaIndex = i * 4;
+            const rgbIndex = i * 3;
+            rgbBuffer[rgbIndex] = imageData.data[rgbaIndex];     // R
+            rgbBuffer[rgbIndex + 1] = imageData.data[rgbaIndex + 1]; // G
+            rgbBuffer[rgbIndex + 2] = imageData.data[rgbaIndex + 2]; // B
+        }
+        
+        // Set input buffer in context
+        this.module._set_input_buffer1(this.contextPtr, bufferPtr);
+        
+        // Free the temporary buffer (WASM function copies it)
+        this.module._free(bufferPtr);
+    }
+
+    setInputBuffer2(imageData: ImageData | null) {
+        if (!this.contextPtr) return;
+        
+        if (!imageData) {
+            this.module._set_input_buffer2(this.contextPtr, 0);
+            return;
+        }
+        
+        // Allocate buffer for RGB data
+        const rgbSize = this.width * this.height * 3;
+        const bufferPtr = this.module._malloc(rgbSize);
+        
+        // Convert RGBA to RGB
+        const rgbBuffer = new Uint8Array(this.module.HEAPU8.buffer, bufferPtr, rgbSize);
+        for (let i = 0; i < this.width * this.height; i++) {
+            const rgbaIndex = i * 4;
+            const rgbIndex = i * 3;
+            rgbBuffer[rgbIndex] = imageData.data[rgbaIndex];     // R
+            rgbBuffer[rgbIndex + 1] = imageData.data[rgbaIndex + 1]; // G
+            rgbBuffer[rgbIndex + 2] = imageData.data[rgbaIndex + 2]; // B
+        }
+        
+        // Set input buffer in context
+        this.module._set_input_buffer2(this.contextPtr, bufferPtr);
+        
+        // Free the temporary buffer (WASM function copies it)
+        this.module._free(bufferPtr);
+    }
+
 ${runnerMethods}
 
     private getImageData(): ImageData | null {
@@ -290,7 +386,9 @@ export async function renderNativeOperator(
     width: number,
     height: number,
     timestamp: number,
-    params: NativeOperatorParams = {}
+    params: NativeOperatorParams = {},
+    inputBuffer1?: ImageData | null,
+    inputBuffer2?: ImageData | null
 ): Promise<ImageData | null> {
     try {
         const module = await loadWasmModule();
@@ -315,6 +413,14 @@ export async function renderNativeOperator(
         
         // Set parameters
         runner.setParameters(paramValues);
+        
+        // Set input buffers if provided (for blend operations)
+        if (inputBuffer1) {
+            runner.setInputBuffer1(inputBuffer1);
+        }
+        if (inputBuffer2) {
+            runner.setInputBuffer2(inputBuffer2);
+        }
         
         // Run the appropriate operator
         let result: ImageData | null = null;

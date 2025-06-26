@@ -27,7 +27,7 @@ TEST_SOURCES = test_operators.cpp $(SOURCES)
 WASM_TARGET = ../../static/wasm/fastled_operators.js
 WASM_SOURCES = operator_registry.cpp $(wildcard operators/*.cpp) wasm_interface.cpp $(FASTLED_SOURCES)
 EMCC_FLAGS = -O3 -s WASM=1 \
-	-s EXPORTED_FUNCTIONS='["_create_context", "_destroy_context", "_set_timing", "_set_parameters", "_get_output_buffer", "_get_buffer_size", "_malloc", "_free", "_call_gradient_operator", "_call_moving_blob_operator", "_call_perlin_noise_operator", "_call_rainbow_operator", "_call_sparkle_operator", "_call_strobe_operator"]' \
+	-s EXPORTED_FUNCTIONS='["_create_context", "_destroy_context", "_set_timing", "_set_parameters", "_get_output_buffer", "_get_buffer_size", "_set_input_buffer1", "_set_input_buffer2", "_malloc", "_free", "_call_blend_operator", "_call_chase_operator", "_call_fade_operator", "_call_gradient_operator", "_call_moving_blob_operator", "_call_perlin_noise_operator", "_call_rainbow_operator", "_call_raindrops_operator", "_call_sparkle_operator", "_call_strobe_operator"]' \
 	-s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap", "setValue", "getValue", "HEAPU8"]' \
 	-s ALLOW_MEMORY_GROWTH=1 \
 	-s MODULARIZE=1 \
@@ -57,7 +57,7 @@ wasm: $(WASM_TARGET)
 $(WASM_TARGET): $(WASM_SOURCES) $(HEADERS)
 	@mkdir -p ../../static/wasm
 	@if command -v emcc >/dev/null 2>&1; then \
-		emcc $(EMCC_FLAGS) $(WASM_SOURCES) -o $(WASM_TARGET); \
+		EM_NODE_JS=$$(which node) emcc $(EMCC_FLAGS) $(WASM_SOURCES) -o $(WASM_TARGET); \
 	else \
 		echo "❌ emcc not found. Run 'npm run setup:emscripten' first."; \
 		exit 1; \

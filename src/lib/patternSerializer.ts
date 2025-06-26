@@ -380,7 +380,7 @@ export function serializePattern(
     const inputEdges = allEdges.filter(edge => edge.target === node.id);
     if (inputEdges.length > 0) {
       // For blend nodes, handle dual inputs
-      if (node.data.type === 'blend') {
+      if (node.data.type === 'blend' || node.data.type === 'native_blend') {
         const input1Edge = inputEdges.find(e => e.targetHandle === 'input-1' || e.targetHandle === 'input');
         const input2Edge = inputEdges.find(e => e.targetHandle === 'input-2');
         
@@ -627,7 +627,7 @@ export function deserializePattern(
     }
     
     // Create edge for secondary input (blend nodes only)
-    if (sNode.t === 'blend' && sNode.i2 !== undefined) {
+    if ((sNode.t === 'blend' || sNode.t === 'native_blend') && sNode.i2 !== undefined) {
       // Find the source node by looking backwards for the most recent node that outputs to this buffer
       const sourceIndex = findSourceNodeIndex(serializedPattern.nodes, targetIndex, sNode.i2);
       

@@ -61,7 +61,9 @@
 
   function handleSelectChange(param: Parameter, event: Event) {
     const select = event.target as HTMLSelectElement;
-    updateParameter(param, select.value);
+    // Convert string value to number for numeric parameters
+    const value = param.type === 'select' ? parseInt(select.value) : select.value;
+    updateParameter(param, value);
   }
 
   function handleDeleteNode() {
@@ -149,7 +151,7 @@
   
   <div class="popover-content">
     {#if nodeDefinition && nodeDefinition.params.length > 0}
-      {#each nodeDefinition.params as param (param.name)}
+      {#each nodeDefinition.params.filter(p => p.name !== 'dual_input') as param (param.name)}
         {@const inputId = getUniqueInputId(param.name)}
         <div class="parameter-group">
           <label class="parameter-label" for={inputId}>{param.label}</label>
@@ -240,7 +242,7 @@
             <div class="select-control">
               <select 
                 id={inputId}
-                value={getParameterValue(param)}
+                value={String(getParameterValue(param))}
                 onchange={(e) => handleSelectChange(param, e)}
               >
                 {#if param.options}
@@ -475,6 +477,7 @@
   }
 
   .select-control {
+    position: relative;
     display: flex;
     align-items: center;
   }
@@ -486,12 +489,23 @@
     border-radius: 4px;
     color: white;
     font-size: 12px;
-    padding: 6px 8px;
+    padding: 6px 24px 6px 8px; /* Add right padding for arrow */
     cursor: pointer;
     outline: none;
-    appearance: none; /* Added for broader compatibility */
-    -webkit-appearance: none; /* For Safari */
-    -moz-appearance: none; /* For Firefox */
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+  }
+
+  .select-control::after {
+    content: '▼';
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #9ca3af;
+    pointer-events: none;
+    font-size: 10px;
   }
 
   .select-control select:hover {

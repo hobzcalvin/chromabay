@@ -381,13 +381,53 @@ uint32_t get_buffer_size(OperatorContext* ctx) {
     return ctx->width * ctx->height * 3; // 3 bytes per pixel (RGB)
 }
 
+EMSCRIPTEN_KEEPALIVE
+void set_input_buffer1(OperatorContext* ctx, uint8_t* buffer) {
+    if (!ctx) return;
+    
+    // Free existing buffer
+    if (ctx->input_buffer1) {
+        free(ctx->input_buffer1);
+        ctx->input_buffer1 = nullptr;
+    }
+    
+    if (buffer) {
+        // Allocate and copy input buffer
+        uint32_t total_pixels = ctx->width * ctx->height;
+        ctx->input_buffer1 = (CRGB*)malloc(total_pixels * sizeof(CRGB));
+        if (ctx->input_buffer1) {
+            memcpy(ctx->input_buffer1, buffer, total_pixels * sizeof(CRGB));
+        }
+    }
+}
+
+EMSCRIPTEN_KEEPALIVE
+void set_input_buffer2(OperatorContext* ctx, uint8_t* buffer) {
+    if (!ctx) return;
+    
+    // Free existing buffer
+    if (ctx->input_buffer2) {
+        free(ctx->input_buffer2);
+        ctx->input_buffer2 = nullptr;
+    }
+    
+    if (buffer) {
+        // Allocate and copy input buffer
+        uint32_t total_pixels = ctx->width * ctx->height;
+        ctx->input_buffer2 = (CRGB*)malloc(total_pixels * sizeof(CRGB));
+        if (ctx->input_buffer2) {
+            memcpy(ctx->input_buffer2, buffer, total_pixels * sizeof(CRGB));
+        }
+    }
+}
+
 // Auto-generated operator call functions
 ${callFunctions}
 
 } // extern "C"
 
 // Note: Exported functions for Emscripten build:
-// [${exportedFunctions}, "_create_context", "_destroy_context", "_set_timing", "_set_parameters", "_get_output_buffer", "_get_buffer_size", "_malloc", "_free"]
+// [${exportedFunctions}, "_create_context", "_destroy_context", "_set_timing", "_set_parameters", "_get_output_buffer", "_get_buffer_size", "_set_input_buffer1", "_set_input_buffer2", "_malloc", "_free"]
 `;
 }
 
@@ -411,7 +451,8 @@ function updateMakefile(operators) {
     // Generate auto-generated exported functions list
     const exportedFunctions = [
         '"_create_context"', '"_destroy_context"', '"_set_timing"', '"_set_parameters"',
-        '"_get_output_buffer"', '"_get_buffer_size"', '"_malloc"', '"_free"',
+        '"_get_output_buffer"', '"_get_buffer_size"', '"_set_input_buffer1"', '"_set_input_buffer2"',
+        '"_malloc"', '"_free"',
         ...operators.map(op => `"_call_${op.operatorName}_operator"`)
     ];
     
@@ -473,7 +514,8 @@ function main() {
     // Extract exported functions for reference
     const exportedFunctions = [
         '"_create_context"', '"_destroy_context"', '"_set_timing"', '"_set_parameters"',
-        '"_get_output_buffer"', '"_get_buffer_size"', '"_malloc"', '"_free"',
+        '"_get_output_buffer"', '"_get_buffer_size"', '"_set_input_buffer1"', '"_set_input_buffer2"',
+        '"_malloc"', '"_free"',
         ...operators.map(op => `"_call_${op.operatorName}_operator"`)
     ];
     

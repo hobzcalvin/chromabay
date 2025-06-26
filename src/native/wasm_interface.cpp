@@ -113,7 +113,65 @@ uint32_t get_buffer_size(OperatorContext* ctx) {
     return ctx->width * ctx->height * 3; // 3 bytes per pixel (RGB)
 }
 
+EMSCRIPTEN_KEEPALIVE
+void set_input_buffer1(OperatorContext* ctx, uint8_t* buffer) {
+    if (!ctx) return;
+    
+    // Free existing buffer
+    if (ctx->input_buffer1) {
+        free(ctx->input_buffer1);
+        ctx->input_buffer1 = nullptr;
+    }
+    
+    if (buffer) {
+        // Allocate and copy input buffer
+        uint32_t total_pixels = ctx->width * ctx->height;
+        ctx->input_buffer1 = (CRGB*)malloc(total_pixels * sizeof(CRGB));
+        if (ctx->input_buffer1) {
+            memcpy(ctx->input_buffer1, buffer, total_pixels * sizeof(CRGB));
+        }
+    }
+}
+
+EMSCRIPTEN_KEEPALIVE
+void set_input_buffer2(OperatorContext* ctx, uint8_t* buffer) {
+    if (!ctx) return;
+    
+    // Free existing buffer
+    if (ctx->input_buffer2) {
+        free(ctx->input_buffer2);
+        ctx->input_buffer2 = nullptr;
+    }
+    
+    if (buffer) {
+        // Allocate and copy input buffer
+        uint32_t total_pixels = ctx->width * ctx->height;
+        ctx->input_buffer2 = (CRGB*)malloc(total_pixels * sizeof(CRGB));
+        if (ctx->input_buffer2) {
+            memcpy(ctx->input_buffer2, buffer, total_pixels * sizeof(CRGB));
+        }
+    }
+}
+
 // Auto-generated operator call functions
+
+EMSCRIPTEN_KEEPALIVE
+void call_blend_operator(OperatorContext* ctx) {
+    if (!ctx) return;
+    blend_operator(ctx);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void call_chase_operator(OperatorContext* ctx) {
+    if (!ctx) return;
+    chase_operator(ctx);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void call_fade_operator(OperatorContext* ctx) {
+    if (!ctx) return;
+    fade_operator(ctx);
+}
 
 EMSCRIPTEN_KEEPALIVE
 void call_gradient_operator(OperatorContext* ctx) {
@@ -140,6 +198,12 @@ void call_rainbow_operator(OperatorContext* ctx) {
 }
 
 EMSCRIPTEN_KEEPALIVE
+void call_raindrops_operator(OperatorContext* ctx) {
+    if (!ctx) return;
+    raindrops_operator(ctx);
+}
+
+EMSCRIPTEN_KEEPALIVE
 void call_sparkle_operator(OperatorContext* ctx) {
     if (!ctx) return;
     sparkle_operator(ctx);
@@ -154,4 +218,4 @@ void call_strobe_operator(OperatorContext* ctx) {
 } // extern "C"
 
 // Note: Exported functions for Emscripten build:
-// ["_call_gradient_operator", "_call_moving_blob_operator", "_call_perlin_noise_operator", "_call_rainbow_operator", "_call_sparkle_operator", "_call_strobe_operator", "_create_context", "_destroy_context", "_set_timing", "_set_parameters", "_get_output_buffer", "_get_buffer_size", "_malloc", "_free"]
+// ["_call_blend_operator", "_call_chase_operator", "_call_fade_operator", "_call_gradient_operator", "_call_moving_blob_operator", "_call_perlin_noise_operator", "_call_rainbow_operator", "_call_raindrops_operator", "_call_sparkle_operator", "_call_strobe_operator", "_create_context", "_destroy_context", "_set_timing", "_set_parameters", "_get_output_buffer", "_get_buffer_size", "_set_input_buffer1", "_set_input_buffer2", "_malloc", "_free"]

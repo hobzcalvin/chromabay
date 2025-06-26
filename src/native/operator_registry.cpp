@@ -9,10 +9,14 @@
 
 // Auto-generated operator registry - parameters are defined alongside their functions
 const OperatorDefinition OPERATOR_DEFINITIONS[] = {
+    {"Blend", "blend", blend_params, 3, blend_operator},
+    {"Chase", "chase", chase_params, 5, chase_operator},
+    {"Fade", "fade", fade_params, 4, fade_operator},
     {"Gradient", "gradient", gradient_params, 5, gradient_operator},
     {"Moving Blob", "moving_blob", moving_blob_params, 5, moving_blob_operator},
     {"Perlin Noise", "perlin_noise", perlin_noise_params, 6, perlin_noise_operator},
     {"Rainbow", "rainbow", rainbow_params, 4, rainbow_operator},
+    {"Raindrops", "raindrops", raindrops_params, 6, raindrops_operator},
     {"Sparkle", "sparkle", sparkle_params, 5, sparkle_operator},
     {"Strobe", "strobe", strobe_params, 5, strobe_operator}
 };

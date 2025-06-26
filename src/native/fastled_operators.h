@@ -109,19 +109,27 @@ typedef struct {
 
 // Auto-generated operator function declarations
 extern "C" {
+    void blend_operator(OperatorContext* ctx);
+    void chase_operator(OperatorContext* ctx);
+    void fade_operator(OperatorContext* ctx);
     void gradient_operator(OperatorContext* ctx);
     void moving_blob_operator(OperatorContext* ctx);
     void perlin_noise_operator(OperatorContext* ctx);
     void rainbow_operator(OperatorContext* ctx);
+    void raindrops_operator(OperatorContext* ctx);
     void sparkle_operator(OperatorContext* ctx);
     void strobe_operator(OperatorContext* ctx);
 }
 
 // Auto-generated operator parameter array declarations
+extern const OperatorParameter blend_params[];
+extern const OperatorParameter chase_params[];
+extern const OperatorParameter fade_params[];
 extern const OperatorParameter gradient_params[];
 extern const OperatorParameter moving_blob_params[];
 extern const OperatorParameter perlin_noise_params[];
 extern const OperatorParameter rainbow_params[];
+extern const OperatorParameter raindrops_params[];
 extern const OperatorParameter sparkle_params[];
 extern const OperatorParameter strobe_params[];
 
