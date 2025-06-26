@@ -35,6 +35,14 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
+      - name: Install Emscripten
+        run: |
+          # Install Emscripten via package manager
+          sudo apt-get update
+          sudo apt-get install -y emscripten
+          # Verify installation
+          emcc --version
+
       - name: Install dependencies
         run: npm ci
 
