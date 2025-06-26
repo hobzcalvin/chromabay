@@ -1,7 +1,7 @@
 {
-  "version": "v0.0.42",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.42.zip",
-  "buildDate": "2025-06-25 06:17:56 UTC",
-  "commitHash": "9fdfcc219d7cb341c1e6eb9e739df1a348ecc2eb",
-  "commitMessage": "Some console logs gone"
+  "version": "v0.0.44",
+  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.44.zip",
+  "buildDate": "2025-06-26 06:20:07 UTC",
+  "commitHash": "519f30337e2a028f2f49c4dc2cbcf001e5522ed4",
+  "commitMessage": "try fixing emscripten in ci"
 }
