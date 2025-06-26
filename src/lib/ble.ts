@@ -2,6 +2,8 @@ import { BleClient, numbersToDataView, dataViewToNumbers, dataViewToText, textTo
 import { Capacitor } from '@capacitor/core';
 import { encode as msgpackEncode } from '@msgpack/msgpack';
 import { serializeCurrentPattern } from './flowStore';
+import { currentPatternName } from './stores/patternsStore';
+import { get } from 'svelte/store';
 
 /**
  * Check if we're running in a web browser
@@ -174,6 +176,13 @@ export async function connectToDevice(device: any): Promise<void> {
   try {
     if (isWeb()) {
       const gattServer = await device.webDevice.gatt.connect();
+      
+      // Add disconnection event listener for Web Bluetooth
+      device.webDevice.addEventListener('gattserverdisconnected', () => {
+        console.log(`Device ${device.deviceId} disconnected unexpectedly`);
+        connectedDevices.delete(device.deviceId);
+      });
+      
       connectedDevices.set(device.deviceId, {
         device: device.webDevice,
         gattServer: gattServer,
@@ -267,6 +276,13 @@ export async function readCharacteristic(deviceId: string, serviceUuid: string, 
     return decodedString;
 
   } catch (error) {
+    // If the error indicates disconnection, clean up the device
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    if (errorMessage.includes('disconnected') || errorMessage.includes('GATT Server is disconnected') || 
+        errorMessage.includes('not connected') || errorMessage.includes('Device is not connected')) {
+      console.log(`Device ${deviceId} appears disconnected, removing from connected devices`);
+      connectedDevices.delete(deviceId);
+    }
     console.error(`Error reading characteristic ${characteristicUuid}:`, error);
     throw error;
   }
@@ -286,6 +302,13 @@ export async function writeCharacteristic(deviceId: string, serviceUuid: string,
     }
     console.log(`Successfully wrote to characteristic ${characteristicUuid}`);
   } catch (error) {
+    // If the error indicates disconnection, clean up the device
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    if (errorMessage.includes('disconnected') || errorMessage.includes('GATT Server is disconnected') || 
+        errorMessage.includes('not connected') || errorMessage.includes('Device is not connected')) {
+      console.log(`Device ${deviceId} appears disconnected, removing from connected devices`);
+      connectedDevices.delete(deviceId);
+    }
     console.error(`Error writing to characteristic ${characteristicUuid}:`, error);
     throw error;
   }
@@ -360,6 +383,34 @@ export function getConnectedDevices(): string[] {
 
 export function getConnectedDeviceCount(): number {
   return connectedDevices.size;
+}
+
+// Validate and clean up stale connections
+export async function validateConnections(): Promise<void> {
+  const deviceIds = Array.from(connectedDevices.keys());
+  
+  for (const deviceId of deviceIds) {
+    try {
+      if (isWeb()) {
+        const deviceInfo = connectedDevices.get(deviceId);
+        if (!deviceInfo?.gattServer?.connected) {
+          console.log(`Removing stale Web Bluetooth connection: ${deviceId}`);
+          connectedDevices.delete(deviceId);
+        }
+      } else {
+        // For Capacitor, try a quick read to test connection
+        try {
+          await BleClient.read(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_DEVICE_INFO);
+        } catch (error) {
+          console.log(`Removing stale Capacitor connection: ${deviceId}`);
+          connectedDevices.delete(deviceId);
+        }
+      }
+    } catch (error) {
+      console.log(`Removing invalid connection: ${deviceId}`);
+      connectedDevices.delete(deviceId);
+    }
+  }
 }
 
 // --- New OTA Functions ---
@@ -674,7 +725,8 @@ export async function syncPatternToAllDevices(): Promise<void> {
 
   try {
     // Serialize the current pattern
-    const serializedPattern = serializeCurrentPattern();
+    const actualPatternName = get(currentPatternName) || "Unnamed Pattern";
+    const serializedPattern = serializeCurrentPattern(actualPatternName);
     
     // Encode as MessagePack
     const msgpackData = msgpackEncode(serializedPattern);

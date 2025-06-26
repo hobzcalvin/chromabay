@@ -1,5 +1,5 @@
 #include <Arduino.h>
-#include <FastLED.h> // Still needed for CRGB struct and color math (fill_rainbow)
+#include <FastLED.h> // Still needed for CRGB struct and color math
 #include <LittleFS.h>
 #include <NimBLEDevice.h>
 #include <NimBLEServer.h>
@@ -12,19 +12,21 @@
 #include "led_manager.h" // Include the new LED Manager
 #include "config_manager.h"   // Restore MessagePack config handling
 #include "firmware_version.h" // Include firmware version header
+#include "pattern_renderer.h" // Include pattern renderer
 
 // LED Configuration (some of these are now defaults for LedManager config)
 #define LED_PIN     13
-#define NUM_LEDS    131 // This defines the size of the `leds` CRGB buffer
+#define NUM_LEDS    25  // 5x5 LED matrix (DISPLAY_WIDTH * DISPLAY_HEIGHT)
 #define BRIGHTNESS  20      // Applied to LedManager
 
-// LED Array (still used by FastLED's fill_rainbow and as a buffer)
-CRGB leds[NUM_LEDS];
+// Note: CRGB type still needed for pattern renderer, but no global array needed
 
 // LedManager instance
 LedConfig::LedManager ledMgr;
 // ConfigManager instance (depends on ledMgr)
 LedConfig::ConfigManager configMgr(ledMgr);
+// Pattern renderer instance
+PatternRenderer* patternRenderer = nullptr;
 
 // NimBLE LED Service (Blumon custom LED service UUID - restored)
 #define SERVICE_UUID           "a0be83e4-8dc9-47f0-ab40-b19721d20ed1"
@@ -67,8 +69,7 @@ bool deviceConnected = false;
 bool oldDeviceConnected = false;
 String receivedData = "";
 
-// Rainbow variables
-uint8_t hue = 0;
+// Pattern rendering variables
 unsigned long lastUpdate = 0;
 const unsigned long updateInterval = 20; // Update every 20ms for smooth animation
 
@@ -680,31 +681,20 @@ class PatternSyncCallbacks : public NimBLECharacteristicCallbacks {
 
 // Function to process received pattern data
 void processReceivedPattern() {
-    if (!newPatternAvailable || patternBuffer == nullptr) {
+    if (!newPatternAvailable || patternBuffer == nullptr || patternRenderer == nullptr) {
         return;
     }
     
     Serial.println("Processing received pattern...");
     
-    // Initialize MessagePack reader
-    mpack_reader_t reader;
-    mpack_reader_init_data(&reader, (const char*)patternBuffer, patternBufferSize);
+    // Try to load the pattern into the pattern renderer
+    bool success = patternRenderer->loadPatternFromMessagePack(patternBuffer, patternBufferSize);
     
-    // For now, just validate that we can read the MessagePack data
-    // Later this will be expanded to actually parse and apply the pattern
-    mpack_tag_t tag = mpack_read_tag(&reader);
-    
-    if (mpack_reader_error(&reader) != mpack_ok) {
-        Serial.printf("MessagePack error: %s\n", mpack_error_to_string(mpack_reader_error(&reader)));
+    if (success) {
+        Serial.println("Pattern loaded successfully into renderer");
     } else {
-        Serial.printf("MessagePack root type: %s\n", mpack_type_to_string(tag.type));
-        if (tag.type == mpack_type_map) {
-            Serial.printf("Pattern map has %d entries\n", tag.v.n);
-        }
-        Serial.println("Pattern MessagePack data is valid and ready for parsing");
+        Serial.println("Failed to load pattern into renderer");
     }
-    
-    mpack_reader_destroy(&reader);
     
     // Mark pattern as processed
     newPatternAvailable = false;
@@ -712,17 +702,7 @@ void processReceivedPattern() {
     Serial.println("Pattern processing completed");
 }
 
-void pushCRGBToStrip() {
-    if (ledMgr.getNumStrips() > 0) { 
-        LedConfig::LedBus* strip0 = ledMgr.getStrip(0);
-        if (strip0) {
-            uint16_t count = min((uint16_t)strip0->getLength(), (uint16_t)NUM_LEDS);
-            for (int i = 0; i < count; i++) {
-                strip0->setPixelColor(i, leds[i]);
-            }
-        }
-    }
-}
+// pushCRGBToStrip function removed - pattern renderer handles LED output directly
 
 void setup() {
     Serial.begin(115200);
@@ -785,6 +765,15 @@ void setup() {
         criticalSystemsOK = false;
     } else {
         Serial.printf("LED strips: %d\n", ledMgr.getNumStrips());
+        
+        // Initialize pattern renderer
+        patternRenderer = new PatternRenderer(&ledMgr);
+        if (patternRenderer) {
+            Serial.println("Pattern renderer initialized");
+        } else {
+            Serial.println("ERROR: Failed to initialize pattern renderer!");
+            criticalSystemsOK = false;
+        }
     }
     
     // Test LED functionality
@@ -884,16 +873,14 @@ const unsigned long heapUpdateInterval = 5000; // Update heap in device info eve
 void loop() {
     unsigned long currentTime = millis();
     
-    // Update rainbow animation
+    // Update pattern rendering
     if (currentTime - lastUpdate >= updateInterval) {
         lastUpdate = currentTime;
         
-        // Pause rainbow animation if OTA is in progress to free up resources
-        if (ledMgr.getNumStrips() > 0 && ledMgr.getStrip(0) != nullptr && !ota_in_progress) { 
-            fill_rainbow(leds, NUM_LEDS, hue, 10); 
-            pushCRGBToStrip();
-            ledMgr.show();
-            hue += 1;
+        // Pause pattern rendering if OTA is in progress to free up resources
+        if (patternRenderer != nullptr && !ota_in_progress) {
+            patternRenderer->update();
+            patternRenderer->render();
         }
     }
 

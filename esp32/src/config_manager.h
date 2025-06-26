@@ -263,8 +263,21 @@ public:
         _ledManager.clearStrips(); 
         _ledManager.setGlobalBrightness(config.globalBrightness);
 
+        // Debug: Print detailed configuration being applied
+        Serial.println(F("=== LED CONFIGURATION DEBUG ==="));
+        Serial.printf("Global Brightness: %d\n", config.globalBrightness);
+        Serial.printf("Number of strips: %d\n", config.strips.size());
+        
         bool allStripsAdded = true;
-        for (const auto& stripConfig : config.strips) {
+        for (size_t i = 0; i < config.strips.size(); i++) {
+            const auto& stripConfig = config.strips[i];
+            Serial.printf("Strip %d:\n", i);
+            Serial.printf("  Chipset: %d\n", static_cast<int>(stripConfig.chipset));
+            Serial.printf("  Pin: %d\n", stripConfig.pin);
+            Serial.printf("  NumLeds: %d\n", stripConfig.numLeds);
+            Serial.printf("  ColorOrder: %d\n", static_cast<int>(stripConfig.colorOrder));
+            Serial.printf("  RMT Channel: %d\n", stripConfig.rmtChannel);
+            
             if (!_ledManager.addStrip(stripConfig)) {
                 Serial.print(F("[ConfigManager] Failed to add strip to LedManager: Pin "));
                 Serial.println(stripConfig.pin);
@@ -275,6 +288,17 @@ public:
         if (!config.strips.empty() || _ledManager.getNumStrips() > 0) { 
             _ledManager.begin(); 
         }
+        
+        // Debug: Print final LED manager state
+        Serial.printf("Final LED Manager State:\n");
+        Serial.printf("  Total strips: %d\n", _ledManager.getNumStrips());
+        for (size_t i = 0; i < _ledManager.getNumStrips(); i++) {
+            const LedBus* bus = _ledManager.getStrip(i);
+            if (bus) {
+                Serial.printf("  Strip %d length: %d\n", i, bus->getLength());
+            }
+        }
+        Serial.println(F("=== END CONFIG DEBUG ==="));
         
         Serial.println(F("[ConfigManager] Configuration applied to LedManager."));
         return allStripsAdded;

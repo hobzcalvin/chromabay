@@ -334,6 +334,9 @@ export function serializePattern(
   });
   
   // Step 2: Find output node and determine final output buffer
+  // The final output buffer should be determined by the SOURCE node feeding into the output,
+  // not the position of the output node itself. This ensures we read from the buffer that
+  // actually contains the rendered data.
   let finalOutputBufferIndex = 0; // Default output buffer
   const outputNode = allNodes.find(n => n.data.type === 'output');
   
@@ -343,6 +346,8 @@ export function serializePattern(
       const sourceNodeId = inputEdgesToOutputNode[0].source;
       const sourceNode = allNodes.find(n => n.id === sourceNodeId);
       if (sourceNode) {
+        // Use the source node's lane/buffer as the final output buffer
+        // This ensures we display the buffer that actually contains the rendered data
         finalOutputBufferIndex = getNodeLaneBuffer(sourceNode);
       }
     }
@@ -421,13 +426,18 @@ export function serializePattern(
     return serializedNode;
   }).filter(Boolean) as SerializedNode[];
   
-  return {
+  const result = {
     nodes: serializedNodes,
     meta: {
       name: patternName,
       output: finalOutputBufferIndex,
     },
   };
+  
+  // Debug: Log the complete serialized pattern
+  console.log('🔧 Serialized Pattern:', JSON.stringify(result, null, 2));
+  
+  return result;
 }
 
 /**

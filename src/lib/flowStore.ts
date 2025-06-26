@@ -296,7 +296,7 @@ const LANES = {
   RIGHT: 325
 };
 
-// Helper function to get which buffer/lane a node is in
+// Helper function to get which buffer/lane a node is in (0-based indexing)
 export function getNodeBuffer(node: Node): number {
   const x = node.position.x;
   const distances = [
@@ -304,7 +304,7 @@ export function getNodeBuffer(node: Node): number {
     Math.abs(x - LANES.CENTER), 
     Math.abs(x - LANES.RIGHT)
   ];
-  return distances.indexOf(Math.min(...distances)) + 1; // Return 1, 2, or 3
+  return distances.indexOf(Math.min(...distances)); // Return 0, 1, or 2 (0-based)
 }
 
 // Helper function to validate buffer constraints for connections
@@ -628,6 +628,8 @@ function syncPatternIfChanged() {
     const currentHash = JSON.stringify(currentPattern);
     
     if (lastPatternHash && lastPatternHash !== currentHash) {
+      console.log('🔄 Pattern changed, scheduling sync...');
+      
       // Clear existing timeout if any
       if (syncTimeout) {
         clearTimeout(syncTimeout);
@@ -636,6 +638,7 @@ function syncPatternIfChanged() {
       // Debounce pattern sync to avoid excessive calls during editing
       syncTimeout = setTimeout(async () => {
         try {
+          console.log('⚡ Executing pattern sync to devices');
           await syncPatternToAllDevices();
           // Logging is now handled in the BLE module based on device connection status
         } catch (error) {

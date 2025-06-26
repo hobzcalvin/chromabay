@@ -2,7 +2,7 @@
   import { page } from '$app/stores';
   import { base } from '$app/paths';
   import { onMount } from 'svelte';
-  import { getConnectedDeviceCount } from '$lib/ble';
+  import { getConnectedDeviceCount, validateConnections } from '$lib/ble';
   import { SvelteFlowProvider } from '@xyflow/svelte';
 
   let connected = 0;
@@ -10,7 +10,9 @@
   
   onMount(() => {
     connected = getConnectedDeviceCount();
-    interval = setInterval(() => {
+    interval = setInterval(async () => {
+      // Validate connections and clean up stale ones
+      await validateConnections();
       connected = getConnectedDeviceCount();
     }, 1000);
     
