@@ -7,17 +7,23 @@
   let animationId: number;
   let wasmModule: any = null;
   
-  const NUM_LEDS = 100;
-  const LED_WIDTH = 4;
-  const LED_HEIGHT = 20;
-  const LED_SPACING = 2;
+  // 100x100 pixel grid (testing larger size)
+  const GRID_WIDTH = 100;
+  const GRID_HEIGHT = 100;
+  const CANVAS_SCALE = 3; // Scale up for visibility
   
   // Simple buffer management - 3 CRGB buffers (always 3 bytes each)
   let buffer0Ptr: number = 0;  // Input buffer 1
   let buffer1Ptr: number = 0;  // Output buffer  
   let buffer2Ptr: number = 0;  // Input buffer 2
   const BYTES_PER_PIXEL = 3; // CRGB is always RGB (3 bytes)
-  const BUFFER_SIZE = NUM_LEDS * BYTES_PER_PIXEL;
+  const BUFFER_SIZE = GRID_WIDTH * GRID_HEIGHT * BYTES_PER_PIXEL;
+  
+  // Operator management
+  let availableOperators: string[] = [];
+  let selectedOperator: string = '';
+  let operatorParameters: any[] = [];
+  let parameterValues: { [key: number]: any } = {};
   
   // FPS tracking
   let fps = 0;
@@ -33,6 +39,9 @@
     if (!canvasCtx) return;
     ctx = canvasCtx;
     
+    // Disable image smoothing for crisp pixels
+    ctx.imageSmoothingEnabled = false;
+    
     // Wait for WASM to be ready
     if (window.isWasmReady && window.isWasmReady()) {
       initializeWasm();
@@ -44,15 +53,19 @@
       if (animationId) {
         cancelAnimationFrame(animationId);
       }
-      if (operatorId !== -1 && wasmModule) {
-        wasmModule.ccall('destroyOperatorInstance', null, ['number'], [operatorId]);
-      }
-      // Clean up allocated WASM memory
-      if (buffer0Ptr && wasmModule) wasmModule._free(buffer0Ptr);
-      if (buffer1Ptr && wasmModule) wasmModule._free(buffer1Ptr);
-      if (buffer2Ptr && wasmModule) wasmModule._free(buffer2Ptr);
+      cleanup();
     };
   });
+  
+  function cleanup() {
+    if (operatorId !== -1 && wasmModule) {
+      wasmModule.ccall('destroyOperatorInstance', null, ['number'], [operatorId]);
+    }
+    // Clean up allocated WASM memory
+    if (buffer0Ptr && wasmModule) wasmModule._free(buffer0Ptr);
+    if (buffer1Ptr && wasmModule) wasmModule._free(buffer1Ptr);
+    if (buffer2Ptr && wasmModule) wasmModule._free(buffer2Ptr);
+  }
   
   function initializeWasm() {
     wasmModule = window.getWasmModule();
@@ -62,54 +75,152 @@
     }
     
     try {
-      // Allocate CRGB buffers directly (3 bytes each)
-      buffer0Ptr = wasmModule._malloc(NUM_LEDS * 3);  // Input buffer 1  
-      buffer1Ptr = wasmModule._malloc(NUM_LEDS * 3);  // Output buffer
-      buffer2Ptr = wasmModule._malloc(NUM_LEDS * 3);  // Input buffer 2
+      // Load available operators
+      loadAvailableOperators();
       
-      // Create NoiseBlendOperator instance
-      operatorId = wasmModule.ccall('createOperatorInstance', 'number', ['string'], ['NoiseBlendOperator']);
+      // Debug: Log buffer size and available memory
+      console.log(`Buffer size calculation: ${GRID_WIDTH}x${GRID_HEIGHT} = ${BUFFER_SIZE} bytes per buffer`);
+      console.log(`Total memory needed: ${BUFFER_SIZE * 3} bytes for 3 buffers`);
       
-      if (operatorId !== -1) {
-        console.log('NoiseBlendOperator created with ID:', operatorId);
-        
-        // Set initial parameters
-        wasmModule.ccall('setOperatorFloatParameter', null, ['number', 'number', 'number'], [operatorId, 0, 1.5]);
-        wasmModule.ccall('setOperatorIntParameter', null, ['number', 'number', 'number'], [operatorId, 1, 0]);
-        wasmModule.ccall('setOperatorFloatParameter', null, ['number', 'number', 'number'], [operatorId, 2, 0.7]);
-        
-        // Set up input buffer pattern
-        wasmModule.ccall('clearBuffer', null, ['number', 'number'], [buffer0Ptr, NUM_LEDS]);
-        
-        // Create input pattern
-        const inputData = new Uint8Array(BUFFER_SIZE);
-        for (let i = 0; i < NUM_LEDS; i++) {
-          if (i % 10 === 0) {
-            inputData[i * 3] = 50;     // R
-            inputData[i * 3 + 1] = 0;  // G  
-            inputData[i * 3 + 2] = 100; // B
-          } else {
-            inputData[i * 3] = 0;
-            inputData[i * 3 + 1] = 0;
-            inputData[i * 3 + 2] = 0;
-          }
-        }
-        
-        wasmModule.HEAPU8.set(inputData, buffer0Ptr);
-        
-        // Initialize timing
-        animationStartTime = Date.now();
-        lastFrameTime = animationStartTime;
-        lastFpsUpdate = animationStartTime;
-        
-        // Start animation loop
-        animate();
-      } else {
-        console.error('Failed to create NoiseBlendOperator');
-      }
+      // Allocate CRGB buffers directly (3 bytes each) - one at a time for debugging
+      console.log('Allocating buffer0...');
+      buffer0Ptr = wasmModule._malloc(BUFFER_SIZE);  // Input buffer 1  
+      console.log('Buffer0 allocated at:', buffer0Ptr);
+      
+      console.log('Allocating buffer1...');
+      buffer1Ptr = wasmModule._malloc(BUFFER_SIZE);  // Output buffer
+      console.log('Buffer1 allocated at:', buffer1Ptr);
+      
+      console.log('Allocating buffer2...');
+      buffer2Ptr = wasmModule._malloc(BUFFER_SIZE);  // Input buffer 2
+      console.log('Buffer2 allocated at:', buffer2Ptr);
+      
+      // Set up input buffer pattern (gradient for testing)
+      setupInputBuffer();
+      
     } catch (error) {
       console.error('Error initializing WASM:', error);
+      console.error('Failed at buffer allocation phase');
     }
+  }
+  
+  function loadAvailableOperators() {
+    const count = wasmModule.ccall('getOperatorCount', 'number', [], []);
+    availableOperators = [];
+    
+    for (let i = 0; i < count; i++) {
+      const name = wasmModule.ccall('getOperatorName', 'string', ['number'], [i]);
+      if (name) {
+        availableOperators.push(name);
+      }
+    }
+    
+    // Select first operator by default
+    if (availableOperators.length > 0) {
+      selectedOperator = availableOperators[0];
+      loadOperatorParameters();
+      createOperatorInstance();
+    }
+  }
+  
+  function loadOperatorParameters() {
+    if (!selectedOperator) return;
+    
+    const paramCount = wasmModule.ccall('getOperatorParameterCount', 'number', ['string'], [selectedOperator]);
+    operatorParameters = [];
+    parameterValues = {};
+    
+    for (let i = 0; i < paramCount; i++) {
+      const paramInfoJson = wasmModule.ccall('getOperatorParameterInfo', 'string', ['string', 'number'], [selectedOperator, i]);
+      if (paramInfoJson) {
+        const paramInfo = JSON.parse(paramInfoJson);
+        operatorParameters.push(paramInfo);
+        
+        // Ensure proper type for default values
+        let defaultValue = paramInfo.default;
+        if (paramInfo.type === 0) { // FLOAT
+          defaultValue = parseFloat(defaultValue) || 0.0;
+        } else if (paramInfo.type === 1) { // INT
+          defaultValue = parseInt(defaultValue) || 0;
+        } else if (paramInfo.type === 2) { // BOOL
+          defaultValue = Boolean(defaultValue);
+        }
+        
+        parameterValues[i] = defaultValue;
+        console.log(`Parameter ${i} (${paramInfo.label}): ${defaultValue} (type: ${paramInfo.type})`);
+      }
+    }
+  }
+  
+  function createOperatorInstance() {
+    // Destroy existing operator
+    if (operatorId !== -1) {
+      wasmModule.ccall('destroyOperatorInstance', null, ['number'], [operatorId]);
+    }
+    
+    // Create new operator instance
+    operatorId = wasmModule.ccall('createOperatorInstance', 'number', ['string'], [selectedOperator]);
+    
+    if (operatorId !== -1) {
+      console.log(`${selectedOperator} created with ID:`, operatorId);
+      
+      // Set initial parameters
+      setAllParameters();
+      
+      // Initialize timing and start animation
+      animationStartTime = Date.now();
+      lastFrameTime = animationStartTime;
+      lastFpsUpdate = animationStartTime;
+      
+      if (!animationId) {
+        animate();
+      }
+    } else {
+      console.error(`Failed to create ${selectedOperator}`);
+    }
+  }
+  
+  function setAllParameters() {
+    operatorParameters.forEach((param, index) => {
+      const value = parameterValues[index];
+      switch (param.type) {
+        case 0: // FLOAT
+          wasmModule.ccall('setOperatorFloatParameter', null, ['number', 'number', 'number'], [operatorId, index, value]);
+          break;
+        case 1: // INT
+          wasmModule.ccall('setOperatorIntParameter', null, ['number', 'number', 'number'], [operatorId, index, value]);
+          break;
+        case 2: // BOOL
+          wasmModule.ccall('setOperatorBoolParameter', null, ['number', 'number', 'number'], [operatorId, index, value ? 1 : 0]);
+          break;
+        case 3: // COLOR
+          // TODO: Implement color parameter setting
+          break;
+        case 4: // SELECT
+          wasmModule.ccall('setOperatorStringParameter', null, ['number', 'number', 'string'], [operatorId, index, value]);
+          break;
+      }
+    });
+  }
+  
+  function setupInputBuffer() {
+    // Create a simple gradient pattern in the input buffer
+    const inputData = new Uint8Array(BUFFER_SIZE);
+    for (let y = 0; y < GRID_HEIGHT; y++) {
+      for (let x = 0; x < GRID_WIDTH; x++) {
+        const index = (y * GRID_WIDTH + x) * 3;
+        // Create a subtle gradient
+        inputData[index] = Math.floor((x / GRID_WIDTH) * 100);     // R
+        inputData[index + 1] = Math.floor((y / GRID_HEIGHT) * 100); // G  
+        inputData[index + 2] = 50;                                   // B
+      }
+    }
+    
+    console.log(`Created input buffer with ${inputData.length} bytes`);
+    
+    // Copy directly to CRGB buffer
+    wasmModule.HEAPU8.set(inputData, buffer0Ptr);
+    console.log('Input buffer copied to WASM memory');
   }
   
   function animate() {
@@ -131,19 +242,15 @@
       }
       
       // Render the operator with direct buffer pointers
-      const renderStart = performance.now();
       const deltaTime = frameTime || 16;
       const relativeTimestamp = now - animationStartTime;
       
       wasmModule.ccall('renderOperator', null, 
         ['number', 'number', 'number', 'number', 'number', 'number', 'number', 'number'], 
-        [operatorId, buffer0Ptr, buffer2Ptr, buffer1Ptr, NUM_LEDS, 1, relativeTimestamp, deltaTime]);
-      const renderTime = performance.now() - renderStart;
+        [operatorId, buffer0Ptr, buffer2Ptr, buffer1Ptr, GRID_WIDTH, GRID_HEIGHT, relativeTimestamp, deltaTime]);
       
-      // Read output and draw to canvas
-      const drawStart = performance.now();
-      drawLeds();
-      const drawTime = performance.now() - drawStart;
+      // Draw to canvas
+      drawGrid();
       
       animationId = requestAnimationFrame(animate);
     } catch (error) {
@@ -151,198 +258,246 @@
     }
   }
   
-  function drawLeds() {
+  function drawGrid() {
     if (!ctx || !buffer1Ptr) return;
     
-    // Clear canvas
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // Read output buffer directly as RGB data
+    const outputData = new Uint8Array(wasmModule.HEAPU8.buffer, buffer1Ptr, BUFFER_SIZE);
     
-    let outputData: Uint8Array;
-    
-    outputData = new Uint8Array(wasmModule.HEAPU8.buffer, buffer1Ptr, NUM_LEDS * 3);
-    
-    // Use ImageData for fast rendering
-    const imageData = ctx.createImageData(canvas.width, LED_HEIGHT);
+    // Create ImageData for the grid
+    const imageData = ctx.createImageData(GRID_WIDTH, GRID_HEIGHT);
     const pixels = imageData.data;
     
-    // Fill ImageData buffer
-    for (let i = 0; i < NUM_LEDS; i++) {
-      const r = outputData[i * 3];
-      const g = outputData[i * 3 + 1]; 
-      const b = outputData[i * 3 + 2];
+    // Copy RGB data to ImageData
+    for (let i = 0; i < GRID_WIDTH * GRID_HEIGHT; i++) {
+      const pixelIndex = i * 4;
+      const rgbIndex = i * 3;
       
-      const startX = i * (LED_WIDTH + LED_SPACING);
-      const endX = startX + LED_WIDTH;
-      
-      // Fill LED rectangle in ImageData
-      for (let x = startX; x < endX && x < canvas.width; x++) {
-        for (let y = 0; y < LED_HEIGHT; y++) {
-          const pixelIndex = (y * canvas.width + x) * 4;
-          pixels[pixelIndex] = r;     // Red
-          pixels[pixelIndex + 1] = g; // Green  
-          pixels[pixelIndex + 2] = b; // Blue
-          pixels[pixelIndex + 3] = 255; // Alpha
-        }
-      }
+      pixels[pixelIndex] = outputData[rgbIndex];         // Red
+      pixels[pixelIndex + 1] = outputData[rgbIndex + 1]; // Green  
+      pixels[pixelIndex + 2] = outputData[rgbIndex + 2]; // Blue
+      pixels[pixelIndex + 3] = 255;                      // Alpha
     }
     
-    // Single operation to draw entire frame
-    ctx.putImageData(imageData, 0, 10);
+    // Draw scaled up to canvas
+    ctx.putImageData(imageData, 0, 0);
   }
   
-  function updateSpeed(event: Event) {
-    const target = event.target as HTMLInputElement;
-    const speed = parseFloat(target.value);
-    if (wasmModule && operatorId !== -1) {
-      wasmModule.ccall('setOperatorFloatParameter', null, ['number', 'number', 'number'], [operatorId, 0, speed]);
-    }
+  function handleOperatorChange() {
+    loadOperatorParameters();
+    createOperatorInstance();
   }
   
-  function updateHue(event: Event) {
-    const target = event.target as HTMLInputElement;
-    const hue = parseInt(target.value);
-    if (wasmModule && operatorId !== -1) {
-      wasmModule.ccall('setOperatorIntParameter', null, ['number', 'number', 'number'], [operatorId, 1, hue]);
-    }
-  }
-  
-  function updateBlend(event: Event) {
-    const target = event.target as HTMLInputElement;
-    const blend = parseFloat(target.value);
-    if (wasmModule && operatorId !== -1) {
-      wasmModule.ccall('setOperatorFloatParameter', null, ['number', 'number', 'number'], [operatorId, 2, blend]);
+  function handleParameterChange(paramIndex: number, value: any) {
+    parameterValues[paramIndex] = value;
+    if (operatorId !== -1) {
+      const param = operatorParameters[paramIndex];
+      switch (param.type) {
+        case 0: // FLOAT
+          wasmModule.ccall('setOperatorFloatParameter', null, ['number', 'number', 'number'], [operatorId, paramIndex, parseFloat(value)]);
+          break;
+        case 1: // INT
+          wasmModule.ccall('setOperatorIntParameter', null, ['number', 'number', 'number'], [operatorId, paramIndex, parseInt(value)]);
+          break;
+        case 2: // BOOL
+          wasmModule.ccall('setOperatorBoolParameter', null, ['number', 'number', 'number'], [operatorId, paramIndex, value ? 1 : 0]);
+          break;
+      }
     }
   }
 </script>
 
 <main>
-  <h1>Settings</h1>
-  <p>Coming soon: application settings.</p>
+  <h1>Visual Operator Playground</h1>
+  <p>Real-time C++ operators running in WebAssembly - {GRID_WIDTH}x{GRID_HEIGHT} pixel grid</p>
   
-  <section class="wasm-demo">
-    <h2>🎨 WASM Operator Demo</h2>
-    <p>Real-time C++ NoiseBlendOperator running in WebAssembly</p>
-    
-    <canvas 
-      bind:this={canvas}
-      width={NUM_LEDS * (LED_WIDTH + LED_SPACING)}
-      height={50}
-      class="led-strip"
-    ></canvas>
-    
-    <div class="performance-stats">
-      <div class="stat">
-        <span class="stat-label">FPS:</span>
-        <span class="stat-value" class:slow={fps < 30} class:medium={fps >= 30 && fps < 50} class:fast={fps >= 50}>{fps}</span>
-      </div>
-      <div class="stat">
-        <span class="stat-label">Frame Time:</span>
-        <span class="stat-value">{frameTime}ms</span>
-      </div>
-    </div>
-    
+  <div class="playground">
+    <!-- Operator Selection -->
     <div class="controls">
-      <label>
-        Speed: 
-        <input type="range" min="0.1" max="5.0" step="0.1" value="1.5" on:input={updateSpeed} />
-      </label>
+      <div class="control-group">
+        <label for="operator-select">Operator:</label>
+        <select id="operator-select" bind:value={selectedOperator} on:change={handleOperatorChange}>
+          {#each availableOperators as operator}
+            <option value={operator}>{wasmModule?.ccall('getOperatorDisplayName', 'string', ['string'], [operator]) || operator}</option>
+          {/each}
+        </select>
+      </div>
       
-      <label>
-        Hue Offset: 
-        <input type="range" min="0" max="255" step="1" value="0" on:input={updateHue} />
-      </label>
+      <!-- Dynamic Parameter Controls -->
+      {#each operatorParameters as param, index}
+        <div class="control-group">
+          <label for="param-{index}">{param.label}:</label>
+          
+          {#if param.type === 0}
+            <!-- FLOAT -->
+                         <input 
+               id="param-{index}"
+               type="range" 
+               min={param.min || 0} 
+               max={param.max || 100} 
+               step="0.1"
+               bind:value={parameterValues[index]}
+               on:input={(e) => handleParameterChange(index, (e.target as HTMLInputElement).value)}
+             />
+                         <span class="value">{typeof parameterValues[index] === 'number' ? parameterValues[index].toFixed(1) : parameterValues[index] || '0.0'}</span>
+          {:else if param.type === 1}
+            <!-- INT -->
+                         <input 
+               id="param-{index}"
+               type="range" 
+               min={param.min || 0} 
+               max={param.max || 255} 
+               step="1"
+               bind:value={parameterValues[index]}
+               on:input={(e) => handleParameterChange(index, (e.target as HTMLInputElement).value)}
+             />
+            <span class="value">{parameterValues[index]}</span>
+          {:else if param.type === 2}
+            <!-- BOOL -->
+                         <input 
+               id="param-{index}"
+               type="checkbox" 
+               bind:checked={parameterValues[index]}
+               on:change={(e) => handleParameterChange(index, (e.target as HTMLInputElement).checked)}
+             />
+          {:else if param.type === 4}
+            <!-- SELECT -->
+                         <select 
+               id="param-{index}"
+               bind:value={parameterValues[index]}
+               on:change={(e) => handleParameterChange(index, (e.target as HTMLSelectElement).value)}
+             >
+              {#each param.options as option}
+                <option value={option}>{option}</option>
+              {/each}
+            </select>
+          {/if}
+        </div>
+      {/each}
       
-      <label>
-        Blend Amount: 
-        <input type="range" min="0" max="1" step="0.1" value="0.7" on:input={updateBlend} />
-      </label>
+      <!-- Performance Stats -->
+      <div class="performance-stats">
+        <div class="stat">
+          <span class="stat-label">FPS:</span>
+          <span class="stat-value" class:slow={fps < 30} class:medium={fps >= 30 && fps < 50} class:fast={fps >= 50}>{fps}</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Frame:</span>
+          <span class="stat-value">{frameTime}ms</span>
+        </div>
+      </div>
     </div>
-  </section>
+    
+    <!-- Visualization Canvas -->
+    <div class="visualization">
+      <canvas 
+        bind:this={canvas}
+        width={GRID_WIDTH}
+        height={GRID_HEIGHT}
+        style="width: {GRID_WIDTH * CANVAS_SCALE}px; height: {GRID_HEIGHT * CANVAS_SCALE}px;"
+        class="grid-canvas"
+      ></canvas>
+      <div class="canvas-info">
+        <span>{GRID_WIDTH}x{GRID_HEIGHT} pixels</span>
+      </div>
+    </div>
+  </div>
 </main>
 
 <style>
-  main {
-    padding: 2rem;
-    max-width: 800px;
-    margin: 0 auto;
-  }
-  
-  .wasm-demo {
-    margin-top: 3rem;
-    padding: 2rem;
-    border: 2px solid #333;
-    border-radius: 8px;
-    background: #111;
-  }
-  
-  .wasm-demo h2 {
-    margin-top: 0;
-    color: #4CAF50;
-  }
-  
-  .led-strip {
-    border: 1px solid #444;
-    background: #000;
-    margin: 1rem 0;
-    display: block;
+  .playground {
+    display: flex;
+    gap: 2rem;
+    align-items: flex-start;
+    margin-top: 2rem;
   }
   
   .controls {
-    display: flex;
-    gap: 2rem;
-    flex-wrap: wrap;
+    flex: 0 0 300px;
+    background: #f5f5f5;
+    padding: 1.5rem;
+    border-radius: 8px;
+    border: 1px solid #ddd;
   }
   
-  .controls label {
+  .control-group {
+    margin-bottom: 1rem;
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
-    color: #ddd;
   }
   
-  .controls input[type="range"] {
-    width: 150px;
+  .control-group label {
+    font-weight: bold;
+    font-size: 0.9rem;
+    color: #333;
+  }
+  
+  .control-group input[type="range"] {
+    width: 100%;
+  }
+  
+  .control-group input[type="checkbox"] {
+    width: auto;
+  }
+  
+  .control-group select {
+    padding: 0.5rem;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    background: white;
+  }
+  
+  .value {
+    font-size: 0.8rem;
+    color: #666;
+    text-align: right;
+  }
+  
+  .visualization {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+  }
+  
+  .grid-canvas {
+    border: 2px solid #333;
+    border-radius: 4px;
+    background: #000;
+    image-rendering: pixelated;
+    image-rendering: -moz-crisp-edges;
+    image-rendering: crisp-edges;
+  }
+  
+  .canvas-info {
+    font-size: 0.9rem;
+    color: #666;
   }
   
   .performance-stats {
-    display: flex;
-    gap: 2rem;
-    margin: 1rem 0;
-    padding: 1rem;
-    background: #222;
-    border-radius: 4px;
-    border: 1px solid #444;
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid #ccc;
   }
   
   .stat {
     display: flex;
-    align-items: center;
-    gap: 0.5rem;
+    justify-content: space-between;
+    margin-bottom: 0.5rem;
   }
   
   .stat-label {
-    color: #aaa;
-    font-size: 0.9rem;
+    font-weight: bold;
+    color: #555;
   }
   
   .stat-value {
-    font-family: 'Courier New', monospace;
-    font-weight: bold;
-    font-size: 1.1rem;
-    min-width: 60px;
-    text-align: right;
+    font-family: monospace;
   }
   
-  .stat-value.slow {
-    color: #ff4444;
-  }
-  
-  .stat-value.medium {
-    color: #ffaa00;
-  }
-  
-  .stat-value.fast {
-    color: #44ff44;
-  }
+  .stat-value.slow { color: #e74c3c; }
+  .stat-value.medium { color: #f39c12; }
+  .stat-value.fast { color: #27ae60; }
 </style>
