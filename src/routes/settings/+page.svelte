@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { getWasmOperatorManager, NODE_TYPES, type NodeDefinition } from '$lib/flowStore';
   
   let canvas: HTMLCanvasElement;
   let ctx: CanvasRenderingContext2D;
@@ -49,10 +50,30 @@
       window.addEventListener('wasmReady', initializeWasm);
     }
     
+    // Also listen for operator loading completion
+    const checkOperatorsLoaded = () => {
+      if (NODE_TYPES.length > 1) { // More than just output node
+        console.log('NODE_TYPES loaded, updating operators...');
+        if (wasmModule) {
+          loadAvailableOperators();
+        }
+      }
+    };
+    
+    // Check periodically for operator loading
+    const operatorCheckInterval = setInterval(() => {
+      checkOperatorsLoaded();
+      if (NODE_TYPES.length > 1) {
+        clearInterval(operatorCheckInterval);
+      }
+    }, 100);
+    
+    // Clean up interval on unmount
     return () => {
       if (animationId) {
         cancelAnimationFrame(animationId);
       }
+      clearInterval(operatorCheckInterval);
       cleanup();
     };
   });
@@ -105,78 +126,127 @@
   }
   
   function loadAvailableOperators() {
-    const count = wasmModule.ccall('getOperatorCount', 'number', [], []);
-    availableOperators = [];
-    
-    for (let i = 0; i < count; i++) {
-      const name = wasmModule.ccall('getOperatorName', 'string', ['number'], [i]);
-      if (name) {
-        availableOperators.push(name);
-      }
+    // Use the centralized operator manager instead of direct WASM calls
+    const manager = getWasmOperatorManager();
+    if (!manager) {
+      console.error('WASM operator manager not available');
+      return;
     }
     
-    // Select first operator by default
-    if (availableOperators.length > 0) {
-      selectedOperator = availableOperators[0];
-      loadOperatorParameters();
-      createOperatorInstance();
+    try {
+      // Get operators from the centralized system (excluding output node)
+      const operators = NODE_TYPES.filter(op => op.type !== 'output');
+      availableOperators = operators.map(op => op.type);
+      
+      console.log(`Loaded ${availableOperators.length} operators for Settings page:`, availableOperators);
+      
+      // Select first operator by default
+      if (availableOperators.length > 0) {
+        selectedOperator = availableOperators[0];
+        loadOperatorParameters();
+        createOperatorInstance();
+      }
+    } catch (error) {
+      console.error('Error loading operators in Settings page:', error);
     }
   }
   
   function loadOperatorParameters() {
     if (!selectedOperator) return;
     
-    const paramCount = wasmModule.ccall('getOperatorParameterCount', 'number', ['string'], [selectedOperator]);
-    operatorParameters = [];
-    parameterValues = {};
-    
-    for (let i = 0; i < paramCount; i++) {
-      const paramInfoJson = wasmModule.ccall('getOperatorParameterInfo', 'string', ['string', 'number'], [selectedOperator, i]);
-      if (paramInfoJson) {
-        const paramInfo = JSON.parse(paramInfoJson);
+    try {
+      // Get parameter definitions from the centralized system
+      const operatorDef = NODE_TYPES.find(op => op.type === selectedOperator);
+      if (!operatorDef) {
+        console.error(`Operator definition not found for: ${selectedOperator}`);
+        return;
+      }
+      
+      operatorParameters = [];
+      parameterValues = {};
+      
+      operatorDef.params.forEach((param, i) => {
+        // Convert from flowStore Parameter to Settings page format
+        const paramInfo = {
+          name: param.name,
+          label: param.label,
+          type: getParameterTypeNumber(param.type),
+          default: param.default,
+          min: param.min,
+          max: param.max,
+          options: param.options?.map(opt => opt.label) || []
+        };
+        
         operatorParameters.push(paramInfo);
         
-        // Ensure proper type for default values
-        let defaultValue = paramInfo.default;
-        if (paramInfo.type === 0) { // FLOAT
+        // Set default values with proper typing
+        let defaultValue = param.default;
+        if (param.type === 'float' || param.type === 'range') {
           defaultValue = parseFloat(defaultValue) || 0.0;
-        } else if (paramInfo.type === 1) { // INT
+        } else if (param.type === 'integer') {
           defaultValue = parseInt(defaultValue) || 0;
-        } else if (paramInfo.type === 2) { // BOOL
-          defaultValue = Boolean(defaultValue);
+        } else if (param.type === 'color') {
+          defaultValue = defaultValue || '#ffffff';
         }
         
         parameterValues[i] = defaultValue;
-        console.log(`Parameter ${i} (${paramInfo.label}): ${defaultValue} (type: ${paramInfo.type})`);
-      }
+        console.log(`Parameter ${i} (${param.label}): ${defaultValue} (type: ${param.type})`);
+      });
+      
+    } catch (error) {
+      console.error(`Error loading parameters for ${selectedOperator}:`, error);
+    }
+  }
+  
+  // Convert parameter type string to number for WASM compatibility
+  function getParameterTypeNumber(type: string): number {
+    switch (type) {
+      case 'float':
+      case 'range': return 0;
+      case 'integer': return 1;
+      case 'hue': return 2;  // Treat hue as bool for now
+      case 'color': return 3;
+      case 'select': return 4;
+      default: return 0;
     }
   }
   
   function createOperatorInstance() {
-    // Destroy existing operator
-    if (operatorId !== -1) {
-      wasmModule.ccall('destroyOperatorInstance', null, ['number'], [operatorId]);
+    const manager = getWasmOperatorManager();
+    if (!manager || !wasmModule) {
+      console.error('WASM manager or module not available');
+      return;
     }
     
-    // Create new operator instance
-    operatorId = wasmModule.ccall('createOperatorInstance', 'number', ['string'], [selectedOperator]);
-    
-    if (operatorId !== -1) {
-      console.log(`${selectedOperator} created with ID:`, operatorId);
-      
-      // Set initial parameters
-      setAllParameters();
-      
-      // Initialize timing and start animation
-      animationStartTime = Date.now();
-      lastFrameTime = animationStartTime;
-      lastFpsUpdate = animationStartTime;
-      
-      if (!animationId) {
-        animate();
+    try {
+      // Destroy existing operator
+      if (operatorId !== -1) {
+        wasmModule.ccall('destroyOperatorInstance', null, ['number'], [operatorId]);
+        operatorId = -1;
       }
-    } else {
-      console.error(`Failed to create ${selectedOperator}`);
+      
+      // Create new operator instance using direct WASM call (Settings page manages its own instances)
+      operatorId = wasmModule.ccall('createOperatorInstance', 'number', ['string'], [selectedOperator]);
+      
+      if (operatorId !== -1) {
+        console.log(`${selectedOperator} created with ID:`, operatorId);
+        
+        // Set initial parameters
+        setAllParameters();
+        
+        // Initialize timing and start animation
+        animationStartTime = Date.now();
+        lastFrameTime = animationStartTime;
+        lastFpsUpdate = animationStartTime;
+        
+        if (!animationId) {
+          animate();
+        }
+      } else {
+        console.error(`Failed to create ${selectedOperator}`);
+      }
+    } catch (error) {
+      console.error(`Error creating operator instance for ${selectedOperator}:`, error);
     }
   }
   

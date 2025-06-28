@@ -66,74 +66,6 @@ export function ensureNodeParametersInitialized(nodeId: string, nodeType: string
   });
 }
 
-// Helper function for HSL to RGB conversion
-function hslToRgb(h: number, s: number, l: number): [number, number, number] {
-  const c = (1 - Math.abs(2 * l - 1)) * s;
-  const x = c * (1 - Math.abs((h * 6) % 2 - 1));
-  const m = l - c / 2;
-  
-  let r = 0, g = 0, b = 0;
-  
-  if (0 <= h && h < 1/6) {
-    r = c; g = x; b = 0;
-  } else if (1/6 <= h && h < 2/6) {
-    r = x; g = c; b = 0;
-  } else if (2/6 <= h && h < 3/6) {
-    r = 0; g = c; b = x;
-  } else if (3/6 <= h && h < 4/6) {
-    r = 0; g = x; b = c;
-  } else if (4/6 <= h && h < 5/6) {
-    r = x; g = 0; b = c;
-  } else if (5/6 <= h && h < 1) {
-    r = c; g = 0; b = x;
-  }
-  
-  return [
-    Math.round((r + m) * 255),
-    Math.round((g + m) * 255),
-    Math.round((b + m) * 255)
-  ];
-}
-
-// Helper function for HSV to RGB conversion
-function hsvToRgb(h: number, s: number, v: number): [number, number, number] {
-  const c = v * s;
-  const x = c * (1 - Math.abs((h * 6) % 2 - 1));
-  const m = v - c;
-  
-  let r = 0, g = 0, b = 0;
-  
-  if (0 <= h && h < 1/6) {
-    r = c; g = x; b = 0;
-  } else if (1/6 <= h && h < 2/6) {
-    r = x; g = c; b = 0;
-  } else if (2/6 <= h && h < 3/6) {
-    r = 0; g = c; b = x;
-  } else if (3/6 <= h && h < 4/6) {
-    r = 0; g = x; b = c;
-  } else if (4/6 <= h && h < 5/6) {
-    r = x; g = 0; b = c;
-  } else if (5/6 <= h && h < 1) {
-    r = c; g = 0; b = x;
-  }
-  
-  return [
-    Math.round((r + m) * 255),
-    Math.round((g + m) * 255),
-    Math.round((b + m) * 255)
-  ];
-}
-
-// Helper function to convert hex color to RGB
-function hexToRgb(hex: string): [number, number, number] {
-  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-  return result ? [
-    parseInt(result[1], 16),
-    parseInt(result[2], 16),
-    parseInt(result[3], 16)
-  ] : [255, 255, 255];
-}
-
 // Type for render function parameters
 export interface RenderContext {
   ctx: CanvasRenderingContext2D;
@@ -146,7 +78,7 @@ export interface RenderContext {
   nodeId: string;
 }
 
-// Type for node definition
+// Type for node definition - now WASM-based
 export interface NodeDefinition {
   name: string;
   type: string;
@@ -154,413 +86,442 @@ export interface NodeDefinition {
   render: (context: RenderContext) => void;
 }
 
-// Define LED pattern node types with their render functions
-// Note: Output is first (index 0) so it's not shown in dropdown, pattern nodes start from index 1
-export const NODE_TYPES: NodeDefinition[] = [
-  {
-    name: 'Output',
-    type: 'output',
-    params: [],
-    render: () => {
-      // Output node doesn't render anything - it just passes through input
-    }
-  },
-  {
-    name: 'Rainbow',
-    type: 'rainbow',
-    params: [
-      { label: 'Speed', name: 'speed', type: 'float', default: 0.1 },
-      { label: 'Saturation', name: 'saturation', type: 'float', default: 1.0 },
-      { label: 'Value', name: 'value', type: 'float', default: 1.0 },
-      { label: 'Angle', name: 'angle', type: 'range', default: 0, min: 0, max: 360 }
-    ],
-    render: ({ ctx, totalTime, width, height, nodeId }) => {
-      const speed = getNodeParameter(nodeId, 'speed', 0.1) * 3; // Scale down for reasonable animation speed
-      const saturation = getNodeParameter(nodeId, 'saturation', 1.0);
-      const value = getNodeParameter(nodeId, 'value', 1.0);
-      const angle = getNodeParameter(nodeId, 'angle', 0);
-      
-      // Convert angle to radians
-      const angleRad = (angle * Math.PI) / 180;
-      const cosAngle = Math.cos(angleRad);
-      const sinAngle = Math.sin(angleRad);
-      
-      for (let x = 0; x < width; x++) {
-        for (let y = 0; y < height; y++) {
-          // Apply rotation to coordinates
-          const rotatedX = x * cosAngle - y * sinAngle;
-          const rotatedY = x * sinAngle + y * cosAngle;
-          
-          // Use rotated X coordinate for hue calculation
-          const hue = ((rotatedX / width) + totalTime * speed) % 1;
-          const [r, g, b] = hsvToRgb(Math.abs(hue), saturation, value);
-          ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
-          ctx.fillRect(x, y, 1, 1);
-        }
-      }
-    }
-  },
-  {
-    name: 'Gradient',
-    type: 'gradient',
-    params: [
-      { label: 'Color 1', name: 'color1', type: 'color', default: '#3b82f6' },
-      { label: 'Color 2', name: 'color2', type: 'color', default: '#8b5cf6' },
-      { label: 'Speed', name: 'speed', type: 'range', default: 10, min: 0, max: 100 },
-      { label: 'Angle', name: 'angle', type: 'range', default: 0, min: 0, max: 360 }
-    ],
-    render: ({ ctx, totalTime, width, height, nodeId }) => {
-      const color1 = getNodeParameter(nodeId, 'color1', '#3b82f6');
-      const color2 = getNodeParameter(nodeId, 'color2', '#8b5cf6');
-      const speed = getNodeParameter(nodeId, 'speed', 10) / 10;
-      const angle = getNodeParameter(nodeId, 'angle', 0);
-      
-      // Convert angle to radians and calculate gradient direction
-      const angleRad = (angle * Math.PI) / 180;
-      const gradientLength = Math.sqrt(width * width + height * height);
-      
-      // Calculate gradient endpoints based on angle
-      const centerX = width / 2;
-      const centerY = height / 2;
-      const halfLength = gradientLength / 2;
-      
-      const x1 = centerX - Math.cos(angleRad) * halfLength;
-      const y1 = centerY - Math.sin(angleRad) * halfLength;
-      const x2 = centerX + Math.cos(angleRad) * halfLength;
-      const y2 = centerY + Math.sin(angleRad) * halfLength;
-      
-      // Animate by shifting the gradient colors
-      const timeOffset = totalTime * speed;
-      const gradient = ctx.createLinearGradient(x1, y1, x2, y2);
-      
-      // Create multiple color stops to animate the gradient
-      const stops = 10;
-      for (let i = 0; i <= stops; i++) {
-        const position = i / stops;
-        const animatedPosition = (position + timeOffset) % 2;
-        
-        // Oscillate between the two colors
-        let color;
-        if (animatedPosition <= 1) {
-          // Blend from color1 to color2
-          const blend = animatedPosition;
-          const [r1, g1, b1] = hexToRgb(color1);
-          const [r2, g2, b2] = hexToRgb(color2);
-          const r = Math.round(r1 * (1 - blend) + r2 * blend);
-          const g = Math.round(g1 * (1 - blend) + g2 * blend);
-          const b = Math.round(b1 * (1 - blend) + b2 * blend);
-          color = `rgb(${r}, ${g}, ${b})`;
-        } else {
-          // Blend from color2 back to color1
-          const blend = animatedPosition - 1;
-          const [r1, g1, b1] = hexToRgb(color2);
-          const [r2, g2, b2] = hexToRgb(color1);
-          const r = Math.round(r1 * (1 - blend) + r2 * blend);
-          const g = Math.round(g1 * (1 - blend) + g2 * blend);
-          const b = Math.round(b1 * (1 - blend) + b2 * blend);
-          color = `rgb(${r}, ${g}, ${b})`;
-        }
-        
-        gradient.addColorStop(position, color);
-      }
-      
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, width, height);
-    }
-  },
-  {
-    name: 'Perlin Noise',
-    type: 'perlin_noise',
-    params: [
-      { label: 'Speed', name: 'speed', type: 'range', default: 50, min: 1, max: 200 },
-      { label: 'Scale', name: 'scale', type: 'float', default: 0.3 },
-      { label: 'Intensity', name: 'intensity', type: 'float', default: 1.0 },
-      { label: 'Octaves', name: 'octaves', type: 'integer', default: 3, min: 1, max: 6 }
-    ],
-    render: ({ ctx, totalTime, width, height, nodeId }) => {
-      // Ensure all parameters are initialized for this node
-      ensureNodeParametersInitialized(nodeId, 'perlin_noise');
-      
-      const speed = getNodeParameter(nodeId, 'speed', 50) / 10;
-      const scale = getNodeParameter(nodeId, 'scale', 0.3);
-      const intensity = getNodeParameter(nodeId, 'intensity', 1.0);
-      const octaves = getNodeParameter(nodeId, 'octaves', 3);
-      
-      // Create more complex noise with multiple octaves
-      for (let x = 0; x < width; x += 1) {
-        for (let y = 0; y < height; y += 1) {
-          let noise = 0;
-          let amplitude = 1;
-          let frequency = scale;
-          let maxValue = 0; // Used for normalizing result to 0-1
-          
-          // Layer multiple noise octaves for more realistic noise
-          for (let i = 0; i < octaves; i++) {
-            // Use multiple sine/cosine layers with different phases for more chaotic noise
-            const n1 = Math.sin(x * frequency + totalTime * speed) * Math.cos(y * frequency + totalTime * speed * 0.7);
-            const n2 = Math.sin(x * frequency * 1.3 + totalTime * speed * 1.5) * Math.cos(y * frequency * 0.8 + totalTime * speed * 0.9);
-            const n3 = Math.sin(x * frequency * 0.6 + totalTime * speed * 2.1) * Math.cos(y * frequency * 1.7 + totalTime * speed * 1.3);
-            
-            const layerNoise = (n1 + n2 * 0.5 + n3 * 0.25) / 1.75; // Mix the layers
-            noise += layerNoise * amplitude;
-            maxValue += amplitude;
-            
-            amplitude *= 0.5; // Each octave has half the amplitude
-            frequency *= 2.0; // Each octave has double the frequency
-          }
-          
-          // Normalize and apply intensity
-          noise = (noise / maxValue); // Now ranges from -1 to 1
-          const alpha = Math.abs(noise) * intensity; // Use absolute value for brightness
-          
-          // Use the noise to create grayscale values instead of just alpha
-          const brightness = Math.max(0, Math.min(1, (noise + 1) * 0.5 * intensity));
-          const colorValue = Math.round(brightness * 255);
-          
-          ctx.fillStyle = `rgb(${colorValue}, ${colorValue}, ${colorValue})`;
-          ctx.fillRect(x, y, 1, 1);
-        }
-      }
-    }
-  },
-  {
-    name: 'Moving Blob',
-    type: 'moving_blob',
-    params: [
-      { label: 'Speed', name: 'speed', type: 'float', default: 2.0 },
-      { label: 'Size', name: 'size', type: 'float', default: 0.25 },
-      { label: 'Color', name: 'color', type: 'color', default: '#ffffff' }
-    ],
-    render: ({ ctx, totalTime, width, height, nodeId }) => {
-      const speed = getNodeParameter(nodeId, 'speed', 2.0);
-      const size = getNodeParameter(nodeId, 'size', 0.25);
-      const color = getNodeParameter(nodeId, 'color', '#ffffff');
-      
-      const centerX = width/2 + Math.sin(totalTime * speed) * (width * 0.2);
-      const centerY = height/2 + Math.cos(totalTime * speed * 0.75) * (height * 0.2);
-      const innerRadius = Math.min(width, height) * 0.06;
-      const outerRadius = Math.min(width, height) * size;
-      const radialGradient = ctx.createRadialGradient(centerX, centerY, innerRadius, centerX, centerY, outerRadius);
-      radialGradient.addColorStop(0, color);
-      radialGradient.addColorStop(1, 'transparent');
-      ctx.fillStyle = radialGradient;
-      ctx.fillRect(0, 0, width, height);
-    }
-  },
-  {
-    name: 'Raindrops',
-    type: 'raindrops',
-    params: [
-      { label: 'Speed', name: 'speed', type: 'range', default: 50, min: 10, max: 200 },
-      { label: 'Count', name: 'count', type: 'integer', default: 8, min: 2, max: 32 },
-      { label: 'Size', name: 'size', type: 'float', default: 0.025 },
-      { label: 'Color', name: 'color', type: 'color', default: '#ffffff' }
-    ],
-    render: ({ ctx, totalTime, width, height, nodeId }) => {
-      const speed = getNodeParameter(nodeId, 'speed', 50);
-      const count = getNodeParameter(nodeId, 'count', 8);
-      const size = getNodeParameter(nodeId, 'size', 0.025);
-      const color = getNodeParameter(nodeId, 'color', '#ffffff');
-      
-      const dropCount = Math.floor(width / (width / count));
-      for (let i = 0; i < dropCount; i++) {
-        const x = (i * (width / dropCount) + width / (dropCount * 2)) % width;
-        const y = ((totalTime * speed + i * 10) % (height + 10)) - 10;
-        if (y >= 0 && y <= height) {
-          ctx.fillStyle = color;
-          ctx.beginPath();
-          const dropWidth = width * size;
-          const dropHeight = height * 0.08;
-          ctx.ellipse(x, y, dropWidth, dropHeight, 0, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
-    }
-  },
-  {
-    name: 'Strobe',
-    type: 'strobe',
-    params: [
-      { label: 'Frequency', name: 'frequency', type: 'range', default: 8, min: 1, max: 30 },
-      { label: 'Intensity', name: 'intensity', type: 'float', default: 0.8 },
-      { label: 'Color', name: 'color', type: 'color', default: '#ffffff' }
-    ],
-    render: ({ ctx, totalTime, width, height, nodeId }) => {
-      const frequency = getNodeParameter(nodeId, 'frequency', 8);
-      const intensity = getNodeParameter(nodeId, 'intensity', 0.8);
-      const color = getNodeParameter(nodeId, 'color', '#ffffff');
-      
-      const strobeValue = Math.sin(totalTime * frequency) > 0.7 ? 1 : 0;
-      if (strobeValue > 0) {
-        const [r, g, b] = hexToRgb(color);
-        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${intensity})`;
-        ctx.fillRect(0, 0, width, height);
-      }
-    }
-  },
-  {
-    name: 'Sparkle',
-    type: 'sparkle',
-    params: [
-      { label: 'Speed', name: 'speed', type: 'float', default: 3.0 },
-      { label: 'Count', name: 'count', type: 'integer', default: 10, min: 3, max: 50 },
-      { label: 'Size', name: 'size', type: 'float', default: 0.025 },
-      { label: 'Color', name: 'color', type: 'color', default: '#ffffff' }
-    ],
-    render: ({ ctx, totalTime, width, height, nodeId }) => {
-      const speed = getNodeParameter(nodeId, 'speed', 3.0);
-      const count = getNodeParameter(nodeId, 'count', 10);
-      const size = getNodeParameter(nodeId, 'size', 0.025);
-      const color = getNodeParameter(nodeId, 'color', '#ffffff');
-      
-      const sparkleCount = Math.floor(width / (width / count));
-      for (let i = 0; i < sparkleCount; i++) {
-        // Make sparkle positions move around randomly
-        const baseX = (width / sparkleCount) * i;
-        const baseY = height / 2;
-        const x = baseX + Math.sin(totalTime * speed + i * 1.7) * (width * 0.1);
-        const y = baseY + Math.cos(totalTime * speed * 0.5 + i * 2.3) * (height * 0.3);
-        const alpha = Math.abs(Math.sin(totalTime * speed + i * 0.8)) * 0.8 + 0.2;
-        ctx.globalAlpha = alpha;
-        ctx.fillStyle = color;
-        ctx.beginPath();
-        const sparkleRadius = Math.min(width, height) * size;
-        ctx.arc(x, y, sparkleRadius, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.globalAlpha = 1;
-    }
-  },
-  {
-    name: 'Fade',
-    type: 'fade',
-    params: [
-      { label: 'Speed', name: 'speed', type: 'float', default: 1.0 },
-      { label: 'Color', name: 'color', type: 'color', default: '#ff6b35' }
-    ],
-    render: ({ ctx, totalTime, width, height, nodeId }) => {
-      const speed = getNodeParameter(nodeId, 'speed', 1.0);
-      const color = getNodeParameter(nodeId, 'color', '#ff6b35');
-      
-      const fadeIntensity = (Math.sin(totalTime * speed) + 1) * 0.5;
-      ctx.globalAlpha = fadeIntensity;
-      ctx.fillStyle = color;
-      ctx.fillRect(0, 0, width, height);
-      ctx.globalAlpha = 1;
-    }
-  },
-  {
-    name: 'Chase',
-    type: 'chase',
-    params: [
-      { label: 'Speed', name: 'speed', type: 'range', default: 20, min: 5, max: 100 },
-      { label: 'Size', name: 'size', type: 'integer', default: 4, min: 1, max: 20 },
-      { label: 'Color', name: 'color', type: 'color', default: '#ffffff' }
-    ],
-    render: ({ ctx, totalTime, width, height, nodeId }) => {
-      const speed = getNodeParameter(nodeId, 'speed', 20);
-      const size = getNodeParameter(nodeId, 'size', 4);
-      const color = getNodeParameter(nodeId, 'color', '#ffffff');
-      
-      const position = (totalTime * speed) % width;
-      ctx.fillStyle = color;
-      ctx.fillRect(position, 0, size, height); // Full vertical bar instead of circle
-    }
-  },
-  {
-    name: 'Blend',
-    type: 'blend',
-    params: [
-      { label: 'Opacity', name: 'opacity', type: 'float', default: 0.5 },
-      { label: 'Blend Mode', name: 'blendMode', type: 'select', default: 'normal', options: [
-        { value: 'normal', label: 'Normal' },
-        { value: 'add', label: 'Add' },
-        { value: 'multiply', label: 'Multiply' },
-        { value: 'screen', label: 'Screen' },
-        { value: 'overlay', label: 'Overlay' },
-        { value: 'difference', label: 'Difference' }
-      ]}
-    ],
-    render: ({ ctx, width, height, getInputNodes, getNodeOutput, nodeId }) => {
-      const opacity = getNodeParameter(nodeId, 'opacity', 0.5);
-      const blendMode = getNodeParameter(nodeId, 'blendMode', 'normal');
-      const inputs = getInputNodes();
-      const input1Data = inputs.input1 ? getNodeOutput(inputs.input1.id) : null;
-      const input2Data = inputs.input2 ? getNodeOutput(inputs.input2.id) : null;
-      
-      if (input1Data || input2Data) {
-        // Create blend effect
-        const imageData = ctx.createImageData(width, height);
-        const data = imageData.data;
-        
-        for (let i = 0; i < data.length; i += 4) {
-          let r1 = 0, g1 = 0, b1 = 0, a1 = 255;
-          let r2 = 0, g2 = 0, b2 = 0, a2 = 255;
-          
-          if (input1Data) {
-            r1 = input1Data.data[i];
-            g1 = input1Data.data[i + 1];
-            b1 = input1Data.data[i + 2];
-            a1 = input1Data.data[i + 3];
-          }
-          
-          if (input2Data) {
-            r2 = input2Data.data[i];
-            g2 = input2Data.data[i + 1];
-            b2 = input2Data.data[i + 2];
-            a2 = input2Data.data[i + 3];
-          }
-          
-          // Apply blend mode
-          let r, g, b;
-          
-          switch (blendMode) {
-            case 'add':
-              r = Math.min(255, r1 + r2 * opacity);
-              g = Math.min(255, g1 + g2 * opacity);
-              b = Math.min(255, b1 + b2 * opacity);
-              break;
-            case 'multiply':
-              r = Math.min(255, r1 * (1 - opacity) + (r1 * r2 / 255) * opacity);
-              g = Math.min(255, g1 * (1 - opacity) + (g1 * g2 / 255) * opacity);
-              b = Math.min(255, b1 * (1 - opacity) + (b1 * b2 / 255) * opacity);
-              break;
-            case 'screen':
-              r = Math.min(255, r1 * (1 - opacity) + (255 - (255 - r1) * (255 - r2) / 255) * opacity);
-              g = Math.min(255, g1 * (1 - opacity) + (255 - (255 - g1) * (255 - g2) / 255) * opacity);
-              b = Math.min(255, b1 * (1 - opacity) + (255 - (255 - b1) * (255 - b2) / 255) * opacity);
-              break;
-            case 'overlay':
-              const overlayR = r1 < 128 ? 2 * r1 * r2 / 255 : 255 - 2 * (255 - r1) * (255 - r2) / 255;
-              const overlayG = g1 < 128 ? 2 * g1 * g2 / 255 : 255 - 2 * (255 - g1) * (255 - g2) / 255;
-              const overlayB = b1 < 128 ? 2 * b1 * b2 / 255 : 255 - 2 * (255 - b1) * (255 - b2) / 255;
-              r = Math.min(255, r1 * (1 - opacity) + overlayR * opacity);
-              g = Math.min(255, g1 * (1 - opacity) + overlayG * opacity);
-              b = Math.min(255, b1 * (1 - opacity) + overlayB * opacity);
-              break;
-            case 'difference':
-              r = Math.min(255, r1 * (1 - opacity) + Math.abs(r1 - r2) * opacity);
-              g = Math.min(255, g1 * (1 - opacity) + Math.abs(g1 - g2) * opacity);
-              b = Math.min(255, b1 * (1 - opacity) + Math.abs(b1 - b2) * opacity);
-              break;
-            default: // normal
-              r = Math.min(255, r1 * (1 - opacity) + r2 * opacity);
-              g = Math.min(255, g1 * (1 - opacity) + g2 * opacity);
-              b = Math.min(255, b1 * (1 - opacity) + b2 * opacity);
-              break;
-          }
-          
-          data[i] = r;
-          data[i + 1] = g;
-          data[i + 2] = b;
-          data[i + 3] = 255;
-        }
-        
-        ctx.putImageData(imageData, 0, 0);
+// WASM Operator Management System
+class WasmOperatorManager {
+  private wasmModule: any = null;
+  private operatorInstances = new Map<string, number>(); // nodeId -> operatorInstanceId
+  private operatorTypes = new Map<string, string>(); // nodeId -> operatorType
+  
+  // 3-Buffer System for ESP32 compatibility
+  private buffers: { [key: number]: number } = {}; // buffer index -> WASM pointer
+  private bufferSize = 0;
+  private width = 100;
+  private height = 50;
+  
+  constructor() {
+    // Wait for WASM to be ready
+    if (typeof window !== 'undefined') {
+      if (window.isWasmReady && window.isWasmReady()) {
+        this.initializeWasm();
+      } else {
+        window.addEventListener('wasmReady', () => this.initializeWasm());
       }
     }
   }
-];
+  
+  private initializeWasm() {
+    try {
+      this.wasmModule = window.getWasmModule();
+      if (!this.wasmModule) {
+        console.error('WASM module not available');
+        return;
+      }
+      
+      // Initialize 3-buffer system
+      this.initializeBuffers();
+      console.log('WASM Operator Manager initialized with 3-buffer system');
+    } catch (error) {
+      console.error('Failed to initialize WASM:', error);
+    }
+  }
+  
+  private initializeBuffers() {
+    if (!this.wasmModule) return;
+    
+    // Calculate buffer size for 100x50 pixels (RGB = 3 bytes per pixel)
+    this.bufferSize = this.width * this.height * 3;
+    
+    // Allocate 3 buffers for ESP32-compatible rendering
+    this.buffers[0] = this.wasmModule._malloc(this.bufferSize); // Buffer 0
+    this.buffers[1] = this.wasmModule._malloc(this.bufferSize); // Buffer 1  
+    this.buffers[2] = this.wasmModule._malloc(this.bufferSize); // Buffer 2
+    
+    console.log('Allocated 3 WASM buffers:', this.buffers);
+  }
+  
+  getAvailableOperators(): NodeDefinition[] {
+    if (!this.wasmModule) {
+      console.warn('WASM not ready, returning minimal operator list');
+      return [this.createOutputNodeDefinition()]; 
+    }
+    
+    try {
+      const count = this.wasmModule.ccall('getOperatorCount', 'number', [], []);
+      console.log(`WASM operator count: ${count}`);
+      
+      const operators: NodeDefinition[] = [this.createOutputNodeDefinition()]; // Output node first
+      
+      for (let i = 0; i < count; i++) {
+        try {
+          const operatorName = this.safeGetString('getOperatorName', ['number'], [i]);
+          if (!operatorName) {
+            console.warn(`Failed to get operator name for index ${i}`);
+            continue;
+          }
+          
+          console.log(`Processing operator: ${operatorName}`);
+          
+          const displayName = this.safeGetString('getOperatorDisplayName', ['string'], [operatorName]);
+          const paramCount = this.wasmModule.ccall('getOperatorParameterCount', 'number', ['string'], [operatorName]);
+          
+          console.log(`  Display name: ${displayName}, param count: ${paramCount}`);
+          
+          const params: Parameter[] = [];
+          for (let p = 0; p < paramCount; p++) {
+            try {
+              const paramInfoJson = this.safeGetString('getOperatorParameterInfo', ['string', 'number'], [operatorName, p]);
+              if (paramInfoJson) {
+                const paramInfo = JSON.parse(paramInfoJson);
+                params.push(this.convertWasmParameter(paramInfo));
+              }
+            } catch (paramError) {
+              console.error(`Error getting parameter ${p} for operator ${operatorName}:`, paramError);
+            }
+          }
+          
+          operators.push({
+            name: displayName || operatorName,
+            type: operatorName.toLowerCase(),
+            params,
+            render: this.createWasmRenderFunction(operatorName)
+          });
+          
+        } catch (operatorError) {
+          console.error(`Error processing operator ${i}:`, operatorError);
+        }
+      }
+      
+      console.log(`Successfully loaded ${operators.length} operators`);
+      return operators;
+    } catch (error) {
+      console.error('Error getting WASM operators:', error);
+      return [this.createOutputNodeDefinition()];
+    }
+  }
+  
+  // Safer string retrieval from WASM with error checking
+  private safeGetString(functionName: string, argTypes: string[], args: any[]): string | null {
+    try {
+      const result = this.wasmModule.ccall(functionName, 'string', argTypes, args);
+      if (typeof result === 'string' && result.length > 0) {
+        return result;
+      }
+      return null;
+    } catch (error) {
+      console.error(`Error calling WASM function ${functionName}:`, error);
+      return null;
+    }
+  }
+  
+  private createOutputNodeDefinition(): NodeDefinition {
+    return {
+      name: 'Output',
+      type: 'output',
+      params: [],
+      render: () => {
+        // Output node doesn't render anything - it just passes through input
+      }
+    };
+  }
+  
+  private convertWasmParameter(wasmParam: any): Parameter {
+    const paramTypes = ['float', 'integer', 'range', 'color', 'select'];
+    let type = 'float' as ParameterType;
+    
+    switch (wasmParam.type) {
+      case 0: type = 'float'; break;
+      case 1: type = 'integer'; break;
+      case 2: type = 'range'; break;
+      case 3: type = 'color'; break;
+      case 4: type = 'select'; break;
+    }
+    
+    const param: Parameter = {
+      label: wasmParam.label,
+      name: wasmParam.name,
+      type,
+      default: wasmParam.default
+    };
+    
+    if (wasmParam.min !== undefined) param.min = wasmParam.min;
+    if (wasmParam.max !== undefined) param.max = wasmParam.max;
+    if (wasmParam.options) {
+      param.options = wasmParam.options.map((opt: string, index: number) => ({
+        value: index.toString(),
+        label: opt
+      }));
+    }
+    
+    return param;
+  }
+  
+  private createWasmRenderFunction(operatorName: string) {
+    return ({ ctx, totalTime, deltaTime, width, height, getInputNodes, getNodeOutput, nodeId }: RenderContext) => {
+      this.renderNodeWithWasm(nodeId, operatorName, ctx, totalTime, deltaTime, width, height, getInputNodes, getNodeOutput);
+    };
+  }
+  
+  private renderNodeWithWasm(
+    nodeId: string, 
+    operatorName: string, 
+    ctx: CanvasRenderingContext2D, 
+    totalTime: number, 
+    deltaTime: number, 
+    width: number, 
+    height: number, 
+    getInputNodes: () => any, 
+    getNodeOutput: (nodeId: string) => ImageData | null
+  ) {
+    // Ensure operator instance exists
+    if (!this.operatorInstances.has(nodeId)) {
+      this.createOperatorInstance(nodeId, operatorName);
+    }
+    
+    // Set parameters from the store
+    let currentParams: Map<string, Map<string, any>> = new Map();
+    nodeParameters.subscribe(params => currentParams = params)();
+    const nodeParams = currentParams.get(nodeId) || new Map();
+    this.setNodeParameters(nodeId, nodeParams);
+    
+    // Simple buffer assignment (we'll improve this later with proper topological ordering)
+    const outputBufferIndex = parseInt(nodeId) % 3;
+    let inputBuffer1Index: number | null = null;
+    let inputBuffer2Index: number | null = null;
+    
+    // Handle input buffers
+    const inputs = getInputNodes();
+    if ('input' in inputs && inputs.input) {
+      const inputData = getNodeOutput(inputs.input.id);
+      if (inputData) {
+        inputBuffer1Index = (parseInt(inputs.input.id) % 3);
+        this.copyImageDataToBuffer(inputData, inputBuffer1Index);
+      }
+    }
+    
+    if ('input1' in inputs && inputs.input1) {
+      const inputData = getNodeOutput(inputs.input1.id);
+      if (inputData) {
+        inputBuffer1Index = (parseInt(inputs.input1.id) % 3);
+        this.copyImageDataToBuffer(inputData, inputBuffer1Index);
+      }
+    }
+    
+    if ('input2' in inputs && inputs.input2) {
+      const inputData = getNodeOutput(inputs.input2.id);
+      if (inputData) {
+        inputBuffer2Index = (parseInt(inputs.input2.id) % 3);
+        this.copyImageDataToBuffer(inputData, inputBuffer2Index);
+      }
+    }
+    
+    // Render with WASM
+    const timestampMs = Math.floor(totalTime * 1000);
+    const deltaTimeMs = Math.floor(deltaTime * 1000);
+    
+    this.renderOperator(nodeId, inputBuffer1Index, inputBuffer2Index, outputBufferIndex, timestampMs, deltaTimeMs);
+    
+    // Convert buffer back to ImageData and draw to canvas
+    const imageData = this.createImageDataFromBuffer(outputBufferIndex);
+    if (imageData) {
+      ctx.putImageData(imageData, 0, 0);
+    }
+  }
+  
+  createOperatorInstance(nodeId: string, operatorType: string): boolean {
+    if (!this.wasmModule || operatorType === 'output') return true;
+    
+    try {
+      const instanceId = this.wasmModule.ccall('createOperatorInstance', 'number', ['string'], [operatorType]);
+      if (instanceId !== -1) {
+        this.operatorInstances.set(nodeId, instanceId);
+        this.operatorTypes.set(nodeId, operatorType);
+        console.log(`Created WASM operator instance ${instanceId} for node ${nodeId} (${operatorType})`);
+        return true;
+      }
+    } catch (error) {
+      console.error(`Failed to create operator instance for ${nodeId}:`, error);
+    }
+    return false;
+  }
+  
+  destroyOperatorInstance(nodeId: string): void {
+    const instanceId = this.operatorInstances.get(nodeId);
+    if (instanceId !== undefined && this.wasmModule) {
+      try {
+        this.wasmModule.ccall('destroyOperatorInstance', null, ['number'], [instanceId]);
+        this.operatorInstances.delete(nodeId);
+        this.operatorTypes.delete(nodeId);
+      } catch (error) {
+        console.error(`Failed to destroy operator instance for ${nodeId}:`, error);
+      }
+    }
+  }
+  
+  setNodeParameters(nodeId: string, nodeParams: Map<string, any>): void {
+    const instanceId = this.operatorInstances.get(nodeId);
+    const operatorType = this.operatorTypes.get(nodeId);
+    if (instanceId === undefined || !this.wasmModule || !operatorType) return;
+    
+    try {
+      const paramCount = this.wasmModule.ccall('getOperatorParameterCount', 'number', ['string'], [operatorType]);
+      
+      for (let i = 0; i < paramCount; i++) {
+        try {
+          const paramInfoJson = this.safeGetString('getOperatorParameterInfo', ['string', 'number'], [operatorType, i]);
+          if (!paramInfoJson) continue;
+          
+          const paramInfo = JSON.parse(paramInfoJson);
+          const value = nodeParams.get(paramInfo.name);
+          
+          if (value !== undefined) {
+            switch (paramInfo.type) {
+              case 0: // FLOAT
+                this.wasmModule.ccall('setOperatorFloatParameter', null, ['number', 'number', 'number'], [instanceId, i, parseFloat(value) || 0]);
+                break;
+              case 1: // INT
+                this.wasmModule.ccall('setOperatorIntParameter', null, ['number', 'number', 'number'], [instanceId, i, parseInt(value) || 0]);
+                break;
+              case 2: // BOOL
+                this.wasmModule.ccall('setOperatorBoolParameter', null, ['number', 'number', 'number'], [instanceId, i, value ? 1 : 0]);
+                break;
+              case 3: // COLOR
+                if (typeof value === 'string' && value.startsWith('#') && value.length === 7) {
+                  const r = parseInt(value.substring(1, 3), 16) || 0;
+                  const g = parseInt(value.substring(3, 5), 16) || 0;
+                  const b = parseInt(value.substring(5, 7), 16) || 0;
+                  this.wasmModule.ccall('setOperatorColorParameter', null, ['number', 'number', 'number', 'number', 'number'], [instanceId, i, r, g, b]);
+                }
+                break;
+              case 4: // SELECT  
+                this.wasmModule.ccall('setOperatorStringParameter', null, ['number', 'number', 'string'], [instanceId, i, String(value)]);
+                break;
+            }
+          }
+        } catch (paramError) {
+          console.error(`Error setting parameter ${i} for node ${nodeId}:`, paramError);
+        }
+      }
+    } catch (error) {
+      console.error(`Failed to set parameters for node ${nodeId}:`, error);
+    }
+  }
+  
+  renderOperator(nodeId: string, inputBuffer1Index: number | null, inputBuffer2Index: number | null, outputBufferIndex: number, timestampMs: number, deltaTimeMs: number): void {
+    const instanceId = this.operatorInstances.get(nodeId);
+    if (instanceId === undefined || !this.wasmModule) return;
+    
+    try {
+      // Clear output buffer
+      this.wasmModule.ccall('clearBuffer', null, ['number', 'number'], [this.buffers[outputBufferIndex], this.width * this.height]);
+      
+      // Call WASM render function
+      this.wasmModule.ccall('renderOperator', null, 
+        ['number', 'number', 'number', 'number', 'number', 'number', 'number', 'number'],
+        [
+          instanceId,
+          inputBuffer1Index !== null ? this.buffers[inputBuffer1Index] : 0,
+          inputBuffer2Index !== null ? this.buffers[inputBuffer2Index] : 0, 
+          this.buffers[outputBufferIndex],
+          this.width,
+          this.height,
+          timestampMs,
+          deltaTimeMs
+        ]
+      );
+    } catch (error) {
+      console.error(`Failed to render operator for node ${nodeId}:`, error);
+    }
+  }
+  
+  copyImageDataToBuffer(imageData: ImageData, bufferIndex: number): void {
+    if (!this.wasmModule || !this.buffers[bufferIndex]) return;
+    
+    const buffer = new Uint8Array(this.wasmModule.HEAPU8.buffer, this.buffers[bufferIndex], this.bufferSize);
+    const data = imageData.data;
+    
+    // Convert RGBA to RGB
+    for (let i = 0; i < this.width * this.height; i++) {
+      buffer[i * 3] = data[i * 4];     // R
+      buffer[i * 3 + 1] = data[i * 4 + 1]; // G  
+      buffer[i * 3 + 2] = data[i * 4 + 2]; // B
+    }
+  }
+  
+  createImageDataFromBuffer(bufferIndex: number): ImageData | null {
+    if (!this.wasmModule || !this.buffers[bufferIndex]) return null;
+    
+    const buffer = new Uint8Array(this.wasmModule.HEAPU8.buffer, this.buffers[bufferIndex], this.bufferSize);
+    const imageData = new ImageData(this.width, this.height);
+    
+    // Convert RGB to RGBA
+    for (let i = 0; i < this.width * this.height; i++) {
+      imageData.data[i * 4] = buffer[i * 3];     // R
+      imageData.data[i * 4 + 1] = buffer[i * 3 + 1]; // G
+      imageData.data[i * 4 + 2] = buffer[i * 3 + 2]; // B
+      imageData.data[i * 4 + 3] = 255;          // A
+    }
+    
+    return imageData;
+  }
+  
+  cleanup(): void {
+    for (const [nodeId] of this.operatorInstances) {
+      this.destroyOperatorInstance(nodeId);
+    }
+    
+    if (this.wasmModule) {
+      for (const buffer of Object.values(this.buffers)) {
+        this.wasmModule._free(buffer);
+      }
+    }
+    
+    this.buffers = {};
+  }
+}
+
+// Global WASM operator manager
+let wasmOperatorManager: WasmOperatorManager | null = null;
+
+// Initialize WASM manager only in browser environment
+if (typeof window !== 'undefined') {
+  wasmOperatorManager = new WasmOperatorManager();
+  
+  // Global cleanup on page unload
+  window.addEventListener('beforeunload', () => {
+    if (wasmOperatorManager) {
+      wasmOperatorManager.cleanup();
+    }
+  });
+}
+
+export function getWasmOperatorManager(): WasmOperatorManager | null {
+  return wasmOperatorManager;
+}
+
+// Dynamic NODE_TYPES loaded from WASM
+export let NODE_TYPES: NodeDefinition[] = [];
+
+function loadOperatorsFromWasm() {
+  const manager = getWasmOperatorManager();
+  if (manager) {
+    NODE_TYPES = manager.getAvailableOperators();
+    console.log(`Loaded ${NODE_TYPES.length} operators from WASM:`, NODE_TYPES.map(op => op.name));
+  } else {
+    // Fallback for SSR
+    NODE_TYPES = [{
+      name: 'Output',
+      type: 'output', 
+      params: [],
+      render: () => {}
+    }];
+  }
+}
+
+// Initialize operators
+loadOperatorsFromWasm();
+if (typeof window !== 'undefined') {
+  window.addEventListener('wasmReady', loadOperatorsFromWasm);
+}
 
 // Helper function to get node definition by type
 export function getNodeDefinition(type: string): NodeDefinition | undefined {
@@ -807,7 +768,14 @@ export function deleteNode(nodeId: string): void {
     params.delete(nodeId);
     return params;
   });
-} 
+  
+  // Clean up WASM operator instance
+  const manager = getWasmOperatorManager();
+  if (manager) {
+    manager.destroyOperatorInstance(nodeId);
+  }
+}
+
 // Pattern serialization imports and utilities
 import type { SerializedPattern } from './patternSerializer';
 import { serializePattern, deserializePattern, estimatePatternSize, compressPattern } from './patternSerializer';
