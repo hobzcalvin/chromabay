@@ -24,13 +24,16 @@
 		"esp32:build": "cd esp32 && pio run",
 		"esp32:upload": "cd esp32 && pio run --target upload",
 		"esp32:monitor": "cd esp32 && pio device monitor --baud 115200",
-		"esp32:full": "npm run esp32:upload && npm run esp32:monitor"
+		"esp32:full": "npm run esp32:upload && npm run esp32:monitor",
+		"wasm:compile": "cd native && fastled . --just-compile --force-compile --web && mkdir -p ../static/native && cp fastled_js/fastled.js ../static/native/ && cp fastled_js/fastled.wasm ../static/native/ && echo '✅ WASM files compiled and copied to static/native/'"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-auto": "^6.0.0",
 		"@sveltejs/adapter-static": "^3.0.8",
 		"@sveltejs/kit": "^2.16.0",
 		"@sveltejs/vite-plugin-svelte": "^5.0.0",
+		"@types/node": "^24.0.6",
+		"chokidar": "^4.0.3",
 		"gh-pages": "^6.3.0",
 		"husky": "^9.1.7",
 		"svelte": "^5.0.0",

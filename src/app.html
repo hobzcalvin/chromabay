@@ -17,6 +17,41 @@
 				}
 			}(window.location))
 		</script>
+		
+		<!-- FastLED WASM Operator System -->
+		<script src="/native/fastled.js"></script>
+		<script>
+			// Global WASM module initialization
+			let wasmModule = null;
+			let wasmReady = false;
+			
+			// Initialize WASM when page loads
+			window.addEventListener('load', async () => {
+				try {
+					wasmModule = await fastled({
+						// Capture WASM stdout/stderr
+						print: function(text) {
+							console.log('[WASM stdout]:', text);
+						},
+						printErr: function(text) {
+							console.error('[WASM stderr]:', text);
+						}
+					});
+					wasmReady = true;
+					console.log('FastLED WASM module loaded successfully');
+					
+					// Dispatch custom event to notify app components
+					window.dispatchEvent(new CustomEvent('wasmReady', { detail: { module: wasmModule } }));
+				} catch (error) {
+					console.error('Failed to load FastLED WASM module:', error);
+				}
+			});
+			
+			// Global helper functions for WASM interaction
+			window.getWasmModule = () => wasmModule;
+			window.isWasmReady = () => wasmReady;
+		</script>
+		
 		%sveltekit.head%
 	</head>
 	<body data-sveltekit-preload-data="hover">
