@@ -13,14 +13,14 @@
 #include <FastLED.h>
 #include <emscripten/emscripten.h>
 
-// Include the operator system
-#include "OperatorBase.h"
+// Include the base operator system
+#include "BaseOperator.h"
 
-// Include all operator implementations
-#include "NoiseBlendOperator.h"
+// Include all operators via centralized list
+#include "OperatorList.h"
 
 // Global operator instance management
-std::map<int, std::unique_ptr<OperatorBase>> activeOperators;
+std::map<int, std::unique_ptr<BaseOperator>> activeOperators;
 std::map<int, std::vector<ParameterValue>> operatorParameters;
 int nextOperatorId = 1;
 

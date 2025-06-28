@@ -34,10 +34,10 @@ struct ParameterInfo {
 };
 
 // Base class for all LED operators
-class OperatorBase {
+class BaseOperator {
 public:
-    OperatorBase() = default;
-    virtual ~OperatorBase() = default;
+    BaseOperator() = default;
+    virtual ~BaseOperator() = default;
 
     // Main render function - output buffer moved to end
     virtual void render(
@@ -87,7 +87,7 @@ public:
 };
 
 // Operator factory function type
-using OperatorFactory = std::function<std::unique_ptr<OperatorBase>()>;
+using OperatorFactory = std::function<std::unique_ptr<BaseOperator>()>;
 
 // Operator registry class - singleton pattern
 class OperatorRegistry {
@@ -108,7 +108,7 @@ public:
     }
     
     // Create an operator by name
-    std::unique_ptr<OperatorBase> createOperator(const std::string& name) {
+    std::unique_ptr<BaseOperator> createOperator(const std::string& name) {
         auto it = factories.find(name);
         if (it != factories.end()) {
             return it->second();

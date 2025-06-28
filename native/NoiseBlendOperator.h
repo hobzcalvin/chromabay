@@ -1,8 +1,9 @@
 #pragma once
 
-#include "OperatorBase.h"
+#include "BaseOperator.h"
 
-class NoiseBlendOperator : public OperatorBase {
+// Noise-based LED operator with color blending
+class NoiseBlendOperator : public BaseOperator {
 public:
     // Direct CRGB buffer access - no conversions needed!
     void render(
