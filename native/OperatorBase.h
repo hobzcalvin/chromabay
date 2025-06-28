@@ -8,8 +8,8 @@
 #include <functional>
 #include <emscripten/emscripten.h>
 
-// Parameter value types
-using ParameterValue = std::variant<float, int, bool, std::string>;
+// Parameter value types - including CRGB for COLOR type
+using ParameterValue = std::variant<float, int, bool, std::string, CRGB>;
 
 // Parameter metadata
 struct ParameterInfo {
@@ -39,11 +39,11 @@ public:
     OperatorBase() = default;
     virtual ~OperatorBase() = default;
 
-    // Main render function - same signature on all platforms
+    // Main render function - output buffer moved to end
     virtual void render(
-        CRGB* outputBuffer,
         CRGB* inputBuffer1,
         CRGB* inputBuffer2,
+        CRGB* outputBuffer,
         uint32_t width,
         uint32_t height,
         uint32_t timestampMs,
@@ -51,8 +51,7 @@ public:
         const std::vector<ParameterValue>& parameters
     ) = 0;
 
-    // Metadata functions
-    virtual const char* getName() const = 0;
+    // Metadata functions - removed getName(), just use class name directly
     virtual const char* getDisplayName() const = 0;
     virtual std::vector<ParameterInfo> getParameterInfo() const = 0;
     
@@ -80,6 +79,10 @@ public:
     
     std::string getString(const std::vector<ParameterValue>& params, size_t index, const std::string& defaultVal = "") const {
         return getParameter<std::string>(params, index, defaultVal);
+    }
+    
+    CRGB getColor(const std::vector<ParameterValue>& params, size_t index, CRGB defaultVal = CRGB::Black) const {
+        return getParameter<CRGB>(params, index, defaultVal);
     }
 };
 
@@ -141,49 +144,4 @@ public:
 
 // Macro for easy operator registration
 #define REGISTER_OPERATOR(ClassName) \
-    static OperatorRegistrar<ClassName> g_##ClassName##_registrar(#ClassName)
-
-// Global buffer management
-class BufferManager {
-private:
-    static constexpr size_t MAX_LEDS = 1000; // Adjust as needed
-    CRGB buffer1[MAX_LEDS];
-    CRGB buffer2[MAX_LEDS];
-    CRGB outputBuffer[MAX_LEDS];
-    
-    size_t currentWidth = 100;
-    size_t currentHeight = 1;
-    
-    BufferManager() = default;
-    
-public:
-    static BufferManager& getInstance() {
-        static BufferManager instance;
-        return instance;
-    }
-    
-    void setDimensions(uint32_t width, uint32_t height) {
-        currentWidth = std::min((size_t)width, MAX_LEDS);
-        currentHeight = height;
-    }
-    
-    CRGB* getBuffer1() { return buffer1; }
-    CRGB* getBuffer2() { return buffer2; }
-    CRGB* getOutputBuffer() { return outputBuffer; }
-    
-    uint32_t getWidth() const { return currentWidth; }
-    uint32_t getHeight() const { return currentHeight; }
-    uint32_t getTotalPixels() const { return currentWidth * currentHeight; }
-    
-    void clearBuffer1() { fill_solid(buffer1, getTotalPixels(), CRGB::Black); }
-    void clearBuffer2() { fill_solid(buffer2, getTotalPixels(), CRGB::Black); }
-    void clearOutputBuffer() { fill_solid(outputBuffer, getTotalPixels(), CRGB::Black); }
-    
-    void copyBuffer1ToOutput() { 
-        memcpy(outputBuffer, buffer1, getTotalPixels() * sizeof(CRGB)); 
-    }
-    
-    void copyBuffer2ToOutput() { 
-        memcpy(outputBuffer, buffer2, getTotalPixels() * sizeof(CRGB)); 
-    }
-}; 
+    static OperatorRegistrar<ClassName> g_##ClassName##_registrar(#ClassName) 

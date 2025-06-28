@@ -4,11 +4,11 @@
 
 class NoiseBlendOperator : public OperatorBase {
 public:
-    // Test comment to trigger compilation
+    // Direct CRGB buffer access - no conversions needed!
     void render(
-        CRGB* outputBuffer,
         CRGB* inputBuffer1,
         CRGB* inputBuffer2,
+        CRGB* outputBuffer,
         uint32_t width,
         uint32_t height,
         uint32_t timestampMs,
@@ -32,10 +32,6 @@ public:
             CRGB input_color = inputBuffer1 ? inputBuffer1[i] : CRGB::Black;
             outputBuffer[i] = blend(input_color, noise_color, (uint8_t)(blendAmount * 255));
         }
-    }
-    
-    const char* getName() const override {
-        return "NoiseBlendOperator";
     }
     
     const char* getDisplayName() const override {

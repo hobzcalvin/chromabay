@@ -12,10 +12,12 @@
   const LED_HEIGHT = 20;
   const LED_SPACING = 2;
   
-  // WASM memory management for batch operations
-  let inputDataPtr: number = 0;
-  let outputDataPtr: number = 0;
-  const BYTES_PER_LED = 3; // RGB
+  // Simple buffer management - 3 CRGB buffers (always 3 bytes each)
+  let buffer0Ptr: number = 0;  // Input buffer 1
+  let buffer1Ptr: number = 0;  // Output buffer  
+  let buffer2Ptr: number = 0;  // Input buffer 2
+  const BYTES_PER_PIXEL = 3; // CRGB is always RGB (3 bytes)
+  const BUFFER_SIZE = NUM_LEDS * BYTES_PER_PIXEL;
   
   // FPS tracking
   let fps = 0;
@@ -46,12 +48,9 @@
         wasmModule.ccall('destroyOperatorInstance', null, ['number'], [operatorId]);
       }
       // Clean up allocated WASM memory
-      if (inputDataPtr && wasmModule) {
-        wasmModule._free(inputDataPtr);
-      }
-      if (outputDataPtr && wasmModule) {
-        wasmModule._free(outputDataPtr);
-      }
+      if (buffer0Ptr && wasmModule) wasmModule._free(buffer0Ptr);
+      if (buffer1Ptr && wasmModule) wasmModule._free(buffer1Ptr);
+      if (buffer2Ptr && wasmModule) wasmModule._free(buffer2Ptr);
     };
   });
   
@@ -63,8 +62,10 @@
     }
     
     try {
-      // Set buffer dimensions
-      wasmModule.ccall('setBufferDimensions', null, ['number', 'number'], [NUM_LEDS, 1]);
+      // Allocate CRGB buffers directly (3 bytes each)
+      buffer0Ptr = wasmModule._malloc(NUM_LEDS * 3);  // Input buffer 1  
+      buffer1Ptr = wasmModule._malloc(NUM_LEDS * 3);  // Output buffer
+      buffer2Ptr = wasmModule._malloc(NUM_LEDS * 3);  // Input buffer 2
       
       // Create NoiseBlendOperator instance
       operatorId = wasmModule.ccall('createOperatorInstance', 'number', ['string'], ['NoiseBlendOperator']);
@@ -72,43 +73,31 @@
       if (operatorId !== -1) {
         console.log('NoiseBlendOperator created with ID:', operatorId);
         
-        // Set some initial parameters
-        // Parameter 0: speed (1.5f)
+        // Set initial parameters
         wasmModule.ccall('setOperatorFloatParameter', null, ['number', 'number', 'number'], [operatorId, 0, 1.5]);
-        // Parameter 1: hueOffset (0)
         wasmModule.ccall('setOperatorIntParameter', null, ['number', 'number', 'number'], [operatorId, 1, 0]);
-        // Parameter 2: blendAmount (0.7f)
         wasmModule.ccall('setOperatorFloatParameter', null, ['number', 'number', 'number'], [operatorId, 2, 0.7]);
         
-        // Allocate WASM memory for batch operations
-        const bufferSize = NUM_LEDS * BYTES_PER_LED;
-        inputDataPtr = wasmModule._malloc(bufferSize);
-        outputDataPtr = wasmModule._malloc(bufferSize);
+        // Set up input buffer pattern
+        wasmModule.ccall('clearBuffer', null, ['number', 'number'], [buffer0Ptr, NUM_LEDS]);
         
-        // Set up input buffer ONCE using batch operations
-        wasmModule.ccall('clearBuffer1', null, [], []);
-        
-        // Create input pattern in JavaScript memory
-        const inputData = new Uint8Array(bufferSize);
+        // Create input pattern
+        const inputData = new Uint8Array(BUFFER_SIZE);
         for (let i = 0; i < NUM_LEDS; i++) {
           if (i % 10 === 0) {
-            // Dark purple base every 10th LED
             inputData[i * 3] = 50;     // R
             inputData[i * 3 + 1] = 0;  // G  
             inputData[i * 3 + 2] = 100; // B
           } else {
-            // Black for other LEDs
             inputData[i * 3] = 0;
             inputData[i * 3 + 1] = 0;
             inputData[i * 3 + 2] = 0;
           }
         }
         
-        // Copy to WASM memory and set buffer
-        wasmModule.HEAPU8.set(inputData, inputDataPtr);
-        wasmModule.ccall('setBuffer', null, ['number', 'number', 'number'], [1, inputDataPtr, bufferSize]);
+        wasmModule.HEAPU8.set(inputData, buffer0Ptr);
         
-        // Initialize animation timing
+        // Initialize timing
         animationStartTime = Date.now();
         lastFrameTime = animationStartTime;
         lastFpsUpdate = animationStartTime;
@@ -116,7 +105,7 @@
         // Start animation loop
         animate();
       } else {
-        console.error('Failed to create NoiseBlendOperator - operator not found or creation failed');
+        console.error('Failed to create NoiseBlendOperator');
       }
     } catch (error) {
       console.error('Error initializing WASM:', error);
@@ -135,30 +124,26 @@
       
       // Update FPS counter
       frameCount++;
-      if (now - lastFpsUpdate >= 1000) { // Update every second
+      if (now - lastFpsUpdate >= 1000) {
         fps = Math.round((frameCount * 1000) / (now - lastFpsUpdate));
         frameCount = 0;
         lastFpsUpdate = now;
       }
       
-      // Render the operator (input buffer already set)
+      // Render the operator with direct buffer pointers
       const renderStart = performance.now();
-      const deltaTime = frameTime || 16; // Use actual frame time, fallback to 16ms
-      const relativeTimestamp = now - animationStartTime; // Relative time since animation started
-      wasmModule.ccall('renderOperatorWithParameters', null, 
-        ['number', 'number', 'number', 'number', 'number'], 
-        [operatorId, relativeTimestamp, deltaTime, true, false]);
+      const deltaTime = frameTime || 16;
+      const relativeTimestamp = now - animationStartTime;
+      
+      wasmModule.ccall('renderOperator', null, 
+        ['number', 'number', 'number', 'number', 'number', 'number', 'number', 'number'], 
+        [operatorId, buffer0Ptr, buffer2Ptr, buffer1Ptr, NUM_LEDS, 1, relativeTimestamp, deltaTime]);
       const renderTime = performance.now() - renderStart;
       
-      // Read output and draw to canvas (batch operation)
+      // Read output and draw to canvas
       const drawStart = performance.now();
       drawLeds();
       const drawTime = performance.now() - drawStart;
-      
-      // Log performance occasionally for debugging
-      if (frameCount % 60 === 0) {
-        //console.log(`WASM render: ${renderTime.toFixed(2)}ms, Canvas draw: ${drawTime.toFixed(2)}ms, Frame: ${frameTime}ms, Delta: ${deltaTime}ms`);
-      }
       
       animationId = requestAnimationFrame(animate);
     } catch (error) {
@@ -167,20 +152,17 @@
   }
   
   function drawLeds() {
-    if (!ctx || !outputDataPtr) return;
+    if (!ctx || !buffer1Ptr) return;
     
     // Clear canvas
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     
-    // Get entire output buffer in one batch operation
-    const bufferSize = NUM_LEDS * BYTES_PER_LED;
-    wasmModule.ccall('getBuffer', null, ['number', 'number', 'number'], [0, outputDataPtr, bufferSize]);
+    let outputData: Uint8Array;
     
-    // Read the data from WASM memory
-    const outputData = new Uint8Array(wasmModule.HEAPU8.buffer, outputDataPtr, bufferSize);
+    outputData = new Uint8Array(wasmModule.HEAPU8.buffer, buffer1Ptr, NUM_LEDS * 3);
     
-    // Use ImageData for much faster rendering
+    // Use ImageData for fast rendering
     const imageData = ctx.createImageData(canvas.width, LED_HEIGHT);
     const pixels = imageData.data;
     

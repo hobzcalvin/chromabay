@@ -10,7 +10,6 @@ function fastledWatcher(): Plugin {
 	return {
 		name: 'fastled-watcher',
 		configureServer(server: ViteDevServer) {
-			const nativePath = path.resolve('native');
 			let isCompiling = false;
 			
 			// Watch native directory, but ignore the output folder
@@ -24,104 +23,56 @@ function fastledWatcher(): Plugin {
 				usePolling: false
 			});
 			
-			console.log('👀 File watcher setup complete. Watching:', path.resolve('native'));
-			
-			// Add debug event handlers
-			watcher.on('ready', () => {
-				console.log('🟢 File watcher is ready and watching for changes');
-			});
-			
-			watcher.on('error', (error) => {
-				console.error('❌ File watcher error:', error);
-			});
+			console.log('👀 Watching native/ for WASM auto-compilation...');
 			
 			watcher.on('change', async (filePath) => {
-				if (isCompiling) return; // Prevent concurrent compilations
-				
-				console.log(`\n🔧 Native file changed: ${path.relative(process.cwd(), filePath)}`);
-				console.log('🚀 Recompiling WASM...');
+				if (isCompiling) return;
 				
 				// Only compile for source files
-				if (!/\.(h|ino|cpp|c)$/.test(filePath)) {
-					console.log('⏭️  Skipping non-source file');
-					return;
-				}
+				if (!/\.(h|ino|cpp|c)$/.test(filePath)) return;
 				
+				console.log(`🔧 ${path.basename(filePath)} changed → compiling WASM...`);
 				isCompiling = true;
 				
 				try {
-					const command = 'fastled';
-					const args = ['--just-compile', '--force-compile', '--web'];
-					console.log(`🔧 Executing: ${command} ${args.join(' ')}`);
-					console.log(`📁 Working directory: ${nativePath}`);
-					
-					const child = spawn(command, args, {
-						cwd: nativePath,
+					const child = spawn('fastled', ['--just-compile', '--force-compile', '--web'], {
+						cwd: path.resolve('native'),
 						stdio: 'pipe'
 					});
 					
 					let output = '';
-					
-					child.stdout?.on('data', (data) => {
-						const text = data.toString();
-						console.log('📤 STDOUT:', text);
-						output += text;
-					});
-					
-					child.stderr?.on('data', (data) => {
-						const text = data.toString();
-						console.log('📤 STDERR:', text);
-						output += text;
-					});
-					
-					child.on('spawn', () => {
-						console.log('🚀 FastLED process spawned successfully');
-					});
-					
-					child.on('error', (error) => {
-						console.error('❌ Process spawn error:', error);
-					});
+					child.stdout?.on('data', (data) => { output += data.toString(); });
+					child.stderr?.on('data', (data) => { output += data.toString(); });
 					
 					child.on('close', (code) => {
-						console.log(`\n📊 FastLED process exited with code: ${code}`);
-						console.log('📋 Full output:');
-						console.log(output || '(no output captured)');
-						
 						if (code === 0) {
-							console.log('✅ WASM compilation completed with exit code 0');
-							
 							// Copy essential files to static directory
 							try {
 								const staticDir = path.join(process.cwd(), 'static', 'native');
 								const sourceDir = path.join(process.cwd(), 'native', 'fastled_js');
 								
-								// Ensure static/native directory exists
 								if (!fs.existsSync(staticDir)) {
 									fs.mkdirSync(staticDir, { recursive: true });
 								}
 								
-								// Copy only essential files
 								const filesToCopy = ['fastled.js', 'fastled.wasm'];
 								filesToCopy.forEach(file => {
 									const srcPath = path.join(sourceDir, file);
 									const destPath = path.join(staticDir, file);
 									if (fs.existsSync(srcPath)) {
 										fs.copyFileSync(srcPath, destPath);
-										console.log(`📁 Copied ${file} to static/native/`);
 									}
 								});
 								
-								console.log('🔄 Triggering browser reload...');
-								
-								// Trigger full reload to get fresh WASM files
-								server.ws.send({
-									type: 'full-reload'
-								});
+								console.log('✅ WASM compiled → browser reloading...');
+								server.ws.send({ type: 'full-reload' });
 							} catch (error) {
 								console.error('❌ Failed to copy WASM files:', error);
 							}
 						} else {
-							console.error('❌ WASM compilation failed with non-zero exit code');
+							console.error('❌ WASM compilation failed');
+							// Only show full output on error
+							console.log(output);
 						}
 						isCompiling = false;
 					});
@@ -136,8 +87,6 @@ function fastledWatcher(): Plugin {
 			server.httpServer?.on('close', () => {
 				watcher.close();
 			});
-			
-			console.log('👀 Watching native/ directory for WASM recompilation...');
 		}
 	};
 }
@@ -150,7 +99,7 @@ export default defineConfig({
 				'**/ios/**',
 				'**/android/**',
 				'**/node_modules/**',
-				'**/native/fastled_js/**'  // Also ignore in Vite's watcher
+				'**/native/fastled_js/**'
 			]
 		}
 	}

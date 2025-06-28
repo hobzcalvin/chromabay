@@ -1083,40 +1083,6 @@ async function createWasm() {
       return 0;
     };
 
-  
-  var _emscripten_date_now = () => Date.now();
-  
-  var nowIsMonotonic = 1;
-  
-  var checkWasiClock = (clock_id) => clock_id >= 0 && clock_id <= 3;
-  
-  var INT53_MAX = 9007199254740992;
-  
-  var INT53_MIN = -9007199254740992;
-  var bigintToI53Checked = (num) => (num < INT53_MIN || num > INT53_MAX) ? NaN : Number(num);
-  function _clock_time_get(clk_id, ignored_precision, ptime) {
-    ignored_precision = bigintToI53Checked(ignored_precision);
-  
-  
-      if (!checkWasiClock(clk_id)) {
-        return 28;
-      }
-      var now;
-      // all wasi clocks but realtime are monotonic
-      if (clk_id === 0) {
-        now = _emscripten_date_now();
-      } else if (nowIsMonotonic) {
-        now = _emscripten_get_now();
-      } else {
-        return 52;
-      }
-      // "now" is in ms, and wasi times are in ns.
-      var nsec = Math.round(now * 1000 * 1000);
-      HEAP64[((ptime)>>3)] = BigInt(nsec);
-      return 0;
-    ;
-  }
-
   var readEmAsmArgsArray = [];
   var readEmAsmArgs = (sigPtr, buf) => {
       // Nobody should have mutated _readEmAsmArgsArray underneath us to be something else than an array.
@@ -1158,9 +1124,6 @@ async function createWasm() {
   var _emscripten_asm_const_int = (code, sigPtr, argbuf) => {
       return runEmAsmFunction(code, sigPtr, argbuf);
     };
-
-
-  var _emscripten_performance_now = () => performance.now();
 
   var getHeapMax = () =>
       // Stay one Wasm page short of 4GB: while e.g. Chrome is able to allocate
@@ -1325,6 +1288,10 @@ async function createWasm() {
       abort('fd_close called without SYSCALLS_REQUIRE_FILESYSTEM');
     };
 
+  var INT53_MAX = 9007199254740992;
+  
+  var INT53_MIN = -9007199254740992;
+  var bigintToI53Checked = (num) => (num < INT53_MIN || num > INT53_MAX) ? NaN : Number(num);
   function _fd_seek(fd, offset, whence, newOffset) {
     offset = bigintToI53Checked(offset);
   
@@ -1697,6 +1664,7 @@ Module['FS_createPreloadedFile'] = FS.createPreloadedFile;
   'getCallstack',
   'convertPCtoSourceLocation',
   'getEnvStrings',
+  'checkWasiClock',
   'wasiRightsToMuslOFlags',
   'wasiOFlagsToMuslOFlags',
   'initRandomFill',
@@ -1827,7 +1795,6 @@ missingLibrarySymbols.forEach(missingLibrarySymbol)
   'restoreOldWindowedStyle',
   'UNWIND_CACHE',
   'ExitStatus',
-  'checkWasiClock',
   'flush_NO_FILESYSTEM',
   'emSetImmediate',
   'emClearImmediate_deps',
@@ -1997,10 +1964,10 @@ function checkIncomingModuleAPI() {
   ignoredModuleProp('fetchSettings');
 }
 var ASM_CONSTS = {
-  72292: ($0) => { globalThis.FastLED_sendMessage = globalThis.FastLED_sendMessage || function(msg_tag, json_data_str) { console.log("Missing globalThis.FastLED_sendMessage() function"); console.log("Message was mean for tag: " + msg_tag); const json_data = JSON.parse(json_data_str); console.log("Received JSON data:", json_data); }; globalThis.FastLED_onFrame = globalThis.FastLED_onFrame || function(frameInfo, callback) { console.log("Missing globalThis.FastLED_onFrame() function"); if (typeof callback === 'function') { callback(); } else { console.error("Callback function is not a function but is of type " + typeof callback); } }; globalThis.onFastLedUiUpdateFunction = globalThis.onFastLedUiUpdateFunction || function(jsonString) { if (typeof jsonString === 'string' && jsonString !== null) { Module.cwrap('jsUpdateUiComponents', null, ['string'])(jsonString); } else { console.error("*** JS→C++: Invalid jsonData received:", jsonString, "expected string but instead got:", typeof jsonString); } }; var jsonStr = UTF8ToString($0); var jsonData = JSON.parse(jsonStr); for (var i = 0; i < jsonData.length; i++) { var stripData = jsonData[i]; var sizePtr = Module._malloc(4); var dataPtr = Module.ccall('getStripPixelData', 'number', ['number', 'number'], [stripData.strip_id, sizePtr]); if (dataPtr !== 0) { var size = Module.getValue(sizePtr, 'i32'); var pixelData = new Uint8Array(Module.HEAPU8.buffer, dataPtr, size); jsonData[i].pixel_data = pixelData; } else { jsonData[i].pixel_data = null; } Module._free(sizePtr); } globalThis.FastLED_onFrame(jsonData, globalThis.onFastLedUiUpdateFunction); },  
- 73887: function($0, $1) { globalThis.FastLED_onStripAdded = globalThis.FastLED_onStripAdded || function() { console.log("Missing globalThis.FastLED_onStripAdded(id, length) function"); console.log("Added strip id: " + arguments[0] + " with length: " + arguments[1]); }; globalThis.FastLED_onStripAdded($0, $1); },  
- 74176: ($0) => { globalThis.FastLED_onUiElementsAdded = globalThis.FastLED_onUiElementsAdded || function(jsonData, updateFunc) { console.log("Missing globalThis.FastLED_onUiElementsAdded(jsonData, updateFunc) function"); }; var jsonStr = UTF8ToString($0); var data = null; try { data = JSON.parse(jsonStr); } catch (error) { console.error("Error parsing JSON:", error); console.error("Problematic JSON string:", jsonStr); return; } if (data) { globalThis.FastLED_onUiElementsAdded(data); } else { console.error("Internal error, data is null"); } },  
- 74709: ($0, $1) => { globalThis.FastLED_onStripUpdate = globalThis.FastLED_onStripUpdate || function(jsonStr) { console.log("Missing globalThis.FastLED_onStripUpdate(jsonStr) function"); }; var jsonStr = UTF8ToString($0, $1); var jsonData = JSON.parse(jsonStr); globalThis.FastLED_onStripUpdate(jsonData); }
+  71940: ($0) => { globalThis.FastLED_sendMessage = globalThis.FastLED_sendMessage || function(msg_tag, json_data_str) { console.log("Missing globalThis.FastLED_sendMessage() function"); console.log("Message was mean for tag: " + msg_tag); const json_data = JSON.parse(json_data_str); console.log("Received JSON data:", json_data); }; globalThis.FastLED_onFrame = globalThis.FastLED_onFrame || function(frameInfo, callback) { console.log("Missing globalThis.FastLED_onFrame() function"); if (typeof callback === 'function') { callback(); } else { console.error("Callback function is not a function but is of type " + typeof callback); } }; globalThis.onFastLedUiUpdateFunction = globalThis.onFastLedUiUpdateFunction || function(jsonString) { if (typeof jsonString === 'string' && jsonString !== null) { Module.cwrap('jsUpdateUiComponents', null, ['string'])(jsonString); } else { console.error("*** JS→C++: Invalid jsonData received:", jsonString, "expected string but instead got:", typeof jsonString); } }; var jsonStr = UTF8ToString($0); var jsonData = JSON.parse(jsonStr); for (var i = 0; i < jsonData.length; i++) { var stripData = jsonData[i]; var sizePtr = Module._malloc(4); var dataPtr = Module.ccall('getStripPixelData', 'number', ['number', 'number'], [stripData.strip_id, sizePtr]); if (dataPtr !== 0) { var size = Module.getValue(sizePtr, 'i32'); var pixelData = new Uint8Array(Module.HEAPU8.buffer, dataPtr, size); jsonData[i].pixel_data = pixelData; } else { jsonData[i].pixel_data = null; } Module._free(sizePtr); } globalThis.FastLED_onFrame(jsonData, globalThis.onFastLedUiUpdateFunction); },  
+ 73535: function($0, $1) { globalThis.FastLED_onStripAdded = globalThis.FastLED_onStripAdded || function() { console.log("Missing globalThis.FastLED_onStripAdded(id, length) function"); console.log("Added strip id: " + arguments[0] + " with length: " + arguments[1]); }; globalThis.FastLED_onStripAdded($0, $1); },  
+ 73824: ($0) => { globalThis.FastLED_onUiElementsAdded = globalThis.FastLED_onUiElementsAdded || function(jsonData, updateFunc) { console.log("Missing globalThis.FastLED_onUiElementsAdded(jsonData, updateFunc) function"); }; var jsonStr = UTF8ToString($0); var data = null; try { data = JSON.parse(jsonStr); } catch (error) { console.error("Error parsing JSON:", error); console.error("Problematic JSON string:", jsonStr); return; } if (data) { globalThis.FastLED_onUiElementsAdded(data); } else { console.error("Internal error, data is null"); } },  
+ 74357: ($0, $1) => { globalThis.FastLED_onStripUpdate = globalThis.FastLED_onStripUpdate || function(jsonStr) { console.log("Missing globalThis.FastLED_onStripUpdate(jsonStr) function"); }; var jsonStr = UTF8ToString($0, $1); var jsonData = JSON.parse(jsonStr); globalThis.FastLED_onStripUpdate(jsonData); }
 };
 var wasmImports = {
   /** @export */
@@ -2014,13 +1981,7 @@ var wasmImports = {
   /** @export */
   _setitimer_js: __setitimer_js,
   /** @export */
-  clock_time_get: _clock_time_get,
-  /** @export */
   emscripten_asm_const_int: _emscripten_asm_const_int,
-  /** @export */
-  emscripten_get_now: _emscripten_get_now,
-  /** @export */
-  emscripten_performance_now: _emscripten_performance_now,
   /** @export */
   emscripten_resize_heap: _emscripten_resize_heap,
   /** @export */
@@ -2041,30 +2002,13 @@ var _getOperatorParameterCount = Module['_getOperatorParameterCount'] = createEx
 var _getOperatorParameterInfo = Module['_getOperatorParameterInfo'] = createExportWrapper('getOperatorParameterInfo', 2);
 var _createOperatorInstance = Module['_createOperatorInstance'] = createExportWrapper('createOperatorInstance', 1);
 var _destroyOperatorInstance = Module['_destroyOperatorInstance'] = createExportWrapper('destroyOperatorInstance', 1);
-var _setBufferDimensions = Module['_setBufferDimensions'] = createExportWrapper('setBufferDimensions', 2);
-var _getBufferWidth = Module['_getBufferWidth'] = createExportWrapper('getBufferWidth', 0);
-var _getBufferHeight = Module['_getBufferHeight'] = createExportWrapper('getBufferHeight', 0);
-var _getBuffer1Pointer = Module['_getBuffer1Pointer'] = createExportWrapper('getBuffer1Pointer', 0);
-var _getBuffer2Pointer = Module['_getBuffer2Pointer'] = createExportWrapper('getBuffer2Pointer', 0);
-var _getOutputBufferPointer = Module['_getOutputBufferPointer'] = createExportWrapper('getOutputBufferPointer', 0);
-var _clearBuffer1 = Module['_clearBuffer1'] = createExportWrapper('clearBuffer1', 0);
-var _clearBuffer2 = Module['_clearBuffer2'] = createExportWrapper('clearBuffer2', 0);
-var _clearOutputBuffer = Module['_clearOutputBuffer'] = createExportWrapper('clearOutputBuffer', 0);
-var _setBuffer = Module['_setBuffer'] = createExportWrapper('setBuffer', 3);
-var _getBuffer = Module['_getBuffer'] = createExportWrapper('getBuffer', 3);
-var _setBuffer1Pixel = Module['_setBuffer1Pixel'] = createExportWrapper('setBuffer1Pixel', 4);
-var _setBuffer2Pixel = Module['_setBuffer2Pixel'] = createExportWrapper('setBuffer2Pixel', 4);
-var _getOutputPixel = Module['_getOutputPixel'] = createExportWrapper('getOutputPixel', 1);
-var _renderOperator = Module['_renderOperator'] = createExportWrapper('renderOperator', 5);
 var _setOperatorFloatParameter = Module['_setOperatorFloatParameter'] = createExportWrapper('setOperatorFloatParameter', 3);
 var _setOperatorIntParameter = Module['_setOperatorIntParameter'] = createExportWrapper('setOperatorIntParameter', 3);
 var _setOperatorBoolParameter = Module['_setOperatorBoolParameter'] = createExportWrapper('setOperatorBoolParameter', 3);
 var _setOperatorStringParameter = Module['_setOperatorStringParameter'] = createExportWrapper('setOperatorStringParameter', 3);
-var _renderOperatorWithParameters = Module['_renderOperatorWithParameters'] = createExportWrapper('renderOperatorWithParameters', 5);
-var _copyOutputToLeds = Module['_copyOutputToLeds'] = createExportWrapper('copyOutputToLeds', 0);
-var _millis = Module['_millis'] = createExportWrapper('millis', 0);
-var _malloc = Module['_malloc'] = createExportWrapper('malloc', 1);
-var _free = Module['_free'] = createExportWrapper('free', 1);
+var _setOperatorColorParameter = Module['_setOperatorColorParameter'] = createExportWrapper('setOperatorColorParameter', 5);
+var _renderOperator = Module['_renderOperator'] = createExportWrapper('renderOperator', 8);
+var _clearBuffer = Module['_clearBuffer'] = createExportWrapper('clearBuffer', 2);
 var _getStripPixelData = Module['_getStripPixelData'] = createExportWrapper('getStripPixelData', 2);
 var _jsInjectFile = Module['_jsInjectFile'] = createExportWrapper('jsInjectFile', 3);
 var _jsAppendFile = Module['_jsAppendFile'] = createExportWrapper('jsAppendFile', 3);
@@ -2076,10 +2020,8 @@ var __ZN2fl25jsFillInMissingScreenMapsERNS_15ActiveStripDataE = Module['__ZN2fl2
 var __ZN2fl9jsOnFrameERNS_15ActiveStripDataE = Module['__ZN2fl9jsOnFrameERNS_15ActiveStripDataE'] = createExportWrapper('_ZN2fl9jsOnFrameERNS_15ActiveStripDataE', 1);
 var __ZN2fl14jsOnStripAddedEmj = Module['__ZN2fl14jsOnStripAddedEmj'] = createExportWrapper('_ZN2fl14jsOnStripAddedEmj', 2);
 var __ZN2fl8updateJsEPKc = Module['__ZN2fl8updateJsEPKc'] = createExportWrapper('_ZN2fl8updateJsEPKc', 1);
-var _micros = Module['_micros'] = createExportWrapper('micros', 0);
-var _delay = Module['_delay'] = createExportWrapper('delay', 1);
-var _delayMicroseconds = Module['_delayMicroseconds'] = createExportWrapper('delayMicroseconds', 1);
-var _yield = Module['_yield'] = createExportWrapper('yield', 0);
+var _malloc = Module['_malloc'] = createExportWrapper('malloc', 1);
+var _free = Module['_free'] = createExportWrapper('free', 1);
 var _fflush = createExportWrapper('fflush', 1);
 var __emscripten_timeout = createExportWrapper('_emscripten_timeout', 2);
 var _strerror = createExportWrapper('strerror', 1);
