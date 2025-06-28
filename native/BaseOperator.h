@@ -51,7 +51,8 @@ public:
         const std::vector<ParameterValue>& parameters
     ) = 0;
 
-    // Metadata functions - removed getName(), just use class name directly
+    // Metadata functions
+    virtual const char* getName() const = 0; // Short lowercase name for serialization/lookups
     virtual const char* getDisplayName() const = 0;
     virtual std::vector<ParameterInfo> getParameterInfo() const = 0;
     

@@ -118,6 +118,10 @@ public:
         }
     }
     
+    const char* getName() const override {
+        return "blend";
+    }
+
     const char* getDisplayName() const override {
         return "Blend";
     }

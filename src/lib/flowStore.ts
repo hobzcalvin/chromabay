@@ -181,7 +181,7 @@ class WasmOperatorManager {
           
           operators.push({
             name: displayName || operatorName,
-            type: operatorName.toLowerCase(),
+            type: operatorName, // operatorName is already the short name from getName()
             params,
             render: this.createWasmRenderFunction(operatorName)
           });
@@ -225,15 +225,18 @@ class WasmOperatorManager {
   }
   
   private convertWasmParameter(wasmParam: any): Parameter {
-    const paramTypes = ['float', 'integer', 'range', 'color', 'select'];
     let type = 'float' as ParameterType;
     
     switch (wasmParam.type) {
       case 0: type = 'float'; break;
       case 1: type = 'integer'; break;
-      case 2: type = 'range'; break;
+      case 2: type = 'range'; break; // WASM BOOL type - use range for boolean toggle UI
       case 3: type = 'color'; break;
       case 4: type = 'select'; break;
+      default: 
+        console.warn(`Unknown WASM parameter type ${wasmParam.type}, defaulting to float`);
+        type = 'float';
+        break;
     }
     
     const param: Parameter = {
@@ -243,8 +246,17 @@ class WasmOperatorManager {
       default: wasmParam.default
     };
     
-    if (wasmParam.min !== undefined) param.min = wasmParam.min;
-    if (wasmParam.max !== undefined) param.max = wasmParam.max;
+    // For boolean parameters (type 2), set appropriate min/max for toggle behavior
+    if (wasmParam.type === 2) {
+      param.min = 0;
+      param.max = 1;
+      // Ensure default is 0 or 1
+      param.default = wasmParam.default ? 1 : 0;
+    } else {
+      if (wasmParam.min !== undefined) param.min = wasmParam.min;
+      if (wasmParam.max !== undefined) param.max = wasmParam.max;
+    }
+    
     if (wasmParam.options) {
       param.options = wasmParam.options.map((opt: string, index: number) => ({
         value: index.toString(),
@@ -283,8 +295,23 @@ class WasmOperatorManager {
     const nodeParams = currentParams.get(nodeId) || new Map();
     this.setNodeParameters(nodeId, nodeParams);
     
-    // Simple buffer assignment (we'll improve this later with proper topological ordering)
-    const outputBufferIndex = parseInt(nodeId) % 3;
+    // Fixed buffer assignment - handle both numeric and deserialized node IDs
+    let outputBufferIndex: number;
+    if (nodeId.startsWith('deserialized_')) {
+      // For deserialized nodes, use a hash of the node ID
+      let hash = 0;
+      for (let i = 0; i < nodeId.length; i++) {
+        const char = nodeId.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash; // Convert to 32-bit integer
+      }
+      outputBufferIndex = Math.abs(hash) % 3;
+    } else {
+      // For regular numeric node IDs
+      const numericId = parseInt(nodeId);
+      outputBufferIndex = isNaN(numericId) ? 0 : numericId % 3;
+    }
+    
     let inputBuffer1Index: number | null = null;
     let inputBuffer2Index: number | null = null;
     
@@ -293,7 +320,20 @@ class WasmOperatorManager {
     if ('input' in inputs && inputs.input) {
       const inputData = getNodeOutput(inputs.input.id);
       if (inputData) {
-        inputBuffer1Index = (parseInt(inputs.input.id) % 3);
+        // Apply same buffer assignment logic for input nodes
+        const inputId = inputs.input.id;
+        if (inputId.startsWith('deserialized_')) {
+          let hash = 0;
+          for (let i = 0; i < inputId.length; i++) {
+            const char = inputId.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash;
+          }
+          inputBuffer1Index = Math.abs(hash) % 3;
+        } else {
+          const numericId = parseInt(inputId);
+          inputBuffer1Index = isNaN(numericId) ? 1 : numericId % 3;
+        }
         this.copyImageDataToBuffer(inputData, inputBuffer1Index);
       }
     }
@@ -301,7 +341,19 @@ class WasmOperatorManager {
     if ('input1' in inputs && inputs.input1) {
       const inputData = getNodeOutput(inputs.input1.id);
       if (inputData) {
-        inputBuffer1Index = (parseInt(inputs.input1.id) % 3);
+        const inputId = inputs.input1.id;
+        if (inputId.startsWith('deserialized_')) {
+          let hash = 0;
+          for (let i = 0; i < inputId.length; i++) {
+            const char = inputId.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash;
+          }
+          inputBuffer1Index = Math.abs(hash) % 3;
+        } else {
+          const numericId = parseInt(inputId);
+          inputBuffer1Index = isNaN(numericId) ? 1 : numericId % 3;
+        }
         this.copyImageDataToBuffer(inputData, inputBuffer1Index);
       }
     }
@@ -309,7 +361,19 @@ class WasmOperatorManager {
     if ('input2' in inputs && inputs.input2) {
       const inputData = getNodeOutput(inputs.input2.id);
       if (inputData) {
-        inputBuffer2Index = (parseInt(inputs.input2.id) % 3);
+        const inputId = inputs.input2.id;
+        if (inputId.startsWith('deserialized_')) {
+          let hash = 0;
+          for (let i = 0; i < inputId.length; i++) {
+            const char = inputId.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash;
+          }
+          inputBuffer2Index = Math.abs(hash) % 3;
+        } else {
+          const numericId = parseInt(inputId);
+          inputBuffer2Index = isNaN(numericId) ? 2 : numericId % 3;
+        }
         this.copyImageDataToBuffer(inputData, inputBuffer2Index);
       }
     }
@@ -324,6 +388,8 @@ class WasmOperatorManager {
     const imageData = this.createImageDataFromBuffer(outputBufferIndex);
     if (imageData) {
       ctx.putImageData(imageData, 0, 0);
+    } else {
+      console.warn(`[WASM Render] Failed to create ImageData from buffer ${outputBufferIndex} for node ${nodeId}`);
     }
   }
   
@@ -778,7 +844,7 @@ export function deleteNode(nodeId: string): void {
 
 // Pattern serialization imports and utilities
 import type { SerializedPattern } from './patternSerializer';
-import { serializePattern, deserializePattern, estimatePatternSize, compressPattern } from './patternSerializer';
+import { serializePattern, deserializePattern, deserializePatternWhenReady, estimatePatternSize, compressPattern } from './patternSerializer';
 import { syncPatternToAllDevices } from './ble';
 
 // Pattern serialization utilities
@@ -794,21 +860,52 @@ export function serializeCurrentPattern(patternName?: string): SerializedPattern
   return serializePattern(currentNodes, currentEdges, currentParams, patternName);
 }
 
-export function loadSerializedPattern(serializedPattern: SerializedPattern): void {
-  const { nodes, edges, nodeParameters: newNodeParameters } = deserializePattern(serializedPattern);
-  
-  // Update all stores with new pattern
-  nodeParameters.set(newNodeParameters);
-  flowNodes.set(nodes);
-  flowEdges.set(edges);
-  
-  // Set next node ID to be higher than any existing node ID
-  const numericIds = nodes.map(n => parseInt(n.id.replace(/\D+/g, ''), 10)).filter(v => !isNaN(v));
-  const maxId = numericIds.length ? Math.max(...numericIds) : 0;
-  nextNodeId.set(maxId + 1);
-  
-  // Mark pattern as clean after loading
-  markPatternClean();
+export async function loadSerializedPattern(serializedPattern: SerializedPattern): Promise<void> {
+  try {
+    // Use the new async deserializer that waits for WASM to be ready
+    const { nodes, edges, nodeParameters: newNodeParameters } = await deserializePatternWhenReady(serializedPattern);
+    
+    // Update all stores with new pattern
+    nodeParameters.set(newNodeParameters);
+    flowNodes.set(nodes);
+    flowEdges.set(edges);
+    
+    // Set next node ID to be higher than any existing node ID
+    const numericIds = nodes.map(n => parseInt(n.id.replace(/\D+/g, ''), 10)).filter(v => !isNaN(v));
+    const maxId = numericIds.length ? Math.max(...numericIds) : 0;
+    nextNodeId.set(maxId + 1);
+    
+    // Mark pattern as clean after loading
+    markPatternClean();
+    
+    console.log('Pattern loaded successfully with', nodes.length, 'nodes and', edges.length, 'edges');
+  } catch (error) {
+    console.error('Failed to load serialized pattern:', error);
+    
+    // Fallback to basic deserialization if WASM timing fails
+    try {
+      console.warn('Falling back to basic deserialization...');
+      const { nodes, edges, nodeParameters: newNodeParameters } = deserializePattern(serializedPattern);
+      
+      // Update all stores with new pattern
+      nodeParameters.set(newNodeParameters);
+      flowNodes.set(nodes);
+      flowEdges.set(edges);
+      
+      // Set next node ID to be higher than any existing node ID
+      const numericIds = nodes.map(n => parseInt(n.id.replace(/\D+/g, ''), 10)).filter(v => !isNaN(v));
+      const maxId = numericIds.length ? Math.max(...numericIds) : 0;
+      nextNodeId.set(maxId + 1);
+      
+      // Mark pattern as clean after loading
+      markPatternClean();
+      
+      console.log('Pattern loaded with fallback method');
+    } catch (fallbackError) {
+      console.error('Even fallback deserialization failed:', fallbackError);
+      throw fallbackError;
+    }
+  }
 }
 
 // Initialize flow with default pattern if no patterns exist

@@ -96,6 +96,10 @@ public:
         }
     }
     
+    const char* getName() const override {
+        return "raindrops";
+    }
+
     const char* getDisplayName() const override {
         return "Raindrops";
     }

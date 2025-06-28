@@ -28,7 +28,7 @@
       await switchToPattern(pattern.meta.name);
       // Load pattern into flow editor for interact page
       const { loadSerializedPattern } = await import('$lib/flowStore');
-      loadSerializedPattern(pattern);
+      await loadSerializedPattern(pattern);
       
       // Sync pattern to all connected devices
       try {
@@ -49,7 +49,7 @@
       await switchToPattern(pattern.meta.name);
       // Load the pattern into the flow editor immediately
       const { loadSerializedPattern } = await import('$lib/flowStore');
-      loadSerializedPattern(pattern);
+      await loadSerializedPattern(pattern);
       goto(`${base}/editor`);
     }
   }

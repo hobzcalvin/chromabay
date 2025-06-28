@@ -55,6 +55,10 @@ public:
         }
     }
     
+    const char* getName() const override {
+        return "fade";
+    }
+
     const char* getDisplayName() const override {
         return "Fade";
     }

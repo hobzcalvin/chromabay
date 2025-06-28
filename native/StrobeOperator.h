@@ -50,6 +50,10 @@ public:
         }
     }
     
+    const char* getName() const override {
+        return "strobe";
+    }
+
     const char* getDisplayName() const override {
         return "Strobe";
     }

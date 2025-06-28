@@ -10,22 +10,24 @@
   // Hidden for now: import PatternSerializationPanel from '$lib/components/PatternSerializationPanel.svelte';
   
   // Initialize patterns on mount
-  onMount(async () => {
-    try {
-      await loadPatterns();
-      // Load the current pattern into the flow editor
-      const current = $currentPattern;
-      if (current) {
-        loadSerializedPattern(current);
-      } else {
-        // Fallback to default pattern
+  onMount(() => {
+    (async () => {
+      try {
+        await loadPatterns();
+        // Load the current pattern into the flow editor
+        const current = $currentPattern;
+        if (current) {
+          await loadSerializedPattern(current);
+        } else {
+          // Fallback to default pattern
+          initializeDefaultPattern();
+        }
+      } catch (error) {
+        console.error('Failed to load patterns:', error);
+        // Fallback to default pattern on error
         initializeDefaultPattern();
       }
-    } catch (error) {
-      console.error('Failed to load patterns:', error);
-      // Fallback to default pattern on error
-      initializeDefaultPattern();
-    }
+    })();
     
     // Add beforeunload handler to warn about unsaved changes
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {

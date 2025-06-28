@@ -62,17 +62,18 @@
     }
   }
   
-  // Load serialized pattern
-  function loadPattern(): void {
+  // Load pattern from input
+  async function loadPattern(): Promise<void> {
     try {
       errorMessage = '';
+      
       if (!loadInput.trim()) {
         errorMessage = 'Please enter a serialized pattern to load';
         return;
       }
       
       const parsed = JSON.parse(loadInput);
-      loadSerializedPattern(parsed);
+      await loadSerializedPattern(parsed);
       successMessage = 'Pattern loaded successfully';
       setTimeout(() => successMessage = '', 3000);
       loadInput = '';
@@ -101,7 +102,7 @@
   }
 
   // Test serialization round-trip (serialize then immediately deserialize)
-  function testSerializationRoundtrip(): void {
+  async function testSerializationRoundtrip(): Promise<void> {
     try {
       errorMessage = '';
       
@@ -109,7 +110,7 @@
       const serialized = serializeCurrentPattern(patternName.trim() || undefined);
       
       // Immediately deserialize it
-      loadSerializedPattern(serialized);
+      await loadSerializedPattern(serialized);
       
       // Update the UI to show the serialized data
       serializedPattern = serialized;

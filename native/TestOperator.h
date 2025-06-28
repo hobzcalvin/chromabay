@@ -49,6 +49,10 @@ public:
         }
     }
     
+    const char* getName() const override {
+        return "test";
+    }
+
     const char* getDisplayName() const override {
         return "Test Rectangle";
     }

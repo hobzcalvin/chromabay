@@ -61,6 +61,10 @@ public:
         }
     }
     
+    const char* getName() const override {
+        return "rainbow";
+    }
+
     const char* getDisplayName() const override {
         return "Rainbow";
     }

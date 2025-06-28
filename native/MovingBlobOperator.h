@@ -95,6 +95,10 @@ public:
         }
     }
     
+    const char* getName() const override {
+        return "movingblob";
+    }
+
     const char* getDisplayName() const override {
         return "Moving Blobs";
     }

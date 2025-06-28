@@ -257,7 +257,7 @@ export function serializePattern(
 
   /* ------------------------------------------------------------------
    * The topological sort above already respects real data dependencies.
-   * Extra re-ordering for “buffer overwrite” was too aggressive and
+   * Extra re-ordering for "buffer overwrite" was too aggressive and
    * broke valid dependency chains (e.g. putting a blend before the
    * Raindrops node it actually needs).  We bring it back in a *scoped*
    * manner: nodes are only re-ordered **within the same dependency
@@ -554,6 +554,8 @@ export function deserializePattern(
     const nodeDefinition = getNodeDefinition(sNode.t);
     if (!nodeDefinition) {
       console.warn(`Unknown node type during deserialization: ${sNode.t}`);
+      console.warn('Available node types:', NODE_TYPES.map(nt => nt.type));
+      console.warn('This might be due to WASM operators not being loaded yet. Consider retrying after WASM is ready.');
       return;
     }
     
@@ -584,11 +586,26 @@ export function deserializePattern(
       currentParamsForNode.set(paramDef.name, paramDef.default);
     });
     
-    // Override with serialized values
+    // Override with serialized values - handle parameter conversion for WASM compatibility
     if (sNode.p) {
       for (const paramName in sNode.p) {
-        if (currentParamsForNode.has(paramName)) {
-          currentParamsForNode.set(paramName, sNode.p[paramName]);
+        const paramDef = nodeDefinition.params.find(p => p.name === paramName);
+        if (paramDef) {
+          let value = sNode.p[paramName];
+          
+          // Handle parameter type conversions for WASM compatibility
+          if (paramDef.type === 'range' && typeof value === 'boolean') {
+            // Convert boolean to range value for WASM bool parameters
+            value = value ? 1 : 0;
+          } else if (paramDef.type === 'integer' && typeof value === 'string') {
+            // Convert string to integer
+            value = parseInt(value) || paramDef.default;
+          } else if (paramDef.type === 'float' && typeof value === 'string') {
+            // Convert string to float
+            value = parseFloat(value) || paramDef.default;
+          }
+          
+          currentParamsForNode.set(paramName, value);
         } else {
           console.warn(`Node type ${sNode.t} has serialized param ${paramName} not in its definition.`);
         }
@@ -607,6 +624,9 @@ export function deserializePattern(
   
   // Step 3: Create edges based on input/output buffer relationships
   serializedPattern.nodes.forEach((sNode, targetIndex) => {
+    // Skip if node wasn't created (due to unknown type)
+    if (targetIndex >= svelteFlowNodes.length) return;
+    
     const targetNodeId = svelteFlowNodes[targetIndex].id;
     
     // Create edge for primary input
@@ -614,7 +634,7 @@ export function deserializePattern(
       // Find the source node by looking backwards for the most recent node that outputs to this buffer
       const sourceIndex = findSourceNodeIndex(serializedPattern.nodes, targetIndex, sNode.i);
       
-      if (sourceIndex !== undefined) {
+      if (sourceIndex !== undefined && sourceIndex < svelteFlowNodes.length) {
         const sourceNodeId = svelteFlowNodes[sourceIndex].id;
         svelteFlowEdges.push({
           id: `e_${sourceNodeId}_${targetNodeId}_i1_${Date.now()}`,
@@ -631,7 +651,7 @@ export function deserializePattern(
       // Find the source node by looking backwards for the most recent node that outputs to this buffer
       const sourceIndex = findSourceNodeIndex(serializedPattern.nodes, targetIndex, sNode.i2);
       
-      if (sourceIndex !== undefined) {
+      if (sourceIndex !== undefined && sourceIndex < svelteFlowNodes.length) {
         const sourceNodeId = svelteFlowNodes[sourceIndex].id;
         svelteFlowEdges.push({
           id: `e_${sourceNodeId}_${targetNodeId}_i2_${Date.now()}`,
@@ -673,7 +693,7 @@ export function deserializePattern(
     let sourceForOutput: string | undefined;
     for (let i = serializedPattern.nodes.length - 1; i >= 0; i--) {
       const node = serializedPattern.nodes[i];
-      if (node.o === finalOutputBuffer) {
+      if (node.o === finalOutputBuffer && i < svelteFlowNodes.length - 1) { // -1 because output node is last
         sourceForOutput = svelteFlowNodes[i].id;
         break;
       }
@@ -689,6 +709,8 @@ export function deserializePattern(
         targetHandle: 'input',
       });
     }
+  } else {
+    console.warn('Output node definition not found. This might be due to WASM operators not being loaded yet.');
   }
   
   return {
@@ -696,6 +718,63 @@ export function deserializePattern(
     edges: svelteFlowEdges,
     nodeParameters: newNodeParameters,
   };
+}
+
+/**
+ * Waits for WASM operators to be loaded before deserializing a pattern.
+ * This prevents issues when deserializing before the WASM module is ready.
+ * 
+ * @param serializedPattern - The serialized pattern
+ * @param maxWaitMs - Maximum time to wait for WASM (default: 5000ms)
+ * @returns Promise that resolves with deserialized pattern or rejects on timeout
+ */
+export async function deserializePatternWhenReady(
+  serializedPattern: SerializedPattern,
+  maxWaitMs: number = 5000
+): Promise<{ nodes: Node[]; edges: Edge[]; nodeParameters: Map<string, Map<string, any>> }> {
+  // Check if WASM operators are already loaded
+  if (NODE_TYPES.length > 1) { // More than just the output node
+    return deserializePattern(serializedPattern);
+  }
+  
+  // Wait for WASM to be ready
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error(`WASM operators not loaded within ${maxWaitMs}ms. Falling back to basic deserialization.`));
+    }, maxWaitMs);
+    
+    const checkReady = () => {
+      if (NODE_TYPES.length > 1) {
+        clearTimeout(timeout);
+        try {
+          const result = deserializePattern(serializedPattern);
+          resolve(result);
+        } catch (error) {
+          reject(error);
+        }
+      } else {
+        // Check again in 100ms
+        setTimeout(checkReady, 100);
+      }
+    };
+    
+    // If we're in a browser environment, also listen for the wasmReady event
+    if (typeof window !== 'undefined') {
+      const onWasmReady = () => {
+        window.removeEventListener('wasmReady', onWasmReady);
+        clearTimeout(timeout);
+        try {
+          const result = deserializePattern(serializedPattern);
+          resolve(result);
+        } catch (error) {
+          reject(error);
+        }
+      };
+      window.addEventListener('wasmReady', onWasmReady);
+    }
+    
+    checkReady();
+  });
 }
 
 /**

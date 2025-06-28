@@ -83,6 +83,10 @@ public:
         }
     }
     
+    const char* getName() const override {
+        return "sparkle";
+    }
+
     const char* getDisplayName() const override {
         return "Sparkle";
     }

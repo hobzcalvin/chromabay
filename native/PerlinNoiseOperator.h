@@ -58,6 +58,10 @@ public:
         }
     }
     
+    const char* getName() const override {
+        return "perlinnoise";
+    }
+
     const char* getDisplayName() const override {
         return "Perlin Noise";
     }

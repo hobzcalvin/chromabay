@@ -65,6 +65,10 @@ public:
         }
     }
     
+    const char* getName() const override {
+        return "gradient";
+    }
+
     const char* getDisplayName() const override {
         return "Gradient";
     }

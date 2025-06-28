@@ -42,6 +42,10 @@ public:
         }
     }
     
+    const char* getName() const override {
+        return "noiseblend";
+    }
+
     const char* getDisplayName() const override {
         return "2D Noise Blend";
     }
