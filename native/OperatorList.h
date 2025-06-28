@@ -18,7 +18,21 @@
 // INCLUDE ALL OPERATORS HERE
 // ========================================
 
+// Include all operator headers here
+// Add new operators by adding their #include statement
+
 #include "NoiseBlendOperator.h"
+#include "RainbowOperator.h"
+#include "SparkleOperator.h"
+#include "ChaseOperator.h"
+#include "BlendOperator.h"
+#include "StrobeOperator.h"
+#include "GradientOperator.h"
+#include "MovingBlobOperator.h"
+#include "FadeOperator.h"
+#include "PerlinNoiseOperator.h"
+#include "RaindropsOperator.h"
+#include "TestOperator.h"
 
 // Add your new operators here:
 // #include "RainbowOperator.h"
