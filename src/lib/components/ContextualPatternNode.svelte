@@ -141,7 +141,6 @@
 <div 
   class="pattern-node" 
   class:blend-node={isBlendNode}
-  class:has-parameters={getNodeDefinition(nodeType)?.params.length ?? 0 > 0}
   role="button"
   tabindex="0"
   data-node-id={id}
@@ -174,7 +173,7 @@
     position: relative;
     background: transparent;
     color: white;
-    border: none;
+    border: 1px solid rgba(59, 130, 246, 0.3);
     font-weight: bold;
     width: 100px;
     height: 50px;
@@ -182,6 +181,12 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    cursor: pointer;
+  }
+  
+  .pattern-node:hover {
+    border-color: rgba(59, 130, 246, 0.6);
+    box-shadow: 0 0 8px rgba(59, 130, 246, 0.3);
   }
   
   .pattern-canvas {
@@ -206,9 +211,5 @@
   
   .blend-node {
     background: rgba(139, 92, 246, 0.1);
-  }
-  
-  .has-parameters {
-    cursor: pointer;
   }
 </style> 
