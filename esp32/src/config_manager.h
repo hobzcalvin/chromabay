@@ -23,6 +23,9 @@ namespace ConfigKeys {
     const char* const NUM_LEDS = "num";
     const char* const COLOR_ORDER = "co";
     const char* const RMT_CHANNEL = "rmt";
+    const char* const WIDTH = "w";
+    const char* const HEIGHT = "h";
+    const char* const ORIENTATION = "ort";
 } // namespace ConfigKeys
 
 // Structure to hold the complete configuration for serialization/deserialization
@@ -68,8 +71,8 @@ public:
             const LedBus* bus = _ledManager.getStrip(i);
             if (bus) {
                 const LedStripConfig& stripConfig = bus->getConfig();
-                // Each strip is a map: chipset, pin, num_leds, color_order, rmt_channel (5 key-value pairs)
-                mpack_start_map(&writer, 5);
+                // Each strip is a map: chipset, pin, num_leds, color_order, rmt_channel, width, height, orientation (8 key-value pairs)
+                mpack_start_map(&writer, 8);
                 mpack_write_cstr(&writer, ConfigKeys::CHIPSET);
                 mpack_write_u8(&writer, static_cast<uint8_t>(stripConfig.chipset));
                 mpack_write_cstr(&writer, ConfigKeys::PIN);
@@ -80,6 +83,12 @@ public:
                 mpack_write_u8(&writer, static_cast<uint8_t>(stripConfig.colorOrder));
                 mpack_write_cstr(&writer, ConfigKeys::RMT_CHANNEL);
                 mpack_write_u8(&writer, stripConfig.rmtChannel);
+                mpack_write_cstr(&writer, ConfigKeys::WIDTH);
+                mpack_write_u16(&writer, stripConfig.width);
+                mpack_write_cstr(&writer, ConfigKeys::HEIGHT);
+                mpack_write_u16(&writer, stripConfig.height);
+                mpack_write_cstr(&writer, ConfigKeys::ORIENTATION);
+                mpack_write_u8(&writer, stripConfig.orientation);
                 mpack_finish_map(&writer);
             }
         }
@@ -219,6 +228,12 @@ public:
                             stripConfig.colorOrder = static_cast<ColorOrderValue>(mpack_expect_u8(&reader));
                         } else if (strcmp(key_buffer, ConfigKeys::RMT_CHANNEL) == 0) {
                             stripConfig.rmtChannel = mpack_expect_u8(&reader);
+                        } else if (strcmp(key_buffer, ConfigKeys::WIDTH) == 0) {
+                            stripConfig.width = mpack_expect_u16(&reader);
+                        } else if (strcmp(key_buffer, ConfigKeys::HEIGHT) == 0) {
+                            stripConfig.height = mpack_expect_u16(&reader);
+                        } else if (strcmp(key_buffer, ConfigKeys::ORIENTATION) == 0) {
+                            stripConfig.orientation = mpack_expect_u8(&reader);
                         } else {
                             Serial.print(F("[ConfigManager] Unknown key in strip map: ")); Serial.println(key_buffer);
                             mpack_discard(&reader); 
@@ -424,12 +439,15 @@ private:
         mpack_write_cstr(&writer, ConfigKeys::STRIPS);
         mpack_start_array(&writer, defaultConfigStruct.strips.size());
         for (const auto& stripCfg : defaultConfigStruct.strips) {
-            mpack_start_map(&writer, 5); // chipset, pin, num_leds, color_order, rmt_channel
+            mpack_start_map(&writer, 8); // chipset, pin, num_leds, color_order, rmt_channel, width, height, orientation
             mpack_write_cstr(&writer, ConfigKeys::CHIPSET);     mpack_write_u8(&writer, static_cast<uint8_t>(stripCfg.chipset));
             mpack_write_cstr(&writer, ConfigKeys::PIN);         mpack_write_u8(&writer, stripCfg.pin);
             mpack_write_cstr(&writer, ConfigKeys::NUM_LEDS);    mpack_write_u16(&writer, stripCfg.numLeds);
             mpack_write_cstr(&writer, ConfigKeys::COLOR_ORDER); mpack_write_u8(&writer, static_cast<uint8_t>(stripCfg.colorOrder));
             mpack_write_cstr(&writer, ConfigKeys::RMT_CHANNEL); mpack_write_u8(&writer, stripCfg.rmtChannel);
+            mpack_write_cstr(&writer, ConfigKeys::WIDTH);       mpack_write_u16(&writer, stripCfg.width);
+            mpack_write_cstr(&writer, ConfigKeys::HEIGHT);     mpack_write_u16(&writer, stripCfg.height);
+            mpack_write_cstr(&writer, ConfigKeys::ORIENTATION); mpack_write_u8(&writer, stripCfg.orientation);
             mpack_finish_map(&writer);
         }
         mpack_finish_array(&writer);

@@ -44,6 +44,10 @@ PatternRendererBase* patternRenderer = nullptr;
 // Pattern Sync Characteristic - for receiving messagepack-encoded patterns
 #define CHARACTERISTIC_UUID_PATTERN_SYNC "a0be83ec-8dc9-47f0-ab40-b19721d20ed1"
 
+// LED Configuration Characteristics - for getting/setting strip configuration
+#define CHARACTERISTIC_UUID_LED_CONFIG_GET "a0be83ed-8dc9-47f0-ab40-b19721d20ed1"
+#define CHARACTERISTIC_UUID_LED_CONFIG_SET "a0be83ee-8dc9-47f0-ab40-b19721d20ed1"
+
 // OTA Constants
 #define MAX_BLE_CHUNK_SIZE 500 
 
@@ -59,6 +63,10 @@ NimBLECharacteristic* pOTASignatureCharacteristic = nullptr;
 
 // Pattern Sync Characteristic
 NimBLECharacteristic* pPatternSyncCharacteristic = nullptr;
+
+// LED Configuration Characteristics
+NimBLECharacteristic* pLedConfigGetCharacteristic = nullptr;
+NimBLECharacteristic* pLedConfigSetCharacteristic = nullptr;
 
 // Pattern Storage
 static uint8_t* patternBuffer = nullptr;
@@ -648,6 +656,144 @@ class OTADataCallbacks : public NimBLECharacteristicCallbacks {
     }
 };
 
+// LED Config Get Callbacks - for reading LED strip configuration
+class LedConfigGetCallbacks : public NimBLECharacteristicCallbacks {
+    void onRead(NimBLECharacteristic* pCharacteristic) {
+        Serial.println("LED Config requested via BLE");
+        
+        // Get current configuration as MessagePack
+        LedConfig::FullLedConfiguration currentConfig = configMgr.getCurrentConfigurationFromManager();
+        
+        // Serialize to MessagePack
+        mpack_writer_t writer;
+        char* mpack_buffer = nullptr;
+        size_t mpack_size = 0;
+        mpack_writer_init_growable(&writer, &mpack_buffer, &mpack_size);
+        
+        // Serialize the configuration
+        mpack_start_map(&writer, 2); // globalBrightness, strips
+        mpack_write_cstr(&writer, "gb");
+        mpack_write_u8(&writer, currentConfig.globalBrightness);
+        mpack_write_cstr(&writer, "strips");
+        mpack_start_array(&writer, currentConfig.strips.size());
+        
+        for (const auto& strip : currentConfig.strips) {
+            mpack_start_map(&writer, 8);
+            mpack_write_cstr(&writer, "cs"); mpack_write_u8(&writer, static_cast<uint8_t>(strip.chipset));
+            mpack_write_cstr(&writer, "pin"); mpack_write_u8(&writer, strip.pin);
+            mpack_write_cstr(&writer, "num"); mpack_write_u16(&writer, strip.numLeds);
+            mpack_write_cstr(&writer, "co"); mpack_write_u8(&writer, static_cast<uint8_t>(strip.colorOrder));
+            mpack_write_cstr(&writer, "rmt"); mpack_write_u8(&writer, strip.rmtChannel);
+            mpack_write_cstr(&writer, "w"); mpack_write_u16(&writer, strip.width);
+            mpack_write_cstr(&writer, "h"); mpack_write_u16(&writer, strip.height);
+            mpack_write_cstr(&writer, "ort"); mpack_write_u8(&writer, strip.orientation);
+            mpack_finish_map(&writer);
+        }
+        mpack_finish_array(&writer);
+        mpack_finish_map(&writer);
+        
+        if (mpack_writer_destroy(&writer) == mpack_ok && mpack_buffer) {
+            // Set the characteristic value
+            pCharacteristic->setValue((uint8_t*)mpack_buffer, mpack_size);
+            Serial.printf("LED Config sent: %d bytes\n", mpack_size);
+            free(mpack_buffer);
+        } else {
+            Serial.println("Failed to serialize LED config");
+            if (mpack_buffer) free(mpack_buffer);
+        }
+    }
+};
+
+// LED Config Set Callbacks - for writing LED strip configuration
+class LedConfigSetCallbacks : public NimBLECharacteristicCallbacks {
+    void onWrite(NimBLECharacteristic* pCharacteristic) {
+        std::string value = pCharacteristic->getValue();
+        if (value.length() > 0) {
+            Serial.printf("LED Config update received: %d bytes\n", value.length());
+            
+            // Parse MessagePack data
+            mpack_reader_t reader;
+            mpack_reader_init_data(&reader, value.data(), value.length());
+            
+            try {
+                uint32_t map_count = mpack_expect_map(&reader);
+                LedConfig::FullLedConfiguration newConfig;
+                
+                for (uint32_t i = 0; i < map_count; ++i) {
+                    char key_buffer[16];
+                    mpack_expect_cstr(&reader, key_buffer, sizeof(key_buffer));
+                    
+                    if (strcmp(key_buffer, "gb") == 0) {
+                        newConfig.globalBrightness = mpack_expect_u8(&reader);
+                    } else if (strcmp(key_buffer, "strips") == 0) {
+                        uint32_t strips_count = mpack_expect_array(&reader);
+                        newConfig.strips.reserve(strips_count);
+                        
+                        for (uint32_t s = 0; s < strips_count; ++s) {
+                            LedConfig::LedStripConfig stripConfig;
+                            uint32_t strip_map_count = mpack_expect_map(&reader);
+                            
+                            for (uint32_t k = 0; k < strip_map_count; ++k) {
+                                mpack_expect_cstr(&reader, key_buffer, sizeof(key_buffer));
+                                
+                                if (strcmp(key_buffer, "cs") == 0) {
+                                    stripConfig.chipset = static_cast<LedConfig::LedChipset>(mpack_expect_u8(&reader));
+                                } else if (strcmp(key_buffer, "pin") == 0) {
+                                    stripConfig.pin = mpack_expect_u8(&reader);
+                                } else if (strcmp(key_buffer, "num") == 0) {
+                                    stripConfig.numLeds = mpack_expect_u16(&reader);
+                                } else if (strcmp(key_buffer, "co") == 0) {
+                                    stripConfig.colorOrder = static_cast<LedConfig::ColorOrderValue>(mpack_expect_u8(&reader));
+                                } else if (strcmp(key_buffer, "rmt") == 0) {
+                                    stripConfig.rmtChannel = mpack_expect_u8(&reader);
+                                } else if (strcmp(key_buffer, "w") == 0) {
+                                    stripConfig.width = mpack_expect_u16(&reader);
+                                } else if (strcmp(key_buffer, "h") == 0) {
+                                    stripConfig.height = mpack_expect_u16(&reader);
+                                } else if (strcmp(key_buffer, "ort") == 0) {
+                                    stripConfig.orientation = mpack_expect_u8(&reader);
+                                } else {
+                                    mpack_discard(&reader);
+                                }
+                            }
+                            mpack_done_map(&reader);
+                            newConfig.strips.push_back(stripConfig);
+                        }
+                        mpack_done_array(&reader);
+                    } else {
+                        mpack_discard(&reader);
+                    }
+                }
+                mpack_done_map(&reader);
+                
+                if (mpack_reader_destroy(&reader) == mpack_ok) {
+                    // Apply the new configuration
+                    if (configMgr.applyConfiguration(newConfig)) {
+                        // Update pattern renderer with new matrix configuration
+                        if (patternRenderer) {
+                            patternRenderer->updateMatrixConfig();
+                        }
+                        
+                        // Save to file
+                        if (configMgr.saveConfiguration()) {
+                            Serial.println("LED Config updated and saved successfully");
+                        } else {
+                            Serial.println("LED Config applied but failed to save to file");
+                        }
+                    } else {
+                        Serial.println("Failed to apply LED config");
+                    }
+                } else {
+                    Serial.println("Failed to parse LED config MessagePack");
+                }
+            } catch (...) {
+                Serial.println("Exception while parsing LED config");
+                mpack_reader_destroy(&reader);
+            }
+        }
+    }
+};
+
 // Pattern Sync Callbacks - for receiving messagepack-encoded patterns
 class PatternSyncCallbacks : public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic* pCharacteristic) {
@@ -742,6 +888,9 @@ void setup() {
     defaultStrip.numLeds     = NUM_LEDS;
     defaultStrip.colorOrder  = LedConfig::ColorOrderValue::CO_GRB;
     defaultStrip.rmtChannel  = 0;
+    defaultStrip.width       = 0;  // 0 = linear strip
+    defaultStrip.height      = 0;  // 0 = linear strip
+    defaultStrip.orientation = 0;  // 0 = no rotation, no flip, no serpentine
     
     // Ensure we have a valid config file (create/overwrite if missing or empty/invalid)
     configMgr.ensureValidConfigFile(defaultStrip);
@@ -770,6 +919,8 @@ void setup() {
         patternRenderer = new PatternRendererBase(&ledMgr);
         if (patternRenderer) {
             Serial.println("Pattern renderer initialized");
+            // Update with current LED configuration
+            patternRenderer->updateMatrixConfig();
         } else {
             Serial.println("ERROR: Failed to initialize pattern renderer!");
             criticalSystemsOK = false;
@@ -824,6 +975,12 @@ void setup() {
             // Pattern Sync Characteristic
             pPatternSyncCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_PATTERN_SYNC, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY);
             pPatternSyncCharacteristic->setCallbacks(new PatternSyncCallbacks());
+            
+            // LED Configuration Characteristics
+            pLedConfigGetCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_LED_CONFIG_GET, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY);
+            pLedConfigGetCharacteristic->setCallbacks(new LedConfigGetCallbacks());
+            pLedConfigSetCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_LED_CONFIG_SET, NIMBLE_PROPERTY::WRITE);
+            pLedConfigSetCharacteristic->setCallbacks(new LedConfigSetCallbacks());
             
             pService->start();
             updateDeviceInfoCharacteristic();

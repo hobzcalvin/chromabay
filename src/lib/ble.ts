@@ -1,6 +1,9 @@
 import { BleClient, numbersToDataView, dataViewToNumbers, dataViewToText, textToDataView } from '@capacitor-community/bluetooth-le';
 import { Capacitor } from '@capacitor/core';
-import { encode as msgpackEncode } from '@msgpack/msgpack';
+// @ts-ignore - MessagePack types issue
+import * as msgpack from '@msgpack/msgpack';
+const msgpackEncode = msgpack.encode;
+const msgpackDecode = msgpack.decode;
 import { serializeCurrentPattern } from './flowStore';
 
 /**
@@ -28,6 +31,10 @@ const CHARACTERISTIC_UUID_OTA_SIGNATURE = "a0be83eb-8dc9-47f0-ab40-b19721d20ed1"
 
 // Pattern Sync Characteristic - for sending messagepack-encoded patterns
 const CHARACTERISTIC_UUID_PATTERN_SYNC = "a0be83ec-8dc9-47f0-ab40-b19721d20ed1";
+
+// LED Configuration Characteristics - for getting/setting strip configuration
+const CHARACTERISTIC_UUID_LED_CONFIG_GET = "a0be83ed-8dc9-47f0-ab40-b19721d20ed1";
+const CHARACTERISTIC_UUID_LED_CONFIG_SET = "a0be83ee-8dc9-47f0-ab40-b19721d20ed1";
 
 const MAX_BLE_CHUNK_SIZE = 500; // Should match ESP32's definition
 
@@ -721,6 +728,158 @@ async function writeCharacteristicBinary(deviceId: string, serviceUuid: string, 
     console.log(`Successfully wrote binary data to characteristic ${characteristicUuid}`);
   } catch (error) {
     console.error(`Error writing binary data to characteristic ${characteristicUuid}:`, error);
+    throw error;
+  }
+}
+
+export interface LedStripConfig {
+  chipset: number;
+  pin: number;
+  numLeds: number;
+  colorOrder: number;
+  rmtChannel: number;
+  width: number;
+  height: number;
+  orientation: number;
+}
+
+export interface LedConfiguration {
+  globalBrightness: number;
+  strips: LedStripConfig[];
+}
+
+// Helper functions for orientation bit manipulation
+export function getRotation(orientation: number): number {
+  return orientation & 0x03;
+}
+
+export function getFlipH(orientation: number): boolean {
+  return (orientation & 0x04) !== 0;
+}
+
+export function getSerpentine(orientation: number): boolean {
+  return (orientation & 0x08) !== 0;
+}
+
+export function setRotation(orientation: number, rotation: number): number {
+  return (orientation & 0xFC) | (rotation & 0x03);
+}
+
+export function setFlipH(orientation: number, flip: boolean): number {
+  return flip ? (orientation | 0x04) : (orientation & 0xFB);
+}
+
+export function setSerpentine(orientation: number, serpentine: boolean): number {
+  return serpentine ? (orientation | 0x08) : (orientation & 0xF7);
+}
+
+// LED Chipset enum values (should match ESP32)
+export const LedChipsets = {
+  NONE: 0,
+  WS2812_RGB: 22,
+  SK6812_RGBW: 27,
+  TM1814_RGBW: 32,
+  WS2811_400KHZ: 24,
+  TM1829_RGB: 20,
+  UCS8903_RGB: 52,
+  UCS8904_RGBW: 53,
+  APA106_RGB: 47,
+  FW1906_RGBCW: 62,
+  WS2805_RGBCW: 63,
+  TM1914_RGB: 64,
+  SM16825_RGBCW: 65
+} as const;
+
+// Color Order enum values (should match ESP32)
+export const ColorOrders = {
+  RGB: 0,
+  RBG: 1,
+  GRB: 2,
+  GBR: 3,
+  BRG: 4,
+  BGR: 5,
+  CO_GRB: 2, // Common alias
+} as const;
+
+// LED Configuration Functions
+
+export async function getLedConfiguration(deviceId: string): Promise<LedConfiguration> {
+  try {
+    console.log(`[LED Config] Getting configuration from ${deviceId}`);
+    
+    // Read the LED config characteristic (returns binary MessagePack data)
+    let rawDataView: DataView;
+    if (isWeb()) {
+      const deviceInfo = connectedDevices.get(deviceId);
+      if (!deviceInfo?.gattServer) throw new Error('Device not connected');
+      const service = await deviceInfo.gattServer.getPrimaryService(LED_SERVICE_UUID);
+      const characteristic = await service.getCharacteristic(CHARACTERISTIC_UUID_LED_CONFIG_GET);
+      rawDataView = await characteristic.readValue();
+    } else {
+      rawDataView = await BleClient.read(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_LED_CONFIG_GET);
+    }
+    
+    // Convert DataView to Uint8Array for MessagePack decoding
+    const rawData = new Uint8Array(rawDataView.buffer, rawDataView.byteOffset, rawDataView.byteLength);
+    console.log(`[LED Config] Raw MessagePack data: ${rawData.length} bytes`);
+    
+    // Decode MessagePack data
+    const decodedConfig = msgpackDecode(rawData) as any;
+    console.log(`[LED Config] Decoded config:`, decodedConfig);
+    
+    // Convert from ESP32 format to our interface
+    const config: LedConfiguration = {
+      globalBrightness: decodedConfig.gb || 255,
+      strips: (decodedConfig.strips || []).map((strip: any) => ({
+        chipset: strip.cs || LedChipsets.WS2812_RGB,
+        pin: strip.pin || 13,
+        numLeds: strip.num || 100,
+        colorOrder: strip.co || ColorOrders.GRB,
+        rmtChannel: strip.rmt || 0,
+        width: strip.w || 0,
+        height: strip.h || 0,
+        orientation: strip.ort || 0
+      }))
+    };
+    
+    return config;
+  } catch (error) {
+    console.error('Error getting LED configuration:', error);
+    throw error;
+  }
+}
+
+export async function setLedConfiguration(deviceId: string, config: LedConfiguration): Promise<void> {
+  try {
+    console.log(`[LED Config] Setting configuration for ${deviceId}:`, config);
+    
+    // Convert to ESP32 format and encode as MessagePack
+    const esp32Config = {
+      gb: config.globalBrightness,
+      strips: config.strips.map(strip => ({
+        cs: strip.chipset,
+        pin: strip.pin,
+        num: strip.numLeds,
+        co: strip.colorOrder,
+        rmt: strip.rmtChannel,
+        w: strip.width,
+        h: strip.height,
+        ort: strip.orientation
+      }))
+    };
+    
+    // Encode as MessagePack
+    const msgpackData = msgpackEncode(esp32Config);
+    const dataView = new DataView(msgpackData.buffer, msgpackData.byteOffset, msgpackData.byteLength);
+    
+    console.log(`[LED Config] Sending MessagePack data: ${msgpackData.byteLength} bytes`);
+    
+    // Send binary data to characteristic
+    await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_LED_CONFIG_SET, dataView);
+    
+    console.log('[LED Config] Configuration sent successfully');
+  } catch (error) {
+    console.error('Error setting LED configuration:', error);
     throw error;
   }
 }

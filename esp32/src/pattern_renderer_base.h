@@ -5,10 +5,6 @@
 #include "led_manager.h"
 #include "mpack.h"
 
-// Display configuration
-#define DISPLAY_WIDTH 8
-#define DISPLAY_HEIGHT 8
-#define DISPLAY_PIXELS (DISPLAY_WIDTH * DISPLAY_HEIGHT)
 #define NUM_BUFFERS 3 // Three lanes for patterns
 
 // Define ESP32 build to disable emscripten includes
@@ -40,20 +36,32 @@ struct Pattern {
 class PatternRendererBase {
 protected:
     LedConfig::LedManager* ledManager;
-    CRGB buffers[NUM_BUFFERS][DISPLAY_PIXELS];
+    CRGB** buffers; // Dynamically allocated buffers
     Pattern currentPattern;
     bool hasPattern = false;
     unsigned long lastFrameTime;
     unsigned long frameStartTime;
     unsigned long globalTime;
+    
+    // Current matrix dimensions (determined from LED strip config)
+    uint16_t matrixWidth = 8;  // Default fallback
+    uint16_t matrixHeight = 8; // Default fallback
+    uint16_t totalPixels = 64; // matrixWidth * matrixHeight
+    bool buffersAllocated = false;
 
     // Helper functions
     void clearBuffer(int bufferIndex);
     CRGB* getBufferPtr(int bufferIndex);
+    void allocateBuffers();
+    void deallocateBuffers();
+    void initializeFromLedConfig();
     
 public:
     PatternRendererBase(LedConfig::LedManager* ledMgr);
     virtual ~PatternRendererBase();
+    
+    // Configuration
+    void updateMatrixConfig(); // Call when LED config changes
     
     // Pattern management
     void setPattern(Pattern&& pattern);

@@ -3,33 +3,85 @@
 
 // PatternRendererBase implementation using native operators
 PatternRendererBase::PatternRendererBase(LedConfig::LedManager* ledMgr) 
-    : ledManager(ledMgr), lastFrameTime(0), frameStartTime(0), globalTime(0), hasPattern(false) {
+    : ledManager(ledMgr), buffers(nullptr), lastFrameTime(0), frameStartTime(0), globalTime(0), hasPattern(false) {
     
-    // Clear all buffers
+    initializeFromLedConfig();
+}
+
+PatternRendererBase::~PatternRendererBase() {
+    deallocateBuffers();
+}
+
+void PatternRendererBase::allocateBuffers() {
+    if (buffersAllocated) {
+        deallocateBuffers();
+    }
+    
+    buffers = new CRGB*[NUM_BUFFERS];
+    for (int i = 0; i < NUM_BUFFERS; i++) {
+        buffers[i] = new CRGB[totalPixels];
+        for (int j = 0; j < totalPixels; j++) {
+            buffers[i][j] = CRGB::Black;
+        }
+    }
+    buffersAllocated = true;
+}
+
+void PatternRendererBase::deallocateBuffers() {
+    if (buffersAllocated && buffers) {
+        for (int i = 0; i < NUM_BUFFERS; i++) {
+            delete[] buffers[i];
+        }
+        delete[] buffers;
+        buffers = nullptr;
+        buffersAllocated = false;
+    }
+}
+
+void PatternRendererBase::initializeFromLedConfig() {
+    // Get matrix dimensions from first LED strip
+    if (ledManager && ledManager->getNumStrips() > 0) {
+        LedConfig::LedBus* strip = ledManager->getStrip(0);
+        if (strip) {
+            const auto& config = strip->getConfig();
+            if (config.width > 0 && config.height > 0) {
+                matrixWidth = config.width;
+                matrixHeight = config.height;
+            } else {
+                // Linear strip - treat as 1D
+                matrixWidth = config.numLeds;
+                matrixHeight = 1;
+            }
+        }
+    }
+    
+    totalPixels = matrixWidth * matrixHeight;
+    allocateBuffers();
+}
+
+void PatternRendererBase::updateMatrixConfig() {
+    initializeFromLedConfig();
+    // Clear all buffers after reallocation
     for (int i = 0; i < NUM_BUFFERS; i++) {
         clearBuffer(i);
     }
 }
 
-PatternRendererBase::~PatternRendererBase() {
-    // Cleanup handled by OperatorRegistry
-}
-
 void PatternRendererBase::clearBuffer(int bufferIndex) {
-    if (bufferIndex < 0 || bufferIndex >= NUM_BUFFERS) return;
+    if (bufferIndex < 0 || bufferIndex >= NUM_BUFFERS || !buffersAllocated) return;
     
-    for (int i = 0; i < DISPLAY_PIXELS; i++) {
+    for (int i = 0; i < totalPixels; i++) {
         buffers[bufferIndex][i] = CRGB::Black;
     }
 }
 
 CRGB* PatternRendererBase::getBufferPtr(int bufferIndex) {
-    if (bufferIndex < 0 || bufferIndex >= NUM_BUFFERS) return nullptr;
+    if (bufferIndex < 0 || bufferIndex >= NUM_BUFFERS || !buffersAllocated) return nullptr;
     return buffers[bufferIndex];
 }
 
 const CRGB* PatternRendererBase::getBuffer(int bufferIndex) const {
-    if (bufferIndex < 0 || bufferIndex >= NUM_BUFFERS) return nullptr;
+    if (bufferIndex < 0 || bufferIndex >= NUM_BUFFERS || !buffersAllocated) return nullptr;
     return buffers[bufferIndex];
 }
 
@@ -44,7 +96,7 @@ void PatternRendererBase::clearPattern() {
 }
 
 void PatternRendererBase::update() {
-    if (!hasPattern) return;
+    if (!hasPattern || !buffersAllocated) return;
     
     unsigned long currentTime = millis();
     frameStartTime = currentTime;
@@ -68,8 +120,8 @@ void PatternRendererBase::update() {
                     inputBuffer1,
                     inputBuffer2, 
                     outputBuffer,
-                    DISPLAY_WIDTH,
-                    DISPLAY_HEIGHT,
+                    matrixWidth,
+                    matrixHeight,
                     globalTime,
                     deltaTime,
                     node.parameters
@@ -82,16 +134,92 @@ void PatternRendererBase::update() {
 }
 
 void PatternRendererBase::render() {
-    if (!hasPattern || !ledManager) return;
+    if (!hasPattern || !ledManager || !buffersAllocated) return;
     
-    // Copy the output buffer to the LED manager
-    const CRGB* outputBuffer = getBuffer(currentPattern.outputBuffer);
-    if (outputBuffer) {
-        for (int i = 0; i < DISPLAY_PIXELS; i++) {
-            ledManager->setPixelColor(0, i, outputBuffer[i]);
+    const CRGB* patternBuffer = getBuffer(currentPattern.outputBuffer);
+    if (!patternBuffer || ledManager->getNumStrips() == 0) return;
+    
+    LedConfig::LedBus* strip = ledManager->getStrip(0);
+    if (!strip) return;
+    
+    const auto& config = strip->getConfig();
+    
+    // Check if this is a matrix layout (has width and height)
+    if (config.width > 0 && config.height > 0) {
+        // 2D Matrix layout - map logical coordinates to physical LED indices
+        // The pattern buffer is in logical row-major order: (0,0), (1,0), (2,0)... (0,1), (1,1)...
+        
+        for (uint16_t logicalY = 0; logicalY < matrixHeight; logicalY++) {
+            for (uint16_t logicalX = 0; logicalX < matrixWidth; logicalX++) {
+                // Get color from logical position in pattern buffer
+                int patternIndex = logicalY * matrixWidth + logicalX;
+                if (patternIndex >= totalPixels) continue;
+                
+                CRGB color = patternBuffer[patternIndex];
+                
+                // Map logical coordinates to physical coordinates using orientation
+                uint16_t physicalX = logicalX;
+                uint16_t physicalY = logicalY;
+                
+                // Apply rotation (bits 0-1 of orientation)
+                uint8_t rotation = config.orientation & 0x03;
+                switch (rotation) {
+                    case 1: // 90° clockwise
+                        {
+                            uint16_t temp = physicalX;
+                            physicalX = physicalY;
+                            physicalY = matrixWidth - 1 - temp;
+                        }
+                        break;
+                    case 2: // 180°
+                        physicalX = matrixWidth - 1 - physicalX;
+                        physicalY = matrixHeight - 1 - physicalY;
+                        break;
+                    case 3: // 270° clockwise (90° counter-clockwise)
+                        {
+                            uint16_t temp = physicalX;
+                            physicalX = matrixHeight - 1 - physicalY;
+                            physicalY = temp;
+                        }
+                        break;
+                    default: // 0° - no rotation
+                        break;
+                }
+                
+                // Apply horizontal flip (bit 2 of orientation)
+                if (config.orientation & 0x04) {
+                    physicalX = matrixWidth - 1 - physicalX;
+                }
+                
+                // Calculate final LED index considering serpentine layout (bit 3 of orientation)
+                int ledIndex;
+                if (config.orientation & 0x08) {
+                    // Serpentine: odd rows are reversed
+                    if (physicalY % 2 == 1) {
+                        ledIndex = physicalY * matrixWidth + (matrixWidth - 1 - physicalX);
+                    } else {
+                        ledIndex = physicalY * matrixWidth + physicalX;
+                    }
+                } else {
+                    // Normal row-major order
+                    ledIndex = physicalY * matrixWidth + physicalX;
+                }
+                
+                // Set the LED color
+                if (ledIndex >= 0 && ledIndex < config.numLeds) {
+                    strip->setPixelColor(ledIndex, color);
+                }
+            }
         }
-        ledManager->show();
+    } else {
+        // Linear strip - direct 1:1 mapping
+        uint16_t pixelCount = min((uint16_t)totalPixels, config.numLeds);
+        for (int i = 0; i < pixelCount; i++) {
+            strip->setPixelColor(i, patternBuffer[i]);
+        }
     }
+    
+    ledManager->show();
 }
 
 bool PatternRendererBase::loadPatternFromMessagePack(const uint8_t* data, unsigned int size) {

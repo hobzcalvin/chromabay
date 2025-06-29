@@ -23,7 +23,20 @@
     stopOTAStatusNotifications,
     type DeviceInfo,
     type FirmwareRegistryEntry,
-    type OTAUpdateStatus
+    type OTAUpdateStatus,
+    // LED Configuration Imports
+    getLedConfiguration,
+    setLedConfiguration,
+    type LedConfiguration,
+    type LedStripConfig,
+    LedChipsets,
+    ColorOrders,
+    getRotation,
+    getFlipH,
+    getSerpentine,
+    setRotation,
+    setFlipH,
+    setSerpentine
     // Removed internal constants like LED_SERVICE_UUID as they are not exported from ble.ts
   } from '$lib/ble';
   import { Capacitor } from '@capacitor/core';
@@ -48,6 +61,11 @@
   let checkingForUpdate = false;
   let showUpdateConfirmation = false;
   let espFirmwareRegistryUrl = "https://hobzcalvin.github.io/blumon/firmware/esp32/esp32_firmware_registry.json"; // Always use production GitHub Pages
+
+  // LED Configuration State
+  let ledConfig: LedConfiguration | null = null;
+  let showLedConfig = false;
+  let ledConfigLoading = false;
 
   // Build information from environment variables
   const buildInfo = {
@@ -142,6 +160,7 @@
       } else {
         statusMessage = `Connected! Found ${services.length} service(s). Fetching device info...`;
         await handleGetDeviceInfo(); // Automatically get device info on connect
+        await handleGetLedConfig(); // Automatically get LED config on connect
         await startOTAStatusNotifications(selectedDevice.deviceId, (status) => { // Start listening for OTA status
           otaStatus = status;
           if (status.isError || status.isComplete) {
@@ -270,6 +289,69 @@
       statusMessage = 'Failed to get device info.';
       console.error('Get device info error:', error);
       deviceInfo = null;
+    }
+  }
+
+  // --- LED Configuration Functions ---
+  async function handleGetLedConfig() {
+    if (!selectedDevice) return;
+    ledConfigLoading = true;
+    try {
+      ledConfig = await getLedConfiguration(selectedDevice.deviceId);
+      console.log('LED config received:', ledConfig);
+    } catch (error: any) {
+      console.error('Get LED config error:', error);
+      ledConfig = null;
+    } finally {
+      ledConfigLoading = false;
+    }
+  }
+
+  async function handleSetLedConfig() {
+    if (!selectedDevice || !ledConfig) return;
+    ledConfigLoading = true;
+    try {
+      await setLedConfiguration(selectedDevice.deviceId, ledConfig);
+      statusMessage = 'LED configuration updated successfully';
+    } catch (error: any) {
+      statusMessage = 'Failed to update LED configuration';
+      console.error('Set LED config error:', error);
+    } finally {
+      ledConfigLoading = false;
+    }
+  }
+
+  function addLedStrip() {
+    if (!ledConfig) return;
+    const newStrip: LedStripConfig = {
+      chipset: LedChipsets.WS2812_RGB,
+      pin: 13,
+      numLeds: 100,
+      colorOrder: ColorOrders.GRB,
+      rmtChannel: 0,
+      width: 0,
+      height: 0,
+      orientation: 0
+    };
+    ledConfig.strips = [...ledConfig.strips, newStrip];
+  }
+
+  function removeLedStrip(index: number) {
+    if (!ledConfig) return;
+    ledConfig.strips = ledConfig.strips.filter((_, i) => i !== index);
+  }
+
+  function updateStripOrientation(stripIndex: number, field: 'rotation' | 'flipH' | 'serpentine', value: number | boolean) {
+    if (!ledConfig) return;
+    const strip = ledConfig.strips[stripIndex];
+    if (!strip) return;
+    
+    if (field === 'rotation' && typeof value === 'number') {
+      strip.orientation = setRotation(strip.orientation, value);
+    } else if (field === 'flipH' && typeof value === 'boolean') {
+      strip.orientation = setFlipH(strip.orientation, value);
+    } else if (field === 'serpentine' && typeof value === 'boolean') {
+      strip.orientation = setSerpentine(strip.orientation, value);
     }
   }
 
@@ -470,6 +552,129 @@
         <button class="btn secondary small" on:click={handleGetDeviceInfo} disabled={otaInProgress || checkingForUpdate}>
           Refresh Info
         </button>
+      </div>
+
+      <div class="led-config-section">
+        <h3>LED Strip Configuration</h3>
+        {#if ledConfigLoading}
+          <p>Loading LED configuration...</p>
+        {:else if ledConfig}
+          <div class="config-section">
+            <label>
+              Global Brightness:
+              <input type="range" min="0" max="255" bind:value={ledConfig.globalBrightness} />
+              <span>{ledConfig.globalBrightness}</span>
+            </label>
+          </div>
+
+          <div class="strips-section">
+            <div class="section-header">
+              <h4>LED Strips ({ledConfig.strips.length})</h4>
+              <button class="btn primary small" on:click={addLedStrip} disabled={otaInProgress}>Add Strip</button>
+            </div>
+
+            {#each ledConfig.strips as strip, index}
+              <div class="strip-card">
+                <div class="strip-header">
+                  <h5>Strip {index + 1}</h5>
+                  <button class="btn danger small" on:click={() => removeLedStrip(index)} disabled={otaInProgress || ledConfig.strips.length <= 1}>Remove</button>
+                </div>
+
+                <div class="strip-controls">
+                  <div class="control-row">
+                    <label>
+                      Chipset:
+                      <select bind:value={strip.chipset}>
+                        <option value={LedChipsets.WS2812_RGB}>WS2812 RGB</option>
+                        <option value={LedChipsets.SK6812_RGBW}>SK6812 RGBW</option>
+                        <option value={LedChipsets.TM1814_RGBW}>TM1814 RGBW</option>
+                        <option value={LedChipsets.WS2811_400KHZ}>WS2811 400KHz</option>
+                        <option value={LedChipsets.APA106_RGB}>APA106 RGB</option>
+                      </select>
+                    </label>
+
+                    <label>
+                      Pin:
+                      <input type="number" min="0" max="39" bind:value={strip.pin} />
+                    </label>
+
+                    <label>
+                      LEDs:
+                      <input type="number" min="1" max="1000" bind:value={strip.numLeds} />
+                    </label>
+
+                    <label>
+                      Color Order:
+                      <select bind:value={strip.colorOrder}>
+                        <option value={ColorOrders.RGB}>RGB</option>
+                        <option value={ColorOrders.RBG}>RBG</option>
+                        <option value={ColorOrders.GRB}>GRB</option>
+                        <option value={ColorOrders.GBR}>GBR</option>
+                        <option value={ColorOrders.BRG}>BRG</option>
+                        <option value={ColorOrders.BGR}>BGR</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <div class="control-row">
+                    <label>
+                      Width (0 = linear):
+                      <input type="number" min="0" max="500" bind:value={strip.width} />
+                    </label>
+
+                    <label>
+                      Height (0 = linear):
+                      <input type="number" min="0" max="500" bind:value={strip.height} />
+                    </label>
+
+                    <label>
+                      RMT Channel:
+                      <input type="number" min="0" max="7" bind:value={strip.rmtChannel} />
+                    </label>
+                  </div>
+
+                  {#if strip.width > 0 && strip.height > 0}
+                    <div class="matrix-controls">
+                      <h6>Matrix Layout Settings</h6>
+                      <div class="control-row">
+                        <label>
+                          Rotation:
+                          <select value={getRotation(strip.orientation)} on:change={(e) => updateStripOrientation(index, 'rotation', parseInt(e.currentTarget.value))}>
+                            <option value="0">0° (No rotation)</option>
+                            <option value="1">90° Clockwise</option>
+                            <option value="2">180°</option>
+                            <option value="3">270° Clockwise</option>
+                          </select>
+                        </label>
+
+                        <label>
+                          <input type="checkbox" checked={getFlipH(strip.orientation)} on:change={(e) => updateStripOrientation(index, 'flipH', e.currentTarget.checked)} />
+                          Flip Horizontally
+                        </label>
+
+                        <label>
+                          <input type="checkbox" checked={getSerpentine(strip.orientation)} on:change={(e) => updateStripOrientation(index, 'serpentine', e.currentTarget.checked)} />
+                          Serpentine Layout
+                        </label>
+                      </div>
+                    </div>
+                  {/if}
+                </div>
+              </div>
+            {/each}
+          </div>
+
+          <div class="config-actions">
+            <button class="btn primary" on:click={handleSetLedConfig} disabled={otaInProgress || ledConfigLoading}>
+              Save Configuration
+            </button>
+            <button class="btn secondary" on:click={handleGetLedConfig} disabled={otaInProgress || ledConfigLoading}>
+              Reload from Device
+            </button>
+          </div>
+        {:else}
+          <p>No LED configuration available. Connect to a device to see configuration.</p>
+        {/if}
       </div>
 
       <div class="ota-controls">
@@ -996,6 +1201,127 @@
     padding: 0.2rem 0.4rem;
     border-radius: 4px;
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  }
+
+  .led-config-section {
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 1rem;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+  }
+
+  .led-config-section h3 {
+    margin-top: 0;
+    margin-bottom: 1rem;
+  }
+
+  .config-section {
+    margin-bottom: 1.5rem;
+    padding: 1rem;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+  }
+
+  .config-section label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .config-section input[type="range"] {
+    flex: 1;
+    margin: 0 0.5rem;
+  }
+
+  .strips-section {
+    margin-bottom: 1.5rem;
+  }
+
+  .section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+  }
+
+  .section-header h4 {
+    margin: 0;
+  }
+
+  .strip-card {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .strip-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+  }
+
+  .strip-header h5 {
+    margin: 0;
+  }
+
+  .strip-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .control-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+  }
+
+  .control-row label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    font-size: 0.9rem;
+  }
+
+  .control-row input,
+  .control-row select {
+    padding: 0.5rem;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+    font-size: 0.9rem;
+  }
+
+  .control-row input[type="checkbox"] {
+    width: auto;
+    margin-right: 0.5rem;
+  }
+
+  .matrix-controls {
+    margin-top: 1rem;
+    padding: 1rem;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .matrix-controls h6 {
+    margin: 0 0 0.75rem 0;
+    font-size: 0.9rem;
+    opacity: 0.9;
+  }
+
+  .config-actions {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
   }
 
   @media (max-width: 768px) {    

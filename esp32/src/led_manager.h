@@ -19,9 +19,57 @@ struct LedStripConfig {
     uint16_t numLeds = 0;
     ColorOrderValue colorOrder = ColorOrderValue::CO_GRB; // Default to GRB
     uint8_t rmtChannel = 0; // ESP32 RMT channel (0-7 for NeoPixelBus default RMT method)
+    
+    // Matrix/2D Layout Configuration
+    uint16_t width = 0;      // Width in pixels (0 = linear strip)
+    uint16_t height = 0;     // Height in pixels (0 = linear strip)
+    uint8_t orientation = 0; // Bit 0-1: rotation (0°/90°/180°/270°), Bit 2: flip H, Bit 3: serpentine
+    
     // Add other strip-specific settings if needed:
     // bool reversed = false;
     // uint16_t anouncementLedsToSkip = 0; // like WLED's skip
+    
+    // Helper functions for 2D coordinate mapping
+    bool isMatrix() const { return width > 0 && height > 0; }
+    uint8_t getRotation() const { return orientation & 0x03; }
+    bool getFlipH() const { return (orientation & 0x04) != 0; }
+    bool getSerpentine() const { return (orientation & 0x08) != 0; }
+    
+    // Convert 2D coordinates to linear index
+    uint16_t xyToIndex(uint16_t x, uint16_t y) const {
+        if (!isMatrix() || x >= width || y >= height) return numLeds; // Invalid
+        
+        // Apply rotation first
+        uint16_t rx = x, ry = y;
+        uint8_t rot = getRotation();
+        if (rot == 1) { // 90° clockwise
+            rx = y;
+            ry = width - 1 - x;
+        } else if (rot == 2) { // 180°
+            rx = width - 1 - x;
+            ry = height - 1 - y;
+        } else if (rot == 3) { // 270° clockwise (90° counter-clockwise)
+            rx = height - 1 - y;
+            ry = x;
+        }
+        
+        // Apply horizontal flip
+        if (getFlipH()) {
+            rx = width - 1 - rx;
+        }
+        
+        // Apply serpentine layout
+        uint16_t index;
+        if (getSerpentine() && (ry % 2 == 1)) {
+            // Odd rows go right-to-left
+            index = ry * width + (width - 1 - rx);
+        } else {
+            // Even rows go left-to-right
+            index = ry * width + rx;
+        }
+        
+        return index < numLeds ? index : numLeds; // Bounds check
+    }
 };
 
 // Internal class to manage a single physical LED bus/strip
@@ -102,6 +150,25 @@ public:
     // FastLED CRGB compatible setPixelColor
     void setPixelColor(uint16_t pixelIndex, const CRGB& color);
 
+    // 2D Matrix coordinate setPixelColor
+    void setPixelColorXY(uint16_t x, uint16_t y, uint32_t color) {
+        if (_config.isMatrix()) {
+            uint16_t index = _config.xyToIndex(x, y);
+            if (index < _config.numLeds) {
+                setPixelColor(index, color);
+            }
+        }
+    }
+
+    // 2D Matrix coordinate setPixelColor with CRGB
+    void setPixelColorXY(uint16_t x, uint16_t y, const CRGB& color) {
+        if (_config.isMatrix()) {
+            uint16_t index = _config.xyToIndex(x, y);
+            if (index < _config.numLeds) {
+                setPixelColor(index, color);
+            }
+        }
+    }
 
     uint32_t getPixelColor(uint16_t pixelIndex) const {
         if (_busPtr && _internalType != ITYPE_NONE && pixelIndex < _config.numLeds) {
@@ -220,6 +287,19 @@ public:
     // FastLED CRGB compatible setPixelColor
     void setPixelColor(uint8_t stripIndex, uint16_t pixelIndex, const CRGB& color);
 
+    // 2D Matrix coordinate setPixelColor
+    void setPixelColorXY(uint8_t stripIndex, uint16_t x, uint16_t y, uint32_t color) {
+        if (stripIndex < _strips.size() && _strips[stripIndex]) {
+            _strips[stripIndex]->setPixelColorXY(x, y, color);
+        }
+    }
+
+    // 2D Matrix coordinate setPixelColor with CRGB
+    void setPixelColorXY(uint8_t stripIndex, uint16_t x, uint16_t y, const CRGB& color) {
+        if (stripIndex < _strips.size() && _strips[stripIndex]) {
+            _strips[stripIndex]->setPixelColorXY(x, y, color);
+        }
+    }
 
     uint32_t getPixelColor(uint8_t stripIndex, uint16_t pixelIndex) const {
         if (stripIndex < _strips.size() && _strips[stripIndex]) {
