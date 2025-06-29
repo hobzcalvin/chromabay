@@ -20,7 +20,7 @@
 
 // Node structure for pattern execution
 struct PatternNode {
-    BaseOperator* op;  // Raw pointer to operator (managed by registry)
+    std::unique_ptr<BaseOperator> op;  // Unique pointer to operator
     std::vector<ParameterValue> parameters;
     int inputBuffer = -1;     // Buffer index to read from (-1 if none)
     int outputBuffer = 0;     // Buffer index to write to
@@ -56,7 +56,7 @@ public:
     virtual ~PatternRendererBase();
     
     // Pattern management
-    void setPattern(const Pattern& pattern);
+    void setPattern(Pattern&& pattern);
     void clearPattern();
     bool loadPatternFromMessagePack(const uint8_t* data, unsigned int size);
     

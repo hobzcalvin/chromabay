@@ -33,8 +33,8 @@ const CRGB* PatternRendererBase::getBuffer(int bufferIndex) const {
     return buffers[bufferIndex];
 }
 
-void PatternRendererBase::setPattern(const Pattern& pattern) {
-    currentPattern = pattern;
+void PatternRendererBase::setPattern(Pattern&& pattern) {
+    currentPattern = std::move(pattern);
     hasPattern = true;
 }
 
@@ -229,7 +229,7 @@ bool PatternRendererBase::loadPatternFromMessagePack(const uint8_t* data, unsign
                 
                 // Only add node if operator was created successfully
                 if (node.op) {
-                    pattern.nodes.push_back(node);
+                    pattern.nodes.push_back(std::move(node));
                 }
             }
         }
@@ -237,6 +237,6 @@ bool PatternRendererBase::loadPatternFromMessagePack(const uint8_t* data, unsign
     
     mpack_tree_destroy(&tree);
     
-    setPattern(pattern);
+    setPattern(std::move(pattern));
     return true;
 }

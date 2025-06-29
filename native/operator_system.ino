@@ -19,8 +19,8 @@
 // Include all operators via centralized list
 #include "OperatorList.h"
 
-// Global operator instance management - using vectors instead of std::map
-std::vector<BaseOperator*> activeOperators;
+// Global operator instance management - using vectors with unique_ptr
+std::vector<std::unique_ptr<BaseOperator>> activeOperators;
 std::vector<std::vector<ParameterValue>> operatorParameters;
 int nextOperatorId = 1;
 
@@ -166,13 +166,13 @@ extern "C" {
             
             // Resize vectors if needed
             if (activeOperators.size() <= (size_t)id) {
-                activeOperators.resize(id + 1, nullptr);
+                activeOperators.resize(id + 1);
             }
             if (operatorParameters.size() <= (size_t)id) {
                 operatorParameters.resize(id + 1);
             }
             
-            activeOperators[id] = op;
+            activeOperators[id] = std::move(op);
             printf("Created operator instance %d for %s (class: %s)\n", id, operatorName, className.c_str());
             return id;
         }
@@ -182,10 +182,7 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE
     void destroyOperatorInstance(int operatorId) {
         if (operatorId >= 0 && operatorId < (int)activeOperators.size()) {
-            if (activeOperators[operatorId]) {
-                delete activeOperators[operatorId];
-                activeOperators[operatorId] = nullptr;
-            }
+            activeOperators[operatorId].reset();
             if (operatorId < (int)operatorParameters.size()) {
                 operatorParameters[operatorId].clear();
             }

@@ -142,13 +142,13 @@ public:
     }
 };
 
-// Operator factory function type (using raw pointer instead of unique_ptr)
-using OperatorFactory = std::function<BaseOperator*()>;
+// Operator factory function type (using unique_ptr)
+using OperatorFactory = std::function<std::unique_ptr<BaseOperator>()>;
 
 // Operator registry class - singleton pattern
 class OperatorRegistry {
 private:
-    std::map<std::string, std::function<BaseOperator*()>> creators;
+    std::map<std::string, std::function<std::unique_ptr<BaseOperator>()>> creators;
     
     OperatorRegistry() {
         // Operators register themselves automatically via REGISTER_OPERATOR macro
@@ -162,22 +162,13 @@ public:
     
     template<typename T>
     void registerOperator(const std::string& name) {
-        creators[name] = []() -> BaseOperator* { return new T(); };
+        creators[name] = []() -> std::unique_ptr<BaseOperator> { return std::unique_ptr<BaseOperator>(new T()); };
     }
     
-    BaseOperator* createOperator(const std::string& name) {
+    std::unique_ptr<BaseOperator> createOperator(const std::string& name) {
         auto it = creators.find(name);
         if (it != creators.end()) {
             return it->second();
-        }
-        return nullptr;
-    }
-    
-    // For WASM compatibility - returns unique_ptr
-    std::unique_ptr<BaseOperator> createOperatorUnique(const std::string& name) {
-        BaseOperator* op = createOperator(name);
-        if (op) {
-            return std::unique_ptr<BaseOperator>(op);
         }
         return nullptr;
     }
@@ -205,5 +196,4 @@ public:
 };
 
 // Macro for easy operator registration
-#define REGISTER_OPERATOR(ClassName) \
-    static OperatorRegistrar<ClassName> g_##ClassName##_registrar(#ClassName) 
+#define REGISTER_OPERATOR(ClassName) static OperatorRegistrar<ClassName> g_##ClassName##_registrar(#ClassName)
