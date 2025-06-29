@@ -1,7 +1,7 @@
 {
-  "version": "v0.0.46",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.46.zip",
-  "buildDate": "2025-06-29 16:50:03 UTC",
-  "commitHash": "cab6653c48ba81781b1410061fba1759149d3ab4",
-  "commitMessage": "really fixed"
+  "version": "v0.0.47",
+  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.47.zip",
+  "buildDate": "2025-06-29 21:49:33 UTC",
+  "commitHash": "99d7b073283b98bfafc173d211de97f45a3a5162",
+  "commitMessage": "fix output render"
 }
