@@ -726,8 +726,6 @@ class CentralizedRenderer {
     const deltaTime = (currentTime - this.lastFrameTime) / 1000;
 
     for (const node of executionOrder) {
-      if (node.data.type === 'output') continue; // Skip output nodes
-      
       const nodeDefinition = getNodeDefinition(node.data.type as string);
       if (!nodeDefinition) continue;
 
@@ -757,7 +755,16 @@ class CentralizedRenderer {
           ctx.fillStyle = '#000000';
           ctx.fillRect(0, 0, canvasElement.width, canvasElement.height);
           
-          // Render this node
+          // Handle input data BEFORE calling render function (for output nodes and others)
+          const inputs = this.getInputNodes(node.id, nodes, edges);
+          if ('input' in inputs && inputs.input) {
+            const inputData = get(nodeOutputs).get(inputs.input.id);
+            if (inputData) {
+              ctx.putImageData(inputData, 0, 0);
+            }
+          }
+          
+          // Render this node (may modify or overlay the input)
           nodeDefinition.render(renderContext);
           
           // Store output for other nodes
