@@ -10,10 +10,6 @@
     disconnectFromDevice,
     isDeviceConnected,
     discoverServices,
-    readCharacteristic,
-    writeCharacteristic,
-    startNotifications,
-    stopNotifications,
     // OTA Imports
     getDeviceInfo,
     fetchFirmwareRegistry,
@@ -37,10 +33,9 @@
     setRotation,
     setFlipH,
     setSerpentine
-    // Removed internal constants like LED_SERVICE_UUID as they are not exported from ble.ts
   } from '$lib/ble';
   import { Capacitor } from '@capacitor/core';
-  import { connectedDevices, activeDeviceId, setActiveDevice, getActiveDevice, getConnectedDevicesList, type ConnectedDevice } from '$lib/stores/deviceStore';
+  import { connectedDevices, getConnectedDevicesList, type ConnectedDevice } from '$lib/stores/deviceStore';
 
   let bleSupported = false;
   let bleEnabled = false;
@@ -48,29 +43,27 @@
   let devices: any[] = [];
   let statusMessage = '';
   let isWeb = false;
-  let services: any[] = [];
-  let notifications: string[] = [];
-  let writeData = '';
 
-  // Device state from store
-  $: activeDevice = getActiveDevice($connectedDevices, $activeDeviceId);
+  // Device states - keyed by deviceId
+  let deviceSettings: Record<string, {
+    showSettings: boolean;
+    ledConfig: LedConfiguration | null;
+    ledConfigLoading: boolean;
+    deviceInfo: DeviceInfo | null;
+    otaStatus: OTAUpdateStatus | null;
+    otaInProgress: boolean;
+    checkingForUpdate: boolean;
+    showUpdateConfirmation: boolean;
+    latestFirmware: FirmwareRegistryEntry | null;
+  }> = {};
+
+  // Connected devices from store
   $: connectedDevicesList = getConnectedDevicesList($connectedDevices);
-  
-  // OTA State
+
   let firmwareRegistry: FirmwareRegistryEntry[] = [];
-  let latestFirmware: FirmwareRegistryEntry | null = null;
-  let otaStatus: OTAUpdateStatus | null = null;
-  let otaInProgress = false;
-  let checkingForUpdate = false;
-  let showUpdateConfirmation = false;
-  let espFirmwareRegistryUrl = "https://hobzcalvin.github.io/blumon/firmware/esp32/esp32_firmware_registry.json"; // Always use production GitHub Pages
+  let espFirmwareRegistryUrl = "https://hobzcalvin.github.io/blumon/firmware/esp32/esp32_firmware_registry.json";
 
-  // LED Configuration State
-  let ledConfig: LedConfiguration | null = null;
-  let showLedConfig = false;
-  let ledConfigLoading = false;
-
-  // Build information from environment variables
+  // Build information
   const buildInfo = {
     version: import.meta.env.VITE_VERSION || 'dev',
     commitHash: import.meta.env.VITE_COMMIT_HASH || 'dev',
@@ -80,7 +73,6 @@
 
   onMount(async () => {
     isWeb = Capacitor.getPlatform() === 'web';
-    
     try {
       await initBle();
       bleSupported = true;
@@ -91,6 +83,23 @@
       statusMessage = 'BLE not supported on this platform';
     }
   });
+
+  function getDeviceSettings(deviceId: string) {
+    if (!deviceSettings[deviceId]) {
+      deviceSettings[deviceId] = {
+        showSettings: false,
+        ledConfig: null,
+        ledConfigLoading: false,
+        deviceInfo: null,
+        otaStatus: null,
+        otaInProgress: false,
+        checkingForUpdate: false,
+        showUpdateConfirmation: false,
+        latestFirmware: null
+      };
+    }
+    return deviceSettings[deviceId];
+  }
 
   async function handleEnableBle() {
     try {
@@ -121,18 +130,14 @@
       
       // Handle auto-connection for web
       if (isWeb && result.autoConnected) {
-        setActiveDevice(result.device.deviceId);
-        statusMessage = `Connected to ${result.device.name}! Discovering services...`;
-        handleServiceDiscoveryAfterConnection(result.device.deviceId);
+        statusMessage = `Connected to ${result.device.name}!`;
       } else if (isWeb && result.connectError) {
         statusMessage = `Device selected but connection failed: ${result.connectError.message}`;
       }
     }).then(() => {
       scanning = false;
-      if (isWeb && !activeDevice) {
-        statusMessage = `Device selection completed.`;
-      } else if (!isWeb) {
-        statusMessage = `Scan complete. Found ${devices.length} device(s). Select one to connect.`;
+      if (!isWeb) {
+        statusMessage = `Scan complete. Found ${devices.length} device(s).`;
       }
     }).catch((error: any) => {
       scanning = false;
@@ -145,36 +150,6 @@
       }
       console.error('Scan error:', error);
     });
-  }
-  
-  async function handleServiceDiscoveryAfterConnection(deviceId: string) {
-    try {
-      const discoveredServices = await discoverServices(deviceId);
-      services = discoveredServices;
-      
-      if (services.length === 0) {
-        statusMessage = `Connected, but no services found. Try "Retry Service Discovery" or check if your ESP32 is advertising services.`;
-      } else {
-        statusMessage = `Connected! Found ${services.length} service(s). Fetching device info...`;
-        await handleGetDeviceInfo();
-        await startOTAStatusNotifications(deviceId, (status) => {
-          otaStatus = status;
-          if (status.isError || status.isComplete) {
-            otaInProgress = false;
-          }
-          if (status.statusMessage.includes("OTA_SUCCESS_REBOOTING")) {
-            otaStatus = { statusMessage: 'Update successful! Device is rebooting with new firmware...', isComplete: true };
-            otaInProgress = false;
-            statusMessage = "OTA complete! Device rebooted with new firmware. Please reconnect to see updated info.";
-          } else if (status.statusMessage.includes("OTA_VALIDATING")) {
-            otaStatus = { statusMessage: 'Validating firmware signature...', progress: 95 };
-          }
-        });
-      }
-    } catch (error: any) {
-      statusMessage = 'Service discovery failed after connection';
-      console.error('Service discovery error:', error);
-    }
   }
 
   async function handleStopScan() {
@@ -193,203 +168,154 @@
     try {
       statusMessage = `Connecting to ${device.name}...`;
       await connectToDevice(device);
-      setActiveDevice(device.deviceId);
-      statusMessage = `Connected to ${device.name}. Discovering services...`;
+      statusMessage = `Connected to ${device.name}!`;
       
-      const discoveredServices = await discoverServices(device.deviceId);
-      services = discoveredServices;
-      
-      if (services.length === 0) {
-        statusMessage = `Connected to ${device.name}, but no services found. Try "Retry Service Discovery" or check if your ESP32 is advertising services.`;
-      } else {
-        statusMessage = `Connected! Found ${services.length} service(s). Fetching device info...`;
-        await handleGetDeviceInfo(); // Automatically get device info on connect
-        await handleGetLedConfig(); // Automatically get LED config on connect
-        await startOTAStatusNotifications(device.deviceId, (status) => { // Start listening for OTA status
-          otaStatus = status;
-          if (status.isError || status.isComplete) {
-            otaInProgress = false;
-          }
-          // Handle ESP32 reboot notification
-          if (status.statusMessage.includes("OTA_SUCCESS_REBOOTING")) {
-            otaStatus = { statusMessage: 'Update successful! Device is rebooting with new firmware...', isComplete: true };
-            otaInProgress = false;
-            statusMessage = "OTA complete! Device rebooted with new firmware. Please reconnect to see updated info.";
-          } else if (status.statusMessage.includes("OTA_VALIDATING")) {
-            otaStatus = { statusMessage: 'Validating firmware signature...', progress: 95 };
-          }
-        });
-      }
+      // Auto-load device info and LED config
+      const settings = getDeviceSettings(device.deviceId);
+      await loadDeviceInfo(device.deviceId);
+      await loadLedConfig(device.deviceId);
+      await startOTAStatusNotifications(device.deviceId, (status) => {
+        settings.otaStatus = status;
+        if (status.isError || status.isComplete) {
+          settings.otaInProgress = false;
+        }
+      });
     } catch (error: any) {
       statusMessage = `Failed to connect to ${device.name}`;
       console.error('Connect error:', error);
     }
   }
 
-  async function handleRetryServiceDiscovery() {
-    if (!activeDevice) return;
-    
-    try {
-      statusMessage = 'Retrying service discovery...';
-      const discoveredServices = await discoverServices(activeDevice.deviceId);
-      services = discoveredServices;
-      
-      if (services.length === 0) {
-        statusMessage = `Still no services found. Check your ESP32's service advertising.`;
-      } else {
-        statusMessage = `Success! Found ${services.length} service(s). Fetching device info...`;
-        await handleGetDeviceInfo();
-      }
-    } catch (error: any) {
-      statusMessage = 'Service discovery failed again';
-      console.error('Service discovery error:', error);
-    }
-  }
-
-  async function handleDisconnect() {
-    if (!activeDevice) return;
-    
-    try {
-      if (otaInProgress) { 
-        await stopOTAStatusNotifications(activeDevice.deviceId);
-      }
-      await disconnectFromDevice(activeDevice.deviceId);
-      statusMessage = `Disconnected from ${activeDevice.name}`;
-      setActiveDevice(null);
-      services = [];
-      notifications = [];
-      latestFirmware = null;
-      otaStatus = null;
-      otaInProgress = false;
-      showUpdateConfirmation = false;
-    } catch (error: any) {
-      statusMessage = 'Failed to disconnect';
-      console.error('Disconnect error:', error);
-    }
-  }
-
-  async function handleDisconnectDevice(deviceId: string) {
+  async function handleDisconnect(deviceId: string) {
     const device = $connectedDevices.get(deviceId);
     if (!device) return;
     
     try {
+      const settings = getDeviceSettings(deviceId);
+      if (settings.otaInProgress) {
+        await stopOTAStatusNotifications(deviceId);
+      }
       await disconnectFromDevice(deviceId);
       statusMessage = `Disconnected from ${device.name}`;
       
-      // If this was the active device, clear active selection
-      if ($activeDeviceId === deviceId) {
-        setActiveDevice(null);
-      }
+      // Clear device settings
+      delete deviceSettings[deviceId];
     } catch (error: any) {
       statusMessage = 'Failed to disconnect';
       console.error('Disconnect error:', error);
     }
   }
 
-  function toggleDeviceActive(deviceId: string) {
-    if ($activeDeviceId === deviceId) {
-      setActiveDevice(null); // Collapse if already active
-    } else {
-      setActiveDevice(deviceId); // Make this device active
-    }
+  function toggleSettings(deviceId: string) {
+    const settings = getDeviceSettings(deviceId);
+    settings.showSettings = !settings.showSettings;
+    // Force reactivity by creating a new object
+    deviceSettings = { ...deviceSettings };
   }
 
-  async function handleRead(serviceUuid: string, charUuid: string) {
-    if (!activeDevice) return;
-    
+  async function loadDeviceInfo(deviceId: string) {
+    const settings = getDeviceSettings(deviceId);
     try {
-      const value = await readCharacteristic(activeDevice.deviceId, serviceUuid, charUuid);
-      statusMessage = `Read: "${value}"`;
-      console.log('Read value:', value);
+      settings.deviceInfo = await getDeviceInfo(deviceId);
     } catch (error: any) {
-      statusMessage = 'Failed to read characteristic';
-      console.error('Read error:', error);
-    }
-  }
-
-  async function handleWrite(serviceUuid: string, charUuid: string) {
-    if (!activeDevice || !writeData.trim()) return;
-    
-    try {
-      await writeCharacteristic(activeDevice.deviceId, serviceUuid, charUuid, writeData);
-      statusMessage = `Wrote: "${writeData}"`;
-      writeData = '';
-    } catch (error: any) {
-      statusMessage = 'Failed to write characteristic';
-      console.error('Write error:', error);
-    }
-  }
-
-  async function handleStartNotifications(serviceUuid: string, charUuid: string) {
-    if (!activeDevice) return;
-    
-    try {
-      await startNotifications(activeDevice.deviceId, serviceUuid, charUuid, (data) => {
-        notifications = [`${new Date().toLocaleTimeString()}: ${data}`, ...notifications].slice(0, 20);
-      });
-      statusMessage = 'Notifications started';
-    } catch (error: any) {
-      statusMessage = 'Failed to start notifications';
-      console.error('Notifications error:', error);
-    }
-  }
-
-  async function handleStopNotifications(serviceUuid: string, charUuid: string) {
-    if (!activeDevice) return;
-    
-    try {
-      await stopNotifications(activeDevice.deviceId, serviceUuid, charUuid);
-      statusMessage = 'Notifications stopped';
-    } catch (error: any) {
-      statusMessage = 'Failed to stop notifications';
-      console.error('Stop notifications error:', error);
-    }
-  }
-
-  // --- OTA Functions ---
-  async function handleGetDeviceInfo() {
-    if (!activeDevice) return;
-    statusMessage = 'Fetching device info...';
-    try {
-      const info = await getDeviceInfo(activeDevice.deviceId);
-      statusMessage = `Device info received: FW ${info.fw_ver}, HW ${info.hw_ver}`;
-    } catch (error: any) {
-      statusMessage = 'Failed to get device info.';
       console.error('Get device info error:', error);
     }
   }
 
-  // --- LED Configuration Functions ---
-  async function handleGetLedConfig() {
-    if (!activeDevice) return;
-    ledConfigLoading = true;
+  async function loadLedConfig(deviceId: string) {
+    const settings = getDeviceSettings(deviceId);
+    settings.ledConfigLoading = true;
     try {
-      ledConfig = await getLedConfiguration(activeDevice.deviceId);
-      console.log('LED config received:', ledConfig);
+      settings.ledConfig = await getLedConfiguration(deviceId);
     } catch (error: any) {
       console.error('Get LED config error:', error);
-      ledConfig = null;
+      settings.ledConfig = null;
     } finally {
-      ledConfigLoading = false;
+      settings.ledConfigLoading = false;
     }
   }
 
-  async function handleSetLedConfig() {
-    if (!activeDevice || !ledConfig) return;
-    ledConfigLoading = true;
+  async function saveLedConfig(deviceId: string) {
+    const settings = getDeviceSettings(deviceId);
+    if (!settings.ledConfig) return;
+    
+    settings.ledConfigLoading = true;
     try {
-      await setLedConfiguration(activeDevice.deviceId, ledConfig);
+      await setLedConfiguration(deviceId, settings.ledConfig);
       statusMessage = 'LED configuration updated successfully';
     } catch (error: any) {
       statusMessage = 'Failed to update LED configuration';
       console.error('Set LED config error:', error);
     } finally {
-      ledConfigLoading = false;
+      settings.ledConfigLoading = false;
     }
   }
 
-  function addLedStrip() {
-    if (!ledConfig) return;
+  async function checkForUpdate(deviceId: string) {
+    const settings = getDeviceSettings(deviceId);
+    if (!settings.deviceInfo) return;
+    
+    settings.checkingForUpdate = true;
+    settings.showUpdateConfirmation = false;
+    try {
+      firmwareRegistry = await fetchFirmwareRegistry(espFirmwareRegistryUrl);
+      if (firmwareRegistry.length > 0) {
+        settings.latestFirmware = findLatestFirmware(firmwareRegistry, settings.deviceInfo.hw_ver);
+        if (settings.latestFirmware) {
+          if (settings.latestFirmware.version !== settings.deviceInfo.fw_ver) {
+            settings.showUpdateConfirmation = true;
+            statusMessage = `Update available: ${settings.latestFirmware.version}`;
+          } else {
+            statusMessage = `Firmware is up to date (${settings.deviceInfo.fw_ver})`;
+          }
+        } else {
+          statusMessage = `No compatible firmware found for HW ${settings.deviceInfo.hw_ver}`;
+        }
+      }
+    } catch (error: any) {
+      statusMessage = 'Failed to check for updates';
+      console.error('Check for update error:', error);
+    } finally {
+      settings.checkingForUpdate = false;
+    }
+  }
+
+  async function handlePerformOTAUpdate(deviceId: string) {
+    const settings = getDeviceSettings(deviceId);
+    if (!settings.latestFirmware) return;
+    
+    settings.otaInProgress = true;
+    settings.showUpdateConfirmation = false;
+    settings.otaStatus = { statusMessage: 'Starting OTA update...', progress: 0 };
+    
+    const baseUrl = 'https://hobzcalvin.github.io/blumon';
+    const firmwareUrl = `${baseUrl}/${settings.latestFirmware.path}`;
+    const signatureUrl = `${baseUrl}/${settings.latestFirmware.signaturePath}`;
+
+    try {
+      await performOTAUpdate(
+        deviceId,
+        firmwareUrl,
+        signatureUrl,
+        (status) => {
+          settings.otaStatus = status;
+          if (status.isError || status.isComplete) {
+            settings.otaInProgress = false;
+          }
+        }
+      );
+      statusMessage = 'OTA update completed successfully!';
+    } catch (error: any) {
+      statusMessage = 'OTA update failed';
+      console.error('OTA update error:', error);
+      settings.otaInProgress = false;
+    }
+  }
+
+  function addLedStrip(deviceId: string) {
+    const settings = getDeviceSettings(deviceId);
+    if (!settings.ledConfig) return;
+    
     const newStrip: LedStripConfig = {
       chipset: LedChipsets.WS2812_RGB,
       pin: 13,
@@ -400,17 +326,19 @@
       height: 0,
       orientation: 0
     };
-    ledConfig.strips = [...ledConfig.strips, newStrip];
+    settings.ledConfig.strips = [...settings.ledConfig.strips, newStrip];
   }
 
-  function removeLedStrip(index: number) {
-    if (!ledConfig) return;
-    ledConfig.strips = ledConfig.strips.filter((_, i) => i !== index);
+  function removeLedStrip(deviceId: string, index: number) {
+    const settings = getDeviceSettings(deviceId);
+    if (!settings.ledConfig) return;
+    settings.ledConfig.strips = settings.ledConfig.strips.filter((_: any, i: number) => i !== index);
   }
 
-  function updateStripOrientation(stripIndex: number, field: 'rotation' | 'flipH' | 'serpentine', value: number | boolean) {
-    if (!ledConfig) return;
-    const strip = ledConfig.strips[stripIndex];
+  function updateStripOrientation(deviceId: string, stripIndex: number, field: 'rotation' | 'flipH' | 'serpentine', value: number | boolean) {
+    const settings = getDeviceSettings(deviceId);
+    if (!settings.ledConfig) return;
+    const strip = settings.ledConfig.strips[stripIndex];
     if (!strip) return;
     
     if (field === 'rotation' && typeof value === 'number') {
@@ -421,85 +349,6 @@
       strip.orientation = setSerpentine(strip.orientation, value);
     }
   }
-
-  async function handleCheckForUpdate() {
-    if (!activeDevice || !activeDevice.deviceInfo) {
-      statusMessage = 'Connect to a device and get info first.';
-      return;
-    }
-    checkingForUpdate = true;
-    statusMessage = 'Checking for firmware updates...';
-    latestFirmware = null;
-    showUpdateConfirmation = false;
-    try {
-      firmwareRegistry = await fetchFirmwareRegistry(espFirmwareRegistryUrl);
-      if (firmwareRegistry.length > 0) {
-        latestFirmware = findLatestFirmware(firmwareRegistry, activeDevice.deviceInfo.hw_ver);
-        if (latestFirmware) {
-          if (latestFirmware.version !== activeDevice.deviceInfo.fw_ver) {
-            statusMessage = `Update available: ${latestFirmware.version}`;
-            showUpdateConfirmation = true;
-          } else {
-            statusMessage = `Firmware is up to date (${activeDevice.deviceInfo.fw_ver}).`;
-          }
-        } else {
-          statusMessage = `No compatible firmware found for HW ${activeDevice.deviceInfo.hw_ver}.`;
-        }
-      } else {
-        statusMessage = 'Firmware registry is empty or could not be fetched.';
-      }
-    } catch (error: any) {
-      statusMessage = 'Failed to check for updates.';
-      console.error('Check for update error:', error);
-    } finally {
-      checkingForUpdate = false;
-    }
-  }
-
-  async function handlePerformOTAUpdate() {
-    if (!activeDevice || !latestFirmware) return;
-    
-    otaInProgress = true;
-    showUpdateConfirmation = false;
-    otaStatus = { statusMessage: 'Starting OTA update...', progress: 0 };
-    statusMessage = 'OTA update in progress...';
-
-    // Always use GitHub Pages for firmware downloads, even during local development
-    const baseUrl = 'https://hobzcalvin.github.io/blumon'; 
-
-    const firmwareUrl = `${baseUrl}/${latestFirmware.path}`;
-    const signatureUrl = `${baseUrl}/${latestFirmware.signaturePath}`;
-
-    try {
-      await performOTAUpdate(
-        activeDevice.deviceId,
-        firmwareUrl,
-        signatureUrl,
-        (statusUpdate) => {
-          otaStatus = statusUpdate;
-          if (statusUpdate.isComplete || statusUpdate.isError) {
-            otaInProgress = false;
-            if (!statusUpdate.isError && (statusUpdate.statusMessage.includes("OTA_SUCCESS_REBOOTING") || statusUpdate.statusMessage.includes("Device rebooted"))) {
-              statusMessage = "OTA complete. Device rebooted with new firmware. Please reconnect to see updated info.";
-            }
-          }
-        }
-      );
-    } catch (error: any) {
-      console.error('OTA process error:', error);
-      // Check if the error is a write timeout after ESP32 started rebooting
-      if (error.message && error.message.includes('Write timeout') && otaStatus?.statusMessage?.includes('VALIDATING')) {
-        // This is expected - ESP32 rebooted during signature verification
-        otaStatus = { statusMessage: 'Update successful! Device rebooted with new firmware.', isComplete: true };
-        statusMessage = "OTA complete! Device rebooted with new firmware. Please reconnect to see updated info.";
-      } else {
-        otaStatus = { statusMessage: `OTA Error: ${error.message}`, isError: true, isComplete: true };
-        statusMessage = `OTA failed: ${error.message}`;
-      }
-      otaInProgress = false;
-    }
-  }
-
 </script>
 
 <main>
@@ -509,71 +358,6 @@
     <p class="company">by ReVolt Labs</p>
   </header>
 
-  <section class="status">
-    <div class="status-card">
-      <h2>Status</h2>
-      <p class="status-message" class:error={!bleSupported || (otaStatus?.isError === true)} class:success={bleEnabled && activeDevice && (otaStatus?.isComplete === true && otaStatus?.isError !== true)}>
-        {#if otaStatus && otaStatus.statusMessage}
-          {otaStatus.statusMessage}
-          {#if otaStatus.progress !== undefined}
-            ({otaStatus.progress}%)
-          {/if}
-        {:else}
-          {statusMessage}
-        {/if}
-      </p>
-      {#if otaInProgress && otaStatus?.progress !== undefined}
-        <div class="progress-bar-container">
-          <div class="progress-bar" style="width: {otaStatus.progress}%"></div>
-        </div>
-      {/if}
-
-      {#if isWeb}
-        <div class="web-info">
-          <p><strong>Web Mode:</strong> Uses browser's device picker instead of continuous scanning.</p>
-          <p>Requires HTTPS and works best in Chrome/Edge browsers.</p>
-          
-          {#if activeDevice && services.length === 0}
-            <div class="troubleshooting">
-              <h4>🔧 Service Discovery Issues?</h4>
-              <p><strong>Common causes on web:</strong></p>
-              <ul>
-                <li>ESP32 firmware may need 2-3 seconds to initialize services after connection</li>
-                <li>Custom service UUIDs must be known in advance for Web Bluetooth</li>
-                <li>Some ESP32 devices require bonding/pairing first</li>
-                <li>Check browser console (F12) for detailed error messages</li>
-              </ul>
-              <p><strong>💡 Tips:</strong></p>
-              <ul>
-                <li>Try the "Retry Service Discovery" button after waiting a few seconds</li>
-                <li>If you know your ESP32's service UUIDs, contact the developer to add them</li>
-                <li>Test with a different ESP32 sketch that uses standard services</li>
-              </ul>
-            </div>
-          {/if}
-        </div>
-      {/if}
-      <div class="indicators">
-        <div class="indicator" class:active={bleSupported}>
-          <span class="icon">📡</span>
-          <span>BLE Supported</span>
-        </div>
-        <div class="indicator" class:active={bleEnabled}>
-          <span class="icon">🔘</span>
-          <span>Bluetooth Enabled</span>
-        </div>
-        <div class="indicator" class:active={scanning}>
-          <span class="icon">🔍</span>
-          <span>{isWeb ? 'Selecting Device' : 'Scanning'}</span>
-        </div>
-        <div class="indicator" class:active={activeDevice}>
-          <span class="icon">🔗</span>
-          <span>Connected</span>
-        </div>
-      </div>
-    </div>
-  </section>
-
   <section class="controls">
     <div class="control-buttons">
       {#if !bleEnabled && bleSupported}
@@ -582,7 +366,7 @@
         </button>
       {/if}
       
-      {#if bleEnabled && !activeDevice}
+      {#if bleEnabled}
         {#if !scanning}
           <button class="btn primary" on:click={handleStartScan}>
             {isWeb ? 'Select ESP32 Device' : 'Scan for ESP32s'}
@@ -593,392 +377,394 @@
           </button>
         {/if}
       {/if}
+    </div>
+  </section>
 
-      {#if activeDevice}
-        <button class="btn danger" on:click={handleDisconnect} disabled={otaInProgress}>
-          Disconnect from {activeDevice.name}
-        </button>
-        {#if services.length === 0 && !otaInProgress}
-          <button class="btn primary" on:click={handleRetryServiceDiscovery}>
-            Retry Service Discovery
-          </button>
+  <!-- Devices List -->
+  <section class="devices">
+    {#if isWeb}
+      <h2>Connected Devices ({connectedDevicesList.length})</h2>
+    {:else}
+      <h2>
+        {#if connectedDevicesList.length > 0}
+          Devices ({devices.length} found, {connectedDevicesList.length} connected)
+        {:else}
+          Found Devices ({devices.length})
         {/if}
+      </h2>
+    {/if}
+
+    <div class="device-list">
+      <!-- Show connected devices first on mobile -->
+      {#if !isWeb}
+        {#each connectedDevicesList as device (device.deviceId)}
+          {#key deviceSettings}
+            {@const settings = getDeviceSettings(device.deviceId)}
+            
+            <div class="device-card connected">
+              <div class="device-header">
+              <div class="device-info">
+                <h3>{device.name}</h3>
+                <p class="device-id">{device.deviceId}</p>
+                {#if settings.deviceInfo}
+                  <p class="fw-version">FW: {settings.deviceInfo.fw_ver}</p>
+                {/if}
+                <span class="status-badge connected">Connected</span>
+              </div>
+              <div class="device-actions">
+                <button class="btn danger small" on:click={() => handleDisconnect(device.deviceId)} disabled={settings.otaInProgress}>
+                  Disconnect
+                </button>
+                <button class="btn secondary small" on:click={() => toggleSettings(device.deviceId)}>
+                  {settings.showSettings ? 'Hide Settings' : 'Show Settings'}
+                </button>
+              </div>
+            </div>
+
+            {#if settings.showSettings}
+              <div class="device-settings">
+                <!-- Device Info -->
+                {#if settings.deviceInfo}
+                  <div class="settings-section">
+                    <h4>Device Information</h4>
+                    <div class="info-grid">
+                      <div><strong>Firmware:</strong> {settings.deviceInfo.fw_ver}</div>
+                      <div><strong>Hardware:</strong> {settings.deviceInfo.hw_ver}</div>
+                      {#if settings.deviceInfo.heap !== undefined}
+                        <div><strong>Free Heap:</strong> {settings.deviceInfo.heap} bytes</div>
+                      {/if}
+                    </div>
+                    <button class="btn secondary small" on:click={() => loadDeviceInfo(device.deviceId)}>
+                      Refresh Info
+                    </button>
+                  </div>
+                {/if}
+
+                <!-- LED Configuration -->
+                <div class="settings-section">
+                  <h4>LED Configuration</h4>
+                  {#if settings.ledConfigLoading}
+                    <p>Loading...</p>
+                  {:else if settings.ledConfig}
+                    <div class="led-config">
+                      <label>
+                        Global Brightness:
+                        <input type="range" min="0" max="255" bind:value={settings.ledConfig.globalBrightness} />
+                        <span>{settings.ledConfig.globalBrightness}</span>
+                      </label>
+
+                      <div class="strips-section">
+                        <div class="section-header">
+                          <h5>LED Strips ({settings.ledConfig.strips.length})</h5>
+                          <button class="btn primary small" on:click={() => addLedStrip(device.deviceId)}>Add Strip</button>
+                        </div>
+
+                        {#each settings.ledConfig.strips as strip, index}
+                          <div class="strip-card">
+                            <div class="strip-header">
+                              <h6>Strip {index + 1}</h6>
+                              <button class="btn danger small" on:click={() => removeLedStrip(device.deviceId, index)} disabled={settings.ledConfig.strips.length <= 1}>Remove</button>
+                            </div>
+                            <div class="strip-controls">
+                              <div class="control-row">
+                                <label>
+                                  Chipset:
+                                  <select bind:value={strip.chipset}>
+                                    <option value={LedChipsets.WS2812_RGB}>WS2812 RGB</option>
+                                    <option value={LedChipsets.SK6812_RGBW}>SK6812 RGBW</option>
+                                    <option value={LedChipsets.TM1814_RGBW}>TM1814 RGBW</option>
+                                  </select>
+                                </label>
+                                <label>
+                                  Pin:
+                                  <input type="number" min="0" max="39" bind:value={strip.pin} />
+                                </label>
+                                <label>
+                                  LEDs:
+                                  <input type="number" min="1" max="1000" bind:value={strip.numLeds} />
+                                </label>
+                              </div>
+                            </div>
+                          </div>
+                        {/each}
+                      </div>
+
+                      <button class="btn primary" on:click={() => saveLedConfig(device.deviceId)} disabled={settings.ledConfigLoading}>
+                        Save Configuration
+                      </button>
+                    </div>
+                  {:else}
+                    <button class="btn secondary" on:click={() => loadLedConfig(device.deviceId)}>
+                      Load Configuration
+                    </button>
+                  {/if}
+                </div>
+
+                <!-- Firmware Update -->
+                <div class="settings-section">
+                  <h4>Firmware Update</h4>
+                  {#if settings.otaInProgress}
+                    <div class="ota-progress">
+                      <p>{settings.otaStatus?.statusMessage || 'Updating...'}</p>
+                      {#if settings.otaStatus?.progress !== undefined}
+                        <div class="progress-bar">
+                          <div class="progress-fill" style="width: {settings.otaStatus.progress}%"></div>
+                        </div>
+                      {/if}
+                    </div>
+                  {:else}
+                    <button class="btn primary" on:click={() => checkForUpdate(device.deviceId)} disabled={settings.checkingForUpdate}>
+                      {settings.checkingForUpdate ? 'Checking...' : 'Check for Updates'}
+                    </button>
+                    
+                    {#if settings.showUpdateConfirmation && settings.latestFirmware}
+                      <div class="update-available">
+                        <p>New firmware available: <strong>{settings.latestFirmware.version}</strong></p>
+                        <div class="update-actions">
+                          <button class="btn success" on:click={() => handlePerformOTAUpdate(device.deviceId)}>
+                            Update to {settings.latestFirmware.version}
+                          </button>
+                          <button class="btn secondary small" on:click={() => settings.showUpdateConfirmation = false}>
+                            Dismiss
+                          </button>
+                        </div>
+                      </div>
+                    {/if}
+                  {/if}
+                </div>
+              </div>
+            {/if}
+          </div>
+          {/key}
+        {/each}
+      {/if}
+
+      <!-- Available/Found devices -->
+      {#if isWeb}
+        <!-- Web: Only show connected devices -->
+        {#each connectedDevicesList as device (device.deviceId)}
+          {#key deviceSettings}
+            {@const settings = getDeviceSettings(device.deviceId)}
+            
+            <div class="device-card connected">
+            <div class="device-header">
+              <div class="device-info">
+                <h3>{device.name}</h3>
+                <p class="device-id">{device.deviceId}</p>
+                {#if settings.deviceInfo}
+                  <p class="fw-version">FW: {settings.deviceInfo.fw_ver}</p>
+                {/if}
+                <span class="status-badge connected">Connected</span>
+              </div>
+              <div class="device-actions">
+                <button class="btn danger small" on:click={() => handleDisconnect(device.deviceId)} disabled={settings.otaInProgress}>
+                  Disconnect
+                </button>
+                <button class="btn secondary small" on:click={() => toggleSettings(device.deviceId)}>
+                  {settings.showSettings ? 'Hide Settings' : 'Show Settings'}
+                </button>
+              </div>
+            </div>
+
+            {#if settings.showSettings}
+              <!-- Same settings content as mobile version above -->
+              <div class="device-settings">
+                <!-- Device Info -->
+                {#if settings.deviceInfo}
+                  <div class="settings-section">
+                    <h4>Device Information</h4>
+                    <div class="info-grid">
+                      <div><strong>Firmware:</strong> {settings.deviceInfo.fw_ver}</div>
+                      <div><strong>Hardware:</strong> {settings.deviceInfo.hw_ver}</div>
+                      {#if settings.deviceInfo.heap !== undefined}
+                        <div><strong>Free Heap:</strong> {settings.deviceInfo.heap} bytes</div>
+                      {/if}
+                    </div>
+                    <button class="btn secondary small" on:click={() => loadDeviceInfo(device.deviceId)}>
+                      Refresh Info
+                    </button>
+                  </div>
+                {/if}
+
+                <!-- LED Configuration -->
+                <div class="settings-section">
+                  <h4>LED Configuration</h4>
+                  {#if settings.ledConfigLoading}
+                    <p>Loading...</p>
+                  {:else if settings.ledConfig}
+                    <div class="led-config">
+                      <label>
+                        Global Brightness:
+                        <input type="range" min="0" max="255" bind:value={settings.ledConfig.globalBrightness} />
+                        <span>{settings.ledConfig.globalBrightness}</span>
+                      </label>
+
+                      <div class="strips-section">
+                        <div class="section-header">
+                          <h5>LED Strips ({settings.ledConfig.strips.length})</h5>
+                          <button class="btn primary small" on:click={() => addLedStrip(device.deviceId)}>Add Strip</button>
+                        </div>
+
+                        {#each settings.ledConfig.strips as strip, index}
+                          <div class="strip-card">
+                            <div class="strip-header">
+                              <h6>Strip {index + 1}</h6>
+                              <button class="btn danger small" on:click={() => removeLedStrip(device.deviceId, index)} disabled={settings.ledConfig.strips.length <= 1}>Remove</button>
+                            </div>
+                            <div class="strip-controls">
+                              <div class="control-row">
+                                <label>
+                                  Chipset:
+                                  <select bind:value={strip.chipset}>
+                                    <option value={LedChipsets.WS2812_RGB}>WS2812 RGB</option>
+                                    <option value={LedChipsets.SK6812_RGBW}>SK6812 RGBW</option>
+                                    <option value={LedChipsets.TM1814_RGBW}>TM1814 RGBW</option>
+                                  </select>
+                                </label>
+                                <label>
+                                  Pin:
+                                  <input type="number" min="0" max="39" bind:value={strip.pin} />
+                                </label>
+                                <label>
+                                  LEDs:
+                                  <input type="number" min="1" max="1000" bind:value={strip.numLeds} />
+                                </label>
+                              </div>
+                            </div>
+                          </div>
+                        {/each}
+                      </div>
+
+                      <button class="btn primary" on:click={() => saveLedConfig(device.deviceId)} disabled={settings.ledConfigLoading}>
+                        Save Configuration
+                      </button>
+                    </div>
+                  {:else}
+                    <button class="btn secondary" on:click={() => loadLedConfig(device.deviceId)}>
+                      Load Configuration
+                    </button>
+                  {/if}
+                </div>
+
+                <!-- Firmware Update -->
+                <div class="settings-section">
+                  <h4>Firmware Update</h4>
+                  {#if settings.otaInProgress}
+                    <div class="ota-progress">
+                      <p>{settings.otaStatus?.statusMessage || 'Updating...'}</p>
+                      {#if settings.otaStatus?.progress !== undefined}
+                        <div class="progress-bar">
+                          <div class="progress-fill" style="width: {settings.otaStatus.progress}%"></div>
+                        </div>
+                      {/if}
+                    </div>
+                  {:else}
+                    <button class="btn primary" on:click={() => checkForUpdate(device.deviceId)} disabled={settings.checkingForUpdate}>
+                      {settings.checkingForUpdate ? 'Checking...' : 'Check for Updates'}
+                    </button>
+                    
+                    {#if settings.showUpdateConfirmation && settings.latestFirmware}
+                      <div class="update-available">
+                        <p>New firmware available: <strong>{settings.latestFirmware.version}</strong></p>
+                        <div class="update-actions">
+                          <button class="btn success" on:click={() => handlePerformOTAUpdate(device.deviceId)}>
+                            Update to {settings.latestFirmware.version}
+                          </button>
+                          <button class="btn secondary small" on:click={() => settings.showUpdateConfirmation = false}>
+                            Dismiss
+                          </button>
+                        </div>
+                      </div>
+                    {/if}
+                  {/if}
+                </div>
+              </div>
+            {/if}
+          </div>
+          {/key}
+        {/each}
+      {:else}
+        <!-- Mobile: Show available devices to connect to -->
+        {#each devices as device}
+          {@const isConnected = $connectedDevices.has(device.deviceId)}
+          
+          {#if !isConnected}
+            <div class="device-card available">
+              <div class="device-header">
+                <div class="device-info">
+                  <h3>{device.name || 'Unknown Device'}</h3>
+                  <p class="device-id">{device.deviceId}</p>
+                  <span class="status-badge available">Available</span>
+                </div>
+                <div class="device-actions">
+                  <button class="btn primary small" on:click={() => handleConnect(device)}>
+                    Connect
+                  </button>
+                </div>
+              </div>
+            </div>
+          {/if}
+        {/each}
       {/if}
     </div>
   </section>
 
-  <!-- Connected Devices Section -->
-  {#if connectedDevicesList.length > 0}
-    <section class="connected-devices">
-      <h2>Connected Devices ({connectedDevicesList.length})</h2>
-      <div class="devices-grid">
-        {#each connectedDevicesList as device (device.deviceId)}
-          {@const isActive = $activeDeviceId === device.deviceId}
-          
-          <div class="device-card" class:active={isActive}>
-            <div class="device-header" on:click={() => toggleDeviceActive(device.deviceId)}>
-              <div class="device-info">
-                <h3>{device.name}</h3>
-                <p class="device-id">{device.deviceId}</p>
-                {#if device.deviceInfo}
-                  <p class="fw-version">FW: {device.deviceInfo.fw_ver}</p>
-                {/if}
-              </div>
-              <div class="device-status">
-                <span class="connection-badge">Connected</span>
-                {#if isActive}
-                  <span class="active-badge">Active</span>
-                {/if}
-              </div>
-            </div>
-            
-            <div class="device-actions">
-              <button class="btn secondary small" on:click|stopPropagation={() => handleDisconnectDevice(device.deviceId)}>
-                Disconnect
-              </button>
-              {#if !isActive}
-                <button class="btn primary small" on:click|stopPropagation={() => setActiveDevice(device.deviceId)}>
-                  Make Active
-                </button>
-              {/if}
-            </div>
-          </div>
-        {/each}
+  <!-- Status section moved to bottom and made smaller -->
+  <section class="status compact">
+    <div class="status-indicators">
+      <div class="indicator" class:active={bleSupported}>
+        <span class="icon">📡</span>
+        <span>BLE</span>
       </div>
-    </section>
-  {/if}
-
-  {#if activeDevice && activeDevice.deviceInfo}
-    <section class="ota-section">
-      <div class="device-info-card">
-        <h3>Device Information</h3>
-        <p><strong>Firmware Version:</strong> {activeDevice.deviceInfo.fw_ver}</p>
-        <p><strong>Hardware Version:</strong> {activeDevice.deviceInfo.hw_ver}</p>
-        {#if activeDevice.deviceInfo.heap !== undefined}
-          <p><strong>Free Heap:</strong> {activeDevice.deviceInfo.heap} bytes</p>
-        {/if}
-        <button class="btn secondary small" on:click={handleGetDeviceInfo} disabled={otaInProgress || checkingForUpdate}>
-          Refresh Info
-        </button>
+      <div class="indicator" class:active={bleEnabled}>
+        <span class="icon">🔘</span>
+        <span>Enabled</span>
       </div>
-
-      <div class="led-config-section">
-        <h3>LED Strip Configuration</h3>
-        {#if ledConfigLoading}
-          <p>Loading LED configuration...</p>
-        {:else if ledConfig}
-          <div class="config-section">
-            <label>
-              Global Brightness:
-              <input type="range" min="0" max="255" bind:value={ledConfig.globalBrightness} />
-              <span>{ledConfig.globalBrightness}</span>
-            </label>
-          </div>
-
-          <div class="strips-section">
-            <div class="section-header">
-              <h4>LED Strips ({ledConfig.strips.length})</h4>
-              <button class="btn primary small" on:click={addLedStrip} disabled={otaInProgress}>Add Strip</button>
-            </div>
-
-            {#each ledConfig.strips as strip, index}
-              <div class="strip-card">
-                <div class="strip-header">
-                  <h5>Strip {index + 1}</h5>
-                  <button class="btn danger small" on:click={() => removeLedStrip(index)} disabled={otaInProgress || ledConfig.strips.length <= 1}>Remove</button>
-                </div>
-
-                <div class="strip-controls">
-                  <div class="control-row">
-                    <label>
-                      Chipset:
-                      <select bind:value={strip.chipset}>
-                        <option value={LedChipsets.WS2812_RGB}>WS2812 RGB</option>
-                        <option value={LedChipsets.SK6812_RGBW}>SK6812 RGBW</option>
-                        <option value={LedChipsets.TM1814_RGBW}>TM1814 RGBW</option>
-                        <option value={LedChipsets.WS2811_400KHZ}>WS2811 400KHz</option>
-                        <option value={LedChipsets.APA106_RGB}>APA106 RGB</option>
-                      </select>
-                    </label>
-
-                    <label>
-                      Pin:
-                      <input type="number" min="0" max="39" bind:value={strip.pin} />
-                    </label>
-
-                    <label>
-                      LEDs:
-                      <input type="number" min="1" max="1000" bind:value={strip.numLeds} />
-                    </label>
-
-                    <label>
-                      Color Order:
-                      <select bind:value={strip.colorOrder}>
-                        <option value={ColorOrders.RGB}>RGB</option>
-                        <option value={ColorOrders.RBG}>RBG</option>
-                        <option value={ColorOrders.GRB}>GRB</option>
-                        <option value={ColorOrders.GBR}>GBR</option>
-                        <option value={ColorOrders.BRG}>BRG</option>
-                        <option value={ColorOrders.BGR}>BGR</option>
-                      </select>
-                    </label>
-                  </div>
-
-                  <div class="control-row">
-                    <label>
-                      Width (0 = linear):
-                      <input type="number" min="0" max="500" bind:value={strip.width} />
-                    </label>
-
-                    <label>
-                      Height (0 = linear):
-                      <input type="number" min="0" max="500" bind:value={strip.height} />
-                    </label>
-
-                    <label>
-                      RMT Channel:
-                      <input type="number" min="0" max="7" bind:value={strip.rmtChannel} />
-                    </label>
-                  </div>
-
-                  {#if strip.width > 0 && strip.height > 0}
-                    <div class="matrix-controls">
-                      <h6>Matrix Layout Settings</h6>
-                      <div class="control-row">
-                        <label>
-                          Rotation:
-                          <select value={getRotation(strip.orientation)} on:change={(e) => updateStripOrientation(index, 'rotation', parseInt(e.currentTarget.value))}>
-                            <option value="0">0° (No rotation)</option>
-                            <option value="1">90° Clockwise</option>
-                            <option value="2">180°</option>
-                            <option value="3">270° Clockwise</option>
-                          </select>
-                        </label>
-
-                        <label>
-                          <input type="checkbox" checked={getFlipH(strip.orientation)} on:change={(e) => updateStripOrientation(index, 'flipH', e.currentTarget.checked)} />
-                          Flip Horizontally
-                        </label>
-
-                        <label>
-                          <input type="checkbox" checked={getSerpentine(strip.orientation)} on:change={(e) => updateStripOrientation(index, 'serpentine', e.currentTarget.checked)} />
-                          Serpentine Layout
-                        </label>
-                      </div>
-                    </div>
-                  {/if}
-                </div>
-              </div>
-            {/each}
-          </div>
-
-          <div class="config-actions">
-            <button class="btn primary" on:click={handleSetLedConfig} disabled={otaInProgress || ledConfigLoading}>
-              Save Configuration
-            </button>
-            <button class="btn secondary" on:click={handleGetLedConfig} disabled={otaInProgress || ledConfigLoading}>
-              Reload from Device
-            </button>
-          </div>
-        {:else}
-          <p>No LED configuration available. Connect to a device to see configuration.</p>
-        {/if}
+      <div class="indicator" class:active={scanning}>
+        <span class="icon">🔍</span>
+        <span>Scanning</span>
       </div>
-
-      <div class="ota-controls">
-        {#if !otaInProgress}
-          <button class="btn primary" on:click={handleCheckForUpdate} disabled={checkingForUpdate}>
-            {checkingForUpdate ? 'Checking...' : 'Check for Updates'}
-          </button>
-        {/if}
-
-        {#if latestFirmware && latestFirmware.version !== activeDevice.deviceInfo.fw_ver && !otaInProgress && showUpdateConfirmation}
-          <div class="update-available">
-            <p>New firmware available: <strong>{latestFirmware.version}</strong></p>
-            <button class="btn success" on:click={handlePerformOTAUpdate}>
-              Update to {latestFirmware.version}
-            </button>
-            <button class="btn secondary small" on:click={() => showUpdateConfirmation = false}>Dismiss</button>
-          </div>
-        {/if}
+      <div class="indicator" class:active={connectedDevicesList.length > 0}>
+        <span class="icon">🔗</span>
+        <span>Connected ({connectedDevicesList.length})</span>
       </div>
-    </section>
-  {/if}
-
-  {#if devices.length > 0 && !activeDevice}
-    <section class="devices">
-      <h2>{isWeb ? 'Selected Devices' : 'Discovered Devices'} ({devices.length})</h2>
-      <div class="device-list">
-        {#each devices as device}
-          <div class="device-card">
-            <div class="device-header">
-              <div class="device-name">
-                {device.name || 'Unknown Device'}
-              </div>
-              <button class="btn primary small" on:click={() => handleConnect(device)}>
-                Connect
-              </button>
-            </div>
-            <div class="device-id">
-              {device.deviceId}
-            </div>
-            {#if device.rssi}
-              <div class="device-rssi">
-                Signal: {device.rssi} dBm
-              </div>
-            {/if}
-          </div>
-        {/each}
-      </div>
-    </section>
-  {/if}
-
-  {#if activeDevice && services.length > 0}
-    <section class="services">
-      <h2>ESP32 Services & Characteristics (Debug)</h2>
-      <div class="write-section">
-        <input 
-          bind:value={writeData} 
-          placeholder="Enter data to send to ESP32 (RX char)" 
-          class="write-input"
-          disabled={otaInProgress}
-        />
-      </div>
-      
-      <div class="services-list">
-        {#each services as service}
-          <div class="service-card">
-            <h3>Service: {service.uuid}</h3>
-            <div class="characteristics">
-              {#each service.characteristics as characteristic}
-                <div class="characteristic-card">
-                  <div class="char-header">
-                    <span class="char-uuid">{characteristic.uuid}</span>
-                    <div class="char-properties">
-                      {#if characteristic.properties.read}
-                        <span class="property read">R</span>
-                      {/if}
-                      {#if characteristic.properties.write || characteristic.properties.writeWithoutResponse}
-                        <span class="property write">W</span>
-                      {/if}
-                      {#if characteristic.properties.notify}
-                        <span class="property notify">N</span>
-                      {/if}
-                    </div>
-                  </div>
-                  <div class="char-actions">
-                    {#if characteristic.properties.read}
-                      <button class="btn secondary small" on:click={() => handleRead(service.uuid, characteristic.uuid)} disabled={otaInProgress}>
-                        Read
-                      </button>
-                    {/if}
-                    {#if characteristic.properties.write || characteristic.properties.writeWithoutResponse}
-                      <button class="btn primary small" on:click={() => handleWrite(service.uuid, characteristic.uuid)} disabled={otaInProgress}>
-                        Write
-                      </button>
-                    {/if}
-                    {#if characteristic.properties.notify}
-                      <button class="btn info small" on:click={() => handleStartNotifications(service.uuid, characteristic.uuid)} disabled={otaInProgress}>
-                        Notify
-                      </button>
-                      <button class="btn secondary small" on:click={() => handleStopNotifications(service.uuid, characteristic.uuid)} disabled={otaInProgress}>
-                        Stop
-                      </button>
-                    {/if}
-                  </div>
-                </div>
-              {/each}
-            </div>
-          </div>
-        {/each}
-      </div>
-    </section>
-  {/if}
-
-  {#if notifications.length > 0}
-    <section class="notifications">
-      <h2>ESP32 Notifications</h2>
-      <div class="notifications-list">
-        {#each notifications as notification}
-          <div class="notification-item">
-            {notification}
-          </div>
-        {/each}
-      </div>
-    </section>
-  {/if}
+    </div>
+    
+    <div class="status-message">
+      {statusMessage}
+    </div>
+  </section>
 
   <footer>
     <p>Built with SvelteKit + Capacitor + Bluetooth LE</p>
-    <p>Ready for ESP32 communication on iOS, Android, and Web</p>
     <div class="build-info">
-      <p><strong>Build Info:</strong></p>
-      <p>📦 Version: <code>{buildInfo.version}</code></p>
-      <p>📦 Commit: <code>{buildInfo.commitHash}</code></p>
-      <p>🕒 Built: {buildInfo.buildDate}</p>
-      <p>💬 {buildInfo.commitMessage}</p>
+      <p>📦 Version: <code>{buildInfo.version}</code> • 🕒 {buildInfo.buildDate}</p>
     </div>
   </footer>
 </main>
 
 <style>
-  .progress-bar-container {
-    width: 100%;
-    background-color: rgba(255, 255, 255, 0.2);
-    border-radius: 4px;
-    margin-bottom: 1rem;
-    overflow: hidden;
-  }
-  .progress-bar {
-    width: 0%;
-    height: 10px;
-    background-color: #22c55e; /* green-500 */
-    border-radius: 4px;
-    transition: width 0.3s ease-in-out;
-  }
-  .ota-section {
-    margin-top: 2rem;
-    margin-bottom: 2rem;
-  }
-  .device-info-card, .ota-controls {
-    background: rgba(255, 255, 255, 0.1);
-    backdrop-filter: blur(10px);
-    border-radius: 12px;
-    padding: 1.5rem;
-    margin-bottom: 1rem;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-  }
-  .device-info-card h3 { /* Removed .ota-controls h3 as it's not used */
-    margin-top: 0;
-  }
-  .update-available {
-    margin-top: 1rem;
-    padding: 1rem;
-    background: rgba(34, 197, 94, 0.1);
-    border: 1px solid rgba(34, 197, 94, 0.2);
-    border-radius: 8px;
-  }
-  .update-available p {
-    margin: 0 0 0.5rem 0;
-  }
-  .btn.success {
-    background: linear-gradient(135deg, #10b981, #059669);
+  main {
+    padding: 2rem;
+    max-width: 1200px;
+    margin: 0 auto;
+    min-height: 100vh;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: white;
-  }
-  .btn.success:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 16px rgba(16, 185, 129, 0.3);
   }
 
   header {
     text-align: center;
-    margin-bottom: 3rem;
+    margin-bottom: 2rem;
   }
 
   h1 {
     font-size: 3rem;
     margin: 0;
-    text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+    background: linear-gradient(45deg, #fff, #e0e7ff);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
   }
 
   .subtitle {
@@ -989,363 +775,144 @@
 
   .company {
     font-size: 1rem;
-    opacity: 0.7;
     margin: 0;
+    opacity: 0.7;
   }
 
-  .status-card {
-    background: rgba(255, 255, 255, 0.1);
-    backdrop-filter: blur(10px);
-    border-radius: 16px;
-    padding: 2rem;
+  .controls {
     margin-bottom: 2rem;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-  }
-
-  .status-card h2 {
-    margin-top: 0;
-    margin-bottom: 1rem;
-  }
-
-  .status-message {
-    font-size: 1.1rem;
-    margin-bottom: 1.5rem;
-    padding: 1rem;
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.1);
-  }
-
-  .status-message.success {
-    background: rgba(34, 197, 94, 0.2);
-    border: 1px solid rgba(34, 197, 94, 0.3);
-  }
-
-  .status-message.error {
-    background: rgba(239, 68, 68, 0.2);
-    border: 1px solid rgba(239, 68, 68, 0.3);
-  }
-
-  .web-info {
-    background: rgba(59, 130, 246, 0.2);
-    border: 1px solid rgba(59, 130, 246, 0.3);
-    border-radius: 8px;
-    padding: 1rem;
-    margin-bottom: 1.5rem;
-    font-size: 0.9rem;
-  }
-
-  .web-info p {
-    margin: 0.5rem 0;
-  }
-
-  .troubleshooting {
-    background: rgba(245, 158, 11, 0.2);
-    border: 1px solid rgba(245, 158, 11, 0.3);
-    border-radius: 8px;
-    padding: 1rem;
-    margin-top: 1rem;
-  }
-
-  .troubleshooting h4 {
-    margin: 0 0 0.5rem 0;
-    color: #fbbf24;
-  }
-
-  .troubleshooting ul {
-    margin: 0.5rem 0;
-    padding-left: 1.5rem;
-  }
-
-  .troubleshooting li {
-    margin: 0.25rem 0;
-    font-size: 0.85rem;
-  }
-
-  .indicators {
-    display: flex;
-    gap: 1rem;
-    flex-wrap: wrap;
-  }
-
-  .indicator {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.5rem 1rem;
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.1);
-    opacity: 0.5;
-    transition: opacity 0.3s ease;
-  }
-
-  .indicator.active {
-    opacity: 1;
-    background: rgba(34, 197, 94, 0.2);
   }
 
   .control-buttons {
     display: flex;
     gap: 1rem;
     justify-content: center;
-    margin-bottom: 2rem;
     flex-wrap: wrap;
   }
 
-  .btn {
-    padding: 1rem 2rem;
-    border: none;
-    border-radius: 12px;
-    font-size: 1.1rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+  .devices {
+    margin-bottom: 3rem;
   }
 
-  .btn.small {
-    padding: 0.5rem 1rem;
-    font-size: 0.9rem;
+  .devices h2 {
+    margin-bottom: 1.5rem;
+    text-align: center;
   }
 
-  .btn.primary {
-    background: linear-gradient(135deg, #22c55e, #16a34a);
-    color: white;
-  }
-
-  .btn.primary:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 16px rgba(34, 197, 94, 0.3);
-  }
-
-  .btn.secondary {
-    background: linear-gradient(135deg, #f59e0b, #d97706);
-    color: white;
-  }
-
-  .btn.secondary:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 16px rgba(245, 158, 11, 0.3);
-  }
-
-  .btn.danger {
-    background: linear-gradient(135deg, #ef4444, #dc2626);
-    color: white;
-  }
-
-  .btn.danger:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 16px rgba(239, 68, 68, 0.3);
-  }
-
-  .btn.info {
-    background: linear-gradient(135deg, #3b82f6, #2563eb);
-    color: white;
-  }
-
-  .btn.info:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 16px rgba(59, 130, 246, 0.3);
-  }
-
-  .devices h2, .services h2, .notifications h2 {
-    margin-bottom: 1rem;
-  }
-
-  .device-list, .services-list {
-    display: grid;
+  .device-list {
+    display: flex;
+    flex-direction: column;
     gap: 1rem;
   }
 
-  .device-card, .service-card {
+  .device-card {
     background: rgba(255, 255, 255, 0.1);
     backdrop-filter: blur(10px);
     border-radius: 12px;
-    padding: 1.5rem;
     border: 1px solid rgba(255, 255, 255, 0.2);
+    overflow: hidden;
+    transition: all 0.3s ease;
+  }
+
+  .device-card.connected {
+    border-color: rgba(34, 197, 94, 0.5);
+    box-shadow: 0 0 10px rgba(34, 197, 94, 0.2);
+  }
+
+  .device-card.available {
+    border-color: rgba(59, 130, 246, 0.5);
   }
 
   .device-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 0.5rem;
+    padding: 1.5rem;
   }
 
-  .device-name {
-    font-size: 1.2rem;
-    font-weight: 600;
+  .device-info h3 {
+    margin: 0 0 0.5rem 0;
+    color: white;
   }
 
   .device-id {
-    font-family: monospace;
-    font-size: 0.9rem;
+    margin: 0.25rem 0;
+    font-size: 0.8rem;
     opacity: 0.7;
-    margin-bottom: 0.5rem;
-  }
-
-  .device-rssi {
-    font-size: 0.9rem;
-    color: #22c55e;
-  }
-
-  .write-section {
-    margin-bottom: 2rem;
-  }
-
-  .write-input {
-    width: 100%;
-    padding: 1rem;
-    border: 1px solid rgba(255, 255, 255, 0.3);
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.1);
-    color: white;
-    font-size: 1rem;
-  }
-
-  .write-input::placeholder {
-    color: rgba(255, 255, 255, 0.7);
-  }
-
-  .service-card h3 {
-    margin: 0 0 1rem 0;
-    font-size: 1rem;
-    opacity: 0.9;
-  }
-
-  .characteristics {
-    display: grid;
-    gap: 1rem;
-  }
-
-  .characteristic-card {
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 8px;
-    padding: 1rem;
-  }
-
-  .char-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 1rem;
-  }
-
-  .char-uuid {
     font-family: monospace;
+  }
+
+  .fw-version {
+    margin: 0.25rem 0;
     font-size: 0.8rem;
     opacity: 0.8;
   }
 
-  .char-properties {
-    display: flex;
-    gap: 0.25rem;
-  }
-
-  .property {
+  .status-badge {
     padding: 0.25rem 0.5rem;
-    border-radius: 4px;
+    border-radius: 12px;
     font-size: 0.7rem;
-    font-weight: bold;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: 0.5rem;
+    display: inline-block;
   }
 
-  .property.read {
-    background: rgba(34, 197, 94, 0.3);
+  .status-badge.connected {
+    background: rgba(34, 197, 94, 0.2);
+    color: #10b981;
+    border: 1px solid rgba(34, 197, 94, 0.5);
   }
 
-  .property.write {
-    background: rgba(59, 130, 246, 0.3);
+  .status-badge.available {
+    background: rgba(59, 130, 246, 0.2);
+    color: #3b82f6;
+    border: 1px solid rgba(59, 130, 246, 0.5);
   }
 
-  .property.notify {
-    background: rgba(245, 158, 11, 0.3);
-  }
-
-  .char-actions {
+  .device-actions {
     display: flex;
     gap: 0.5rem;
-    flex-wrap: wrap;
+    align-items: center;
   }
 
-  .notifications-list {
-    max-height: 300px;
-    overflow-y: auto;
-    background: rgba(0, 0, 0, 0.2);
-    border-radius: 8px;
-    padding: 1rem;
-  }
-
-  .notification-item {
-    padding: 0.5rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-    font-family: monospace;
-    font-size: 0.9rem;
-  }
-
-  .notification-item:last-child {
-    border-bottom: none;
-  }
-
-  footer {
-    text-align: center;
-    margin-top: 3rem;
-    opacity: 0.7;
-  }
-
-  footer p {
-    margin: 0.5rem 0;
-  }
-
-  .build-info {
-    margin-top: 1.5rem;
-    padding: 1rem;
-    background: rgba(0, 0, 0, 0.2);
-    border-radius: 8px;
-    font-size: 0.85rem;
-  }
-
-  .build-info code {
-    background: rgba(255, 255, 255, 0.2);
-    padding: 0.2rem 0.4rem;
-    border-radius: 4px;
-    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-  }
-
-  .led-config-section {
-    background: rgba(255, 255, 255, 0.1);
-    backdrop-filter: blur(10px);
-    border-radius: 12px;
+  .device-settings {
     padding: 1.5rem;
-    margin-bottom: 1rem;
-    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.05);
   }
 
-  .led-config-section h3 {
-    margin-top: 0;
-    margin-bottom: 1rem;
-  }
-
-  .config-section {
-    margin-bottom: 1.5rem;
+  .settings-section {
+    margin-bottom: 2rem;
     padding: 1rem;
     background: rgba(255, 255, 255, 0.05);
     border-radius: 8px;
   }
 
-  .config-section label {
+  .settings-section h4 {
+    margin: 0 0 1rem 0;
+    font-size: 1.1rem;
+  }
+
+  .info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    font-size: 0.9rem;
+  }
+
+  .led-config label {
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    margin-bottom: 0.5rem;
+    margin-bottom: 1rem;
   }
 
-  .config-section input[type="range"] {
+  .led-config input[type="range"] {
     flex: 1;
     margin: 0 0.5rem;
-  }
-
-  .strips-section {
-    margin-bottom: 1.5rem;
   }
 
   .section-header {
@@ -1355,13 +922,13 @@
     margin-bottom: 1rem;
   }
 
-  .section-header h4 {
+  .section-header h5 {
     margin: 0;
   }
 
   .strip-card {
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 6px;
     padding: 1rem;
     margin-bottom: 1rem;
     border: 1px solid rgba(255, 255, 255, 0.1);
@@ -1374,19 +941,13 @@
     margin-bottom: 1rem;
   }
 
-  .strip-header h5 {
+  .strip-header h6 {
     margin: 0;
-  }
-
-  .strip-controls {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
   }
 
   .control-row {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
     gap: 1rem;
   }
 
@@ -1394,54 +955,182 @@
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
-    font-size: 0.9rem;
+    font-size: 0.8rem;
   }
 
   .control-row input,
   .control-row select {
-    padding: 0.5rem;
+    padding: 0.4rem;
     border: 1px solid rgba(255, 255, 255, 0.3);
     border-radius: 4px;
     background: rgba(255, 255, 255, 0.1);
     color: white;
-    font-size: 0.9rem;
+    font-size: 0.8rem;
   }
 
-  .control-row input[type="checkbox"] {
-    width: auto;
-    margin-right: 0.5rem;
+  .ota-progress {
+    margin: 1rem 0;
   }
 
-  .matrix-controls {
-    margin-top: 1rem;
+  .progress-bar {
+    width: 100%;
+    height: 8px;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 0.5rem;
+  }
+
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #10b981, #34d399);
+    transition: width 0.3s ease;
+  }
+
+  .update-available {
+    margin: 1rem 0;
     padding: 1rem;
-    background: rgba(255, 255, 255, 0.03);
-    border-radius: 6px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(34, 197, 94, 0.1);
+    border-radius: 8px;
+    border: 1px solid rgba(34, 197, 94, 0.3);
   }
 
-  .matrix-controls h6 {
-    margin: 0 0 0.75rem 0;
-    font-size: 0.9rem;
-    opacity: 0.9;
-  }
-
-  .config-actions {
+  .update-actions {
     display: flex;
+    gap: 0.5rem;
+    margin-top: 1rem;
+  }
+
+  /* Compact status section */
+  .status.compact {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 2rem;
+  }
+
+  .status-indicators {
+    display: flex;
+    justify-content: center;
     gap: 1rem;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+  }
+
+  .indicator {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    font-size: 0.8rem;
+    min-width: 80px;
     justify-content: center;
   }
 
-  @media (max-width: 768px) {    
+  .indicator.active {
+    background: rgba(34, 197, 94, 0.2);
+    border-color: rgba(34, 197, 94, 0.5);
+  }
+
+  .icon {
+    font-size: 1rem;
+  }
+
+  .status-message {
+    text-align: center;
+    font-size: 0.9rem;
+    opacity: 0.8;
+    padding: 0.5rem;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 6px;
+  }
+
+  .btn {
+    padding: 0.75rem 1.5rem;
+    border: none;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .btn.primary {
+    background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+    color: white;
+  }
+
+  .btn.secondary {
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+  }
+
+  .btn.danger {
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+    color: white;
+  }
+
+  .btn.success {
+    background: linear-gradient(135deg, #10b981, #059669);
+    color: white;
+  }
+
+  .btn.small {
+    padding: 0.5rem 1rem;
+    font-size: 0.8rem;
+  }
+
+  .btn:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  }
+
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  footer {
+    text-align: center;
+    margin-top: 2rem;
+    opacity: 0.7;
+    font-size: 0.9rem;
+  }
+
+  .build-info {
+    margin-top: 0.5rem;
+    font-size: 0.8rem;
+  }
+
+  .build-info code {
+    background: rgba(255, 255, 255, 0.1);
+    padding: 0.2rem 0.4rem;
+    border-radius: 4px;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  }
+
+  @media (max-width: 768px) {
+    main {
+      padding: 1rem;
+    }
+
     h1 {
       font-size: 2rem;
     }
-    
+
     .control-buttons {
       flex-direction: column;
       align-items: center;
     }
-    
+
     .btn {
       width: 100%;
       max-width: 300px;
@@ -1449,28 +1138,8 @@
 
     .device-header {
       flex-direction: column;
-      align-items: flex-start;
       gap: 1rem;
-    }
-
-    .char-header {
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 0.5rem;
-    }
-
-    .devices-grid {
-      grid-template-columns: 1fr;
-    }
-
-    .device-header {
-      flex-direction: column;
-      gap: 1rem;
-    }
-
-    .device-status {
-      align-items: flex-start;
-      flex-direction: row;
+      align-items: stretch;
     }
 
     .device-actions {
@@ -1480,93 +1149,13 @@
     .device-actions .btn {
       flex: 1;
     }
-  }
 
-  /* Multi-device UI styles */
-  .connected-devices {
-    margin: 2rem 0;
-  }
+    .status-indicators {
+      justify-content: center;
+    }
 
-  .devices-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-    gap: 1rem;
-    margin-top: 1rem;
-  }
-
-  .device-card {
-    background: rgba(255, 255, 255, 0.1);
-    backdrop-filter: blur(10px);
-    border-radius: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    overflow: hidden;
-    transition: all 0.3s ease;
-  }
-
-  .device-card.active {
-    border-color: rgba(34, 197, 94, 0.5);
-    box-shadow: 0 0 20px rgba(34, 197, 94, 0.2);
-    transform: translateY(-2px);
-  }
-
-  .device-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    padding: 1.5rem;
-    cursor: pointer;
-    transition: background 0.2s ease;
-  }
-
-  .device-header:hover {
-    background: rgba(255, 255, 255, 0.05);
-  }
-
-  .device-info h3 {
-    margin: 0 0 0.5rem 0;
-    color: white;
-    font-size: 1.1rem;
-  }
-
-  .device-id, .fw-version {
-    margin: 0.25rem 0;
-    font-size: 0.8rem;
-    opacity: 0.7;
-    font-family: monospace;
-  }
-
-  .device-status {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 0.5rem;
-  }
-
-  .connection-badge, .active-badge {
-    padding: 0.25rem 0.5rem;
-    border-radius: 12px;
-    font-size: 0.7rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-
-  .connection-badge {
-    background: rgba(34, 197, 94, 0.2);
-    color: #10b981;
-    border: 1px solid rgba(34, 197, 94, 0.5);
-  }
-
-  .active-badge {
-    background: rgba(59, 130, 246, 0.2);
-    color: #3b82f6;
-    border: 1px solid rgba(59, 130, 246, 0.5);
-  }
-
-  .device-actions {
-    display: flex;
-    gap: 0.5rem;
-    padding: 0 1.5rem 1.5rem 1.5rem;
-    justify-content: flex-end;
+    .control-row {
+      grid-template-columns: 1fr;
+    }
   }
 </style>
