@@ -1,1 +1,0 @@
-import{f as n,a as t}from"../chunks/BcCzdIWg.js";import"../chunks/DIoet675.js";var i=n("<main><h1>Settings</h1> <p>Coming soon: application settings.</p></main>");function r(o){var a=i();t(o,a)}export{r as component};

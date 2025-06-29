@@ -18,22 +18,58 @@
 			}(window.location))
 		</script>
 		
-		<link rel="modulepreload" href="/blumon/_app/immutable/entry/start.Bn5r24Ng.js">
-		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/D33QY40z.js">
-		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/UjzXMTYm.js">
-		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/Bvtak3ne.js">
-		<link rel="modulepreload" href="/blumon/_app/immutable/entry/app.WD_WEI10.js">
-		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/D1zUUewk.js">
-		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/C8VYoiV6.js">
-		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/BcCzdIWg.js">
-		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/4uw3KPr5.js">
-		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/DlGPwD8I.js">
+		<!-- FastLED WASM Operator System -->
+		<script src="/native/fastled.js"></script>
+		<script>
+			// Global WASM module initialization
+			let wasmModule = null;
+			let wasmReady = false;
+			
+			// Initialize WASM when page loads
+			window.addEventListener('load', async () => {
+				try {
+					wasmModule = await fastled({
+						// Capture WASM stdout/stderr
+						print: function(text) {
+							console.log('[WASM stdout]:', text);
+						},
+						printErr: function(text) {
+							console.error('[WASM stderr]:', text);
+						}
+					});
+					wasmReady = true;
+					console.log('FastLED WASM module loaded successfully');
+					
+					// Dispatch custom event to notify app components
+					window.dispatchEvent(new CustomEvent('wasmReady', { detail: { module: wasmModule } }));
+				} catch (error) {
+					console.error('Failed to load FastLED WASM module:', error);
+				}
+			});
+			
+			// Global helper functions for WASM interaction
+			window.getWasmModule = () => wasmModule;
+			window.isWasmReady = () => wasmReady;
+		</script>
+		
+		
+		<link rel="modulepreload" href="/blumon/_app/immutable/entry/start.nOCBRqVC.js">
+		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/C_i3Svi1.js">
+		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/s_OLZFay.js">
+		<link rel="modulepreload" href="/blumon/_app/immutable/entry/app.BZxF_lcs.js">
+		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/_oc2-SAt.js">
+		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/DLP5dlH0.js">
+		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/BFBJKavG.js">
+		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/DsA2mp4b.js">
+		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/BuJA8iA6.js">
+		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/DUkSdlFC.js">
+		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/CpqvsScj.js">
 	</head>
 	<body data-sveltekit-preload-data="hover">
 		<div style="display: contents">
 			<script>
 				{
-					__sveltekit_39yqd3 = {
+					__sveltekit_36y5lp = {
 						base: "/blumon",
 						assets: "/blumon"
 					};
@@ -41,8 +77,8 @@
 					const element = document.currentScript.parentElement;
 
 					Promise.all([
-						import("/blumon/_app/immutable/entry/start.Bn5r24Ng.js"),
-						import("/blumon/_app/immutable/entry/app.WD_WEI10.js")
+						import("/blumon/_app/immutable/entry/start.nOCBRqVC.js"),
+						import("/blumon/_app/immutable/entry/app.BZxF_lcs.js")
 					]).then(([kit, app]) => {
 						kit.start(app, element);
 					});
