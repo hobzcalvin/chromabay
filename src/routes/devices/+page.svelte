@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { dev } from '$app/environment';
   import { 
     initBle, 
     isBleEnabled, 
@@ -63,6 +64,20 @@
   let firmwareRegistry: FirmwareRegistryEntry[] = [];
   let espFirmwareRegistryUrl = "https://hobzcalvin.github.io/blumon/firmware/esp32/esp32_firmware_registry.json";
 
+  // Fetch firmware registry on app load
+  async function initializeFirmwareRegistry() {
+    try {
+      firmwareRegistry = await fetchFirmwareRegistry(espFirmwareRegistryUrl);
+      // Check for updates for all connected devices
+      const connected = getConnectedDevicesList($connectedDevices);
+      for (const device of connected) {
+        await checkForUpdateSilently(device.deviceId);
+      }
+    } catch (error) {
+      console.error('Failed to initialize firmware registry:', error);
+    }
+  }
+
   // Build information
   const buildInfo = {
     version: import.meta.env.VITE_VERSION || 'dev',
@@ -83,6 +98,63 @@
       statusMessage = 'BLE not supported on this platform';
     }
     
+    // Initialize firmware registry
+    await initializeFirmwareRegistry();
+    
+    // CREATE FAKE DEVICE FOR TESTING (dev mode only)
+    if (dev) {
+      setTimeout(() => {
+        const fakeDeviceId = 'fake-test-device-12345';
+        const fakeName = 'TEST ESP32 Device';
+        
+        // Add to connected devices
+        connectedDevices.update(devices => {
+          devices.set(fakeDeviceId, { 
+            name: fakeName, 
+            deviceId: fakeDeviceId,
+            services: [],
+            lastConnected: Date.now()
+          });
+          return devices;
+        });
+        
+        // Create fake device settings with all the data needed
+        const fakeSettings = {
+          showSettings: false,
+          deviceInfo: {
+            fw_ver: 'esp32-v0.0.13',
+            hw_ver: 'esp32-hw-v1.0',
+            heap: 185420
+          },
+          ledConfig: {
+            globalBrightness: 128,
+            strips: [{
+              chipset: LedChipsets.WS2812_RGB,
+              pin: 13,
+              numLeds: 144,
+              colorOrder: ColorOrders.GRB,
+              rmtChannel: 0,
+              width: 12,
+              height: 12,
+              orientation: 0
+            }]
+          },
+          ledConfigLoading: false,
+          latestFirmware: null,
+          showUpdateConfirmation: false,
+          checkingForUpdate: false,
+          otaInProgress: false,
+          otaStatus: null
+        };
+        
+        deviceSettings[fakeDeviceId] = fakeSettings;
+        deviceSettings = { ...deviceSettings };
+        
+        statusMessage = 'Fake test device created for debugging';
+        console.log('Fake device created:', fakeDeviceId, fakeSettings);
+      }, 2000);
+    }
+    
     // Auto-check for updates when app is foregrounded
     if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', () => {
@@ -90,7 +162,7 @@
           // Check for updates for all connected devices
           const connected = getConnectedDevicesList($connectedDevices);
           for (const device of connected) {
-            checkForUpdate(device.deviceId);
+            checkForUpdateSilently(device.deviceId);
           }
         }
       });
@@ -188,7 +260,7 @@
       await loadDeviceInfo(device.deviceId);
       await loadLedConfig(device.deviceId);
       // Auto-check for firmware updates
-      await checkForUpdate(device.deviceId);
+      await checkForUpdateSilently(device.deviceId);
       
       await startOTAStatusNotifications(device.deviceId, (status) => {
         settings.otaStatus = status;
@@ -223,9 +295,15 @@
     }
   }
 
-  function toggleSettings(deviceId: string) {
+  async function toggleSettings(deviceId: string) {
     const settings = getDeviceSettings(deviceId);
     settings.showSettings = !settings.showSettings;
+    
+    // Auto-load LED config when settings are shown
+    if (settings.showSettings && !settings.ledConfig && !settings.ledConfigLoading) {
+      await loadLedConfig(deviceId);
+    }
+    
     deviceSettings = { ...deviceSettings };
   }
 
@@ -273,38 +351,23 @@
     }
   }
 
-  async function checkForUpdate(deviceId: string) {
+  async function checkForUpdateSilently(deviceId: string) {
     const settings = getDeviceSettings(deviceId);
-    if (!settings.deviceInfo) return;
-    
-    settings.checkingForUpdate = true;
-    settings.showUpdateConfirmation = false;
-    // Force reactivity update
-    deviceSettings = { ...deviceSettings };
+    if (!settings.deviceInfo || firmwareRegistry.length === 0) return;
     
     try {
-      firmwareRegistry = await fetchFirmwareRegistry(espFirmwareRegistryUrl);
-      if (firmwareRegistry.length > 0) {
-        settings.latestFirmware = findLatestFirmware(firmwareRegistry, settings.deviceInfo.hw_ver);
-        if (settings.latestFirmware) {
-          if (settings.latestFirmware.version !== settings.deviceInfo.fw_ver) {
-            settings.showUpdateConfirmation = true;
-            statusMessage = `Update available: ${settings.latestFirmware.version}`;
-          } else {
-            statusMessage = `Firmware is up to date (${settings.deviceInfo.fw_ver})`;
-          }
-        } else {
-          statusMessage = `No compatible firmware found for HW ${settings.deviceInfo.hw_ver}`;
-        }
+      settings.latestFirmware = findLatestFirmware(firmwareRegistry, settings.deviceInfo.hw_ver);
+      if (settings.latestFirmware && settings.latestFirmware.version !== settings.deviceInfo.fw_ver) {
+        settings.showUpdateConfirmation = true;
       }
-    } catch (error: any) {
-      statusMessage = 'Failed to check for updates';
-      console.error('Check for update error:', error);
-    } finally {
-      settings.checkingForUpdate = false;
-      // Force reactivity update
       deviceSettings = { ...deviceSettings };
+    } catch (error: any) {
+      console.error('Silent firmware check error:', error);
     }
+  }
+
+  async function checkForUpdate(deviceId: string) {
+    await checkForUpdateSilently(deviceId);
   }
 
   async function handlePerformOTAUpdate(deviceId: string) {
@@ -499,24 +562,33 @@
                               <div class="control-row">
                                 <label>
                                   Chipset:
-                                  <select bind:value={strip.chipset}>
+                                  <select id="chipset-{device.deviceId}-{index}" name="chipset" bind:value={strip.chipset}>
                                     <option value={LedChipsets.WS2812_RGB}>WS2812 RGB</option>
                                     <option value={LedChipsets.SK6812_RGBW}>SK6812 RGBW</option>
                                     <option value={LedChipsets.TM1814_RGBW}>TM1814 RGBW</option>
+                                    <option value={LedChipsets.WS2811_400KHZ}>WS2811 400KHz</option>
+                                    <option value={LedChipsets.TM1829_RGB}>TM1829 RGB</option>
+                                    <option value={LedChipsets.UCS8903_RGB}>UCS8903 RGB</option>
+                                    <option value={LedChipsets.UCS8904_RGBW}>UCS8904 RGBW</option>
+                                    <option value={LedChipsets.APA106_RGB}>APA106 RGB</option>
+                                    <option value={LedChipsets.FW1906_RGBCW}>FW1906 RGBCW</option>
+                                    <option value={LedChipsets.WS2805_RGBCW}>WS2805 RGBCW</option>
+                                    <option value={LedChipsets.TM1914_RGB}>TM1914 RGB</option>
+                                    <option value={LedChipsets.SM16825_RGBCW}>SM16825 RGBCW</option>
                                   </select>
                                 </label>
                                 <label>
                                   Pin:
-                                  <input type="number" min="0" max="39" bind:value={strip.pin} />
+                                  <input id="pin-{device.deviceId}-{index}" name="pin" type="number" min="0" max="39" bind:value={strip.pin} />
                                 </label>
                                 <label>
                                   LEDs:
-                                  <input type="number" min="1" max="1000" bind:value={strip.numLeds} />
+                                  <input id="numleds-{device.deviceId}-{index}" name="numleds" type="number" min="1" max="1000" bind:value={strip.numLeds} />
                                 </label>
                               </div>                              <div class="control-row">
                                 <label>
                                   Color Order:
-                                  <select bind:value={strip.colorOrder}>
+                                  <select id="colororder-{device.deviceId}-{index}" name="colororder" bind:value={strip.colorOrder}>
                                     <option value={ColorOrders.RGB}>RGB</option>
                                     <option value={ColorOrders.RBG}>RBG</option>
                                     <option value={ColorOrders.GRB}>GRB</option>
@@ -527,26 +599,27 @@
                                 </label>
                                 <label>
                                   RMT Channel:
-                                  <input type="number" min="0" max="7" bind:value={strip.rmtChannel} />
+                                  <input id="rmtchannel-{device.deviceId}-{index}" name="rmtchannel" type="number" min="0" max="7" bind:value={strip.rmtChannel} />
                                 </label>
                               </div>
                               <div class="control-row">
                                 <label>
                                   Width (0 = linear):
-                                  <input type="number" min="0" max="500" bind:value={strip.width} />
+                                  <input id="width-{device.deviceId}-{index}" name="width" type="number" min="0" max="500" bind:value={strip.width} />
                                 </label>
                                 <label>
                                   Height (0 = linear):
-                                  <input type="number" min="0" max="500" bind:value={strip.height} />
+                                  <input id="height-{device.deviceId}-{index}" name="height" type="number" min="0" max="500" bind:value={strip.height} />
                                 </label>
                               </div>
                               {#if strip.width > 0 && strip.height > 0}
+                                {@const currentRotation = getRotation(strip.orientation).toString()}
                                 <div class="matrix-controls">
                                   <h6>Matrix Layout Settings</h6>
                                   <div class="control-row">
                                     <label>
                                       Rotation:
-                                      <select value={getRotation(strip.orientation)} on:change={(e) => updateStripOrientation(device.deviceId, index, 'rotation', parseInt(e.currentTarget.value))}>
+                                      <select id="rotation-{device.deviceId}-{index}" name="rotation" value={currentRotation} on:change={(e) => { strip.orientation = setRotation(strip.orientation, parseInt(e.currentTarget.value)); deviceSettings = { ...deviceSettings }; }}>
                                         <option value="0">0° (No rotation)</option>
                                         <option value="1">90° Clockwise</option>
                                         <option value="2">180°</option>
@@ -554,11 +627,11 @@
                                       </select>
                                     </label>
                                     <label>
-                                      <input type="checkbox" checked={getFlipH(strip.orientation)} on:change={(e) => updateStripOrientation(device.deviceId, index, 'flipH', e.currentTarget.checked)} />
+                                      <input id="flip-{device.deviceId}-{index}" name="flip" type="checkbox" checked={getFlipH(strip.orientation)} on:change={(e) => { strip.orientation = setFlipH(strip.orientation, e.currentTarget.checked); deviceSettings = { ...deviceSettings }; }} />
                                       Flip Horizontally
                                     </label>
                                     <label>
-                                      <input type="checkbox" checked={getSerpentine(strip.orientation)} on:change={(e) => updateStripOrientation(device.deviceId, index, 'serpentine', e.currentTarget.checked)} />
+                                      <input id="serpentine-{device.deviceId}-{index}" name="serpentine" type="checkbox" checked={getSerpentine(strip.orientation)} on:change={(e) => { strip.orientation = setSerpentine(strip.orientation, e.currentTarget.checked); deviceSettings = { ...deviceSettings }; }} />
                                       Serpentine Layout
                                     </label>
                                   </div>
@@ -574,9 +647,7 @@
                       </button>
                     </div>
                   {:else}
-                    <button class="btn secondary" on:click={() => loadLedConfig(device.deviceId)}>
-                      Load Configuration
-                    </button>
+                    <p>Loading LED configuration automatically...</p>
                   {/if}
                 </div>
 
@@ -592,24 +663,20 @@
                         </div>
                       {/if}
                     </div>
-                  {:else}
-                    <button class="btn primary" on:click={() => checkForUpdate(device.deviceId)} disabled={settings.checkingForUpdate}>
-                      {settings.checkingForUpdate ? 'Checking...' : 'Check for Updates'}
-                    </button>
-                    
-                    {#if settings.showUpdateConfirmation && settings.latestFirmware}
-                      <div class="update-available">
-                        <p>New firmware available: <strong>{settings.latestFirmware.version}</strong></p>
-                        <div class="update-actions">
-                          <button class="btn success" on:click={() => handlePerformOTAUpdate(device.deviceId)}>
-                            Update to {settings.latestFirmware.version}
-                          </button>
-                          <button class="btn secondary small" on:click={() => settings.showUpdateConfirmation = false}>
-                            Dismiss
-                          </button>
-                        </div>
+                  {:else if settings.showUpdateConfirmation && settings.latestFirmware}
+                    <div class="update-available">
+                      <p>New firmware available: <strong>{settings.latestFirmware.version}</strong></p>
+                      <div class="update-actions">
+                        <button class="btn success" on:click={() => handlePerformOTAUpdate(device.deviceId)}>
+                          Update to {settings.latestFirmware.version}
+                        </button>
+                        <button class="btn secondary small" on:click={() => settings.showUpdateConfirmation = false}>
+                          Dismiss
+                        </button>
                       </div>
-                    {/if}
+                    </div>
+                  {:else}
+                    <p>Firmware is up to date - Current: {settings.deviceInfo?.fw_ver || 'Unknown'}</p>
                   {/if}
                 </div>
               </div>
@@ -695,24 +762,33 @@
                               <div class="control-row">
                                 <label>
                                   Chipset:
-                                  <select bind:value={strip.chipset}>
+                                  <select id="chipset-web-{device.deviceId}-{index}" name="chipset" bind:value={strip.chipset}>
                                     <option value={LedChipsets.WS2812_RGB}>WS2812 RGB</option>
                                     <option value={LedChipsets.SK6812_RGBW}>SK6812 RGBW</option>
                                     <option value={LedChipsets.TM1814_RGBW}>TM1814 RGBW</option>
+                                    <option value={LedChipsets.WS2811_400KHZ}>WS2811 400KHz</option>
+                                    <option value={LedChipsets.TM1829_RGB}>TM1829 RGB</option>
+                                    <option value={LedChipsets.UCS8903_RGB}>UCS8903 RGB</option>
+                                    <option value={LedChipsets.UCS8904_RGBW}>UCS8904 RGBW</option>
+                                    <option value={LedChipsets.APA106_RGB}>APA106 RGB</option>
+                                    <option value={LedChipsets.FW1906_RGBCW}>FW1906 RGBCW</option>
+                                    <option value={LedChipsets.WS2805_RGBCW}>WS2805 RGBCW</option>
+                                    <option value={LedChipsets.TM1914_RGB}>TM1914 RGB</option>
+                                    <option value={LedChipsets.SM16825_RGBCW}>SM16825 RGBCW</option>
                                   </select>
                                 </label>
                                 <label>
                                   Pin:
-                                  <input type="number" min="0" max="39" bind:value={strip.pin} />
+                                  <input id="pin-{device.deviceId}-{index}" name="pin" type="number" min="0" max="39" bind:value={strip.pin} />
                                 </label>
                                 <label>
                                   LEDs:
-                                  <input type="number" min="1" max="1000" bind:value={strip.numLeds} />
+                                  <input id="numleds-{device.deviceId}-{index}" name="numleds" type="number" min="1" max="1000" bind:value={strip.numLeds} />
                                 </label>
                               </div>                              <div class="control-row">
                                 <label>
                                   Color Order:
-                                  <select bind:value={strip.colorOrder}>
+                                  <select id="colororder-{device.deviceId}-{index}" name="colororder" bind:value={strip.colorOrder}>
                                     <option value={ColorOrders.RGB}>RGB</option>
                                     <option value={ColorOrders.RBG}>RBG</option>
                                     <option value={ColorOrders.GRB}>GRB</option>
@@ -723,26 +799,27 @@
                                 </label>
                                 <label>
                                   RMT Channel:
-                                  <input type="number" min="0" max="7" bind:value={strip.rmtChannel} />
+                                  <input id="rmtchannel-{device.deviceId}-{index}" name="rmtchannel" type="number" min="0" max="7" bind:value={strip.rmtChannel} />
                                 </label>
                               </div>
                               <div class="control-row">
                                 <label>
                                   Width (0 = linear):
-                                  <input type="number" min="0" max="500" bind:value={strip.width} />
+                                  <input id="width-{device.deviceId}-{index}" name="width" type="number" min="0" max="500" bind:value={strip.width} />
                                 </label>
                                 <label>
                                   Height (0 = linear):
-                                  <input type="number" min="0" max="500" bind:value={strip.height} />
+                                  <input id="height-{device.deviceId}-{index}" name="height" type="number" min="0" max="500" bind:value={strip.height} />
                                 </label>
                               </div>
                               {#if strip.width > 0 && strip.height > 0}
+                                {@const currentRotation = getRotation(strip.orientation).toString()}
                                 <div class="matrix-controls">
                                   <h6>Matrix Layout Settings</h6>
                                   <div class="control-row">
                                     <label>
                                       Rotation:
-                                      <select value={getRotation(strip.orientation)} on:change={(e) => updateStripOrientation(device.deviceId, index, 'rotation', parseInt(e.currentTarget.value))}>
+                                      <select id="rotation-web-{device.deviceId}-{index}" name="rotation" value={currentRotation} on:change={(e) => { strip.orientation = setRotation(strip.orientation, parseInt(e.currentTarget.value)); deviceSettings = { ...deviceSettings }; }}>
                                         <option value="0">0° (No rotation)</option>
                                         <option value="1">90° Clockwise</option>
                                         <option value="2">180°</option>
@@ -750,11 +827,11 @@
                                       </select>
                                     </label>
                                     <label>
-                                      <input type="checkbox" checked={getFlipH(strip.orientation)} on:change={(e) => updateStripOrientation(device.deviceId, index, 'flipH', e.currentTarget.checked)} />
+                                      <input id="flip-web-{device.deviceId}-{index}" name="flip" type="checkbox" checked={getFlipH(strip.orientation)} on:change={(e) => { strip.orientation = setFlipH(strip.orientation, e.currentTarget.checked); deviceSettings = { ...deviceSettings }; }} />
                                       Flip Horizontally
                                     </label>
                                     <label>
-                                      <input type="checkbox" checked={getSerpentine(strip.orientation)} on:change={(e) => updateStripOrientation(device.deviceId, index, 'serpentine', e.currentTarget.checked)} />
+                                      <input id="serpentine-web-{device.deviceId}-{index}" name="serpentine" type="checkbox" checked={getSerpentine(strip.orientation)} on:change={(e) => { strip.orientation = setSerpentine(strip.orientation, e.currentTarget.checked); deviceSettings = { ...deviceSettings }; }} />
                                       Serpentine Layout
                                     </label>
                                   </div>
@@ -770,9 +847,7 @@
                       </button>
                     </div>
                   {:else}
-                    <button class="btn secondary" on:click={() => loadLedConfig(device.deviceId)}>
-                      Load Configuration
-                    </button>
+                    <p>Loading LED configuration automatically...</p>
                   {/if}
                 </div>
 
@@ -788,24 +863,20 @@
                         </div>
                       {/if}
                     </div>
-                  {:else}
-                    <button class="btn primary" on:click={() => checkForUpdate(device.deviceId)} disabled={settings.checkingForUpdate}>
-                      {settings.checkingForUpdate ? 'Checking...' : 'Check for Updates'}
-                    </button>
-                    
-                    {#if settings.showUpdateConfirmation && settings.latestFirmware}
-                      <div class="update-available">
-                        <p>New firmware available: <strong>{settings.latestFirmware.version}</strong></p>
-                        <div class="update-actions">
-                          <button class="btn success" on:click={() => handlePerformOTAUpdate(device.deviceId)}>
-                            Update to {settings.latestFirmware.version}
-                          </button>
-                          <button class="btn secondary small" on:click={() => settings.showUpdateConfirmation = false}>
-                            Dismiss
-                          </button>
-                        </div>
+                  {:else if settings.showUpdateConfirmation && settings.latestFirmware}
+                    <div class="update-available">
+                      <p>New firmware available: <strong>{settings.latestFirmware.version}</strong></p>
+                      <div class="update-actions">
+                        <button class="btn success" on:click={() => handlePerformOTAUpdate(device.deviceId)}>
+                          Update to {settings.latestFirmware.version}
+                        </button>
+                        <button class="btn secondary small" on:click={() => settings.showUpdateConfirmation = false}>
+                          Dismiss
+                        </button>
                       </div>
-                    {/if}
+                    </div>
+                  {:else}
+                    <p>Firmware is up to date - Current: {settings.deviceInfo?.fw_ver || 'Unknown'}</p>
                   {/if}
                 </div>
               </div>
