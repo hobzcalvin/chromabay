@@ -675,6 +675,7 @@ export async function syncPatternToAllDevices(): Promise<void> {
   try {
     // Serialize the current pattern
     const serializedPattern = serializeCurrentPattern();
+    console.log('Serialized pattern:', serializedPattern);
     
     // Encode as MessagePack
     const msgpackData = msgpackEncode(serializedPattern);

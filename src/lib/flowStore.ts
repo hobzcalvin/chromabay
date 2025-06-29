@@ -1,4 +1,4 @@
-import { writable } from 'svelte/store';
+import { writable, get } from 'svelte/store';
 import type { Node, Edge, Connection } from '@xyflow/svelte';
 
 // Global start time for synchronized animations across all nodes
@@ -846,6 +846,7 @@ export function deleteNode(nodeId: string): void {
 import type { SerializedPattern } from './patternSerializer';
 import { serializePattern, deserializePattern, deserializePatternWhenReady, estimatePatternSize, compressPattern } from './patternSerializer';
 import { syncPatternToAllDevices } from './ble';
+import { currentPatternName } from './stores/patternsStore';
 
 // Pattern serialization utilities
 export function serializeCurrentPattern(patternName?: string): SerializedPattern {
@@ -856,6 +857,16 @@ export function serializeCurrentPattern(patternName?: string): SerializedPattern
   flowNodes.subscribe(nodes => currentNodes = nodes)();
   flowEdges.subscribe(edges => currentEdges = edges)();
   nodeParameters.subscribe(params => currentParams = params)();
+
+  // If no pattern name provided, get it from the currentPatternName store
+  if (!patternName) {
+    try {
+      patternName = get(currentPatternName);
+    } catch (error) {
+      console.warn('Could not load pattern name from store:', error);
+      patternName = undefined;
+    }
+  }
 
   return serializePattern(currentNodes, currentEdges, currentParams, patternName);
 }
