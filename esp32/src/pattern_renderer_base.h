@@ -43,6 +43,11 @@ protected:
     unsigned long frameStartTime;
     unsigned long globalTime;
     
+    // Timestamp synchronization
+    unsigned long syncedBaseTime = 0;       // Synchronized base timestamp
+    unsigned long syncedLocalTime = 0;      // Local millis() when sync was received
+    bool useSyncedTime = false;             // Whether to use synchronized time
+    
     // Current matrix dimensions (determined from LED strip config)
     uint16_t matrixWidth = 8;  // Default fallback
     uint16_t matrixHeight = 8; // Default fallback
@@ -55,6 +60,7 @@ protected:
     void allocateBuffers();
     void deallocateBuffers();
     void initializeFromLedConfig();
+    unsigned long getCurrentTime(); // Get current time (synced or local)
     
 public:
     PatternRendererBase(LedConfig::LedManager* ledMgr);
@@ -62,6 +68,10 @@ public:
     
     // Configuration
     void updateMatrixConfig(); // Call when LED config changes
+    
+    // Timestamp synchronization
+    void setSynchronizedTime(unsigned long syncTimestamp, unsigned long localTime);
+    void clearSynchronizedTime();
     
     // Pattern management
     void setPattern(Pattern&& pattern);

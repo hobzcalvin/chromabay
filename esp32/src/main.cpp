@@ -48,6 +48,9 @@ PatternRendererBase* patternRenderer = nullptr;
 #define CHARACTERISTIC_UUID_LED_CONFIG_GET "a0be83ed-8dc9-47f0-ab40-b19721d20ed1"
 #define CHARACTERISTIC_UUID_LED_CONFIG_SET "a0be83ee-8dc9-47f0-ab40-b19721d20ed1"
 
+// Timestamp Sync Characteristic - for synchronizing time across devices
+#define CHARACTERISTIC_UUID_TIMESTAMP_SYNC "a0be83ef-8dc9-47f0-ab40-b19721d20ed1"
+
 // OTA Constants
 #define MAX_BLE_CHUNK_SIZE 500 
 
@@ -67,6 +70,9 @@ NimBLECharacteristic* pPatternSyncCharacteristic = nullptr;
 // LED Configuration Characteristics
 NimBLECharacteristic* pLedConfigGetCharacteristic = nullptr;
 NimBLECharacteristic* pLedConfigSetCharacteristic = nullptr;
+
+// Timestamp Sync Characteristic
+NimBLECharacteristic* pTimestampSyncCharacteristic = nullptr;
 
 // Pattern Storage
 static uint8_t* patternBuffer = nullptr;
@@ -100,6 +106,24 @@ struct SignatureVerificationData {
     const esp_partition_t* partition;
     size_t firmware_size;
 };
+
+// Timestamp synchronization variables
+unsigned long syncedTimestampMs = 0;    // The synchronized timestamp from mobile app
+unsigned long syncedLocalTime = 0;      // Local millis() when the sync was received
+bool timestampSynced = false;           // Whether we have received a sync
+
+// Function to get the current synchronized timestamp
+unsigned long getSynchronizedTime() {
+    if (timestampSynced) {
+        // Calculate elapsed time since sync point using local millis()
+        unsigned long currentLocalTime = millis();
+        unsigned long elapsedTime = currentLocalTime - syncedLocalTime;
+        return syncedTimestampMs + elapsedTime;
+    } else {
+        // Fall back to local time if no sync received
+        return millis();
+    }
+}
 
 // Function to verify firmware signature using PSA Crypto API
 bool verifyFirmwareSignature(const uint8_t* signature, size_t sigLen, const esp_partition_t* partition, size_t firmware_size) {
@@ -276,6 +300,7 @@ class ServerCallbacks: public NimBLEServerCallbacks {
         Serial.println("BLE Client Connected");
         // Update device info characteristic as heap might have changed or client needs fresh info
         updateDeviceInfoCharacteristic(); 
+        // Note: Mobile app will send timestamp sync after connection is established
     };
 
     void onDisconnect(NimBLEServer* pServer) {
@@ -730,34 +755,38 @@ class LedConfigSetCallbacks : public NimBLECharacteristicCallbacks {
                         newConfig.strips.reserve(strips_count);
                         
                         for (uint32_t s = 0; s < strips_count; ++s) {
-                            LedConfig::LedStripConfig stripConfig;
                             uint32_t strip_map_count = mpack_expect_map(&reader);
+                            LedConfig::LedStripConfig stripConfig;
                             
                             for (uint32_t k = 0; k < strip_map_count; ++k) {
-                                mpack_expect_cstr(&reader, key_buffer, sizeof(key_buffer));
+                                char strip_key[16];
+                                mpack_expect_cstr(&reader, strip_key, sizeof(strip_key));
                                 
-                                if (strcmp(key_buffer, "cs") == 0) {
+                                if (strcmp(strip_key, "cs") == 0) {
                                     stripConfig.chipset = static_cast<LedConfig::LedChipset>(mpack_expect_u8(&reader));
-                                } else if (strcmp(key_buffer, "pin") == 0) {
+                                } else if (strcmp(strip_key, "pin") == 0) {
                                     stripConfig.pin = mpack_expect_u8(&reader);
-                                } else if (strcmp(key_buffer, "num") == 0) {
+                                } else if (strcmp(strip_key, "num") == 0) {
                                     stripConfig.numLeds = mpack_expect_u16(&reader);
-                                } else if (strcmp(key_buffer, "co") == 0) {
+                                } else if (strcmp(strip_key, "co") == 0) {
                                     stripConfig.colorOrder = static_cast<LedConfig::ColorOrderValue>(mpack_expect_u8(&reader));
-                                } else if (strcmp(key_buffer, "rmt") == 0) {
+                                } else if (strcmp(strip_key, "rmt") == 0) {
                                     stripConfig.rmtChannel = mpack_expect_u8(&reader);
-                                } else if (strcmp(key_buffer, "w") == 0) {
+                                } else if (strcmp(strip_key, "w") == 0) {
                                     stripConfig.width = mpack_expect_u16(&reader);
-                                } else if (strcmp(key_buffer, "h") == 0) {
+                                } else if (strcmp(strip_key, "h") == 0) {
                                     stripConfig.height = mpack_expect_u16(&reader);
-                                } else if (strcmp(key_buffer, "ort") == 0) {
+                                } else if (strcmp(strip_key, "ort") == 0) {
                                     stripConfig.orientation = mpack_expect_u8(&reader);
                                 } else {
                                     mpack_discard(&reader);
                                 }
                             }
                             mpack_done_map(&reader);
-                            newConfig.strips.push_back(stripConfig);
+                            
+                            if (stripConfig.numLeds > 0) {
+                                newConfig.strips.push_back(stripConfig);
+                            }
                         }
                         mpack_done_array(&reader);
                     } else {
@@ -766,30 +795,24 @@ class LedConfigSetCallbacks : public NimBLECharacteristicCallbacks {
                 }
                 mpack_done_map(&reader);
                 
-                if (mpack_reader_destroy(&reader) == mpack_ok) {
-                    // Apply the new configuration
-                    if (configMgr.applyConfiguration(newConfig)) {
-                        // Update pattern renderer with new matrix configuration
-                        if (patternRenderer) {
-                            patternRenderer->updateMatrixConfig();
-                        }
-                        
-                        // Save to file
-                        if (configMgr.saveConfiguration()) {
-                            Serial.println("LED Config updated and saved successfully");
-                        } else {
-                            Serial.println("LED Config applied but failed to save to file");
-                        }
-                    } else {
-                        Serial.println("Failed to apply LED config");
-                    }
-                } else {
-                    Serial.println("Failed to parse LED config MessagePack");
+                // Apply the new configuration
+                configMgr.applyConfiguration(newConfig);
+                
+                // Update pattern renderer matrix config
+                if (patternRenderer) {
+                    patternRenderer->updateMatrixConfig();
                 }
+                
+                // Save configuration to file
+                configMgr.saveConfiguration();
+                
+                Serial.println("LED Configuration updated successfully");
+                
             } catch (...) {
-                Serial.println("Exception while parsing LED config");
-                mpack_reader_destroy(&reader);
+                Serial.println("Error parsing LED configuration MessagePack data");
             }
+            
+            mpack_reader_destroy(&reader);
         }
     }
 };
@@ -821,6 +844,35 @@ class PatternSyncCallbacks : public NimBLECharacteristicCallbacks {
                 Serial.println("Pattern Sync: Failed to allocate memory for pattern");
                 patternBufferSize = 0;
             }
+        }
+    }
+};
+
+// Timestamp Sync Callbacks - for receiving timestamp synchronization from mobile app
+class TimestampSyncCallbacks : public NimBLECharacteristicCallbacks {
+    void onWrite(NimBLECharacteristic* pCharacteristic) {
+        std::string value = pCharacteristic->getValue();
+        if (value.length() == 8) { // Expecting 64-bit timestamp in milliseconds
+            // Parse the timestamp (little-endian 64-bit unsigned integer)
+            uint64_t timestamp = 0;
+            memcpy(&timestamp, value.data(), 8);
+            
+            unsigned long localTime = millis();
+            
+            // Store sync point
+            syncedTimestampMs = (unsigned long)timestamp;
+            syncedLocalTime = localTime;
+            timestampSynced = true;
+            
+            // Update pattern renderer with synchronized time
+            if (patternRenderer) {
+                patternRenderer->setSynchronizedTime(syncedTimestampMs, syncedLocalTime);
+            }
+            
+            Serial.printf("Timestamp sync received: %lu ms (local: %lu ms)\n", 
+                         syncedTimestampMs, syncedLocalTime);
+        } else {
+            Serial.printf("Invalid timestamp sync length: %d bytes (expected 8)\n", value.length());
         }
     }
 };
@@ -981,6 +1033,10 @@ void setup() {
             pLedConfigGetCharacteristic->setCallbacks(new LedConfigGetCallbacks());
             pLedConfigSetCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_LED_CONFIG_SET, NIMBLE_PROPERTY::WRITE);
             pLedConfigSetCharacteristic->setCallbacks(new LedConfigSetCallbacks());
+            
+            // Timestamp Sync Characteristic
+            pTimestampSyncCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_TIMESTAMP_SYNC, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY);
+            pTimestampSyncCharacteristic->setCallbacks(new TimestampSyncCallbacks());
             
             pService->start();
             updateDeviceInfoCharacteristic();

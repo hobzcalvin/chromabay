@@ -39,23 +39,43 @@ void PatternRendererBase::deallocateBuffers() {
 }
 
 void PatternRendererBase::initializeFromLedConfig() {
-    // Get matrix dimensions from first LED strip
-    if (ledManager && ledManager->getNumStrips() > 0) {
-        LedConfig::LedBus* strip = ledManager->getStrip(0);
-        if (strip) {
-            const auto& config = strip->getConfig();
-            if (config.width > 0 && config.height > 0) {
-                matrixWidth = config.width;
-                matrixHeight = config.height;
-            } else {
-                // Linear strip - treat as 1D
-                matrixWidth = config.numLeds;
-                matrixHeight = 1;
-            }
-        }
+    if (!ledManager || ledManager->getNumStrips() == 0) {
+        Serial.println("PatternRenderer: No LED strips available");
+        matrixWidth = 8;  // Default
+        matrixHeight = 8; // Default
+        totalPixels = 64;
+        return;
     }
     
-    totalPixels = matrixWidth * matrixHeight;
+    const LedConfig::LedBus* strip = ledManager->getStrip(0);
+    if (!strip) {
+        Serial.println("PatternRenderer: Strip 0 not available");
+        matrixWidth = 8;  // Default
+        matrixHeight = 8; // Default
+        totalPixels = 64;
+        return;
+    }
+    
+    const auto& config = strip->getConfig();
+    
+    if (config.width > 0 && config.height > 0) {
+        // Matrix configuration
+        matrixWidth = config.width;
+        matrixHeight = config.height;
+        totalPixels = matrixWidth * matrixHeight;
+        Serial.printf("PatternRenderer: Matrix mode %dx%d (%d pixels)\n", 
+                     matrixWidth, matrixHeight, totalPixels);
+    } else {
+        // Linear strip - use square dimensions
+        uint16_t stripLength = config.numLeds;
+        uint16_t side = (uint16_t)sqrt(stripLength);
+        matrixWidth = side;
+        matrixHeight = side;
+        totalPixels = side * side;
+        Serial.printf("PatternRenderer: Linear mode, using %dx%d matrix (%d of %d pixels)\n", 
+                     matrixWidth, matrixHeight, totalPixels, stripLength);
+    }
+    
     allocateBuffers();
 }
 
@@ -95,10 +115,36 @@ void PatternRendererBase::clearPattern() {
     currentPattern.nodes.clear();
 }
 
+unsigned long PatternRendererBase::getCurrentTime() {
+    if (useSyncedTime) {
+        // Calculate elapsed time since sync point using local millis()
+        unsigned long currentLocalTime = millis();
+        unsigned long elapsedTime = currentLocalTime - syncedLocalTime;
+        return syncedBaseTime + elapsedTime;
+    } else {
+        // Fall back to local time if no sync received
+        return millis();
+    }
+}
+
+void PatternRendererBase::setSynchronizedTime(unsigned long syncTimestamp, unsigned long localTime) {
+    syncedBaseTime = syncTimestamp;
+    syncedLocalTime = localTime;
+    useSyncedTime = true;
+    Serial.printf("PatternRenderer: Sync time set - base: %lu, local: %lu\n", syncTimestamp, localTime);
+}
+
+void PatternRendererBase::clearSynchronizedTime() {
+    useSyncedTime = false;
+    syncedBaseTime = 0;
+    syncedLocalTime = 0;
+    Serial.println("PatternRenderer: Synchronized time cleared");
+}
+
 void PatternRendererBase::update() {
     if (!hasPattern || !buffersAllocated) return;
     
-    unsigned long currentTime = millis();
+    unsigned long currentTime = getCurrentTime(); // Use synchronized time if available
     frameStartTime = currentTime;
     
     if (lastFrameTime == 0) {

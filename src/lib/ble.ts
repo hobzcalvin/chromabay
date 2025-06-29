@@ -39,6 +39,9 @@ const CHARACTERISTIC_UUID_PATTERN_SYNC = "a0be83ec-8dc9-47f0-ab40-b19721d20ed1";
 const CHARACTERISTIC_UUID_LED_CONFIG_GET = "a0be83ed-8dc9-47f0-ab40-b19721d20ed1";
 const CHARACTERISTIC_UUID_LED_CONFIG_SET = "a0be83ee-8dc9-47f0-ab40-b19721d20ed1";
 
+// Timestamp Sync Characteristic - for synchronizing time across devices
+const CHARACTERISTIC_UUID_TIMESTAMP_SYNC = "a0be83ef-8dc9-47f0-ab40-b19721d20ed1";
+
 const MAX_BLE_CHUNK_SIZE = 500; // Should match ESP32's definition
 
 // --- OTA Interfaces ---
@@ -213,10 +216,16 @@ export async function connectToDevice(device: any): Promise<void> {
         services: null
       });
       console.log('Connected to device via Web Bluetooth');
+      
+      // Start timestamp synchronization for this device
+      startTimestampSync(device.deviceId);
     } else {
       await BleClient.connect(device.deviceId);
       connectedDevices.set(device.deviceId, { device: device }); // Store native device info
       console.log('Connected to device via Capacitor');
+      
+      // Start timestamp synchronization for this device
+      startTimestampSync(device.deviceId);
     }
     
     // Add to device store for UI state management
@@ -246,6 +255,10 @@ export async function disconnectFromDevice(deviceId: string): Promise<void> {
     }
     connectedDevices.delete(deviceId);
     removeConnectedDevice(deviceId);
+    
+    // Stop timestamp synchronization for this device
+    stopTimestampSync(deviceId);
+    
     console.log('Disconnected from device');
   } catch (error) {
     console.error('Error disconnecting from device:', error);
@@ -922,5 +935,78 @@ export async function setLedConfiguration(deviceId: string, config: LedConfigura
   } catch (error) {
     console.error('Error setting LED configuration:', error);
     throw error;
+  }
+}
+
+// Timestamp Sync Functions
+
+/**
+ * Sends current system timestamp to ESP32 for synchronization
+ */
+export async function sendTimestampSync(deviceId: string): Promise<void> {
+  try {
+    // Get current system time in milliseconds
+    const currentTimestamp = Date.now();
+    
+    // Convert to 64-bit little-endian binary format
+    const buffer = new ArrayBuffer(8);
+    const view = new DataView(buffer);
+    
+    // Write timestamp as 64-bit little-endian unsigned integer
+    // JavaScript numbers are 64-bit floats, but we need to split into two 32-bit parts
+    const timestampLow = currentTimestamp & 0xFFFFFFFF;
+    const timestampHigh = Math.floor(currentTimestamp / 0x100000000);
+    
+    view.setUint32(0, timestampLow, true);  // little-endian
+    view.setUint32(4, timestampHigh, true); // little-endian
+    
+    const dataView = new DataView(buffer);
+    
+    // Send binary data to timestamp sync characteristic
+    await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_TIMESTAMP_SYNC, dataView);
+    
+    console.log(`[Timestamp Sync] Sent timestamp ${currentTimestamp} to device ${deviceId}`);
+  } catch (error) {
+    console.error('Error sending timestamp sync:', error);
+    throw error;
+  }
+}
+
+// Timestamp sync interval management
+const timestampSyncIntervals = new Map<string, number>();
+
+/**
+ * Starts periodic timestamp synchronization for a device (every 10 seconds)
+ */
+function startTimestampSync(deviceId: string): void {
+  // Clear any existing interval
+  stopTimestampSync(deviceId);
+  
+  // Send initial sync
+  sendTimestampSync(deviceId).catch(err => {
+    console.error(`Failed to send initial timestamp sync to ${deviceId}:`, err);
+  });
+  
+  // Set up periodic sync every 10 seconds
+  const intervalId = window.setInterval(() => {
+    sendTimestampSync(deviceId).catch(err => {
+      console.error(`Failed to send periodic timestamp sync to ${deviceId}:`, err);
+      // Don't stop the interval on error - keep trying
+    });
+  }, 10000);
+  
+  timestampSyncIntervals.set(deviceId, intervalId);
+  console.log(`[Timestamp Sync] Started periodic sync for device ${deviceId}`);
+}
+
+/**
+ * Stops periodic timestamp synchronization for a device
+ */
+function stopTimestampSync(deviceId: string): void {
+  const intervalId = timestampSyncIntervals.get(deviceId);
+  if (intervalId !== undefined) {
+    window.clearInterval(intervalId);
+    timestampSyncIntervals.delete(deviceId);
+    console.log(`[Timestamp Sync] Stopped periodic sync for device ${deviceId}`);
   }
 }
