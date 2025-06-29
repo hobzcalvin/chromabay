@@ -1131,8 +1131,18 @@ function syncPatternIfChanged() {
   }
 }
 
-// Subscribe to pattern changes for auto-sync
-flowNodes.subscribe(() => syncPatternIfChanged());
-flowEdges.subscribe(() => syncPatternIfChanged());
-nodeParameters.subscribe(() => syncPatternIfChanged());
+// Defer subscription setup to avoid initialization order issues
+if (typeof window !== 'undefined') {
+  // Wait for next tick to ensure all modules are initialized
+  setTimeout(() => {
+    try {
+      // Subscribe to pattern changes for auto-sync
+      flowNodes.subscribe(() => syncPatternIfChanged());
+      flowEdges.subscribe(() => syncPatternIfChanged());
+      nodeParameters.subscribe(() => syncPatternIfChanged());
+    } catch (error) {
+      console.error('Error setting up pattern sync subscriptions:', error);
+    }
+  }, 0);
+}
 
