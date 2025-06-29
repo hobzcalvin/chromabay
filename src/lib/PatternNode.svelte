@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Handle, Position, type NodeProps } from '@xyflow/svelte';
   import { onMount, onDestroy } from 'svelte';
-  import { flowNodes, flowEdges, nodeOutputs, getNodeDefinition, globalStartTime, type RenderContext } from '$lib/flowStore';
+  import { flowNodes, flowEdges, nodeOutputs, getNodeDefinition, globalStartTime, disableIndividualAnimation, type RenderContext } from '$lib/flowStore';
   
   let { data, id, type, ...nodeProps }: NodeProps & { type: string } = $props();
   
@@ -16,6 +16,9 @@
   
   // Get the clean node type from data
   const nodeType = data.type as string;
+  
+  // Check if centralized rendering is active
+  const useCentralizedRendering = disableIndividualAnimation();
   
   // Get connected input nodes
   function getInputNodes() {
@@ -48,7 +51,11 @@
   onMount(() => {
     ctx = canvasElement.getContext('2d', { willReadFrequently: true });
     lastFrameTime = performance.now();
-    animate();
+    
+    // Only start individual animation if centralized rendering is not active
+    if (!useCentralizedRendering) {
+      animate();
+    }
   });
 
   function animate() {
@@ -133,6 +140,7 @@
   class:has-parameters={getNodeDefinition(nodeType)?.params.length ?? 0 > 0}
   role="button"
   tabindex="0"
+  data-node-id={id}
 >
   <canvas 
     bind:this={canvasElement}

@@ -295,102 +295,73 @@ class WasmOperatorManager {
     const nodeParams = currentParams.get(nodeId) || new Map();
     this.setNodeParameters(nodeId, nodeParams);
     
-    // Fixed buffer assignment - handle both numeric and deserialized node IDs
-    let outputBufferIndex: number;
-    if (nodeId.startsWith('deserialized_')) {
-      // For deserialized nodes, use a hash of the node ID
-      let hash = 0;
-      for (let i = 0; i < nodeId.length; i++) {
-        const char = nodeId.charCodeAt(i);
-        hash = ((hash << 5) - hash) + char;
-        hash = hash & hash; // Convert to 32-bit integer
-      }
-      outputBufferIndex = Math.abs(hash) % 3;
-    } else {
-      // For regular numeric node IDs
-      const numericId = parseInt(nodeId);
-      outputBufferIndex = isNaN(numericId) ? 0 : numericId % 3;
-    }
+    // Get current nodes to assign buffers based on lane positions
+    let currentNodes: Node[] = [];
+    flowNodes.subscribe(nodes => currentNodes = nodes)();
+    
+    // Find the current node to get its lane-based buffer assignment
+    const currentNode = currentNodes.find(n => n.id === nodeId);
+    const outputBufferIndex = currentNode ? getNodeBuffer(currentNode) : 0;
     
     let inputBuffer1Index: number | null = null;
     let inputBuffer2Index: number | null = null;
     
-    // Handle input buffers
+    // Handle input buffers using lane-based assignment
     const inputs = getInputNodes();
-    if ('input' in inputs && inputs.input) {
-      const inputData = getNodeOutput(inputs.input.id);
-      if (inputData) {
-        // Apply same buffer assignment logic for input nodes
-        const inputId = inputs.input.id;
-        if (inputId.startsWith('deserialized_')) {
-          let hash = 0;
-          for (let i = 0; i < inputId.length; i++) {
-            const char = inputId.charCodeAt(i);
-            hash = ((hash << 5) - hash) + char;
-            hash = hash & hash;
-          }
-          inputBuffer1Index = Math.abs(hash) % 3;
-        } else {
-          const numericId = parseInt(inputId);
-          inputBuffer1Index = isNaN(numericId) ? 1 : numericId % 3;
-        }
-        this.copyImageDataToBuffer(inputData, inputBuffer1Index);
-      }
-    }
     
     if ('input1' in inputs && inputs.input1) {
-      const inputData = getNodeOutput(inputs.input1.id);
-      if (inputData) {
-        const inputId = inputs.input1.id;
-        if (inputId.startsWith('deserialized_')) {
-          let hash = 0;
-          for (let i = 0; i < inputId.length; i++) {
-            const char = inputId.charCodeAt(i);
-            hash = ((hash << 5) - hash) + char;
-            hash = hash & hash;
-          }
-          inputBuffer1Index = Math.abs(hash) % 3;
-        } else {
-          const numericId = parseInt(inputId);
-          inputBuffer1Index = isNaN(numericId) ? 1 : numericId % 3;
+      const inputNode = currentNodes.find(n => n.id === inputs.input1.id);
+      inputBuffer1Index = inputNode ? getNodeBuffer(inputNode) : null;
+      
+      if (inputBuffer1Index !== null) {
+        const inputData = getNodeOutput(inputs.input1.id);
+        if (inputData) {
+          this.copyImageDataToBuffer(inputData, inputBuffer1Index, width, height);
         }
-        this.copyImageDataToBuffer(inputData, inputBuffer1Index);
       }
     }
     
     if ('input2' in inputs && inputs.input2) {
-      const inputData = getNodeOutput(inputs.input2.id);
-      if (inputData) {
-        const inputId = inputs.input2.id;
-        if (inputId.startsWith('deserialized_')) {
-          let hash = 0;
-          for (let i = 0; i < inputId.length; i++) {
-            const char = inputId.charCodeAt(i);
-            hash = ((hash << 5) - hash) + char;
-            hash = hash & hash;
-          }
-          inputBuffer2Index = Math.abs(hash) % 3;
-        } else {
-          const numericId = parseInt(inputId);
-          inputBuffer2Index = isNaN(numericId) ? 2 : numericId % 3;
+      const inputNode = currentNodes.find(n => n.id === inputs.input2.id);
+      inputBuffer2Index = inputNode ? getNodeBuffer(inputNode) : null;
+      
+      if (inputBuffer2Index !== null) {
+        const inputData = getNodeOutput(inputs.input2.id);
+        if (inputData) {
+          this.copyImageDataToBuffer(inputData, inputBuffer2Index, width, height);
         }
-        this.copyImageDataToBuffer(inputData, inputBuffer2Index);
       }
     }
     
-    // Render with WASM
+    // Handle single input for non-blend nodes
+    if ('input' in inputs && inputs.input && !('input1' in inputs)) {
+      const inputNode = currentNodes.find(n => n.id === inputs.input.id);
+      inputBuffer1Index = inputNode ? getNodeBuffer(inputNode) : null;
+      
+      if (inputBuffer1Index !== null) {
+        const inputData = getNodeOutput(inputs.input.id);
+        if (inputData) {
+          this.copyImageDataToBuffer(inputData, inputBuffer1Index, width, height);
+        }
+      }
+    }
+    
+    // Execute the WASM operator
     const timestampMs = Math.floor(totalTime * 1000);
     const deltaTimeMs = Math.floor(deltaTime * 1000);
     
-    this.renderOperator(nodeId, inputBuffer1Index, inputBuffer2Index, outputBufferIndex, timestampMs, deltaTimeMs);
+    // Get buffer pointers - use 0 as null pointer for unused inputs
+    const inputBuffer1Ptr = inputBuffer1Index !== null ? this.buffers[inputBuffer1Index] : 0;
+    const inputBuffer2Ptr = inputBuffer2Index !== null ? this.buffers[inputBuffer2Index] : 0;
+    const outputBufferPtr = this.buffers[outputBufferIndex];
     
-    // Convert buffer back to ImageData and draw to canvas
-    const imageData = this.createImageDataFromBuffer(outputBufferIndex);
-    if (imageData) {
-      ctx.putImageData(imageData, 0, 0);
-    } else {
-      console.warn(`[WASM Render] Failed to create ImageData from buffer ${outputBufferIndex} for node ${nodeId}`);
-    }
+    this.wasmModule.ccall('renderOperator', null, 
+      ['number', 'number', 'number', 'number', 'number', 'number', 'number', 'number'], 
+      [this.operatorInstances.get(nodeId), inputBuffer1Ptr, inputBuffer2Ptr, outputBufferPtr, width, height, timestampMs, deltaTimeMs]
+    );
+    
+    // Copy the buffer data back to canvas
+    this.copyBufferToCanvas(outputBufferIndex, ctx, width, height);
   }
   
   createOperatorInstance(nodeId: string, operatorType: string): boolean {
@@ -472,62 +443,35 @@ class WasmOperatorManager {
     }
   }
   
-  renderOperator(nodeId: string, inputBuffer1Index: number | null, inputBuffer2Index: number | null, outputBufferIndex: number, timestampMs: number, deltaTimeMs: number): void {
-    const instanceId = this.operatorInstances.get(nodeId);
-    if (instanceId === undefined || !this.wasmModule) return;
-    
-    try {
-      // Clear output buffer
-      this.wasmModule.ccall('clearBuffer', null, ['number', 'number'], [this.buffers[outputBufferIndex], this.width * this.height]);
-      
-      // Call WASM render function
-      this.wasmModule.ccall('renderOperator', null, 
-        ['number', 'number', 'number', 'number', 'number', 'number', 'number', 'number'],
-        [
-          instanceId,
-          inputBuffer1Index !== null ? this.buffers[inputBuffer1Index] : 0,
-          inputBuffer2Index !== null ? this.buffers[inputBuffer2Index] : 0, 
-          this.buffers[outputBufferIndex],
-          this.width,
-          this.height,
-          timestampMs,
-          deltaTimeMs
-        ]
-      );
-    } catch (error) {
-      console.error(`Failed to render operator for node ${nodeId}:`, error);
-    }
-  }
-  
-  copyImageDataToBuffer(imageData: ImageData, bufferIndex: number): void {
+  copyImageDataToBuffer(imageData: ImageData, bufferIndex: number, width: number, height: number): void {
     if (!this.wasmModule || !this.buffers[bufferIndex]) return;
     
     const buffer = new Uint8Array(this.wasmModule.HEAPU8.buffer, this.buffers[bufferIndex], this.bufferSize);
     const data = imageData.data;
     
     // Convert RGBA to RGB
-    for (let i = 0; i < this.width * this.height; i++) {
+    for (let i = 0; i < width * height; i++) {
       buffer[i * 3] = data[i * 4];     // R
       buffer[i * 3 + 1] = data[i * 4 + 1]; // G  
       buffer[i * 3 + 2] = data[i * 4 + 2]; // B
     }
   }
   
-  createImageDataFromBuffer(bufferIndex: number): ImageData | null {
-    if (!this.wasmModule || !this.buffers[bufferIndex]) return null;
+  copyBufferToCanvas(bufferIndex: number, ctx: CanvasRenderingContext2D, width: number, height: number): void {
+    if (!this.wasmModule || !this.buffers[bufferIndex]) return;
     
     const buffer = new Uint8Array(this.wasmModule.HEAPU8.buffer, this.buffers[bufferIndex], this.bufferSize);
-    const imageData = new ImageData(this.width, this.height);
+    const imageData = new ImageData(width, height);
     
     // Convert RGB to RGBA
-    for (let i = 0; i < this.width * this.height; i++) {
+    for (let i = 0; i < width * height; i++) {
       imageData.data[i * 4] = buffer[i * 3];     // R
       imageData.data[i * 4 + 1] = buffer[i * 3 + 1]; // G
       imageData.data[i * 4 + 2] = buffer[i * 3 + 2]; // B
       imageData.data[i * 4 + 3] = 255;          // A
     }
     
-    return imageData;
+    ctx.putImageData(imageData, 0, 0);
   }
   
   cleanup(): void {
@@ -609,7 +553,7 @@ export function getNodeBuffer(node: Node): number {
     Math.abs(x - LANES.CENTER), 
     Math.abs(x - LANES.RIGHT)
   ];
-  return distances.indexOf(Math.min(...distances)) + 1; // Return 1, 2, or 3
+  return distances.indexOf(Math.min(...distances)); // Return 0, 1, or 2 (0-indexed like serialization system)
 }
 
 // Helper function to validate buffer constraints for connections
@@ -733,6 +677,181 @@ export function createNodeFromType(nodeType: NodeDefinition, id: string, positio
 // Create persistent stores for nodes and edges - will be initialized from patterns
 export const flowNodes = writable<Node[]>([]);
 export const flowEdges = writable<Edge[]>([]);
+
+// Centralized sequential renderer to ensure correct execution order
+class CentralizedRenderer {
+  private animationFrame: number | null = null;
+  private lastFrameTime: number = 0;
+  private isRunning: boolean = false;
+
+  start() {
+    if (this.isRunning) return;
+    this.isRunning = true;
+    this.lastFrameTime = performance.now();
+    this.animate();
+  }
+
+  stop() {
+    this.isRunning = false;
+    if (this.animationFrame) {
+      cancelAnimationFrame(this.animationFrame);
+      this.animationFrame = null;
+    }
+  }
+
+  private animate = () => {
+    if (!this.isRunning) return;
+
+    const currentTime = performance.now();
+    this.renderAllNodesInOrder(currentTime);
+    this.lastFrameTime = currentTime;
+    
+    this.animationFrame = requestAnimationFrame(this.animate);
+  }
+
+  private renderAllNodesInOrder(currentTime: number) {
+    // Get current nodes and edges
+    let nodes: Node[] = [];
+    let edges: Edge[] = [];
+    flowNodes.subscribe(n => nodes = n)();
+    flowEdges.subscribe(e => edges = e)();
+
+    if (nodes.length === 0) return;
+
+    // Calculate execution order using topological sort
+    const executionOrder = this.calculateExecutionOrder(nodes, edges);
+    
+    // Execute nodes sequentially in dependency order
+    const totalTime = (currentTime - get(globalStartTime)) / 1000;
+    const deltaTime = (currentTime - this.lastFrameTime) / 1000;
+
+    for (const node of executionOrder) {
+      if (node.data.type === 'output') continue; // Skip output nodes
+      
+      const nodeDefinition = getNodeDefinition(node.data.type as string);
+      if (!nodeDefinition) continue;
+
+      // Create render context for this node
+      const renderContext: RenderContext = {
+        ctx: null as any, // Will be set by the render function
+        totalTime,
+        deltaTime,
+        width: 100,
+        height: 50,
+        getInputNodes: () => this.getInputNodes(node.id, nodes, edges),
+        getNodeOutput: (nodeId: string) => {
+          const outputs = get(nodeOutputs);
+          return outputs.get(nodeId) || null;
+        },
+        nodeId: node.id
+      };
+
+      // Find the canvas element for this node (if it exists)
+      const canvasElement = document.querySelector(`[data-node-id="${node.id}"] canvas`) as HTMLCanvasElement;
+      if (canvasElement) {
+        const ctx = canvasElement.getContext('2d');
+        if (ctx) {
+          renderContext.ctx = ctx;
+          
+          // Clear canvas
+          ctx.fillStyle = '#000000';
+          ctx.fillRect(0, 0, canvasElement.width, canvasElement.height);
+          
+          // Render this node
+          nodeDefinition.render(renderContext);
+          
+          // Store output for other nodes
+          const outputData = ctx.getImageData(0, 0, canvasElement.width, canvasElement.height);
+          nodeOutputs.update(outputs => {
+            outputs.set(node.id, outputData);
+            return outputs;
+          });
+        }
+      }
+    }
+  }
+
+  private calculateExecutionOrder(nodes: Node[], edges: Edge[]): Node[] {
+    // Simple topological sort
+    const graph = new Map<string, string[]>();
+    const inDegree = new Map<string, number>();
+    
+    // Initialize
+    nodes.forEach(node => {
+      graph.set(node.id, []);
+      inDegree.set(node.id, 0);
+    });
+    
+    // Build graph
+    edges.forEach(edge => {
+      graph.get(edge.source)?.push(edge.target);
+      inDegree.set(edge.target, (inDegree.get(edge.target) || 0) + 1);
+    });
+    
+    // Find nodes with no dependencies
+    const queue: string[] = [];
+    inDegree.forEach((degree, nodeId) => {
+      if (degree === 0) queue.push(nodeId);
+    });
+    
+    // Process in order
+    const result: Node[] = [];
+    while (queue.length > 0) {
+      const nodeId = queue.shift()!;
+      const node = nodes.find(n => n.id === nodeId);
+      if (node) result.push(node);
+      
+      // Update dependencies
+      graph.get(nodeId)?.forEach(dependentId => {
+        const newDegree = (inDegree.get(dependentId) || 0) - 1;
+        inDegree.set(dependentId, newDegree);
+        if (newDegree === 0) {
+          queue.push(dependentId);
+        }
+      });
+    }
+    
+    return result;
+  }
+
+  private getInputNodes(nodeId: string, nodes: Node[], edges: Edge[]) {
+    const inputEdges = edges.filter(edge => edge.target === nodeId);
+    
+    const node = nodes.find(n => n.id === nodeId);
+    if (node?.data.type === 'blend') {
+      // For blend nodes, get both inputs
+      const input1Edge = inputEdges.find(e => e.targetHandle === 'input-1' || e.targetHandle === 'input');
+      const input2Edge = inputEdges.find(e => e.targetHandle === 'input-2');
+      
+      const input1Node = input1Edge ? nodes.find(n => n.id === input1Edge.source) : null;
+      const input2Node = input2Edge ? nodes.find(n => n.id === input2Edge.source) : null;
+      
+      return { input1: input1Node, input2: input2Node };
+    } else {
+      // For other nodes, get single input
+      const inputEdge = inputEdges[0];
+      const inputNode = inputEdge ? nodes.find(n => n.id === inputEdge.source) : null;
+      return { input: inputNode };
+    }
+  }
+}
+
+// Global centralized renderer instance
+const centralizedRenderer = new CentralizedRenderer();
+
+// Start/stop centralized rendering when nodes change
+flowNodes.subscribe(nodes => {
+  if (nodes.length > 0) {
+    centralizedRenderer.start();
+  } else {
+    centralizedRenderer.stop();
+  }
+});
+
+// Export function to disable individual node animation (for PatternNode components)
+export function disableIndividualAnimation() {
+  return true; // Signal that centralized rendering is active
+}
 
 // Subscribe to changes to check dirty state
 let debounceTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -1009,3 +1128,4 @@ function syncPatternIfChanged() {
 flowNodes.subscribe(() => syncPatternIfChanged());
 flowEdges.subscribe(() => syncPatternIfChanged());
 nodeParameters.subscribe(() => syncPatternIfChanged());
+
