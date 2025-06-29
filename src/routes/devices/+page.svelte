@@ -82,6 +82,19 @@
       console.error('BLE initialization failed:', error);
       statusMessage = 'BLE not supported on this platform';
     }
+    
+    // Auto-check for updates when app is foregrounded
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          // Check for updates for all connected devices
+          const connected = getConnectedDevicesList($connectedDevices);
+          for (const device of connected) {
+            checkForUpdate(device.deviceId);
+          }
+        }
+      });
+    }
   });
 
   function getDeviceSettings(deviceId: string) {
@@ -174,11 +187,15 @@
       const settings = getDeviceSettings(device.deviceId);
       await loadDeviceInfo(device.deviceId);
       await loadLedConfig(device.deviceId);
+      // Auto-check for firmware updates
+      await checkForUpdate(device.deviceId);
+      
       await startOTAStatusNotifications(device.deviceId, (status) => {
         settings.otaStatus = status;
         if (status.isError || status.isComplete) {
           settings.otaInProgress = false;
         }
+        deviceSettings = { ...deviceSettings };
       });
     } catch (error: any) {
       statusMessage = `Failed to connect to ${device.name}`;
@@ -209,7 +226,6 @@
   function toggleSettings(deviceId: string) {
     const settings = getDeviceSettings(deviceId);
     settings.showSettings = !settings.showSettings;
-    // Force reactivity by creating a new object
     deviceSettings = { ...deviceSettings };
   }
 
@@ -217,6 +233,8 @@
     const settings = getDeviceSettings(deviceId);
     try {
       settings.deviceInfo = await getDeviceInfo(deviceId);
+      // Force reactivity update
+      deviceSettings = { ...deviceSettings };
     } catch (error: any) {
       console.error('Get device info error:', error);
     }
@@ -227,11 +245,15 @@
     settings.ledConfigLoading = true;
     try {
       settings.ledConfig = await getLedConfiguration(deviceId);
+      // Force reactivity update
+      deviceSettings = { ...deviceSettings };
     } catch (error: any) {
       console.error('Get LED config error:', error);
       settings.ledConfig = null;
     } finally {
       settings.ledConfigLoading = false;
+      // Force reactivity update
+      deviceSettings = { ...deviceSettings };
     }
   }
 
@@ -257,6 +279,9 @@
     
     settings.checkingForUpdate = true;
     settings.showUpdateConfirmation = false;
+    // Force reactivity update
+    deviceSettings = { ...deviceSettings };
+    
     try {
       firmwareRegistry = await fetchFirmwareRegistry(espFirmwareRegistryUrl);
       if (firmwareRegistry.length > 0) {
@@ -277,6 +302,8 @@
       console.error('Check for update error:', error);
     } finally {
       settings.checkingForUpdate = false;
+      // Force reactivity update
+      deviceSettings = { ...deviceSettings };
     }
   }
 
@@ -327,12 +354,14 @@
       orientation: 0
     };
     settings.ledConfig.strips = [...settings.ledConfig.strips, newStrip];
+    deviceSettings = { ...deviceSettings };
   }
 
   function removeLedStrip(deviceId: string, index: number) {
     const settings = getDeviceSettings(deviceId);
     if (!settings.ledConfig) return;
     settings.ledConfig.strips = settings.ledConfig.strips.filter((_: any, i: number) => i !== index);
+    deviceSettings = { ...deviceSettings };
   }
 
   function updateStripOrientation(deviceId: string, stripIndex: number, field: 'rotation' | 'flipH' | 'serpentine', value: number | boolean) {
@@ -348,6 +377,7 @@
     } else if (field === 'serpentine' && typeof value === 'boolean') {
       strip.orientation = setSerpentine(strip.orientation, value);
     }
+    deviceSettings = { ...deviceSettings };
   }
 </script>
 
@@ -483,7 +513,57 @@
                                   LEDs:
                                   <input type="number" min="1" max="1000" bind:value={strip.numLeds} />
                                 </label>
+                              </div>                              <div class="control-row">
+                                <label>
+                                  Color Order:
+                                  <select bind:value={strip.colorOrder}>
+                                    <option value={ColorOrders.RGB}>RGB</option>
+                                    <option value={ColorOrders.RBG}>RBG</option>
+                                    <option value={ColorOrders.GRB}>GRB</option>
+                                    <option value={ColorOrders.GBR}>GBR</option>
+                                    <option value={ColorOrders.BRG}>BRG</option>
+                                    <option value={ColorOrders.BGR}>BGR</option>
+                                  </select>
+                                </label>
+                                <label>
+                                  RMT Channel:
+                                  <input type="number" min="0" max="7" bind:value={strip.rmtChannel} />
+                                </label>
                               </div>
+                              <div class="control-row">
+                                <label>
+                                  Width (0 = linear):
+                                  <input type="number" min="0" max="500" bind:value={strip.width} />
+                                </label>
+                                <label>
+                                  Height (0 = linear):
+                                  <input type="number" min="0" max="500" bind:value={strip.height} />
+                                </label>
+                              </div>
+                              {#if strip.width > 0 && strip.height > 0}
+                                <div class="matrix-controls">
+                                  <h6>Matrix Layout Settings</h6>
+                                  <div class="control-row">
+                                    <label>
+                                      Rotation:
+                                      <select value={getRotation(strip.orientation)} on:change={(e) => updateStripOrientation(device.deviceId, index, 'rotation', parseInt(e.currentTarget.value))}>
+                                        <option value="0">0° (No rotation)</option>
+                                        <option value="1">90° Clockwise</option>
+                                        <option value="2">180°</option>
+                                        <option value="3">270° Clockwise</option>
+                                      </select>
+                                    </label>
+                                    <label>
+                                      <input type="checkbox" checked={getFlipH(strip.orientation)} on:change={(e) => updateStripOrientation(device.deviceId, index, 'flipH', e.currentTarget.checked)} />
+                                      Flip Horizontally
+                                    </label>
+                                    <label>
+                                      <input type="checkbox" checked={getSerpentine(strip.orientation)} on:change={(e) => updateStripOrientation(device.deviceId, index, 'serpentine', e.currentTarget.checked)} />
+                                      Serpentine Layout
+                                    </label>
+                                  </div>
+                                </div>
+                              {/if}
                             </div>
                           </div>
                         {/each}
@@ -629,7 +709,57 @@
                                   LEDs:
                                   <input type="number" min="1" max="1000" bind:value={strip.numLeds} />
                                 </label>
+                              </div>                              <div class="control-row">
+                                <label>
+                                  Color Order:
+                                  <select bind:value={strip.colorOrder}>
+                                    <option value={ColorOrders.RGB}>RGB</option>
+                                    <option value={ColorOrders.RBG}>RBG</option>
+                                    <option value={ColorOrders.GRB}>GRB</option>
+                                    <option value={ColorOrders.GBR}>GBR</option>
+                                    <option value={ColorOrders.BRG}>BRG</option>
+                                    <option value={ColorOrders.BGR}>BGR</option>
+                                  </select>
+                                </label>
+                                <label>
+                                  RMT Channel:
+                                  <input type="number" min="0" max="7" bind:value={strip.rmtChannel} />
+                                </label>
                               </div>
+                              <div class="control-row">
+                                <label>
+                                  Width (0 = linear):
+                                  <input type="number" min="0" max="500" bind:value={strip.width} />
+                                </label>
+                                <label>
+                                  Height (0 = linear):
+                                  <input type="number" min="0" max="500" bind:value={strip.height} />
+                                </label>
+                              </div>
+                              {#if strip.width > 0 && strip.height > 0}
+                                <div class="matrix-controls">
+                                  <h6>Matrix Layout Settings</h6>
+                                  <div class="control-row">
+                                    <label>
+                                      Rotation:
+                                      <select value={getRotation(strip.orientation)} on:change={(e) => updateStripOrientation(device.deviceId, index, 'rotation', parseInt(e.currentTarget.value))}>
+                                        <option value="0">0° (No rotation)</option>
+                                        <option value="1">90° Clockwise</option>
+                                        <option value="2">180°</option>
+                                        <option value="3">270° Clockwise</option>
+                                      </select>
+                                    </label>
+                                    <label>
+                                      <input type="checkbox" checked={getFlipH(strip.orientation)} on:change={(e) => updateStripOrientation(device.deviceId, index, 'flipH', e.currentTarget.checked)} />
+                                      Flip Horizontally
+                                    </label>
+                                    <label>
+                                      <input type="checkbox" checked={getSerpentine(strip.orientation)} on:change={(e) => updateStripOrientation(device.deviceId, index, 'serpentine', e.currentTarget.checked)} />
+                                      Serpentine Layout
+                                    </label>
+                                  </div>
+                                </div>
+                              {/if}
                             </div>
                           </div>
                         {/each}
@@ -1115,6 +1245,22 @@
     padding: 0.2rem 0.4rem;
     border-radius: 4px;
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  }
+
+  /* Matrix configuration styling */
+  .matrix-controls {
+    margin-top: 1rem;
+    padding: 1rem;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .matrix-controls h6 {
+    margin: 0 0 0.75rem 0;
+    color: var(--accent-color);
+    font-size: 0.9rem;
+    font-weight: 600;
   }
 
   @media (max-width: 768px) {
