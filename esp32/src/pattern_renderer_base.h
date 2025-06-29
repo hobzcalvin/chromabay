@@ -6,8 +6,8 @@
 #include "mpack.h"
 
 // Display configuration
-#define DISPLAY_WIDTH 5
-#define DISPLAY_HEIGHT 5
+#define DISPLAY_WIDTH 8
+#define DISPLAY_HEIGHT 8
 #define DISPLAY_PIXELS (DISPLAY_WIDTH * DISPLAY_HEIGHT)
 #define NUM_BUFFERS 3 // Three lanes for patterns
 

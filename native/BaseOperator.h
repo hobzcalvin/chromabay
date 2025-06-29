@@ -190,8 +190,11 @@ public:
 template<typename T>
 class OperatorRegistrar {
 public:
-    OperatorRegistrar(const std::string& name) {
-        OperatorRegistry::getInstance().registerOperator<T>(name);
+    OperatorRegistrar(const std::string& /* className */) {
+        // Create a temporary instance to get the short name
+        T temp;
+        std::string shortName = temp.getName();
+        OperatorRegistry::getInstance().registerOperator<T>(shortName);
     }
 };
 

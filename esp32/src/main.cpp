@@ -16,7 +16,7 @@
 
 // LED Configuration (some of these are now defaults for LedManager config)
 #define LED_PIN     13
-#define NUM_LEDS    25  // 5x5 LED matrix (DISPLAY_WIDTH * DISPLAY_HEIGHT)
+#define NUM_LEDS    64  // 5x5 LED matrix (DISPLAY_WIDTH * DISPLAY_HEIGHT)
 #define BRIGHTNESS  20      // Applied to LedManager
 
 // Note: CRGB type still needed for pattern renderer, but no global array needed

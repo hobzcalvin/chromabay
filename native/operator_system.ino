@@ -24,18 +24,6 @@ std::vector<std::unique_ptr<BaseOperator>> activeOperators;
 std::vector<std::vector<ParameterValue>> operatorParameters;
 int nextOperatorId = 1;
 
-// Helper function to find class name by short name (outside extern "C")
-std::string findClassNameByShortName(const char* shortName) {
-    auto classNames = OperatorRegistry::getInstance().getOperatorNames();
-    for (const auto& className : classNames) {
-        auto op = OperatorRegistry::getInstance().createOperator(className);
-        if (op && std::string(op->getName()) == shortName) {
-            return className;
-        }
-    }
-    return "";
-}
-
 extern "C" {
     // ========================================
     // OPERATOR DISCOVERY AND METADATA API
@@ -48,30 +36,24 @@ extern "C" {
     
     EMSCRIPTEN_KEEPALIVE
     const char* getOperatorName(int index) {
-        auto classNames = OperatorRegistry::getInstance().getOperatorNames();
-        if (index >= 0 && index < (int)classNames.size()) {
+        auto operatorNames = OperatorRegistry::getInstance().getOperatorNames();
+        if (index >= 0 && index < (int)operatorNames.size()) {
             // Convert set to vector for indexing
-            auto it = classNames.begin();
+            auto it = operatorNames.begin();
             std::advance(it, index);
             
-            // Create operator instance to get the short name
-            auto op = OperatorRegistry::getInstance().createOperator(*it);
-            if (op) {
-                static std::string buffer;
-                buffer = op->getName();
-                return buffer.c_str();
-            }
+            // Registry now stores by short names directly
+            static std::string buffer;
+            buffer = *it;
+            return buffer.c_str();
         }
         return nullptr;
     }
     
     EMSCRIPTEN_KEEPALIVE
     const char* getOperatorDisplayName(const char* operatorName) {
-        // operatorName is short name, find class name
-        std::string className = findClassNameByShortName(operatorName);
-        if (className.empty()) return nullptr;
-        
-        auto op = OperatorRegistry::getInstance().createOperator(className);
+        // operatorName is the short name, which is now the registry key
+        auto op = OperatorRegistry::getInstance().createOperator(operatorName);
         if (op) {
             static std::string buffer;
             buffer = op->getDisplayName();
@@ -82,11 +64,8 @@ extern "C" {
     
     EMSCRIPTEN_KEEPALIVE
     int getOperatorParameterCount(const char* operatorName) {
-        // operatorName is short name, find class name
-        std::string className = findClassNameByShortName(operatorName);
-        if (className.empty()) return 0;
-        
-        auto op = OperatorRegistry::getInstance().createOperator(className);
+        // operatorName is the short name, which is now the registry key
+        auto op = OperatorRegistry::getInstance().createOperator(operatorName);
         if (op) {
             return op->getParameterInfo().size();
         }
@@ -95,11 +74,8 @@ extern "C" {
     
     EMSCRIPTEN_KEEPALIVE
     const char* getOperatorParameterInfo(const char* operatorName, int paramIndex) {
-        // operatorName is short name, find class name
-        std::string className = findClassNameByShortName(operatorName);
-        if (className.empty()) return nullptr;
-        
-        auto op = OperatorRegistry::getInstance().createOperator(className);
+        // operatorName is the short name, which is now the registry key
+        auto op = OperatorRegistry::getInstance().createOperator(operatorName);
         if (op) {
             auto params = op->getParameterInfo();
             if (paramIndex >= 0 && paramIndex < (int)params.size()) {
@@ -153,14 +129,8 @@ extern "C" {
     
     EMSCRIPTEN_KEEPALIVE
     int createOperatorInstance(const char* operatorName) {
-        // operatorName is now the short name (e.g., "rainbow"), need to find class name
-        std::string className = findClassNameByShortName(operatorName);
-        if (className.empty()) {
-            printf("Could not find operator with short name: %s\n", operatorName);
-            return -1;
-        }
-        
-        auto op = OperatorRegistry::getInstance().createOperator(className);
+        // operatorName is the short name, which is now the registry key
+        auto op = OperatorRegistry::getInstance().createOperator(operatorName);
         if (op) {
             int id = nextOperatorId++;
             
@@ -173,9 +143,10 @@ extern "C" {
             }
             
             activeOperators[id] = std::move(op);
-            printf("Created operator instance %d for %s (class: %s)\n", id, operatorName, className.c_str());
+            printf("Created operator instance %d for %s\n", id, operatorName);
             return id;
         }
+        printf("Could not find operator: %s\n", operatorName);
         return -1;
     }
     

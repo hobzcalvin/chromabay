@@ -53,12 +53,6 @@
     updateParameter(param, value);
   }
 
-  function handleFloatChange(param: Parameter, event: Event) {
-    const input = event.target as HTMLInputElement;
-    const value = Math.max(0, Math.min(1, parseFloat(input.value) || 0));
-    updateParameter(param, value);
-  }
-
   function handleSelectChange(param: Parameter, event: Event) {
     const select = event.target as HTMLSelectElement;
     updateParameter(param, select.value);
@@ -159,12 +153,12 @@
               <input 
                 id={inputId}
                 type="range" 
-                min="0" 
-                max="1" 
-                step="0.01"
+                min={param.min ?? 0} 
+                max={param.max ?? 1} 
+                step={((param.max ?? 1) - (param.min ?? 0)) / 100}
                 value={getParameterValue(param)}
-                oninput={(e) => handleFloatChange(param, e)}
-                onchange={(e) => handleFloatChange(param, e)}
+                oninput={(e) => handleRangeChange(param, e)}
+                onchange={(e) => handleRangeChange(param, e)}
                 ontouchstart={(e) => e.stopPropagation()}
                 ontouchmove={(e) => e.stopPropagation()}
                 ontouchend={(e) => e.stopPropagation()}

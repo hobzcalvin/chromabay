@@ -146,7 +146,7 @@ bool PatternRendererBase::loadPatternFromMessagePack(const uint8_t* data, unsign
                         mpack_node_copy_cstr(typeNode, typeBuffer, sizeof(typeBuffer));
                         std::string operatorName(typeBuffer);
                         
-                        // Use operator registry to create operator by name - NO HARDCODING!
+                        // Use operator registry to create operator by name - direct lookup now!
                         node.op = OperatorRegistry::getInstance().createOperator(operatorName);
                         if (!node.op) {
                             Serial.printf("Failed to create operator: %s\n", operatorName.c_str());
