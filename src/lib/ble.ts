@@ -13,8 +13,11 @@ function isWeb(): boolean {
   return Capacitor.getPlatform() === 'web';
 }
 
-// Store connected devices and their GATT servers
+// Store connected devices and their GATT servers (internal BLE tracking)
 const connectedDevices = new Map<string, any>();
+
+// Import device store for UI state management
+import { removeConnectedDevice, addConnectedDevice, updateDeviceInfo } from './stores/deviceStore';
 
 // Blumon LED Service UUID - the only service we care about for general commands
 const LED_SERVICE_UUID = 'a0be83e4-8dc9-47f0-ab40-b19721d20ed1';
@@ -148,14 +151,29 @@ function startWebBluetoothScan(
         { services: [LED_SERVICE_UUID] }
       ],
       optionalServices: [LED_SERVICE_UUID] 
-    }).then(device => {
-      callback({
-        device: {
-          deviceId: device.id,
-          name: device.name || 'Unknown Device',
-          webDevice: device 
-        }
-      });
+    }).then(async (device) => {
+      const deviceInfo = {
+        deviceId: device.id,
+        name: device.name || 'Unknown Device',
+        webDevice: device 
+      };
+      
+      // For web, automatically connect after selection
+      try {
+        await connectToDevice(deviceInfo);
+        callback({
+          device: deviceInfo,
+          autoConnected: true
+        });
+      } catch (error) {
+        // If auto-connect fails, still call callback but mark as failed
+        callback({
+          device: deviceInfo,
+          autoConnected: false,
+          connectError: error
+        });
+      }
+      
       resolve();
     }).catch(error => {
       console.error('Error selecting BLE device:', error);
@@ -181,6 +199,14 @@ export async function connectToDevice(device: any): Promise<void> {
   try {
     if (isWeb()) {
       const gattServer = await device.webDevice.gatt.connect();
+      
+      // Listen for disconnection events
+      device.webDevice.addEventListener('gattserverdisconnected', () => {
+        console.log('Device disconnected via GATT event');
+        connectedDevices.delete(device.deviceId);
+        removeConnectedDevice(device.deviceId);
+      });
+      
       connectedDevices.set(device.deviceId, {
         device: device.webDevice,
         gattServer: gattServer,
@@ -192,6 +218,16 @@ export async function connectToDevice(device: any): Promise<void> {
       connectedDevices.set(device.deviceId, { device: device }); // Store native device info
       console.log('Connected to device via Capacitor');
     }
+    
+    // Add to device store for UI state management
+    addConnectedDevice({
+      deviceId: device.deviceId,
+      name: device.name || 'Unknown Device',
+      webDevice: device.webDevice,
+      services: [],
+      lastConnected: Date.now()
+    });
+    
   } catch (error) {
     console.error('Error connecting to device:', error);
     throw error;
@@ -209,6 +245,7 @@ export async function disconnectFromDevice(deviceId: string): Promise<void> {
       await BleClient.disconnect(deviceId);
     }
     connectedDevices.delete(deviceId);
+    removeConnectedDevice(deviceId);
     console.log('Disconnected from device');
   } catch (error) {
     console.error('Error disconnecting from device:', error);
@@ -378,6 +415,10 @@ export async function getDeviceInfo(deviceId: string): Promise<DeviceInfo> {
     try {
       const info = JSON.parse(jsonString) as DeviceInfo;
       console.log('[OTA] Device Info:', info);
+      
+      // Update device store with the fetched info
+      updateDeviceInfo(deviceId, info);
+      
       return info;
     } catch (e) {
       console.error('[OTA] Failed to parse device info JSON:', jsonString, e);

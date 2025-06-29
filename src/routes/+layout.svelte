@@ -2,17 +2,12 @@
   import { page } from '$app/stores';
   import { base } from '$app/paths';
   import { onMount } from 'svelte';
-  import { getConnectedDeviceCount } from '$lib/ble';
+  import { connectedDevices } from '$lib/stores/deviceStore';
   import { SvelteFlowProvider } from '@xyflow/svelte';
 
-  let connected = 0;
-  let interval: any;
+  $: connected = $connectedDevices.size;
   
   onMount(() => {
-    connected = getConnectedDeviceCount();
-    interval = setInterval(() => {
-      connected = getConnectedDeviceCount();
-    }, 1000);
     
     // iOS Safari viewport height fix
     function setVHProperty() {
@@ -31,7 +26,6 @@
     });
     
     return () => {
-      clearInterval(interval);
       window.removeEventListener('resize', setVHProperty);
       window.removeEventListener('orientationchange', setVHProperty);
     };

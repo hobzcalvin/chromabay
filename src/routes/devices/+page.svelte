@@ -40,6 +40,7 @@
     // Removed internal constants like LED_SERVICE_UUID as they are not exported from ble.ts
   } from '$lib/ble';
   import { Capacitor } from '@capacitor/core';
+  import { connectedDevices, activeDeviceId, setActiveDevice, getActiveDevice, getConnectedDevicesList, type ConnectedDevice } from '$lib/stores/deviceStore';
 
   let bleSupported = false;
   let bleEnabled = false;
@@ -47,13 +48,15 @@
   let devices: any[] = [];
   let statusMessage = '';
   let isWeb = false;
-  let selectedDevice: any = null;
   let services: any[] = [];
   let notifications: string[] = [];
   let writeData = '';
 
+  // Device state from store
+  $: activeDevice = getActiveDevice($connectedDevices, $activeDeviceId);
+  $: connectedDevicesList = getConnectedDevicesList($connectedDevices);
+  
   // OTA State
-  let deviceInfo: DeviceInfo | null = null;
   let firmwareRegistry: FirmwareRegistryEntry[] = [];
   let latestFirmware: FirmwareRegistryEntry | null = null;
   let otaStatus: OTAUpdateStatus | null = null;
@@ -115,10 +118,21 @@
       if (!existingDevice) {
         devices = [...devices, result.device];
       }
+      
+      // Handle auto-connection for web
+      if (isWeb && result.autoConnected) {
+        setActiveDevice(result.device.deviceId);
+        statusMessage = `Connected to ${result.device.name}! Discovering services...`;
+        handleServiceDiscoveryAfterConnection(result.device.deviceId);
+      } else if (isWeb && result.connectError) {
+        statusMessage = `Device selected but connection failed: ${result.connectError.message}`;
+      }
     }).then(() => {
-      if (isWeb) {
-        scanning = false;
-        statusMessage = `Device selected. Found ${devices.length} device(s).`;
+      scanning = false;
+      if (isWeb && !activeDevice) {
+        statusMessage = `Device selection completed.`;
+      } else if (!isWeb) {
+        statusMessage = `Scan complete. Found ${devices.length} device(s). Select one to connect.`;
       }
     }).catch((error: any) => {
       scanning = false;
@@ -131,6 +145,36 @@
       }
       console.error('Scan error:', error);
     });
+  }
+  
+  async function handleServiceDiscoveryAfterConnection(deviceId: string) {
+    try {
+      const discoveredServices = await discoverServices(deviceId);
+      services = discoveredServices;
+      
+      if (services.length === 0) {
+        statusMessage = `Connected, but no services found. Try "Retry Service Discovery" or check if your ESP32 is advertising services.`;
+      } else {
+        statusMessage = `Connected! Found ${services.length} service(s). Fetching device info...`;
+        await handleGetDeviceInfo();
+        await startOTAStatusNotifications(deviceId, (status) => {
+          otaStatus = status;
+          if (status.isError || status.isComplete) {
+            otaInProgress = false;
+          }
+          if (status.statusMessage.includes("OTA_SUCCESS_REBOOTING")) {
+            otaStatus = { statusMessage: 'Update successful! Device is rebooting with new firmware...', isComplete: true };
+            otaInProgress = false;
+            statusMessage = "OTA complete! Device rebooted with new firmware. Please reconnect to see updated info.";
+          } else if (status.statusMessage.includes("OTA_VALIDATING")) {
+            otaStatus = { statusMessage: 'Validating firmware signature...', progress: 95 };
+          }
+        });
+      }
+    } catch (error: any) {
+      statusMessage = 'Service discovery failed after connection';
+      console.error('Service discovery error:', error);
+    }
   }
 
   async function handleStopScan() {
@@ -149,7 +193,7 @@
     try {
       statusMessage = `Connecting to ${device.name}...`;
       await connectToDevice(device);
-      selectedDevice = device;
+      setActiveDevice(device.deviceId);
       statusMessage = `Connected to ${device.name}. Discovering services...`;
       
       const discoveredServices = await discoverServices(device.deviceId);
@@ -161,7 +205,7 @@
         statusMessage = `Connected! Found ${services.length} service(s). Fetching device info...`;
         await handleGetDeviceInfo(); // Automatically get device info on connect
         await handleGetLedConfig(); // Automatically get LED config on connect
-        await startOTAStatusNotifications(selectedDevice.deviceId, (status) => { // Start listening for OTA status
+        await startOTAStatusNotifications(device.deviceId, (status) => { // Start listening for OTA status
           otaStatus = status;
           if (status.isError || status.isComplete) {
             otaInProgress = false;
@@ -179,16 +223,15 @@
     } catch (error: any) {
       statusMessage = `Failed to connect to ${device.name}`;
       console.error('Connect error:', error);
-      selectedDevice = null; 
     }
   }
 
   async function handleRetryServiceDiscovery() {
-    if (!selectedDevice) return;
+    if (!activeDevice) return;
     
     try {
       statusMessage = 'Retrying service discovery...';
-      const discoveredServices = await discoverServices(selectedDevice.deviceId);
+      const discoveredServices = await discoverServices(activeDevice.deviceId);
       services = discoveredServices;
       
       if (services.length === 0) {
@@ -204,18 +247,17 @@
   }
 
   async function handleDisconnect() {
-    if (!selectedDevice) return;
+    if (!activeDevice) return;
     
     try {
       if (otaInProgress) { 
-        await stopOTAStatusNotifications(selectedDevice.deviceId);
+        await stopOTAStatusNotifications(activeDevice.deviceId);
       }
-      await disconnectFromDevice(selectedDevice.deviceId);
-      statusMessage = `Disconnected from ${selectedDevice.name}`;
-      selectedDevice = null;
+      await disconnectFromDevice(activeDevice.deviceId);
+      statusMessage = `Disconnected from ${activeDevice.name}`;
+      setActiveDevice(null);
       services = [];
       notifications = [];
-      deviceInfo = null;
       latestFirmware = null;
       otaStatus = null;
       otaInProgress = false;
@@ -226,11 +268,37 @@
     }
   }
 
-  async function handleRead(serviceUuid: string, charUuid: string) {
-    if (!selectedDevice) return;
+  async function handleDisconnectDevice(deviceId: string) {
+    const device = $connectedDevices.get(deviceId);
+    if (!device) return;
     
     try {
-      const value = await readCharacteristic(selectedDevice.deviceId, serviceUuid, charUuid);
+      await disconnectFromDevice(deviceId);
+      statusMessage = `Disconnected from ${device.name}`;
+      
+      // If this was the active device, clear active selection
+      if ($activeDeviceId === deviceId) {
+        setActiveDevice(null);
+      }
+    } catch (error: any) {
+      statusMessage = 'Failed to disconnect';
+      console.error('Disconnect error:', error);
+    }
+  }
+
+  function toggleDeviceActive(deviceId: string) {
+    if ($activeDeviceId === deviceId) {
+      setActiveDevice(null); // Collapse if already active
+    } else {
+      setActiveDevice(deviceId); // Make this device active
+    }
+  }
+
+  async function handleRead(serviceUuid: string, charUuid: string) {
+    if (!activeDevice) return;
+    
+    try {
+      const value = await readCharacteristic(activeDevice.deviceId, serviceUuid, charUuid);
       statusMessage = `Read: "${value}"`;
       console.log('Read value:', value);
     } catch (error: any) {
@@ -240,10 +308,10 @@
   }
 
   async function handleWrite(serviceUuid: string, charUuid: string) {
-    if (!selectedDevice || !writeData.trim()) return;
+    if (!activeDevice || !writeData.trim()) return;
     
     try {
-      await writeCharacteristic(selectedDevice.deviceId, serviceUuid, charUuid, writeData);
+      await writeCharacteristic(activeDevice.deviceId, serviceUuid, charUuid, writeData);
       statusMessage = `Wrote: "${writeData}"`;
       writeData = '';
     } catch (error: any) {
@@ -253,10 +321,10 @@
   }
 
   async function handleStartNotifications(serviceUuid: string, charUuid: string) {
-    if (!selectedDevice) return;
+    if (!activeDevice) return;
     
     try {
-      await startNotifications(selectedDevice.deviceId, serviceUuid, charUuid, (data) => {
+      await startNotifications(activeDevice.deviceId, serviceUuid, charUuid, (data) => {
         notifications = [`${new Date().toLocaleTimeString()}: ${data}`, ...notifications].slice(0, 20);
       });
       statusMessage = 'Notifications started';
@@ -267,10 +335,10 @@
   }
 
   async function handleStopNotifications(serviceUuid: string, charUuid: string) {
-    if (!selectedDevice) return;
+    if (!activeDevice) return;
     
     try {
-      await stopNotifications(selectedDevice.deviceId, serviceUuid, charUuid);
+      await stopNotifications(activeDevice.deviceId, serviceUuid, charUuid);
       statusMessage = 'Notifications stopped';
     } catch (error: any) {
       statusMessage = 'Failed to stop notifications';
@@ -280,24 +348,23 @@
 
   // --- OTA Functions ---
   async function handleGetDeviceInfo() {
-    if (!selectedDevice) return;
+    if (!activeDevice) return;
     statusMessage = 'Fetching device info...';
     try {
-      deviceInfo = await getDeviceInfo(selectedDevice.deviceId);
-      statusMessage = `Device info received: FW ${deviceInfo.fw_ver}, HW ${deviceInfo.hw_ver}`;
+      const info = await getDeviceInfo(activeDevice.deviceId);
+      statusMessage = `Device info received: FW ${info.fw_ver}, HW ${info.hw_ver}`;
     } catch (error: any) {
       statusMessage = 'Failed to get device info.';
       console.error('Get device info error:', error);
-      deviceInfo = null;
     }
   }
 
   // --- LED Configuration Functions ---
   async function handleGetLedConfig() {
-    if (!selectedDevice) return;
+    if (!activeDevice) return;
     ledConfigLoading = true;
     try {
-      ledConfig = await getLedConfiguration(selectedDevice.deviceId);
+      ledConfig = await getLedConfiguration(activeDevice.deviceId);
       console.log('LED config received:', ledConfig);
     } catch (error: any) {
       console.error('Get LED config error:', error);
@@ -308,10 +375,10 @@
   }
 
   async function handleSetLedConfig() {
-    if (!selectedDevice || !ledConfig) return;
+    if (!activeDevice || !ledConfig) return;
     ledConfigLoading = true;
     try {
-      await setLedConfiguration(selectedDevice.deviceId, ledConfig);
+      await setLedConfiguration(activeDevice.deviceId, ledConfig);
       statusMessage = 'LED configuration updated successfully';
     } catch (error: any) {
       statusMessage = 'Failed to update LED configuration';
@@ -356,7 +423,7 @@
   }
 
   async function handleCheckForUpdate() {
-    if (!selectedDevice || !deviceInfo) {
+    if (!activeDevice || !activeDevice.deviceInfo) {
       statusMessage = 'Connect to a device and get info first.';
       return;
     }
@@ -367,16 +434,16 @@
     try {
       firmwareRegistry = await fetchFirmwareRegistry(espFirmwareRegistryUrl);
       if (firmwareRegistry.length > 0) {
-        latestFirmware = findLatestFirmware(firmwareRegistry, deviceInfo.hw_ver);
+        latestFirmware = findLatestFirmware(firmwareRegistry, activeDevice.deviceInfo.hw_ver);
         if (latestFirmware) {
-          if (latestFirmware.version !== deviceInfo.fw_ver) {
+          if (latestFirmware.version !== activeDevice.deviceInfo.fw_ver) {
             statusMessage = `Update available: ${latestFirmware.version}`;
             showUpdateConfirmation = true;
           } else {
-            statusMessage = `Firmware is up to date (${deviceInfo.fw_ver}).`;
+            statusMessage = `Firmware is up to date (${activeDevice.deviceInfo.fw_ver}).`;
           }
         } else {
-          statusMessage = `No compatible firmware found for HW ${deviceInfo.hw_ver}.`;
+          statusMessage = `No compatible firmware found for HW ${activeDevice.deviceInfo.hw_ver}.`;
         }
       } else {
         statusMessage = 'Firmware registry is empty or could not be fetched.';
@@ -390,7 +457,7 @@
   }
 
   async function handlePerformOTAUpdate() {
-    if (!selectedDevice || !latestFirmware) return;
+    if (!activeDevice || !latestFirmware) return;
     
     otaInProgress = true;
     showUpdateConfirmation = false;
@@ -405,7 +472,7 @@
 
     try {
       await performOTAUpdate(
-        selectedDevice.deviceId,
+        activeDevice.deviceId,
         firmwareUrl,
         signatureUrl,
         (statusUpdate) => {
@@ -445,7 +512,7 @@
   <section class="status">
     <div class="status-card">
       <h2>Status</h2>
-      <p class="status-message" class:error={!bleSupported || (otaStatus?.isError === true)} class:success={bleEnabled && selectedDevice && (otaStatus?.isComplete === true && otaStatus?.isError !== true)}>
+      <p class="status-message" class:error={!bleSupported || (otaStatus?.isError === true)} class:success={bleEnabled && activeDevice && (otaStatus?.isComplete === true && otaStatus?.isError !== true)}>
         {#if otaStatus && otaStatus.statusMessage}
           {otaStatus.statusMessage}
           {#if otaStatus.progress !== undefined}
@@ -466,7 +533,7 @@
           <p><strong>Web Mode:</strong> Uses browser's device picker instead of continuous scanning.</p>
           <p>Requires HTTPS and works best in Chrome/Edge browsers.</p>
           
-          {#if selectedDevice && services.length === 0}
+          {#if activeDevice && services.length === 0}
             <div class="troubleshooting">
               <h4>🔧 Service Discovery Issues?</h4>
               <p><strong>Common causes on web:</strong></p>
@@ -499,7 +566,7 @@
           <span class="icon">🔍</span>
           <span>{isWeb ? 'Selecting Device' : 'Scanning'}</span>
         </div>
-        <div class="indicator" class:active={selectedDevice}>
+        <div class="indicator" class:active={activeDevice}>
           <span class="icon">🔗</span>
           <span>Connected</span>
         </div>
@@ -515,7 +582,7 @@
         </button>
       {/if}
       
-      {#if bleEnabled && !selectedDevice}
+      {#if bleEnabled && !activeDevice}
         {#if !scanning}
           <button class="btn primary" on:click={handleStartScan}>
             {isWeb ? 'Select ESP32 Device' : 'Scan for ESP32s'}
@@ -527,9 +594,9 @@
         {/if}
       {/if}
 
-      {#if selectedDevice}
+      {#if activeDevice}
         <button class="btn danger" on:click={handleDisconnect} disabled={otaInProgress}>
-          Disconnect from {selectedDevice.name}
+          Disconnect from {activeDevice.name}
         </button>
         {#if services.length === 0 && !otaInProgress}
           <button class="btn primary" on:click={handleRetryServiceDiscovery}>
@@ -540,14 +607,55 @@
     </div>
   </section>
 
-  {#if selectedDevice && deviceInfo}
+  <!-- Connected Devices Section -->
+  {#if connectedDevicesList.length > 0}
+    <section class="connected-devices">
+      <h2>Connected Devices ({connectedDevicesList.length})</h2>
+      <div class="devices-grid">
+        {#each connectedDevicesList as device (device.deviceId)}
+          {@const isActive = $activeDeviceId === device.deviceId}
+          
+          <div class="device-card" class:active={isActive}>
+            <div class="device-header" on:click={() => toggleDeviceActive(device.deviceId)}>
+              <div class="device-info">
+                <h3>{device.name}</h3>
+                <p class="device-id">{device.deviceId}</p>
+                {#if device.deviceInfo}
+                  <p class="fw-version">FW: {device.deviceInfo.fw_ver}</p>
+                {/if}
+              </div>
+              <div class="device-status">
+                <span class="connection-badge">Connected</span>
+                {#if isActive}
+                  <span class="active-badge">Active</span>
+                {/if}
+              </div>
+            </div>
+            
+            <div class="device-actions">
+              <button class="btn secondary small" on:click|stopPropagation={() => handleDisconnectDevice(device.deviceId)}>
+                Disconnect
+              </button>
+              {#if !isActive}
+                <button class="btn primary small" on:click|stopPropagation={() => setActiveDevice(device.deviceId)}>
+                  Make Active
+                </button>
+              {/if}
+            </div>
+          </div>
+        {/each}
+      </div>
+    </section>
+  {/if}
+
+  {#if activeDevice && activeDevice.deviceInfo}
     <section class="ota-section">
       <div class="device-info-card">
         <h3>Device Information</h3>
-        <p><strong>Firmware Version:</strong> {deviceInfo.fw_ver}</p>
-        <p><strong>Hardware Version:</strong> {deviceInfo.hw_ver}</p>
-        {#if deviceInfo.heap !== undefined}
-          <p><strong>Free Heap:</strong> {deviceInfo.heap} bytes</p>
+        <p><strong>Firmware Version:</strong> {activeDevice.deviceInfo.fw_ver}</p>
+        <p><strong>Hardware Version:</strong> {activeDevice.deviceInfo.hw_ver}</p>
+        {#if activeDevice.deviceInfo.heap !== undefined}
+          <p><strong>Free Heap:</strong> {activeDevice.deviceInfo.heap} bytes</p>
         {/if}
         <button class="btn secondary small" on:click={handleGetDeviceInfo} disabled={otaInProgress || checkingForUpdate}>
           Refresh Info
@@ -684,7 +792,7 @@
           </button>
         {/if}
 
-        {#if latestFirmware && latestFirmware.version !== deviceInfo.fw_ver && !otaInProgress && showUpdateConfirmation}
+        {#if latestFirmware && latestFirmware.version !== activeDevice.deviceInfo.fw_ver && !otaInProgress && showUpdateConfirmation}
           <div class="update-available">
             <p>New firmware available: <strong>{latestFirmware.version}</strong></p>
             <button class="btn success" on:click={handlePerformOTAUpdate}>
@@ -697,7 +805,7 @@
     </section>
   {/if}
 
-  {#if devices.length > 0 && !selectedDevice}
+  {#if devices.length > 0 && !activeDevice}
     <section class="devices">
       <h2>{isWeb ? 'Selected Devices' : 'Discovered Devices'} ({devices.length})</h2>
       <div class="device-list">
@@ -725,7 +833,7 @@
     </section>
   {/if}
 
-  {#if selectedDevice && services.length > 0}
+  {#if activeDevice && services.length > 0}
     <section class="services">
       <h2>ESP32 Services & Characteristics (Debug)</h2>
       <div class="write-section">
@@ -1350,5 +1458,115 @@
       align-items: flex-start;
       gap: 0.5rem;
     }
+
+    .devices-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .device-header {
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .device-status {
+      align-items: flex-start;
+      flex-direction: row;
+    }
+
+    .device-actions {
+      justify-content: stretch;
+    }
+
+    .device-actions .btn {
+      flex: 1;
+    }
+  }
+
+  /* Multi-device UI styles */
+  .connected-devices {
+    margin: 2rem 0;
+  }
+
+  .devices-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 1rem;
+    margin-top: 1rem;
+  }
+
+  .device-card {
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    overflow: hidden;
+    transition: all 0.3s ease;
+  }
+
+  .device-card.active {
+    border-color: rgba(34, 197, 94, 0.5);
+    box-shadow: 0 0 20px rgba(34, 197, 94, 0.2);
+    transform: translateY(-2px);
+  }
+
+  .device-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 1.5rem;
+    cursor: pointer;
+    transition: background 0.2s ease;
+  }
+
+  .device-header:hover {
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  .device-info h3 {
+    margin: 0 0 0.5rem 0;
+    color: white;
+    font-size: 1.1rem;
+  }
+
+  .device-id, .fw-version {
+    margin: 0.25rem 0;
+    font-size: 0.8rem;
+    opacity: 0.7;
+    font-family: monospace;
+  }
+
+  .device-status {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.5rem;
+  }
+
+  .connection-badge, .active-badge {
+    padding: 0.25rem 0.5rem;
+    border-radius: 12px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .connection-badge {
+    background: rgba(34, 197, 94, 0.2);
+    color: #10b981;
+    border: 1px solid rgba(34, 197, 94, 0.5);
+  }
+
+  .active-badge {
+    background: rgba(59, 130, 246, 0.2);
+    color: #3b82f6;
+    border: 1px solid rgba(59, 130, 246, 0.5);
+  }
+
+  .device-actions {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0 1.5rem 1.5rem 1.5rem;
+    justify-content: flex-end;
   }
 </style>
