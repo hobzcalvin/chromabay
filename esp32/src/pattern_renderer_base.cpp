@@ -155,6 +155,12 @@ void PatternRendererBase::update() {
     globalTime = currentTime;
     
     // Execute all nodes in sequence using native operators
+    // Pre-process timestamps to avoid floating-point precision issues
+    // Large timestamps (3+ billion ms) lose precision when cast to float
+    // Use modulo to keep timestamps in float-friendly range (~16 minutes cycle)
+    uint32_t floatFriendlyTime = globalTime % 1000000; // 1M ms = ~16.67 minutes
+    uint32_t floatFriendlyDelta = deltaTime; // Delta is usually small, no modulo needed
+    
     for (const auto& node : currentPattern.nodes) {
         if (node.op) {
             CRGB* inputBuffer1 = (node.inputBuffer >= 0) ? getBufferPtr(node.inputBuffer) : nullptr;
@@ -168,8 +174,8 @@ void PatternRendererBase::update() {
                     outputBuffer,
                     matrixWidth,
                     matrixHeight,
-                    globalTime,
-                    deltaTime,
+                    floatFriendlyTime,  // Use pre-processed timestamp
+                    floatFriendlyDelta,
                     node.parameters
                 );
             }
