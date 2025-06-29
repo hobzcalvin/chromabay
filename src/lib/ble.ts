@@ -237,6 +237,15 @@ export async function connectToDevice(device: any): Promise<void> {
       lastConnected: Date.now()
     });
     
+    // Sync current pattern to newly connected device
+    console.log('Syncing current pattern to newly connected device...');
+    try {
+      await syncPatternToAllDevices();
+      console.log('Initial pattern sync completed');
+    } catch (error) {
+      console.error('Failed to sync initial pattern to device:', error);
+      // Don't throw here - connection was successful, pattern sync can be retried
+    }
   } catch (error) {
     console.error('Error connecting to device:', error);
     throw error;

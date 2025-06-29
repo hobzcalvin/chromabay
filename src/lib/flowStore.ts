@@ -845,7 +845,7 @@ export function deleteNode(nodeId: string): void {
 // Pattern serialization imports and utilities
 import type { SerializedPattern } from './patternSerializer';
 import { serializePattern, deserializePattern, deserializePatternWhenReady, estimatePatternSize, compressPattern } from './patternSerializer';
-import { syncPatternToAllDevices } from './ble';
+import { syncPatternToAllDevices, getConnectedDeviceCount } from './ble';
 import { currentPatternName } from './stores/patternsStore';
 
 // Pattern serialization utilities
@@ -981,7 +981,8 @@ function syncPatternIfChanged() {
     const currentPattern = serializeCurrentPattern();
     const currentHash = JSON.stringify(currentPattern);
     
-    if (lastPatternHash && lastPatternHash !== currentHash) {
+    // Only sync if pattern changed and there are connected devices
+    if ((!lastPatternHash || lastPatternHash !== currentHash) && getConnectedDeviceCount() > 0) {
       // Clear existing timeout if any
       if (syncTimeout) {
         clearTimeout(syncTimeout);
