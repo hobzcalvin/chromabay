@@ -19,7 +19,7 @@
 		</script>
 		
 		<!-- FastLED WASM Operator System -->
-		<script src="/native/fastled.js"></script>
+		<script src="/blumon/native/fastled.js"></script>
 		<script>
 			// Global WASM module initialization
 			let wasmModule = null;
@@ -27,7 +27,14 @@
 			
 			// Initialize WASM when page loads
 			window.addEventListener('load', async () => {
+				console.log('🚀 Starting WASM initialization...');
 				try {
+					// Check if fastled function is available
+					if (typeof fastled === 'undefined') {
+						throw new Error('fastled function not found - WASM script may have failed to load');
+					}
+					
+					console.log('✅ fastled function found, calling it...');
 					wasmModule = await fastled({
 						// Capture WASM stdout/stderr
 						print: function(text) {
@@ -38,12 +45,23 @@
 						}
 					});
 					wasmReady = true;
-					console.log('FastLED WASM module loaded successfully');
+					console.log('✅ FastLED WASM module loaded successfully');
+					
+					// Test operator count
+					try {
+						const operatorCount = wasmModule.ccall('getOperatorCount', 'number', [], []);
+						console.log('🎯 WASM Operator count:', operatorCount);
+					} catch (testError) {
+						console.error('❌ WASM operator count test failed:', testError);
+					}
 					
 					// Dispatch custom event to notify app components
 					window.dispatchEvent(new CustomEvent('wasmReady', { detail: { module: wasmModule } }));
 				} catch (error) {
-					console.error('Failed to load FastLED WASM module:', error);
+					console.error('❌ Failed to load FastLED WASM module:', error);
+					console.error('❌ Error type:', error.constructor.name);
+					console.error('❌ Current URL:', window.location.href);
+					console.error('❌ Base path:', document.getElementsByTagName('base')[0]?.href || 'none');
 				}
 			});
 			
@@ -53,10 +71,10 @@
 		</script>
 		
 		
-		<link rel="modulepreload" href="/blumon/_app/immutable/entry/start.DSp0sJta.js">
-		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/eXYolNSR.js">
+		<link rel="modulepreload" href="/blumon/_app/immutable/entry/start.CaUrMavV.js">
+		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/Mv5FenIG.js">
 		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/s_OLZFay.js">
-		<link rel="modulepreload" href="/blumon/_app/immutable/entry/app.qD6C2ftn.js">
+		<link rel="modulepreload" href="/blumon/_app/immutable/entry/app.DBDbSPVS.js">
 		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/_oc2-SAt.js">
 		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/DLP5dlH0.js">
 		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/BFBJKavG.js">
@@ -69,7 +87,7 @@
 		<div style="display: contents">
 			<script>
 				{
-					__sveltekit_1e670ij = {
+					__sveltekit_uomenx = {
 						base: "/blumon",
 						assets: "/blumon"
 					};
@@ -77,8 +95,8 @@
 					const element = document.currentScript.parentElement;
 
 					Promise.all([
-						import("/blumon/_app/immutable/entry/start.DSp0sJta.js"),
-						import("/blumon/_app/immutable/entry/app.qD6C2ftn.js")
+						import("/blumon/_app/immutable/entry/start.CaUrMavV.js"),
+						import("/blumon/_app/immutable/entry/app.DBDbSPVS.js")
 					]).then(([kit, app]) => {
 						kit.start(app, element);
 					});
