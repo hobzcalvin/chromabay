@@ -3,13 +3,59 @@
 #include <FastLED.h>
 #include <vector>
 #include <string>
-#include <variant>
 #include <map>
 #include <functional>
+#include <set>
+#ifndef ESP32_BUILD
 #include <emscripten/emscripten.h>
+#endif
 
-// Parameter value types - including CRGB for COLOR type
-using ParameterValue = std::variant<float, int, bool, std::string, CRGB>;
+// ESP32-compatible parameter value (replacement for std::variant)
+struct ParameterValue {
+    enum Type { FLOAT, INT, BOOL, STRING, COLOR } type;
+    union {
+        float floatVal;
+        int intVal;
+        bool boolVal;
+        CRGB colorVal;
+    };
+    std::string stringVal; // String outside union
+    
+    ParameterValue() : type(FLOAT), floatVal(0.0f) {}
+    ParameterValue(float f) : type(FLOAT), floatVal(f) {}
+    ParameterValue(int i) : type(INT), intVal(i) {}
+    ParameterValue(bool b) : type(BOOL), boolVal(b) {}
+    ParameterValue(CRGB c) : type(COLOR), colorVal(c) {}
+    ParameterValue(const std::string& s) : type(STRING), stringVal(s) {}
+    ParameterValue(const char* s) : type(STRING), stringVal(s) {}
+    
+    // Copy constructor
+    ParameterValue(const ParameterValue& other) : type(other.type), stringVal(other.stringVal) {
+        switch(type) {
+            case FLOAT: floatVal = other.floatVal; break;
+            case INT: intVal = other.intVal; break;
+            case BOOL: boolVal = other.boolVal; break;
+            case COLOR: colorVal = other.colorVal; break;
+            case STRING: break; // already copied stringVal
+        }
+    }
+    
+    // Assignment operator
+    ParameterValue& operator=(const ParameterValue& other) {
+        if (this != &other) {
+            type = other.type;
+            stringVal = other.stringVal;
+            switch(type) {
+                case FLOAT: floatVal = other.floatVal; break;
+                case INT: intVal = other.intVal; break;
+                case BOOL: boolVal = other.boolVal; break;
+                case COLOR: colorVal = other.colorVal; break;
+                case STRING: break; // already copied stringVal
+            }
+        }
+        return *this;
+    }
+};
 
 // Parameter metadata
 struct ParameterInfo {
@@ -56,46 +102,57 @@ public:
     virtual const char* getDisplayName() const = 0;
     virtual std::vector<ParameterInfo> getParameterInfo() const = 0;
     
-    // Helper functions for parameter access (WASM-compatible, no exceptions)
-    template<typename T>
-    T getParameter(const std::vector<ParameterValue>& params, size_t index, T defaultVal = T{}) const {
-        if (index >= params.size()) return defaultVal;
-        
-        // Use std::get_if for exception-free access
-        const T* value = std::get_if<T>(&params[index]);
-        return value ? *value : defaultVal;
-    }
+    // Helper functions for parameter access (ESP32-compatible, no templates)
     
     float getFloat(const std::vector<ParameterValue>& params, size_t index, float defaultVal = 0.0f) const {
-        return getParameter<float>(params, index, defaultVal);
+        if (index >= params.size()) return defaultVal;
+        const ParameterValue& param = params[index];
+        if (param.type == ParameterValue::FLOAT) return param.floatVal;
+        if (param.type == ParameterValue::INT) return (float)param.intVal;
+        return defaultVal;
     }
     
     int getInt(const std::vector<ParameterValue>& params, size_t index, int defaultVal = 0) const {
-        return getParameter<int>(params, index, defaultVal);
+        if (index >= params.size()) return defaultVal;
+        const ParameterValue& param = params[index];
+        if (param.type == ParameterValue::INT) return param.intVal;
+        if (param.type == ParameterValue::FLOAT) return (int)param.floatVal;
+        return defaultVal;
     }
     
     bool getBool(const std::vector<ParameterValue>& params, size_t index, bool defaultVal = false) const {
-        return getParameter<bool>(params, index, defaultVal);
+        if (index >= params.size()) return defaultVal;
+        const ParameterValue& param = params[index];
+        if (param.type == ParameterValue::BOOL) return param.boolVal;
+        return defaultVal;
     }
     
     std::string getString(const std::vector<ParameterValue>& params, size_t index, const std::string& defaultVal = "") const {
-        return getParameter<std::string>(params, index, defaultVal);
+        if (index >= params.size()) return defaultVal;
+        const ParameterValue& param = params[index];
+        if (param.type == ParameterValue::STRING) return param.stringVal;
+        return defaultVal;
     }
     
     CRGB getColor(const std::vector<ParameterValue>& params, size_t index, CRGB defaultVal = CRGB::Black) const {
-        return getParameter<CRGB>(params, index, defaultVal);
+        if (index >= params.size()) return defaultVal;
+        const ParameterValue& param = params[index];
+        if (param.type == ParameterValue::COLOR) return param.colorVal;
+        return defaultVal;
     }
 };
 
-// Operator factory function type
-using OperatorFactory = std::function<std::unique_ptr<BaseOperator>()>;
+// Operator factory function type (using raw pointer instead of unique_ptr)
+using OperatorFactory = std::function<BaseOperator*()>;
 
 // Operator registry class - singleton pattern
 class OperatorRegistry {
 private:
-    std::map<std::string, OperatorFactory> factories;
+    std::map<std::string, std::function<BaseOperator*()>> creators;
     
-    OperatorRegistry() = default;
+    OperatorRegistry() {
+        // Operators register themselves automatically via REGISTER_OPERATOR macro
+    }
     
 public:
     static OperatorRegistry& getInstance() {
@@ -103,32 +160,38 @@ public:
         return instance;
     }
     
-    // Register an operator
-    void registerOperator(const std::string& name, OperatorFactory factory) {
-        factories[name] = factory;
+    template<typename T>
+    void registerOperator(const std::string& name) {
+        creators[name] = []() -> BaseOperator* { return new T(); };
     }
     
-    // Create an operator by name
-    std::unique_ptr<BaseOperator> createOperator(const std::string& name) {
-        auto it = factories.find(name);
-        if (it != factories.end()) {
+    BaseOperator* createOperator(const std::string& name) {
+        auto it = creators.find(name);
+        if (it != creators.end()) {
             return it->second();
         }
         return nullptr;
     }
     
-    // Get list of all registered operator names
-    std::vector<std::string> getOperatorNames() const {
-        std::vector<std::string> names;
-        for (const auto& pair : factories) {
-            names.push_back(pair.first);
+    // For WASM compatibility - returns unique_ptr
+    std::unique_ptr<BaseOperator> createOperatorUnique(const std::string& name) {
+        BaseOperator* op = createOperator(name);
+        if (op) {
+            return std::unique_ptr<BaseOperator>(op);
+        }
+        return nullptr;
+    }
+    
+    std::set<std::string> getOperatorNames() const {
+        std::set<std::string> names;
+        for (const auto& pair : creators) {
+            names.insert(pair.first);
         }
         return names;
     }
     
-    // Get count of registered operators
-    size_t getOperatorCount() const {
-        return factories.size();
+    int getOperatorCount() const {
+        return creators.size();
     }
 };
 
@@ -137,9 +200,7 @@ template<typename T>
 class OperatorRegistrar {
 public:
     OperatorRegistrar(const std::string& name) {
-        OperatorRegistry::getInstance().registerOperator(name, []() {
-            return std::make_unique<T>();
-        });
+        OperatorRegistry::getInstance().registerOperator<T>(name);
     }
 };
 

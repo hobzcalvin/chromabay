@@ -19,9 +19,9 @@
 // Include all operators via centralized list
 #include "OperatorList.h"
 
-// Global operator instance management
-std::map<int, std::unique_ptr<BaseOperator>> activeOperators;
-std::map<int, std::vector<ParameterValue>> operatorParameters;
+// Global operator instance management - using vectors instead of std::map
+std::vector<BaseOperator*> activeOperators;
+std::vector<std::vector<ParameterValue>> operatorParameters;
 int nextOperatorId = 1;
 
 // Helper function to find class name by short name (outside extern "C")
@@ -110,28 +110,28 @@ extern "C" {
                         "\",\"label\":\"" + param.label + 
                         "\",\"type\":" + std::to_string((int)param.type);
                 
-                // Add default value based on type
+                // Add default value based on type using direct member access
                 if (param.type == ParameterInfo::FLOAT) {
-                    buffer += ",\"default\":" + std::to_string(std::get<float>(param.defaultValue));
-                    if (param.minValue.index() != 0) {
-                        buffer += ",\"min\":" + std::to_string(std::get<float>(param.minValue));
+                    buffer += ",\"default\":" + std::to_string(param.defaultValue.floatVal);
+                    if (param.minValue.type == ParameterValue::FLOAT) {
+                        buffer += ",\"min\":" + std::to_string(param.minValue.floatVal);
                     }
-                    if (param.maxValue.index() != 0) {
-                        buffer += ",\"max\":" + std::to_string(std::get<float>(param.maxValue));
+                    if (param.maxValue.type == ParameterValue::FLOAT) {
+                        buffer += ",\"max\":" + std::to_string(param.maxValue.floatVal);
                     }
                 } else if (param.type == ParameterInfo::INT) {
-                    buffer += ",\"default\":" + std::to_string(std::get<int>(param.defaultValue));
-                    if (param.minValue.index() != 0) {
-                        buffer += ",\"min\":" + std::to_string(std::get<int>(param.minValue));
+                    buffer += ",\"default\":" + std::to_string(param.defaultValue.intVal);
+                    if (param.minValue.type == ParameterValue::INT) {
+                        buffer += ",\"min\":" + std::to_string(param.minValue.intVal);
                     }
-                    if (param.maxValue.index() != 0) {
-                        buffer += ",\"max\":" + std::to_string(std::get<int>(param.maxValue));
+                    if (param.maxValue.type == ParameterValue::INT) {
+                        buffer += ",\"max\":" + std::to_string(param.maxValue.intVal);
                     }
                 } else if (param.type == ParameterInfo::BOOL) {
                     buffer += ",\"default\":";
-                    buffer += (std::get<bool>(param.defaultValue) ? "true" : "false");
+                    buffer += (param.defaultValue.boolVal ? "true" : "false");
                 } else if (param.type == ParameterInfo::SELECT) {
-                    buffer += ",\"default\":\"" + std::get<std::string>(param.defaultValue) + "\"";
+                    buffer += ",\"default\":\"" + param.defaultValue.stringVal + "\"";
                     buffer += ",\"options\":[";
                     for (size_t i = 0; i < param.options.size(); i++) {
                         if (i > 0) buffer += ",";
@@ -163,7 +163,16 @@ extern "C" {
         auto op = OperatorRegistry::getInstance().createOperator(className);
         if (op) {
             int id = nextOperatorId++;
-            activeOperators[id] = std::move(op);
+            
+            // Resize vectors if needed
+            if (activeOperators.size() <= (size_t)id) {
+                activeOperators.resize(id + 1, nullptr);
+            }
+            if (operatorParameters.size() <= (size_t)id) {
+                operatorParameters.resize(id + 1);
+            }
+            
+            activeOperators[id] = op;
             printf("Created operator instance %d for %s (class: %s)\n", id, operatorName, className.c_str());
             return id;
         }
@@ -172,8 +181,15 @@ extern "C" {
     
     EMSCRIPTEN_KEEPALIVE
     void destroyOperatorInstance(int operatorId) {
-        activeOperators.erase(operatorId);
-        operatorParameters.erase(operatorId);
+        if (operatorId >= 0 && operatorId < (int)activeOperators.size()) {
+            if (activeOperators[operatorId]) {
+                delete activeOperators[operatorId];
+                activeOperators[operatorId] = nullptr;
+            }
+            if (operatorId < (int)operatorParameters.size()) {
+                operatorParameters[operatorId].clear();
+            }
+        }
     }
     
     // ========================================
@@ -182,42 +198,52 @@ extern "C" {
     
     EMSCRIPTEN_KEEPALIVE
     void setOperatorFloatParameter(int operatorId, int paramIndex, float value) {
-        if (operatorParameters[operatorId].size() <= (size_t)paramIndex) {
-            operatorParameters[operatorId].resize(paramIndex + 1);
+        if (operatorId >= 0 && operatorId < (int)operatorParameters.size()) {
+            if (operatorParameters[operatorId].size() <= (size_t)paramIndex) {
+                operatorParameters[operatorId].resize(paramIndex + 1);
+            }
+            operatorParameters[operatorId][paramIndex] = value;
         }
-        operatorParameters[operatorId][paramIndex] = value;
     }
     
     EMSCRIPTEN_KEEPALIVE
     void setOperatorIntParameter(int operatorId, int paramIndex, int value) {
-        if (operatorParameters[operatorId].size() <= (size_t)paramIndex) {
-            operatorParameters[operatorId].resize(paramIndex + 1);
+        if (operatorId >= 0 && operatorId < (int)operatorParameters.size()) {
+            if (operatorParameters[operatorId].size() <= (size_t)paramIndex) {
+                operatorParameters[operatorId].resize(paramIndex + 1);
+            }
+            operatorParameters[operatorId][paramIndex] = value;
         }
-        operatorParameters[operatorId][paramIndex] = value;
     }
     
     EMSCRIPTEN_KEEPALIVE
     void setOperatorBoolParameter(int operatorId, int paramIndex, bool value) {
-        if (operatorParameters[operatorId].size() <= (size_t)paramIndex) {
-            operatorParameters[operatorId].resize(paramIndex + 1);
+        if (operatorId >= 0 && operatorId < (int)operatorParameters.size()) {
+            if (operatorParameters[operatorId].size() <= (size_t)paramIndex) {
+                operatorParameters[operatorId].resize(paramIndex + 1);
+            }
+            operatorParameters[operatorId][paramIndex] = value;
         }
-        operatorParameters[operatorId][paramIndex] = value;
     }
     
     EMSCRIPTEN_KEEPALIVE
     void setOperatorStringParameter(int operatorId, int paramIndex, const char* value) {
-        if (operatorParameters[operatorId].size() <= (size_t)paramIndex) {
-            operatorParameters[operatorId].resize(paramIndex + 1);
+        if (operatorId >= 0 && operatorId < (int)operatorParameters.size()) {
+            if (operatorParameters[operatorId].size() <= (size_t)paramIndex) {
+                operatorParameters[operatorId].resize(paramIndex + 1);
+            }
+            operatorParameters[operatorId][paramIndex] = std::string(value);
         }
-        operatorParameters[operatorId][paramIndex] = std::string(value);
     }
     
     EMSCRIPTEN_KEEPALIVE
     void setOperatorColorParameter(int operatorId, int paramIndex, uint8_t r, uint8_t g, uint8_t b) {
-        if (operatorParameters[operatorId].size() <= (size_t)paramIndex) {
-            operatorParameters[operatorId].resize(paramIndex + 1);
+        if (operatorId >= 0 && operatorId < (int)operatorParameters.size()) {
+            if (operatorParameters[operatorId].size() <= (size_t)paramIndex) {
+                operatorParameters[operatorId].resize(paramIndex + 1);
+            }
+            operatorParameters[operatorId][paramIndex] = CRGB(r, g, b);
         }
-        operatorParameters[operatorId][paramIndex] = CRGB(r, g, b);
     }
     
     // ========================================
@@ -235,11 +261,13 @@ extern "C" {
         uint32_t timestampMs,
         uint32_t deltaTimeMs
     ) {
-        auto it = activeOperators.find(operatorId);
-        if (it != activeOperators.end()) {
-            auto& parameters = operatorParameters[operatorId];
+        if (operatorId >= 0 && operatorId < (int)activeOperators.size() && activeOperators[operatorId]) {
+            static std::vector<ParameterValue> emptyParams;
+            auto& parameters = (operatorId < (int)operatorParameters.size()) ? 
+                operatorParameters[operatorId] : 
+                emptyParams;
             
-            it->second->render(
+            activeOperators[operatorId]->render(
                 inputBuffer1,
                 inputBuffer2,
                 outputBuffer,
@@ -265,7 +293,7 @@ extern "C" {
 }
 
 void setup() {
-    // No setup needed for WASM
+    // Vectors start empty, no initialization needed
 }
 
 void loop() {
