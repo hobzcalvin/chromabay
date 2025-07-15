@@ -73,7 +73,7 @@
   
   // Add Pattern Node dropdown state
   let showAddNodeDropdown = $state(false);
-  let addNodeDropdownRef: HTMLDivElement;
+  let addNodeDropdownRef = $state<HTMLDivElement>();
   
   // Reactive check for active node - ensure we have a valid node with proper data
   const activeNode = $derived.by(() => {
@@ -517,15 +517,7 @@
     font-weight: 700;
     text-shadow: 0 2px 4px rgba(0,0,0,0.3);
   }
-  
-  .header p {
-    margin: 0.5rem 0 0 0;
-    font-size: 1.1rem;
-    opacity: 0.9;
-  }
-  
 
-  
   .flow-container {
     flex: 1;
     border-radius: 12px;
@@ -542,25 +534,11 @@
     .header h1 {
       font-size: 2rem;
     }
-    
-    .header p {
-      font-size: 1rem;
-    }
-    
-    .dropdown-container {
-      position: static;
-      transform: none;
-      margin-top: 1rem;
-    }
   }
   
   @media (max-width: 480px) {
     .header h1 {
       font-size: 1.75rem;
-    }
-    
-    .header p {
-      font-size: 0.9rem;
     }
   }
 
