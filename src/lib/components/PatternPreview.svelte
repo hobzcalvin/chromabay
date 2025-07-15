@@ -18,7 +18,7 @@
   const localFlowEdges = writable<Edge[]>([]);
   const localNodeOutputs = writable<Map<string, ImageData>>(new Map());
   const localNodeParameters = writable<Map<string, any>>(new Map());
-  const localGlobalStartTime = writable<number>(performance.now());
+  const localGlobalStartTime = writable<number>(Date.now()); // Use synchronized timestamp
 
   // Set context so PatternNode components can access local stores
   setContext('flowNodes', localFlowNodes);

@@ -2,7 +2,12 @@ import { writable, get } from 'svelte/store';
 import type { Node, Edge, Connection } from '@xyflow/svelte';
 
 // Global start time for synchronized animations across all nodes
-export const globalStartTime = writable<number>(performance.now());
+export const globalStartTime = writable<number>(Date.now());
+
+// Update global start time to current timestamp when patterns change
+export function resetGlobalStartTime(): void {
+  globalStartTime.set(Date.now());
+}
 
 // Parameter types
 export type ParameterType = 'float' | 'range' | 'integer' | 'hue' | 'color' | 'select';
@@ -23,7 +28,9 @@ export const nodeParameters = writable<Map<string, Map<string, any>>>(new Map())
 // Helper function to get parameter value for a node
 export function getNodeParameter(nodeId: string, paramName: string, defaultValue: any): any {
   let currentParams: Map<string, Map<string, any>> = new Map();
-  nodeParameters.subscribe(params => currentParams = params)();
+  nodeParameters.subscribe(params => {
+    currentParams = params;
+  })();
   
   const nodeParams = currentParams.get(nodeId);
   if (nodeParams && nodeParams.has(paramName)) {
@@ -347,7 +354,7 @@ class WasmOperatorManager {
     }
     
     // Execute the WASM operator
-    const timestampMs = Math.floor(totalTime * 1000);
+    const timestampMs = Date.now(); // Use synchronized global timestamp (same as BLE devices)
     const deltaTimeMs = Math.floor(deltaTime * 1000);
     
     // Get buffer pointers - use 0 as null pointer for unused inputs
@@ -721,8 +728,8 @@ class CentralizedRenderer {
     // Calculate execution order using topological sort
     const executionOrder = this.calculateExecutionOrder(nodes, edges);
     
-    // Execute nodes sequentially in dependency order
-    const totalTime = (currentTime - get(globalStartTime)) / 1000;
+    // Use synchronized global timestamp for all patterns (same as BLE devices)
+    const globalTimestamp = Date.now();
     const deltaTime = (currentTime - this.lastFrameTime) / 1000;
 
     for (const node of executionOrder) {
@@ -732,7 +739,7 @@ class CentralizedRenderer {
       // Create render context for this node
       const renderContext: RenderContext = {
         ctx: null as any, // Will be set by the render function
-        totalTime,
+        totalTime: globalTimestamp / 1000, // Convert to seconds for compatibility
         deltaTime,
         width: 100,
         height: 50,

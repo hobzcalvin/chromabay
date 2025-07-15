@@ -67,7 +67,7 @@
   function render(currentTime: number) {
     if (!ctx) return;
     
-    const totalTime = (currentTime - $globalStartTime) / 1000; // Convert to seconds
+    const totalTime = Date.now() / 1000; // Use synchronized global timestamp (same as BLE devices)
     const deltaTime = (currentTime - lastFrameTime) / 1000; // Convert to seconds
     lastFrameTime = currentTime;
     
