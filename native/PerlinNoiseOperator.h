@@ -68,7 +68,7 @@ public:
     
     std::vector<ParameterInfo> getParameterInfo() const override {
         return {
-            ParameterInfo("scale", "Scale", ParameterInfo::FLOAT, 4.0f, 1.0f, 20.0f),
+            ParameterInfo("scale", "Scale (cycles/display)", ParameterInfo::FLOAT, 4.0f, 1.0f, 20.0f),
             ParameterInfo("speed", "Speed", ParameterInfo::FLOAT, 50.0f, 0.0f, 200.0f),
             ParameterInfo("hue_base", "Base Hue", ParameterInfo::FLOAT, 0.0f, 0.0f, 255.0f),
             ParameterInfo("hue_range", "Hue Range", ParameterInfo::FLOAT, 60.0f, 0.0f, 255.0f),

@@ -54,13 +54,16 @@ public:
             
             // Animate Y position based on time and speed
             float timeOffset = timestampMs * speed * 0.001f; // Convert to seconds and scale
-            float y = fmod(timeOffset + i * 10.0f, (float)(height + 10)) - 10.0f;
+            // Use normalized speed (0-1.2 coordinate system) instead of height-dependent
+            float normalizedSpeed = speed / 100.0f; // Speed parameter now represents % of height per second
+            float normalizedY = fmod(timeOffset * normalizedSpeed + i * 0.1f, 1.2f) - 0.2f;
+            float y = normalizedY * (float)height;
             
             // Only draw if raindrop is visible
             if (y >= 0.0f && y <= (float)height) {
                 // Calculate drop dimensions
-                float dropWidth = width * size;
-                float dropHeight = height * 0.08f; // Fixed aspect ratio
+                float dropWidth = fmax(1.0f, width * size);
+                float dropHeight = fmax(1.0f, height * 0.08f); // Fixed aspect ratio with 1-pixel minimum
                 
                 // Create raindrop color
                 CHSV drop_hsv((uint8_t)hue, (uint8_t)saturation, (uint8_t)value);
@@ -69,8 +72,8 @@ public:
                 // Draw elliptical raindrop
                 int centerX = (int)baseX;
                 int centerY = (int)y;
-                int radiusX = (int)(dropWidth * 0.5f);
-                int radiusY = (int)(dropHeight * 0.5f);
+                int radiusX = (int)fmax(1.0f, dropWidth * 0.5f);
+                int radiusY = (int)fmax(1.0f, dropHeight * 0.5f);
                 
                 // Draw filled ellipse
                 for (int dy = -radiusY; dy <= radiusY; dy++) {
@@ -106,9 +109,9 @@ public:
     
     std::vector<ParameterInfo> getParameterInfo() const override {
         return {
-            ParameterInfo("speed", "Speed", ParameterInfo::FLOAT, 50.0f, 10.0f, 200.0f),
+            ParameterInfo("speed", "Speed (%/sec)", ParameterInfo::FLOAT, 50.0f, 10.0f, 200.0f),
             ParameterInfo("count", "Count", ParameterInfo::FLOAT, 8.0f, 2.0f, 32.0f),
-            ParameterInfo("size", "Size", ParameterInfo::FLOAT, 0.025f, 0.01f, 0.1f),
+            ParameterInfo("size", "Size (% width)", ParameterInfo::FLOAT, 0.025f, 0.01f, 0.1f),
             ParameterInfo("hue", "Hue", ParameterInfo::FLOAT, 0.0f, 0.0f, 255.0f),
             ParameterInfo("saturation", "Saturation", ParameterInfo::FLOAT, 0.0f, 0.0f, 255.0f),
             ParameterInfo("value", "Value", ParameterInfo::FLOAT, 255.0f, 0.0f, 255.0f)

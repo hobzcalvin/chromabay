@@ -82,7 +82,7 @@ extern "C" {
                 static std::string buffer;
                 const auto& param = params[paramIndex];
                 
-                buffer = "{\"name\":\"" + param.name + 
+                buffer = std::string("{\"name\":\"") + param.name + 
                         "\",\"label\":\"" + param.label + 
                         "\",\"type\":" + std::to_string((int)param.type);
                 
@@ -107,11 +107,11 @@ extern "C" {
                     buffer += ",\"default\":";
                     buffer += (param.defaultValue.boolVal ? "true" : "false");
                 } else if (param.type == ParameterInfo::SELECT) {
-                    buffer += ",\"default\":\"" + param.defaultValue.stringVal + "\"";
+                    buffer += std::string(",\"default\":\"") + param.defaultValue.stringVal + "\"";
                     buffer += ",\"options\":[";
                     for (size_t i = 0; i < param.options.size(); i++) {
                         if (i > 0) buffer += ",";
-                        buffer += "\"" + param.options[i] + "\"";
+                        buffer += std::string("\"") + param.options[i] + "\"";
                     }
                     buffer += "]";
                 }

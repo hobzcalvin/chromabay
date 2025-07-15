@@ -39,7 +39,10 @@ public:
         
         // Calculate chase position
         float timeInSeconds = timestampMs * 0.001f;
-        float position = fmod(timeInSeconds * speed, (float)width);
+        // Use normalized speed (0-1 coordinate system) instead of width-dependent
+        float normalizedSpeed = speed / 100.0f; // Speed parameter now represents % of width per second
+        float normalizedPosition = fmod(timeInSeconds * normalizedSpeed, 1.0f);
+        float position = normalizedPosition * (float)width;
         
         // Create chase color
         CHSV chase_hsv((uint8_t)hue, (uint8_t)saturation, (uint8_t)value);
@@ -47,7 +50,8 @@ public:
         
         // Draw vertical bar at current position
         int startX = (int)position;
-        int barWidth = (int)size;
+        // Use proportional sizing with 1-pixel minimum
+        int barWidth = (int)fmax(1.0f, (size / 100.0f) * (float)width);
         
         for (int x = startX; x < startX + barWidth && x < (int)width; x++) {
             if (x >= 0) {
@@ -69,8 +73,8 @@ public:
     
     std::vector<ParameterInfo> getParameterInfo() const override {
         return {
-            ParameterInfo("speed", "Speed", ParameterInfo::FLOAT, 20.0f, 5.0f, 100.0f),
-            ParameterInfo("size", "Size", ParameterInfo::FLOAT, 4.0f, 1.0f, 20.0f),
+            ParameterInfo("speed", "Speed (%/sec)", ParameterInfo::FLOAT, 20.0f, 1.0f, 100.0f),
+            ParameterInfo("size", "Size (% width)", ParameterInfo::FLOAT, 10.0f, 1.0f, 50.0f),
             ParameterInfo("hue", "Hue", ParameterInfo::FLOAT, 0.0f, 0.0f, 255.0f),
             ParameterInfo("saturation", "Saturation", ParameterInfo::FLOAT, 0.0f, 0.0f, 255.0f),
             ParameterInfo("value", "Value", ParameterInfo::FLOAT, 255.0f, 0.0f, 255.0f)

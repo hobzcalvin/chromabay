@@ -25,11 +25,14 @@ public:
             for (uint32_t x = 0; x < width; x++) {
                 uint32_t index = y * width + x;
                 
-                // Generate 2D noise value using x,y coordinates and time
+                // Generate 2D noise value using normalized coordinates and proportional scaling
+                // Scale represents "cycles per display dimension" for consistent visual density
+                float norm_x = (float)x / (float)width;
+                float norm_y = (float)y / (float)height;
                 uint8_t noise_val = inoise8(
-                    x * scale,                                    // X spatial frequency
-                    y * scale,                                    // Y spatial frequency  
-                    (uint32_t)(timestampMs * speed)              // Time evolution
+                    (uint16_t)(norm_x * scale * 1000.0f),         // X spatial frequency (normalized)
+                    (uint16_t)(norm_y * scale * 1000.0f),         // Y spatial frequency (normalized)
+                    (uint32_t)(timestampMs * speed)               // Time evolution
                 );
                 
                 // Create vibrant noise color
@@ -55,7 +58,7 @@ public:
             ParameterInfo("speed", "Speed", ParameterInfo::FLOAT, 1.0f, 0.1f, 5.0f),
             ParameterInfo("hueOffset", "Hue Offset", ParameterInfo::INT, 0, 0, 255),
             ParameterInfo("blendAmount", "Blend Amount", ParameterInfo::FLOAT, 0.5f, 0.0f, 1.0f),
-            ParameterInfo("scale", "Noise Scale", ParameterInfo::FLOAT, 50.0f, 10.0f, 200.0f)
+            ParameterInfo("scale", "Noise Scale (cycles/display)", ParameterInfo::FLOAT, 5.0f, 1.0f, 20.0f)
         };
     }
 };

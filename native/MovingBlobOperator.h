@@ -36,6 +36,9 @@ public:
         // Calculate blob positions based on time
         float time_offset = (timestampMs * speed / 1000.0f) * 2.0f * M_PI / 65535.0f;
         
+        // Ensure minimum blob size of 1 pixel in normalized coordinates
+        float min_size = fmax(1.0f / (float)fmin(width, height), blob_size);
+        
         // Create multiple blobs
         const int num_blobs = 3;
         for (int blob = 0; blob < num_blobs; blob++) {
@@ -66,7 +69,7 @@ public:
                     float distance = sqrt(dx * dx + dy * dy);
                     
                     // Calculate intensity based on distance (soft falloff)
-                    float intensity = 1.0f - (distance / blob_size);
+                    float intensity = 1.0f - (distance / min_size);
                     intensity = fmax(0.0f, intensity);
                     intensity = intensity * intensity; // Quadratic falloff for smoother edges
                     
@@ -106,7 +109,7 @@ public:
     std::vector<ParameterInfo> getParameterInfo() const override {
         return {
             ParameterInfo("speed", "Speed", ParameterInfo::FLOAT, 30.0f, 0.0f, 100.0f),
-            ParameterInfo("blob_size", "Blob Size", ParameterInfo::FLOAT, 0.3f, 0.1f, 1.0f),
+            ParameterInfo("blob_size", "Blob Size (% display)", ParameterInfo::FLOAT, 0.3f, 0.1f, 1.0f),
             ParameterInfo("hue", "Hue", ParameterInfo::FLOAT, 0.0f, 0.0f, 255.0f),
             ParameterInfo("saturation", "Saturation", ParameterInfo::FLOAT, 255.0f, 0.0f, 255.0f),
             ParameterInfo("value", "Value", ParameterInfo::FLOAT, 255.0f, 0.0f, 255.0f)
