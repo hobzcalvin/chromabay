@@ -24,7 +24,11 @@
   let svgElement: SVGSVGElement;
   let containerElement: HTMLDivElement;
   
-  const dispatch = createEventDispatcher();
+  const dispatch = createEventDispatcher<{
+    start: void;
+    change: number;
+    end: void;
+  }>();
   
   // Sensitivity settings
   const VERTICAL_SENSITIVITY = 0.2; // Main control: more change per pixel (less pixels needed)
@@ -54,7 +58,7 @@
     const tolerance = 10;
     
     // Calculate distance from MIN_ANGLE (210°) going counterclockwise
-    let angleDistance;
+    let angleDistance: number;
     
     if (angle >= MIN_ANGLE) {
       // From 210° to 360°

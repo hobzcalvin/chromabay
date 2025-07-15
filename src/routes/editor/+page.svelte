@@ -2,7 +2,7 @@
   import { tick, onMount, onDestroy } from 'svelte';
   import { SvelteFlow, Controls, Background, BaseEdge, MarkerType, Position, type Node, type Edge, type Connection, useSvelteFlow, useViewport, getOutgoers } from '@xyflow/svelte';
   import '@xyflow/svelte/dist/style.css';
-  import { flowNodes, flowEdges, nextNodeId, LANES, NODE_TYPES, createNodeFromType, getNodeDefinition, isValidConnectionWithBuffers, initializeDefaultPattern, loadSerializedPattern, isDirty } from '$lib/flowStore';
+  import { flowNodes, flowEdges, nextNodeId, LANES, NODE_TYPES, createNodeFromType, getNodeDefinition, isValidConnectionWithBuffers, initializeDefaultPattern, loadSerializedPattern, isDirty, forceSyncCurrentPattern } from '$lib/flowStore';
   import PatternNode from '$lib/PatternNode.svelte';
   import NodeParameterEditor from '$lib/components/NodeParameterEditor.svelte';
   import PatternActions from '$lib/components/PatternActions.svelte';
@@ -22,10 +22,15 @@
           // Fallback to default pattern
           initializeDefaultPattern();
         }
+        
+        // Force sync the loaded pattern to connected devices
+        forceSyncCurrentPattern();
       } catch (error) {
         console.error('Failed to load patterns:', error);
         // Fallback to default pattern on error
         initializeDefaultPattern();
+        // Still try to sync the default pattern
+        forceSyncCurrentPattern();
       }
     })();
     

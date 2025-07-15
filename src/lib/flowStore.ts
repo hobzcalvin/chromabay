@@ -997,7 +997,80 @@ export function serializeCurrentPattern(patternName?: string): SerializedPattern
   return serializePattern(currentNodes, currentEdges, currentParams, patternName);
 }
 
+// Automatic pattern sync when pattern changes
+let lastPatternHash: string | null = null;
+let syncInProgress = false;
+let patternLoading = false;
+
+function syncPatternIfChanged() {
+  try {
+    // Skip sync if pattern is currently loading (stores may be inconsistent)
+    if (patternLoading) {
+      return;
+    }
+    
+    const currentPattern = serializeCurrentPattern();
+    const currentHash = JSON.stringify(currentPattern);
+    
+    // Only sync if pattern changed and there are connected devices
+    if ((!lastPatternHash || lastPatternHash !== currentHash) && getConnectedDeviceCount() > 0) {
+      
+      // Skip if sync is already in progress
+      if (syncInProgress) {
+        console.log('Sync already in progress, skipping...');
+        return;
+      }
+      
+      // Mark sync as in progress
+      syncInProgress = true;
+      
+      // Sync immediately
+      syncPatternToAllDevices().catch(error => {
+        console.error('Failed to sync pattern:', error);
+      }).finally(() => {
+        syncInProgress = false;
+      });
+    }
+    
+    lastPatternHash = currentHash;
+  } catch (error) {
+    console.error('Error in pattern sync check:', error);
+  }
+}
+
+// Force sync current pattern regardless of whether it changed
+export function forceSyncCurrentPattern(): void {
+  try {
+    if (getConnectedDeviceCount() > 0) {
+      // Skip if sync is already in progress
+      if (syncInProgress) {
+        console.log('Force sync skipped - sync already in progress');
+        return;
+      }
+      
+      // Update the hash to current pattern so future changes are detected properly
+      const currentPattern = serializeCurrentPattern();
+      lastPatternHash = JSON.stringify(currentPattern);
+      
+      // Mark sync as in progress
+      syncInProgress = true;
+      
+      // Sync immediately
+      syncPatternToAllDevices().catch(error => {
+        console.error('Failed to force sync pattern:', error);
+      }).finally(() => {
+        syncInProgress = false;
+      });
+    }
+  } catch (error) {
+    console.error('Error in force sync:', error);
+  }
+}
+
 export async function loadSerializedPattern(serializedPattern: SerializedPattern): Promise<void> {
+  // Set loading state to prevent syncing during loading
+  patternLoading = true;
+  
   try {
     // Use the new async deserializer that waits for WASM to be ready
     const { nodes, edges, nodeParameters: newNodeParameters } = await deserializePatternWhenReady(serializedPattern);
@@ -1014,6 +1087,12 @@ export async function loadSerializedPattern(serializedPattern: SerializedPattern
     
     // Mark pattern as clean after loading
     markPatternClean();
+    
+    // Clear loading state
+    patternLoading = false;
+    
+    // Force sync the loaded pattern to connected devices
+    forceSyncCurrentPattern();
     
     console.log('Pattern loaded successfully with', nodes.length, 'nodes and', edges.length, 'edges');
   } catch (error) {
@@ -1037,9 +1116,16 @@ export async function loadSerializedPattern(serializedPattern: SerializedPattern
       // Mark pattern as clean after loading
       markPatternClean();
       
+      // Clear loading state
+      patternLoading = false;
+      
+      // Force sync the loaded pattern to connected devices
+      forceSyncCurrentPattern();
+      
       console.log('Pattern loaded with fallback method');
     } catch (fallbackError) {
       console.error('Even fallback deserialization failed:', fallbackError);
+      patternLoading = false; // Clear loading state even on error
       throw fallbackError;
     }
   }
@@ -1096,39 +1182,6 @@ export function getPatternSizeEstimate(): number {
 export function getPatternForBLE(): string {
   const pattern = serializeCurrentPattern();
   return compressPattern(pattern);
-}
-
-// Automatic pattern sync when pattern changes
-let lastPatternHash: string | null = null;
-let syncTimeout: NodeJS.Timeout | null = null;
-
-function syncPatternIfChanged() {
-  try {
-    const currentPattern = serializeCurrentPattern();
-    const currentHash = JSON.stringify(currentPattern);
-    
-    // Only sync if pattern changed and there are connected devices
-    if ((!lastPatternHash || lastPatternHash !== currentHash) && getConnectedDeviceCount() > 0) {
-      // Clear existing timeout if any
-      if (syncTimeout) {
-        clearTimeout(syncTimeout);
-      }
-      
-      // Debounce pattern sync to avoid excessive calls during editing
-      syncTimeout = setTimeout(async () => {
-        try {
-          await syncPatternToAllDevices();
-          console.log('Pattern auto-synced to devices');
-        } catch (error) {
-          console.error('Failed to auto-sync pattern:', error);
-        }
-      }, 500); // 500ms debounce
-    }
-    
-    lastPatternHash = currentHash;
-  } catch (error) {
-    console.error('Error in pattern sync check:', error);
-  }
 }
 
 // Defer subscription setup to avoid initialization order issues
