@@ -298,13 +298,17 @@ class WasmOperatorManager {
     
     // Set parameters from the store
     let currentParams: Map<string, Map<string, any>> = new Map();
-    nodeParameters.subscribe(params => currentParams = params)();
+    nodeParameters.subscribe(params => {
+      currentParams = params;
+    })();
     const nodeParams = currentParams.get(nodeId) || new Map();
     this.setNodeParameters(nodeId, nodeParams);
     
     // Get current nodes to assign buffers based on lane positions
     let currentNodes: Node[] = [];
-    flowNodes.subscribe(nodes => currentNodes = nodes)();
+    flowNodes.subscribe(nodes => {
+      currentNodes = nodes;
+    })();
     
     // Find the current node to get its lane-based buffer assignment
     const currentNode = currentNodes.find(n => n.id === nodeId);
@@ -354,7 +358,7 @@ class WasmOperatorManager {
     }
     
     // Execute the WASM operator
-    const timestampMs = Date.now(); // Use synchronized global timestamp (same as BLE devices)
+    const timestampMs = Date.now() & 0xFFFFFFFF; // Truncate to 32-bit to match ESP32 behavior
     const deltaTimeMs = Math.floor(deltaTime * 1000);
     
     // Get buffer pointers - use 0 as null pointer for unused inputs
@@ -720,8 +724,12 @@ class CentralizedRenderer {
     // Get current nodes and edges
     let nodes: Node[] = [];
     let edges: Edge[] = [];
-    flowNodes.subscribe(n => nodes = n)();
-    flowEdges.subscribe(e => edges = e)();
+    flowNodes.subscribe(n => {
+      nodes = n;
+    })();
+    flowEdges.subscribe(e => {
+      edges = e;
+    })();
 
     if (nodes.length === 0) return;
 
@@ -729,7 +737,7 @@ class CentralizedRenderer {
     const executionOrder = this.calculateExecutionOrder(nodes, edges);
     
     // Use synchronized global timestamp for all patterns (same as BLE devices)
-    const globalTimestamp = Date.now();
+    const globalTimestamp = Date.now() & 0xFFFFFFFF; // Truncate to 32-bit to match ESP32 behavior
     const deltaTime = (currentTime - this.lastFrameTime) / 1000;
 
     for (const node of executionOrder) {
@@ -915,8 +923,12 @@ export function deleteNode(nodeId: string): void {
   let currentNodes: Node[] = [];
   let currentEdges: Edge[] = [];
   
-  flowNodes.subscribe(nodes => currentNodes = nodes)();
-  flowEdges.subscribe(edges => currentEdges = edges)();
+  flowNodes.subscribe(nodes => {
+    currentNodes = nodes;
+  })();
+  flowEdges.subscribe(edges => {
+    currentEdges = edges;
+  })();
   
   // Find the node to delete
   const nodeToDelete = currentNodes.find(n => n.id === nodeId);
@@ -987,9 +999,15 @@ export function serializeCurrentPattern(patternName?: string): SerializedPattern
   let currentEdges: Edge[] = [];
   let currentParams: Map<string, Map<string, any>> = new Map();
 
-  flowNodes.subscribe(nodes => currentNodes = nodes)();
-  flowEdges.subscribe(edges => currentEdges = edges)();
-  nodeParameters.subscribe(params => currentParams = params)();
+  flowNodes.subscribe(nodes => {
+    currentNodes = nodes;
+  })();
+  flowEdges.subscribe(edges => {
+    currentEdges = edges;
+  })();
+  nodeParameters.subscribe(params => {
+    currentParams = params;
+  })();
 
   // If no pattern name provided, get it from the currentPatternName store
   if (!patternName) {
