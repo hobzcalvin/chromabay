@@ -1,7 +1,7 @@
 {
-  "version": "v0.0.48",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.48.zip",
-  "buildDate": "2025-06-29 22:06:01 UTC",
-  "commitHash": "866e04e3d3a2391d0c5262b15bfb4344fdd3bafa",
-  "commitMessage": "Fix WASM loading on GitHub Pages"
+  "version": "v0.0.49",
+  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.49.zip",
+  "buildDate": "2025-07-17 03:04:45 UTC",
+  "commitHash": "e3951f6e4f82fc2b7def48e844cceb37da09c756",
+  "commitMessage": "attempting timing fixes"
 }
