@@ -2,7 +2,7 @@
 
 // Firmware Version - This will be updated by the release script
 // Format: fwvX.Y.Z
-#define FIRMWARE_VERSION "fwv0.0.17"
+#define FIRMWARE_VERSION "fwv0.0.18"
 
 // Hardware Version - Manually update this if hardware changes
 // Format: hwvX.Y.Z
