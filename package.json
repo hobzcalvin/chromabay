@@ -22,7 +22,7 @@
 		"bundle:live": "npm run build && node scripts/deploy-live-update.js",
 		"clear-cache": "rm -rf .svelte-kit node_modules/.vite build docs && echo '✅ All caches cleared!'",
 		"esp32:build": "cd esp32 && pio run",
-		"esp32:upload": "cd esp32 && pio run --target upload",
+		"esp32:upload": "cd esp32 && pio run --target upload && echo -e '\\a'",
 		"esp32:monitor": "cd esp32 && pio device monitor --baud 115200",
 		"esp32:full": "npm run esp32:upload && npm run esp32:monitor",
 		"wasm:compile": "cd native && fastled . --just-compile --force-compile --web && mkdir -p ../static/native && cp fastled_js/fastled.js ../static/native/ && cp fastled_js/fastled.wasm ../static/native/ && echo '✅ WASM files compiled and copied to static/native/'"
