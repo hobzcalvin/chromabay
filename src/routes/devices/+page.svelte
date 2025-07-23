@@ -37,6 +37,7 @@
   } from '$lib/ble';
   import { Capacitor } from '@capacitor/core';
   import { connectedDevices, getConnectedDevicesList, type ConnectedDevice } from '$lib/stores/deviceStore';
+  import LedConfigurationComponent from '$lib/components/LedConfiguration.svelte';
 
   let bleSupported = false;
   let bleEnabled = false;
@@ -534,122 +535,15 @@
                 {/if}
 
                 <!-- LED Configuration -->
-                <div class="settings-section">
-                  <h4>LED Configuration</h4>
-                  {#if settings.ledConfigLoading}
-                    <p>Loading...</p>
-                  {:else if settings.ledConfig}
-                    <div class="led-config">
-                      <label>
-                        Global Brightness:
-                        <input type="range" min="0" max="255" bind:value={settings.ledConfig.globalBrightness} />
-                        <span>{settings.ledConfig.globalBrightness}</span>
-                      </label>
-
-                      <div class="strips-section">
-                        <div class="section-header">
-                          <h5>LED Strips ({settings.ledConfig.strips.length})</h5>
-                          <button class="btn primary small" on:click={() => addLedStrip(device.deviceId)}>Add Strip</button>
-                        </div>
-
-                        {#each settings.ledConfig.strips as strip, index}
-                          <div class="strip-card">
-                            <div class="strip-header">
-                              <h6>Strip {index + 1}</h6>
-                              <button class="btn danger small" on:click={() => removeLedStrip(device.deviceId, index)} disabled={settings.ledConfig.strips.length <= 1}>Remove</button>
-                            </div>
-                            <div class="strip-controls">
-                              <div class="control-row">
-                                <label>
-                                  Chipset:
-                                  <select id="chipset-{device.deviceId}-{index}" name="chipset" bind:value={strip.chipset}>
-                                    <option value={LedChipsets.WS2812_RGB}>WS2812 RGB</option>
-                                    <option value={LedChipsets.SK6812_RGBW}>SK6812 RGBW</option>
-                                    <option value={LedChipsets.TM1814_RGBW}>TM1814 RGBW</option>
-                                    <option value={LedChipsets.WS2811_400KHZ}>WS2811 400KHz</option>
-                                    <option value={LedChipsets.TM1829_RGB}>TM1829 RGB</option>
-                                    <option value={LedChipsets.UCS8903_RGB}>UCS8903 RGB</option>
-                                    <option value={LedChipsets.UCS8904_RGBW}>UCS8904 RGBW</option>
-                                    <option value={LedChipsets.APA106_RGB}>APA106 RGB</option>
-                                    <option value={LedChipsets.FW1906_RGBCW}>FW1906 RGBCW</option>
-                                    <option value={LedChipsets.WS2805_RGBCW}>WS2805 RGBCW</option>
-                                    <option value={LedChipsets.TM1914_RGB}>TM1914 RGB</option>
-                                    <option value={LedChipsets.SM16825_RGBCW}>SM16825 RGBCW</option>
-                                  </select>
-                                </label>
-                                <label>
-                                  Pin:
-                                  <input id="pin-{device.deviceId}-{index}" name="pin" type="number" min="0" max="39" bind:value={strip.pin} />
-                                </label>
-                                <label>
-                                  LEDs:
-                                  <input id="numleds-{device.deviceId}-{index}" name="numleds" type="number" min="1" max="1000" bind:value={strip.numLeds} />
-                                </label>
-                              </div>                              <div class="control-row">
-                                <label>
-                                  Color Order:
-                                  <select id="colororder-{device.deviceId}-{index}" name="colororder" bind:value={strip.colorOrder}>
-                                    <option value={ColorOrders.RGB}>RGB</option>
-                                    <option value={ColorOrders.RBG}>RBG</option>
-                                    <option value={ColorOrders.GRB}>GRB</option>
-                                    <option value={ColorOrders.GBR}>GBR</option>
-                                    <option value={ColorOrders.BRG}>BRG</option>
-                                    <option value={ColorOrders.BGR}>BGR</option>
-                                  </select>
-                                </label>
-                                <label>
-                                  RMT Channel:
-                                  <input id="rmtchannel-{device.deviceId}-{index}" name="rmtchannel" type="number" min="0" max="7" bind:value={strip.rmtChannel} />
-                                </label>
-                              </div>
-                              <div class="control-row">
-                                <label>
-                                  Width (0 = linear):
-                                  <input id="width-{device.deviceId}-{index}" name="width" type="number" min="0" max="500" bind:value={strip.width} />
-                                </label>
-                                <label>
-                                  Height (0 = linear):
-                                  <input id="height-{device.deviceId}-{index}" name="height" type="number" min="0" max="500" bind:value={strip.height} />
-                                </label>
-                              </div>
-                              {#if strip.width > 0 && strip.height > 0}
-                                {@const currentRotation = getRotation(strip.orientation).toString()}
-                                <div class="matrix-controls">
-                                  <h6>Matrix Layout Settings</h6>
-                                  <div class="control-row">
-                                    <label>
-                                      Rotation:
-                                      <select id="rotation-{device.deviceId}-{index}" name="rotation" value={currentRotation} on:change={(e) => { strip.orientation = setRotation(strip.orientation, parseInt(e.currentTarget.value)); deviceSettings = { ...deviceSettings }; }}>
-                                        <option value="0">0° (No rotation)</option>
-                                        <option value="1">90° Clockwise</option>
-                                        <option value="2">180°</option>
-                                        <option value="3">270° Clockwise</option>
-                                      </select>
-                                    </label>
-                                    <label>
-                                      <input id="flip-{device.deviceId}-{index}" name="flip" type="checkbox" checked={getFlipH(strip.orientation)} on:change={(e) => { strip.orientation = setFlipH(strip.orientation, e.currentTarget.checked); deviceSettings = { ...deviceSettings }; }} />
-                                      Flip Horizontally
-                                    </label>
-                                    <label>
-                                      <input id="serpentine-{device.deviceId}-{index}" name="serpentine" type="checkbox" checked={getSerpentine(strip.orientation)} on:change={(e) => { strip.orientation = setSerpentine(strip.orientation, e.currentTarget.checked); deviceSettings = { ...deviceSettings }; }} />
-                                      Serpentine Layout
-                                    </label>
-                                  </div>
-                                </div>
-                              {/if}
-                            </div>
-                          </div>
-                        {/each}
-                      </div>
-
-                      <button class="btn primary" on:click={() => saveLedConfig(device.deviceId)} disabled={settings.ledConfigLoading}>
-                        Save Configuration
-                      </button>
-                    </div>
-                  {:else}
-                    <p>Loading LED configuration automatically...</p>
-                  {/if}
-                </div>
+                <LedConfigurationComponent 
+                  {settings}
+                  deviceId={device.deviceId}
+                  idPrefix=""
+                  onAddStrip={addLedStrip}
+                  onRemoveStrip={removeLedStrip}
+                  onSaveConfig={saveLedConfig}
+                  onReactivityUpdate={() => { deviceSettings = { ...deviceSettings }; }}
+                />
 
                 <!-- Firmware Update -->
                 <div class="settings-section">
@@ -734,122 +628,15 @@
                 {/if}
 
                 <!-- LED Configuration -->
-                <div class="settings-section">
-                  <h4>LED Configuration</h4>
-                  {#if settings.ledConfigLoading}
-                    <p>Loading...</p>
-                  {:else if settings.ledConfig}
-                    <div class="led-config">
-                      <label>
-                        Global Brightness:
-                        <input type="range" min="0" max="255" bind:value={settings.ledConfig.globalBrightness} />
-                        <span>{settings.ledConfig.globalBrightness}</span>
-                      </label>
-
-                      <div class="strips-section">
-                        <div class="section-header">
-                          <h5>LED Strips ({settings.ledConfig.strips.length})</h5>
-                          <button class="btn primary small" on:click={() => addLedStrip(device.deviceId)}>Add Strip</button>
-                        </div>
-
-                        {#each settings.ledConfig.strips as strip, index}
-                          <div class="strip-card">
-                            <div class="strip-header">
-                              <h6>Strip {index + 1}</h6>
-                              <button class="btn danger small" on:click={() => removeLedStrip(device.deviceId, index)} disabled={settings.ledConfig.strips.length <= 1}>Remove</button>
-                            </div>
-                            <div class="strip-controls">
-                              <div class="control-row">
-                                <label>
-                                  Chipset:
-                                  <select id="chipset-web-{device.deviceId}-{index}" name="chipset" bind:value={strip.chipset}>
-                                    <option value={LedChipsets.WS2812_RGB}>WS2812 RGB</option>
-                                    <option value={LedChipsets.SK6812_RGBW}>SK6812 RGBW</option>
-                                    <option value={LedChipsets.TM1814_RGBW}>TM1814 RGBW</option>
-                                    <option value={LedChipsets.WS2811_400KHZ}>WS2811 400KHz</option>
-                                    <option value={LedChipsets.TM1829_RGB}>TM1829 RGB</option>
-                                    <option value={LedChipsets.UCS8903_RGB}>UCS8903 RGB</option>
-                                    <option value={LedChipsets.UCS8904_RGBW}>UCS8904 RGBW</option>
-                                    <option value={LedChipsets.APA106_RGB}>APA106 RGB</option>
-                                    <option value={LedChipsets.FW1906_RGBCW}>FW1906 RGBCW</option>
-                                    <option value={LedChipsets.WS2805_RGBCW}>WS2805 RGBCW</option>
-                                    <option value={LedChipsets.TM1914_RGB}>TM1914 RGB</option>
-                                    <option value={LedChipsets.SM16825_RGBCW}>SM16825 RGBCW</option>
-                                  </select>
-                                </label>
-                                <label>
-                                  Pin:
-                                  <input id="pin-{device.deviceId}-{index}" name="pin" type="number" min="0" max="39" bind:value={strip.pin} />
-                                </label>
-                                <label>
-                                  LEDs:
-                                  <input id="numleds-{device.deviceId}-{index}" name="numleds" type="number" min="1" max="1000" bind:value={strip.numLeds} />
-                                </label>
-                              </div>                              <div class="control-row">
-                                <label>
-                                  Color Order:
-                                  <select id="colororder-{device.deviceId}-{index}" name="colororder" bind:value={strip.colorOrder}>
-                                    <option value={ColorOrders.RGB}>RGB</option>
-                                    <option value={ColorOrders.RBG}>RBG</option>
-                                    <option value={ColorOrders.GRB}>GRB</option>
-                                    <option value={ColorOrders.GBR}>GBR</option>
-                                    <option value={ColorOrders.BRG}>BRG</option>
-                                    <option value={ColorOrders.BGR}>BGR</option>
-                                  </select>
-                                </label>
-                                <label>
-                                  RMT Channel:
-                                  <input id="rmtchannel-{device.deviceId}-{index}" name="rmtchannel" type="number" min="0" max="7" bind:value={strip.rmtChannel} />
-                                </label>
-                              </div>
-                              <div class="control-row">
-                                <label>
-                                  Width (0 = linear):
-                                  <input id="width-{device.deviceId}-{index}" name="width" type="number" min="0" max="500" bind:value={strip.width} />
-                                </label>
-                                <label>
-                                  Height (0 = linear):
-                                  <input id="height-{device.deviceId}-{index}" name="height" type="number" min="0" max="500" bind:value={strip.height} />
-                                </label>
-                              </div>
-                              {#if strip.width > 0 && strip.height > 0}
-                                {@const currentRotation = getRotation(strip.orientation).toString()}
-                                <div class="matrix-controls">
-                                  <h6>Matrix Layout Settings</h6>
-                                  <div class="control-row">
-                                    <label>
-                                      Rotation:
-                                      <select id="rotation-web-{device.deviceId}-{index}" name="rotation" value={currentRotation} on:change={(e) => { strip.orientation = setRotation(strip.orientation, parseInt(e.currentTarget.value)); deviceSettings = { ...deviceSettings }; }}>
-                                        <option value="0">0° (No rotation)</option>
-                                        <option value="1">90° Clockwise</option>
-                                        <option value="2">180°</option>
-                                        <option value="3">270° Clockwise</option>
-                                      </select>
-                                    </label>
-                                    <label>
-                                      <input id="flip-web-{device.deviceId}-{index}" name="flip" type="checkbox" checked={getFlipH(strip.orientation)} on:change={(e) => { strip.orientation = setFlipH(strip.orientation, e.currentTarget.checked); deviceSettings = { ...deviceSettings }; }} />
-                                      Flip Horizontally
-                                    </label>
-                                    <label>
-                                      <input id="serpentine-web-{device.deviceId}-{index}" name="serpentine" type="checkbox" checked={getSerpentine(strip.orientation)} on:change={(e) => { strip.orientation = setSerpentine(strip.orientation, e.currentTarget.checked); deviceSettings = { ...deviceSettings }; }} />
-                                      Serpentine Layout
-                                    </label>
-                                  </div>
-                                </div>
-                              {/if}
-                            </div>
-                          </div>
-                        {/each}
-                      </div>
-
-                      <button class="btn primary" on:click={() => saveLedConfig(device.deviceId)} disabled={settings.ledConfigLoading}>
-                        Save Configuration
-                      </button>
-                    </div>
-                  {:else}
-                    <p>Loading LED configuration automatically...</p>
-                  {/if}
-                </div>
+                <LedConfigurationComponent 
+                  {settings}
+                  deviceId={device.deviceId}
+                  idPrefix="web"
+                  onAddStrip={addLedStrip}
+                  onRemoveStrip={removeLedStrip}
+                  onSaveConfig={saveLedConfig}
+                  onReactivityUpdate={() => { deviceSettings = { ...deviceSettings }; }}
+                />
 
                 <!-- Firmware Update -->
                 <div class="settings-section">
@@ -1104,70 +891,7 @@
     font-size: 0.9rem;
   }
 
-  .led-config label {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    margin-bottom: 1rem;
-  }
 
-  .led-config input[type="range"] {
-    flex: 1;
-    margin: 0 0.5rem;
-  }
-
-  .section-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 1rem;
-  }
-
-  .section-header h5 {
-    margin: 0;
-  }
-
-  .strip-card {
-    background: rgba(255, 255, 255, 0.03);
-    border-radius: 6px;
-    padding: 1rem;
-    margin-bottom: 1rem;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-  }
-
-  .strip-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 1rem;
-  }
-
-  .strip-header h6 {
-    margin: 0;
-  }
-
-  .control-row {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: 1rem;
-  }
-
-  .control-row label {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-    font-size: 0.8rem;
-  }
-
-  .control-row input,
-  .control-row select {
-    padding: 0.4rem;
-    border: 1px solid rgba(255, 255, 255, 0.3);
-    border-radius: 4px;
-    background: rgba(255, 255, 255, 0.1);
-    color: white;
-    font-size: 0.8rem;
-  }
 
   .ota-progress {
     margin: 1rem 0;
@@ -1318,21 +1042,7 @@
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
   }
 
-  /* Matrix configuration styling */
-  .matrix-controls {
-    margin-top: 1rem;
-    padding: 1rem;
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-  }
 
-  .matrix-controls h6 {
-    margin: 0 0 0.75rem 0;
-    color: var(--accent-color);
-    font-size: 0.9rem;
-    font-weight: 600;
-  }
 
   @media (max-width: 768px) {
     main {
@@ -1371,8 +1081,6 @@
       justify-content: center;
     }
 
-    .control-row {
-      grid-template-columns: 1fr;
-    }
+
   }
 </style>
