@@ -48,10 +48,6 @@ protected:
     unsigned long syncedLocalTime = 0;      // Local millis() when sync was received
     bool useSyncedTime = false;             // Whether to use synchronized time
     
-    // Current matrix dimensions (determined from LED strip config)
-    uint16_t matrixWidth = 8;  // Default fallback
-    uint16_t matrixHeight = 8; // Default fallback
-    uint16_t totalPixels = 64; // matrixWidth * matrixHeight
     bool buffersAllocated = false;
 
     // Helper functions
@@ -61,6 +57,11 @@ protected:
     void deallocateBuffers();
     void initializeFromLedConfig();
     unsigned long getCurrentTime(); // Get current time (synced or local)
+    
+    // Get current dimensions from LED config (single source of truth)
+    uint16_t getMatrixWidth() const;
+    uint16_t getMatrixHeight() const;
+    uint16_t getTotalPixels() const;
     
 public:
     PatternRendererBase(LedConfig::LedManager* ledMgr);
