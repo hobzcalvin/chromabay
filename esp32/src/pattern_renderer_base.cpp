@@ -17,6 +17,7 @@ void PatternRendererBase::allocateBuffers() {
         deallocateBuffers();
     }
     
+    uint16_t totalPixels = getTotalPixels();
     buffers = new CRGB*[NUM_BUFFERS];
     for (int i = 0; i < NUM_BUFFERS; i++) {
         buffers[i] = new CRGB[totalPixels];
@@ -38,42 +39,64 @@ void PatternRendererBase::deallocateBuffers() {
     }
 }
 
+uint16_t PatternRendererBase::getMatrixWidth() const {
+    if (!ledManager || ledManager->getNumStrips() == 0) return 8; // Default fallback
+    
+    const LedConfig::LedBus* strip = ledManager->getStrip(0);
+    if (!strip) return 8; // Default fallback
+    
+    const auto& config = strip->getConfig();
+    if (config.width > 0) {
+        return config.width;
+    } else {
+        // Linear strip - use square dimensions
+        uint16_t side = (uint16_t)sqrt(config.numLeds);
+        return side;
+    }
+}
+
+uint16_t PatternRendererBase::getMatrixHeight() const {
+    if (!ledManager || ledManager->getNumStrips() == 0) return 8; // Default fallback
+    
+    const LedConfig::LedBus* strip = ledManager->getStrip(0);
+    if (!strip) return 8; // Default fallback
+    
+    const auto& config = strip->getConfig();
+    if (config.height > 0) {
+        return config.height;
+    } else {
+        // Linear strip - use square dimensions
+        uint16_t side = (uint16_t)sqrt(config.numLeds);
+        return side;
+    }
+}
+
+uint16_t PatternRendererBase::getTotalPixels() const {
+    return getMatrixWidth() * getMatrixHeight();
+}
+
 void PatternRendererBase::initializeFromLedConfig() {
     if (!ledManager || ledManager->getNumStrips() == 0) {
         Serial.println("PatternRenderer: No LED strips available");
-        matrixWidth = 8;  // Default
-        matrixHeight = 8; // Default
-        totalPixels = 64;
         return;
     }
     
     const LedConfig::LedBus* strip = ledManager->getStrip(0);
     if (!strip) {
         Serial.println("PatternRenderer: Strip 0 not available");
-        matrixWidth = 8;  // Default
-        matrixHeight = 8; // Default
-        totalPixels = 64;
         return;
     }
     
     const auto& config = strip->getConfig();
+    uint16_t width = getMatrixWidth();
+    uint16_t height = getMatrixHeight();
+    uint16_t pixels = getTotalPixels();
     
     if (config.width > 0 && config.height > 0) {
-        // Matrix configuration
-        matrixWidth = config.width;
-        matrixHeight = config.height;
-        totalPixels = matrixWidth * matrixHeight;
-        Serial.printf("PatternRenderer: Matrix mode %dx%d (%d pixels)\n", 
-                     matrixWidth, matrixHeight, totalPixels);
+        Serial.printf("PatternRenderer: Matrix mode %dx%d (%d pixels)\n", width, height, pixels);
     } else {
-        // Linear strip - use square dimensions
-        uint16_t stripLength = config.numLeds;
-        uint16_t side = (uint16_t)sqrt(stripLength);
-        matrixWidth = side;
-        matrixHeight = side;
-        totalPixels = side * side;
         Serial.printf("PatternRenderer: Linear mode, using %dx%d matrix (%d of %d pixels)\n", 
-                     matrixWidth, matrixHeight, totalPixels, stripLength);
+                     width, height, pixels, config.numLeds);
     }
     
     allocateBuffers();
@@ -90,6 +113,7 @@ void PatternRendererBase::updateMatrixConfig() {
 void PatternRendererBase::clearBuffer(int bufferIndex) {
     if (bufferIndex < 0 || bufferIndex >= NUM_BUFFERS || !buffersAllocated) return;
     
+    uint16_t totalPixels = getTotalPixels();
     for (int i = 0; i < totalPixels; i++) {
         buffers[bufferIndex][i] = CRGB::Black;
     }
@@ -161,6 +185,9 @@ void PatternRendererBase::update() {
     uint32_t floatFriendlyTime = globalTime % 1000000; // 1M ms = ~16.67 minutes
     uint32_t floatFriendlyDelta = deltaTime; // Delta is usually small, no modulo needed
     
+    uint16_t matrixWidth = getMatrixWidth();
+    uint16_t matrixHeight = getMatrixHeight();
+    
     for (const auto& node : currentPattern.nodes) {
         if (node.op) {
             CRGB* inputBuffer1 = (node.inputBuffer >= 0) ? getBufferPtr(node.inputBuffer) : nullptr;
@@ -195,9 +222,12 @@ void PatternRendererBase::render() {
     if (!strip) return;
     
     const auto& config = strip->getConfig();
+    uint16_t matrixWidth = getMatrixWidth();
+    uint16_t matrixHeight = getMatrixHeight();
+    uint16_t totalPixels = getTotalPixels();
     
     // Check if this is a matrix layout (has width and height)
-    if (config.width > 0 && config.height > 0) {
+    if (matrixWidth > 0 && matrixHeight > 0) {
         // 2D Matrix layout - map logical coordinates to physical LED indices
         // The pattern buffer is in logical row-major order: (0,0), (1,0), (2,0)... (0,1), (1,1)...
         
@@ -265,7 +295,7 @@ void PatternRendererBase::render() {
         }
     } else {
         // Linear strip - direct 1:1 mapping
-        uint16_t pixelCount = min((uint16_t)totalPixels, config.numLeds);
+        uint16_t pixelCount = min(totalPixels, config.numLeds);
         for (int i = 0; i < pixelCount; i++) {
             strip->setPixelColor(i, patternBuffer[i]);
         }
