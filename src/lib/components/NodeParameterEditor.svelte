@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { getNodeDefinition, setNodeParameter, getNodeParameter, deleteNode, nodeParameters, type Parameter } from '../flowStore';
+  import { getParameterInteractive, setParameterInteractive, MAX_INTERACTIVE_PARAMS } from '../stores/interactiveStore';
   import type { Node } from '@xyflow/svelte';
 
   export let node: Node;
@@ -113,6 +114,20 @@
   function getUniqueInputId(paramName: string): string {
     return `param-input-${node.id}-${paramName}`;
   }
+
+  function handleInteractiveToggle(param: Parameter, event: Event) {
+    const checkbox = event.target as HTMLInputElement;
+    const wantsInteractive = checkbox.checked;
+    
+    const success = setParameterInteractive(node.id, param.name, wantsInteractive);
+    
+    if (!success) {
+      // Revert the checkbox state
+      checkbox.checked = false;
+      // Show error message
+      alert(`Maximum of ${MAX_INTERACTIVE_PARAMS} interactive parameters allowed. Please uncheck other parameters first.`);
+    }
+  }
 </script>
 
 <div 
@@ -146,7 +161,18 @@
       {#each nodeDefinition.params as param (param.name)}
         {@const inputId = getUniqueInputId(param.name)}
         <div class="parameter-group">
-          <label class="parameter-label" for={inputId}>{param.label}</label>
+          <div class="parameter-header">
+            <label class="parameter-label" for={inputId}>{param.label}</label>
+            <div class="interactive-checkbox">
+              <input 
+                type="checkbox" 
+                id="interactive-{inputId}"
+                checked={getParameterInteractive(node.id, param.name)}
+                onchange={(e) => handleInteractiveToggle(param, e)}
+              />
+              <label for="interactive-{inputId}" class="hand-emoji" title="Interactive parameter (shows knob on interact page)">🖐️</label>
+            </div>
+          </div>
           
           {#if param.type === 'float'}
             <div class="float-control">
@@ -355,12 +381,49 @@
     margin-bottom: 0;
   }
 
+  .parameter-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+
   .parameter-label {
-    display: block;
     font-size: 12px;
     font-weight: 500;
     color: #d1d5db;
-    margin-bottom: 8px;
+    margin: 0;
+  }
+
+  .interactive-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .interactive-checkbox input[type="checkbox"] {
+    display: none;
+  }
+
+  .hand-emoji {
+    font-size: 14px;
+    cursor: pointer;
+    opacity: 0.3;
+    transition: opacity 0.2s ease;
+    user-select: none;
+  }
+
+  .interactive-checkbox input[type="checkbox"]:checked + .hand-emoji {
+    opacity: 1;
+  }
+
+  .hand-emoji:hover {
+    opacity: 0.7;
+  }
+
+  .interactive-checkbox input[type="checkbox"]:checked + .hand-emoji:hover {
+    opacity: 1;
+    transform: scale(1.1);
   }
 
   .float-control, .range-control, .integer-control, .hue-control {

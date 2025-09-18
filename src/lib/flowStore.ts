@@ -1,5 +1,6 @@
 import { writable, get } from 'svelte/store';
 import type { Node, Edge, Connection } from '@xyflow/svelte';
+import { clearNodeInteractiveParameters } from './stores/interactiveStore';
 import { renderConfig, type RenderConfig } from './renderConfig';
 
 // Global start time for synchronized animations across all nodes
@@ -1043,6 +1044,9 @@ export function deleteNode(nodeId: string): void {
     params.delete(nodeId);
     return params;
   });
+
+  // Clean up interactive parameters for the deleted node
+  clearNodeInteractiveParameters(nodeId);
   
   // Clean up WASM operator instance
   const manager = getWasmOperatorManager();

@@ -16,6 +16,8 @@ import {
   type Parameter,
   getNodeBuffer
 } from './flowStore';
+import { interactiveParameters, setParameterInteractive } from './stores/interactiveStore';
+import { get } from 'svelte/store';
 
 /**
  * Compact representation of a node in the serialized pattern
@@ -36,6 +38,9 @@ export interface SerializedNode {
 
   /** Second input buffer index (only for blend nodes) */
   i2?: number;
+
+  /** Interactive parameters - parameter names that should have knobs on interact page */
+  x?: Record<string, number>;
 }
 
 /**
@@ -351,6 +356,9 @@ export function serializePattern(
   // Step 3: Filter out output node for serialization
   const nodesToSerialize = conflictSafeOrder.filter(node => node.data.type !== 'output');
   
+  // Get interactive parameters once before serialization
+  const currentInteractiveParams = get(interactiveParameters);
+
   // Step 4: Create serialized nodes with lane-based buffer assignment
   const serializedNodes: SerializedNode[] = nodesToSerialize.map((node) => {
     const nodeDefinition = getNodeDefinition(node.data.type as string);
@@ -416,6 +424,23 @@ export function serializePattern(
     // Add parameters if any
     if (Object.keys(params).length > 0) {
       serializedNode.p = params;
+    }
+    
+    // Add interactive parameters if any
+    const nodeInteractiveParams = currentInteractiveParams.get(node.id);
+    if (nodeInteractiveParams) {
+      const interactiveFlags: Record<string, number> = {};
+      let order = 0;
+      
+      for (const [paramName, isInteractive] of nodeInteractiveParams.entries()) {
+        if (isInteractive) {
+          interactiveFlags[paramName] = order++;
+        }
+      }
+      
+      if (Object.keys(interactiveFlags).length > 0) {
+        serializedNode.x = interactiveFlags;
+      }
     }
     
     return serializedNode;
@@ -553,6 +578,9 @@ function calculateDependencyLevels(
 export function deserializePattern(
   serializedPattern: SerializedPattern
 ): { nodes: Node[]; edges: Edge[]; nodeParameters: Map<string, Map<string, any>> } {
+  
+  // Clear existing interactive parameters before loading new pattern
+  interactiveParameters.set(new Map());
   const svelteFlowNodes: Node[] = [];
   const svelteFlowEdges: Edge[] = [];
   const newNodeParameters = new Map<string, Map<string, any>>();
@@ -648,6 +676,13 @@ export function deserializePattern(
     
     // Store parameters
     newNodeParameters.set(nodeId, currentParamsForNode);
+    
+    // Restore interactive parameters
+    if (sNode.x) {
+      for (const paramName in sNode.x) {
+        setParameterInteractive(nodeId, paramName, true);
+      }
+    }
     
     // For visual consistency in PatternNode if it reads data.parameters directly
     newNode.data.parameters = Object.fromEntries(currentParamsForNode.entries());
