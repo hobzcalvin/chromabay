@@ -1,7 +1,7 @@
 {
-  "version": "v0.0.49",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.49.zip",
-  "buildDate": "2025-07-17 03:04:45 UTC",
-  "commitHash": "e3951f6e4f82fc2b7def48e844cceb37da09c756",
-  "commitMessage": "attempting timing fixes"
+  "version": "v0.0.50",
+  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-v0.0.50.zip",
+  "buildDate": "2025-09-18 06:06:28 UTC",
+  "commitHash": "c0ed1fa4a70dcd4d5056f79850a7be41eeabf9d0",
+  "commitMessage": "Update .gitignore for static/native files"
 }
