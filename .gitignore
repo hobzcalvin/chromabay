@@ -12,6 +12,9 @@ etc
 
 # Native stuff
 native/fastled_js
+static/native/*
+!static/native/fastled.js
+!static/native/fastled.wasm
 
 # OS
 .DS_Store
