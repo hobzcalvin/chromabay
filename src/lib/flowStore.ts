@@ -358,7 +358,9 @@ class WasmOperatorManager {
     }
     
     // Execute the WASM operator
-    const timestampMs = Date.now() & 0xFFFFFFFF; // Truncate to 32-bit to match ESP32 behavior
+    // Fix: performance.now() has sub-ms precision, but WASM uint32_t truncates it
+    // Scale by 100 to preserve 0.01ms precision: 123456.789ms becomes 12345678 (0.01ms units)
+    const scaledTimestamp = Math.floor(performance.now() * 100) & 0xFFFFFFFF; // 0.01ms units as uint32
     const deltaTimeMs = Math.floor(deltaTime * 1000);
     
     // Get buffer pointers - use 0 as null pointer for unused inputs
@@ -368,7 +370,7 @@ class WasmOperatorManager {
     
     this.wasmModule.ccall('renderOperator', null, 
       ['number', 'number', 'number', 'number', 'number', 'number', 'number', 'number'], 
-      [this.operatorInstances.get(nodeId), inputBuffer1Ptr, inputBuffer2Ptr, outputBufferPtr, width, height, timestampMs, deltaTimeMs]
+      [this.operatorInstances.get(nodeId), inputBuffer1Ptr, inputBuffer2Ptr, outputBufferPtr, width, height, scaledTimestamp, deltaTimeMs]
     );
     
     // Copy the buffer data back to canvas

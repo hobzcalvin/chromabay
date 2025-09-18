@@ -87,6 +87,12 @@ function getNodeLaneBuffer(node: Node): number {
  * @returns The X position for the corresponding lane
  */
 function getLaneFromBuffer(bufferIndex: number): number {
+  // Ensure bufferIndex is a valid number
+  if (!Number.isFinite(bufferIndex) || Number.isNaN(bufferIndex)) {
+    console.warn(`⚠️ Invalid buffer index: ${bufferIndex}, defaulting to center lane`);
+    return LANES.CENTER;
+  }
+  
   if (bufferIndex === 0) return LANES.LEFT;
   if (bufferIndex === 1) return LANES.CENTER;
   return LANES.RIGHT;
@@ -527,6 +533,14 @@ function calculateDependencyLevels(
     }
   });
   
+  // Validate dependency levels
+  for (const [index, level] of levels.entries()) {
+    if (Number.isNaN(level)) {
+      console.error(`❌ NaN level detected for node index ${index}!`);
+      levels.set(index, 0); // Fix with fallback level
+    }
+  }
+  
   return levels;
 }
 
@@ -542,6 +556,11 @@ export function deserializePattern(
   const svelteFlowNodes: Node[] = [];
   const svelteFlowEdges: Edge[] = [];
   const newNodeParameters = new Map<string, Map<string, any>>();
+  
+  // Handle edge case: empty patterns
+  if (!serializedPattern.nodes || serializedPattern.nodes.length === 0) {
+    return { nodes: [], edges: [], nodeParameters: newNodeParameters };
+  }
   
   // Step 1: Calculate dependency levels for proper vertical positioning
   const dependencyLevels = calculateDependencyLevels(serializedPattern.nodes);
@@ -562,22 +581,37 @@ export function deserializePattern(
     const nodeId = `deserialized_${sNode.t}_${Date.now()}_${index}`;
     
     // Position node based on its output buffer (x) and dependency level (y)
-    const xPos = getLaneFromBuffer(sNode.o);
+    let rawXPos = getLaneFromBuffer(sNode.o);
     const level = dependencyLevels.get(index) || 0;
     // Calculate base Y position
-    let yPos = 50 + level * (NODE_HEIGHT + VERTICAL_SPACING);
+    let rawYPos = 50 + level * (NODE_HEIGHT + VERTICAL_SPACING);
     // Determine if another node already occupies this lane+level;
     // if so, offset further to avoid overlap
     const laneLevelKey = `${sNode.o}-${level}`;
     const alreadyPlaced = laneLevelCounts.get(laneLevelKey) ?? 0;
     if (alreadyPlaced > 0) {
       // Add extra spacing for each stacked node
-      yPos += alreadyPlaced * (NODE_HEIGHT + VERTICAL_SPACING);
+      rawYPos += alreadyPlaced * (NODE_HEIGHT + VERTICAL_SPACING);
     }
     laneLevelCounts.set(laneLevelKey, alreadyPlaced + 1);
     
+    // Validate and fix position calculations
+    if (Number.isNaN(rawXPos) || Number.isNaN(rawYPos)) {
+      console.error(`❌ NaN detected in node positions! sNode.o=${sNode.o}, level=${level}, xPos=${rawXPos}, yPos=${rawYPos}`);
+      console.error('Node data:', sNode);
+      
+      // Fallback to safe default positions to prevent SVG errors
+      rawXPos = Number.isNaN(rawXPos) ? 175 : rawXPos; // Default to center lane
+      rawYPos = Number.isNaN(rawYPos) ? 50 : rawYPos;  // Default to top level
+      console.warn(`🛟 Using fallback positions: x=${rawXPos}, y=${rawYPos}`);
+    }
+    
+    // Ensure positions are valid numbers before creating node
+    const safeX = Number.isFinite(rawXPos) ? rawXPos : 175;
+    const safeY = Number.isFinite(rawYPos) ? rawYPos : 50;
+    
     // Create node
-    const newNode = createNodeFromType(nodeDefinition, nodeId, { x: xPos, y: yPos });
+    const newNode = createNodeFromType(nodeDefinition, nodeId, { x: safeX, y: safeY });
     
     // Set parameters
     const currentParamsForNode = new Map<string, any>();
