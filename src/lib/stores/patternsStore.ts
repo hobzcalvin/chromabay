@@ -52,14 +52,14 @@ function createDefaultPattern(): SerializedPattern {
   };
 }
 
-// Create empty pattern with just output node
+// Create new pattern with rainbow node (same as default)
 export function createEmptyPattern(name?: string): SerializedPattern {
   if (!name) {
     const seconds = getSecondsSinceApril19();
     name = `My Pattern ${seconds}`;
   }
   return {
-    nodes: [{ t: "output", o: 1 }],
+    nodes: [{ t: "rainbow", o: 1 }],
     meta: {
       output: 1,
       name

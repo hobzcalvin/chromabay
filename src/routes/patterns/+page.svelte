@@ -25,24 +25,32 @@
     await loadPatterns();
   });
   
-  async function handlePatternTap(pattern: SerializedPattern) {
-    // Set as current pattern and go to Interact
-    if (pattern.meta?.name) {
-      console.log('Setting pattern as current:', pattern.meta?.name);
-      await switchToPattern(pattern.meta.name);
-      // Load pattern into flow editor for interact page
-      const { loadSerializedPattern } = await import('$lib/flowStore');
-      await loadSerializedPattern(pattern);
-      
-      // Sync pattern to all connected devices
-      try {
-        await syncPatternToAllDevices();
-      } catch (error) {
-        console.error('Failed to sync pattern to devices:', error);
-      }
-      
-      goto(`${base}/interact`);
+  async function handlePatternItemClick(pattern: SerializedPattern, event: Event) {
+    const patternName = pattern.meta?.name;
+    if (!patternName) return;
+    
+    // If delete area is revealed, close it instead of navigating
+    if (swipeStates[patternName]?.isSwipeRevealed) {
+      swipeStates[patternName].isSwipeRevealed = false;
+      swipeStates = { ...swipeStates }; // Trigger reactivity
+      return;
     }
+    
+    // Normal tap behavior: Set as current pattern and go to Interact
+    console.log('Setting pattern as current:', patternName);
+    await switchToPattern(patternName);
+    // Load pattern into flow editor for interact page
+    const { loadSerializedPattern } = await import('$lib/flowStore');
+    await loadSerializedPattern(pattern);
+    
+    // Sync pattern to all connected devices
+    try {
+      await syncPatternToAllDevices();
+    } catch (error) {
+      console.error('Failed to sync pattern to devices:', error);
+    }
+    
+    goto(`${base}/interact`);
   }
   
   async function handleEditTap(pattern: SerializedPattern, event: Event) {
@@ -63,14 +71,25 @@
     
     if (!pattern.meta?.name) return;
     
-    if (window.confirm(`Are you sure you want to delete "${pattern.meta.name}"?\n\nThis action cannot be undone.`)) {
-      // Import and use the delete function
-      const { deletePatternByName } = await import('$lib/stores/patternsStore');
-      await deletePatternByName(pattern.meta.name);
-      // Hide swipe state after deletion
-      if (swipeStates[pattern.meta.name]) {
-        swipeStates[pattern.meta.name].isSwipeRevealed = false;
-      }
+    // First tap: reveal the swipe delete area (same as left swipe)
+    if (!swipeStates[pattern.meta.name]) {
+      swipeStates[pattern.meta.name] = { isSwipeRevealed: false, startX: 0, currentX: 0 };
+    }
+    swipeStates[pattern.meta.name].isSwipeRevealed = true;
+    swipeStates = { ...swipeStates }; // Trigger reactivity
+  }
+  
+  async function handleConfirmDelete(pattern: SerializedPattern, event: Event) {
+    event.stopPropagation();
+    
+    if (!pattern.meta?.name) return;
+    
+    // Second tap: actually delete (no confirm dialog)
+    const { deletePatternByName } = await import('$lib/stores/patternsStore');
+    await deletePatternByName(pattern.meta.name);
+    // Hide swipe state after deletion
+    if (swipeStates[pattern.meta.name]) {
+      swipeStates[pattern.meta.name].isSwipeRevealed = false;
     }
   }
   
@@ -164,7 +183,7 @@
           class="pattern-item" 
           class:current={isCurrentPattern}
           class:swiped={swipeState?.isSwipeRevealed}
-          onclick={() => handlePatternTap(pattern)}
+          onclick={(e) => handlePatternItemClick(pattern, e)}
           ontouchstart={(e) => handleTouchStart(e, patternName)}
           ontouchmove={(e) => handleTouchMove(e, patternName)}
           ontouchend={(e) => handleTouchEnd(e, patternName)}
@@ -205,8 +224,8 @@
           <div class="delete-area">
             <button 
               class="delete-button"
-              onclick={(e) => handleDeleteTap(pattern, e)}
-              aria-label="Delete {patternName}"
+              onclick={(e) => handleConfirmDelete(pattern, e)}
+              aria-label="Confirm delete {patternName}"
             >
               🗑️ Delete
             </button>
