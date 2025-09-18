@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { base } from '$app/paths';
-  import { patterns, loadPatterns, switchToPattern, currentPatternName } from '$lib/stores/patternsStore';
+  import { patterns, loadPatterns, switchToPattern, currentPatternName, createEmptyPattern, saveAsPattern } from '$lib/stores/patternsStore';
   import PatternPreview from '$lib/components/PatternPreview.svelte';
   import type { SerializedPattern } from '$lib/patternSerializer';
   import { syncPatternToAllDevices } from '$lib/ble';
@@ -11,8 +11,12 @@
   let currentName = '';
   
   // Subscribe to patterns and current pattern name
-  patterns.subscribe(pats => patternsList = pats);
-  currentPatternName.subscribe(name => currentName = name);
+  patterns.subscribe(pats => {
+    patternsList = pats;
+  });
+  currentPatternName.subscribe(name => {
+    currentName = name;
+  });
   
   // Swipe state
   let swipeStates: { [key: string]: { isSwipeRevealed: boolean, startX: number, currentX: number } } = {};
@@ -114,12 +118,32 @@
       swipeStates = { ...swipeStates };
     }
   }
+  
+  async function handleNewPattern() {
+    const name = prompt('Enter a name for the new pattern:');
+    if (!name?.trim()) return;
+    
+    try {
+      // Create and save empty pattern
+      const emptyPattern = createEmptyPattern(name.trim());
+      await saveAsPattern(emptyPattern, name.trim());
+      
+      // Load it into the editor and navigate there
+      const { loadSerializedPattern } = await import('$lib/flowStore');
+      await loadSerializedPattern(emptyPattern);
+      
+      goto(`${base}/editor`);
+    } catch (error) {
+      console.error('Failed to create new pattern:', error);
+      alert('Failed to create new pattern. Please try again.');
+    }
+  }
 </script>
 
 <main class="patterns-page" onclick={handleDocumentClick}>
   <div class="header">
     <h1>🎨 Patterns</h1>
-    <p class="subtitle">Tap to interact • Pencil to edit • Swipe left to delete</p>
+    <p class="subtitle">Tap to interact • Pencil to edit • Trash to delete</p>
   </div>
   
   {#if patternsList.length === 0}
@@ -155,18 +179,27 @@
             
             <div class="pattern-details">
               <h3 class="pattern-name">{patternName}</h3>
-              <p class="pattern-info">
-                {pattern.nodes.length} nodes • {pattern.meta?.output || 1} output
-              </p>
             </div>
             
-            <button 
-              class="edit-button"
-              onclick={(e) => handleEditTap(pattern, e)}
-              aria-label="Edit {patternName}"
-            >
-              ✏️
-            </button>
+            <div class="action-buttons">
+              <button 
+                class="edit-button"
+                onclick={(e) => handleEditTap(pattern, e)}
+                aria-label="Edit {patternName}"
+                title="Edit pattern"
+              >
+                ✏️
+              </button>
+              
+              <button 
+                class="delete-button-visible"
+                onclick={(e) => handleDeleteTap(pattern, e)}
+                aria-label="Delete {patternName}"
+                title="Delete pattern"
+              >
+                🗑️
+              </button>
+            </div>
           </div>
           
           <div class="delete-area">
@@ -180,6 +213,11 @@
           </div>
         </div>
       {/each}
+      
+      <!-- New Pattern Button -->
+      <button class="new-pattern-button" onclick={handleNewPattern}>
+        ➕ New Pattern
+      </button>
     </div>
   {/if}
 </main>
@@ -335,28 +373,39 @@
     white-space: nowrap;
   }
   
-  .pattern-info {
-    margin: 0;
-    font-size: 0.8rem;
-    color: #d1d5db;
+  /* Removed .pattern-info as we no longer show node counts */
+  
+  .action-buttons {
+    display: flex;
+    gap: 0.5rem;
+    flex-shrink: 0;
   }
   
-  .edit-button {
+  .edit-button, .delete-button-visible {
     background: rgba(255, 255, 255, 0.1);
     border: 1px solid rgba(255, 255, 255, 0.2);
     padding: 0.5rem;
     border-radius: 8px;
     cursor: pointer;
-    font-size: 1.2rem;
+    font-size: 1.1rem;
     transition: all 0.2s ease;
-    flex-shrink: 0;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
     backdrop-filter: blur(8px);
   }
   
-  .edit-button:hover {
+  .edit-button:hover, .delete-button-visible:hover {
     background: rgba(255, 255, 255, 0.2);
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  }
+  
+  .delete-button-visible {
+    background: rgba(239, 68, 68, 0.2);
+    border-color: rgba(239, 68, 68, 0.4);
+  }
+  
+  .delete-button-visible:hover {
+    background: rgba(239, 68, 68, 0.3);
+    border-color: rgba(239, 68, 68, 0.6);
   }
   
   .delete-area {
@@ -389,6 +438,27 @@
   
   .delete-button:hover {
     background: rgba(255, 255, 255, 0.2);
+  }
+  
+  .new-pattern-button {
+    margin-top: 1rem;
+    padding: 1rem;
+    background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+    color: white;
+    border: none;
+    border-radius: 12px;
+    font-size: 1.1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+    width: 100%;
+  }
+  
+  .new-pattern-button:hover {
+    background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+    transform: translateY(-1px);
   }
   
   /* Mobile-specific styles */

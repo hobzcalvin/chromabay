@@ -27,6 +27,9 @@ export interface Parameter {
 // Store for parameter values - keyed by nodeId, then by parameter name
 export const nodeParameters = writable<Map<string, Map<string, any>>>(new Map());
 
+// Auto-save timeout for debouncing
+let autoSaveTimeout: ReturnType<typeof setTimeout> | undefined;
+
 // Helper function to get parameter value for a node
 export function getNodeParameter(nodeId: string, paramName: string, defaultValue: any): any {
   let currentParams: Map<string, Map<string, any>> = new Map();
@@ -50,6 +53,25 @@ export function setNodeParameter(nodeId: string, paramName: string, value: any):
     params.get(nodeId)!.set(paramName, value);
     return params;
   });
+  
+  // Auto-save: Save current pattern whenever a parameter changes
+  // We use a debounced approach to avoid too many saves during rapid changes
+  clearTimeout(autoSaveTimeout);
+  autoSaveTimeout = setTimeout(async () => {
+    try {
+      const { saveCurrentPattern } = await import('$lib/stores/patternsStore');
+      const { currentPatternName } = await import('$lib/stores/patternsStore');
+      const { get } = await import('svelte/store');
+      
+      const currentName = get(currentPatternName);
+      const serialized = serializeCurrentPattern(currentName);
+      await saveCurrentPattern(serialized);
+      
+      console.log('📊 Auto-saved pattern after parameter change');
+    } catch (error) {
+      console.error('❌ Failed to auto-save pattern:', error);
+    }
+  }, 500); // 500ms debounce
 }
 
 // Helper function to ensure all parameters are initialized for a node

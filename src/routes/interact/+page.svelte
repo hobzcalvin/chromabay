@@ -42,6 +42,7 @@ import { get } from 'svelte/store';
       if (previousValue !== knob.value) {
         setNodeParameter(knob.nodeId, knob.paramName, knob.value);
         previousKnobValues.set(key, knob.value);
+        // Note: setNodeParameter already handles auto-save with debouncing
         // Optional: console.log(`🎛️ Knob value changed: ${knob.paramLabel} = ${knob.value}`);
       }
     }

@@ -6,7 +6,8 @@
     saveAsPattern,
     renameCurrentPattern,
     deleteCurrentPattern,
-    patternNameExists
+    patternNameExists,
+    createEmptyPattern
   } from '$lib/stores/patternsStore';
   import { syncPatternToAllDevices } from '$lib/ble';
   
@@ -18,11 +19,13 @@
   let dropdownRef: HTMLDivElement;
   
   // Dialog states
-  let showSaveAsDialog = $state(false);
+  let showDuplicateDialog = $state(false);
+  let showNewDialog = $state(false);
   let showRenameDialog = $state(false);
   
   // Dialog inputs
-  let saveAsName = $state('');
+  let duplicateName = $state('');
+  let newName = $state('');
   let renameName = $state('');
   
   // Reactive current pattern name
@@ -51,26 +54,15 @@
   });
   
   // Actions
-  async function handleSave() {
-    try {
-      const serialized = serializeCurrentPattern(patternName);
-      await saveCurrentPattern(serialized);
-      // Sync pattern to all connected devices
-      try {
-        await syncPatternToAllDevices();
-      } catch (error) {
-        console.error('Failed to sync pattern to devices:', error);
-      }
-      showDropdown = false;
-    } catch (error: any) {
-      console.error('Failed to save pattern:', error);
-      alert('Failed to save pattern: ' + (error?.message || 'Unknown error'));
-    }
+  function handleNew() {
+    newName = '';
+    showNewDialog = true;
+    showDropdown = false;
   }
   
-  function handleSaveAs() {
-    saveAsName = patternName;
-    showSaveAsDialog = true;
+  function handleDuplicate() {
+    duplicateName = `Copy of ${patternName}`;
+    showDuplicateDialog = true;
     showDropdown = false;
   }
   
@@ -88,30 +80,65 @@
   }
   
   // Dialog actions
-  async function confirmSaveAs() {
-    if (!saveAsName.trim()) return;
+  async function confirmNew() {
+    if (!newName.trim()) return;
     
     // Check if name already exists
-    if (patternNameExists(saveAsName.trim())) {
-      if (!confirm(`A pattern named "${saveAsName.trim()}" already exists. Do you want to overwrite it?`)) {
+    if (patternNameExists(newName.trim())) {
+      if (!confirm(`A pattern named "${newName.trim()}" already exists. Do you want to overwrite it?`)) {
         return;
       }
     }
     
     try {
-      const serialized = serializeCurrentPattern(saveAsName.trim());
-      await saveAsPattern(serialized, saveAsName.trim());
+      // Create empty pattern and switch to it
+      const emptyPattern = createEmptyPattern(newName.trim());
+      await saveAsPattern(emptyPattern, newName.trim());
+      
+      // Load the empty pattern into the editor
+      const { loadSerializedPattern } = await import('$lib/flowStore');
+      await loadSerializedPattern(emptyPattern);
+      
+      // Sync to devices
+      try {
+        await syncPatternToAllDevices();
+      } catch (syncError) {
+        console.error('Failed to sync pattern to devices:', syncError);
+      }
+      
+      showNewDialog = false;
+      newName = '';
+    } catch (error: any) {
+      console.error('Failed to create new pattern:', error);
+      alert('Failed to create new pattern: ' + (error?.message || 'Unknown error'));
+    }
+  }
+  
+  async function confirmDuplicate() {
+    if (!duplicateName.trim()) return;
+    
+    // Check if name already exists
+    if (patternNameExists(duplicateName.trim())) {
+      if (!confirm(`A pattern named "${duplicateName.trim()}" already exists. Do you want to overwrite it?`)) {
+        return;
+      }
+    }
+    
+    try {
+      // Duplicate current pattern
+      const serialized = serializeCurrentPattern(duplicateName.trim());
+      await saveAsPattern(serialized, duplicateName.trim());
       // Sync pattern to all connected devices
       try {
         await syncPatternToAllDevices();
       } catch (syncError) {
         console.error('Failed to sync pattern to devices:', syncError);
       }
-      showSaveAsDialog = false;
-      saveAsName = '';
+      showDuplicateDialog = false;
+      duplicateName = '';
     } catch (error: any) {
-      console.error('Failed to save pattern as:', error);
-      alert('Failed to save pattern: ' + (error?.message || 'Unknown error'));
+      console.error('Failed to duplicate pattern:', error);
+      alert('Failed to duplicate pattern: ' + (error?.message || 'Unknown error'));
     }
   }
   
@@ -151,9 +178,11 @@
   }
   
   function cancelDialog() {
-    showSaveAsDialog = false;
+    showDuplicateDialog = false;
+    showNewDialog = false;
     showRenameDialog = false;
-    saveAsName = '';
+    duplicateName = '';
+    newName = '';
     renameName = '';
   }
 </script>
@@ -178,8 +207,8 @@
       
       {#if showDropdown}
         <div class="dropdown-menu">
-          <button onclick={handleSave}>💾 Save</button>
-          <button onclick={handleSaveAs}>📋 Save As...</button>
+          <button onclick={handleNew}>➕ New...</button>
+          <button onclick={handleDuplicate}>📋 Duplicate...</button>
           <button onclick={handleRename}>✏️ Rename...</button>
           <hr />
           <button onclick={handleDelete} class="delete-action">🗑️ Delete</button>
@@ -212,20 +241,39 @@
   </div>
 </div>
 
-<!-- Save As Dialog -->
-{#if showSaveAsDialog}
+<!-- New Pattern Dialog -->
+{#if showNewDialog}
   <div class="dialog-overlay">
     <div class="dialog">
-      <h3>Save Pattern As</h3>
+      <h3>Create New Pattern</h3>
       <input
         type="text"
-        bind:value={saveAsName}
+        bind:value={newName}
         placeholder="Enter pattern name..."
-        onkeydown={(e) => e.key === 'Enter' && confirmSaveAs()}
+        onkeydown={(e) => e.key === 'Enter' && confirmNew()}
       />
       <div class="dialog-actions">
         <button onclick={cancelDialog}>Cancel</button>
-        <button onclick={confirmSaveAs} disabled={!saveAsName.trim()}>Save</button>
+        <button onclick={confirmNew} disabled={!newName.trim()}>Create</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- Duplicate Pattern Dialog -->
+{#if showDuplicateDialog}
+  <div class="dialog-overlay">
+    <div class="dialog">
+      <h3>Duplicate Pattern</h3>
+      <input
+        type="text"
+        bind:value={duplicateName}
+        placeholder="Enter new pattern name..."
+        onkeydown={(e) => e.key === 'Enter' && confirmDuplicate()}
+      />
+      <div class="dialog-actions">
+        <button onclick={cancelDialog}>Cancel</button>
+        <button onclick={confirmDuplicate} disabled={!duplicateName.trim()}>Duplicate</button>
       </div>
     </div>
   </div>

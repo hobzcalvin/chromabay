@@ -53,9 +53,11 @@ function createDefaultPattern(): SerializedPattern {
 }
 
 // Create empty pattern with just output node
-function createEmptyPattern(): SerializedPattern {
-  const seconds = getSecondsSinceApril19();
-  const name = `My Pattern ${seconds}`;
+export function createEmptyPattern(name?: string): SerializedPattern {
+  if (!name) {
+    const seconds = getSecondsSinceApril19();
+    name = `My Pattern ${seconds}`;
+  }
   return {
     nodes: [{ t: "output", o: 1 }],
     meta: {
