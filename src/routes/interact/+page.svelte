@@ -2,6 +2,8 @@
   import { onMount } from 'svelte';
   import PatternRenderer from '$lib/components/PatternRenderer.svelte';
   import RotaryKnob from '$lib/components/RotaryKnob.svelte';
+  import { loadPatterns, currentPattern } from '$lib/stores/patternsStore';
+  import { loadSerializedPattern, initializeDefaultPattern, forceSyncCurrentPattern } from '$lib/flowStore';
 
   let showNotification = true;
   let notificationVisible = true;
@@ -19,7 +21,33 @@
   }
 
   onMount(() => {
-    // Start fade out after 2 seconds, then hide after transition
+    // Initialize patterns on mount (same as editor page)
+    (async () => {
+      try {
+        await loadPatterns();
+        // Load the current pattern into the flow editor
+        const current = $currentPattern;
+        if (current) {
+          await loadSerializedPattern(current);
+          console.log('🎯 Loaded current pattern for interact mode:', current.meta?.name);
+        } else {
+          // Fallback to default pattern
+          initializeDefaultPattern();
+          console.log('🔄 No current pattern found, using default for interact mode');
+        }
+        
+        // Force sync the loaded pattern to connected devices
+        forceSyncCurrentPattern();
+      } catch (error) {
+        console.error('❌ Failed to load patterns in interact mode:', error);
+        // Fallback to default pattern on error
+        initializeDefaultPattern();
+        // Still try to sync the default pattern
+        forceSyncCurrentPattern();
+      }
+    })();
+    
+    // Start notification fade out after 2 seconds, then hide after transition
     setTimeout(() => {
       notificationVisible = false;
     }, 2000);

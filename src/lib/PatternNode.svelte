@@ -2,6 +2,7 @@
   import { Handle, Position, type NodeProps } from '@xyflow/svelte';
   import { onMount, onDestroy } from 'svelte';
   import { flowNodes, flowEdges, nodeOutputs, getNodeDefinition, globalStartTime, disableIndividualAnimation, type RenderContext } from '$lib/flowStore';
+  import { renderConfig } from '$lib/renderConfig';
   
   let { data, id, type, ...nodeProps }: NodeProps & { type: string } = $props();
   
@@ -10,9 +11,33 @@
   let animationFrame: number | null = null;
   let lastFrameTime: number;
   
-  // Configurable texture dimensions - these should come from props or a config store
-  let textureWidth = 100;
-  let textureHeight = 50;
+  // Dynamic texture dimensions from renderConfig store
+  let textureWidth = $state(100);
+  let textureHeight = $state(50);
+  
+  // Subscribe to render config changes
+  let configUnsubscribe: (() => void) | null = null;
+  
+  onMount(() => {
+    configUnsubscribe = renderConfig.subscribe(config => {
+      textureWidth = config.width;
+      textureHeight = config.height;
+      // Update canvas dimensions if it exists
+      if (canvasElement) {
+        canvasElement.width = textureWidth;
+        canvasElement.height = textureHeight;
+      }
+    });
+  });
+
+  onDestroy(() => {
+    if (animationFrame) {
+      cancelAnimationFrame(animationFrame);
+    }
+    if (configUnsubscribe) {
+      configUnsubscribe();
+    }
+  });
   
   // Get the clean node type from data
   const nodeType = data.type as string;
@@ -51,6 +76,10 @@
   onMount(() => {
     ctx = canvasElement.getContext('2d', { willReadFrequently: true });
     lastFrameTime = performance.now();
+    
+    // Set initial canvas dimensions from current config
+    canvasElement.width = textureWidth;
+    canvasElement.height = textureHeight;
     
     // Only start individual animation if centralized rendering is not active
     if (!useCentralizedRendering) {

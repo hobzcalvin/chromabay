@@ -1,5 +1,6 @@
 import { writable, get } from 'svelte/store';
 import type { Node, Edge, Connection } from '@xyflow/svelte';
+import { renderConfig, type RenderConfig } from './renderConfig';
 
 // Global start time for synchronized animations across all nodes
 export const globalStartTime = writable<number>(Date.now());
@@ -102,12 +103,21 @@ class WasmOperatorManager {
   // 3-Buffer System for ESP32 compatibility
   private buffers: { [key: number]: number } = {}; // buffer index -> WASM pointer
   private bufferSize = 0;
-  private width = 100;
-  private height = 50;
+  private currentConfig: RenderConfig = { width: 100, height: 50, maxWidth: 500, maxHeight: 500 };
+  private renderConfigUnsubscribe: (() => void) | null = null;
   
   constructor() {
-    // Wait for WASM to be ready
+    // Subscribe to render config changes
     if (typeof window !== 'undefined') {
+      this.renderConfigUnsubscribe = renderConfig.subscribe(config => {
+        this.currentConfig = config;
+        // Reallocate buffers if WASM is ready and config changed
+        if (this.wasmModule && this.bufferSize > 0) {
+          this.reallocateBuffers();
+        }
+      });
+      
+      // Wait for WASM to be ready
       if (window.isWasmReady && window.isWasmReady()) {
         this.initializeWasm();
       } else {
@@ -135,15 +145,28 @@ class WasmOperatorManager {
   private initializeBuffers() {
     if (!this.wasmModule) return;
     
-    // Calculate buffer size for 100x50 pixels (RGB = 3 bytes per pixel)
-    this.bufferSize = this.width * this.height * 3;
+    // Calculate buffer size using current config dimensions (RGB = 3 bytes per pixel)
+    this.bufferSize = this.currentConfig.width * this.currentConfig.height * 3;
     
     // Allocate 3 buffers for ESP32-compatible rendering
     this.buffers[0] = this.wasmModule._malloc(this.bufferSize); // Buffer 0
     this.buffers[1] = this.wasmModule._malloc(this.bufferSize); // Buffer 1  
     this.buffers[2] = this.wasmModule._malloc(this.bufferSize); // Buffer 2
     
-    console.log('Allocated 3 WASM buffers:', this.buffers);
+    console.log(`Allocated 3 WASM buffers (${this.currentConfig.width}x${this.currentConfig.height}):`, this.buffers);
+  }
+  
+  private reallocateBuffers() {
+    if (!this.wasmModule) return;
+    
+    // Free existing buffers
+    for (const buffer of Object.values(this.buffers)) {
+      this.wasmModule._free(buffer);
+    }
+    
+    // Reallocate with new dimensions
+    this.initializeBuffers();
+    console.log(`Reallocated WASM buffers for new dimensions: ${this.currentConfig.width}x${this.currentConfig.height}`);
   }
   
   getAvailableOperators(): NodeDefinition[] {
@@ -276,7 +299,7 @@ class WasmOperatorManager {
   
   private createWasmRenderFunction(operatorName: string) {
     return ({ ctx, totalTime, deltaTime, width, height, getInputNodes, getNodeOutput, nodeId }: RenderContext) => {
-      this.renderNodeWithWasm(nodeId, operatorName, ctx, totalTime, deltaTime, width, height, getInputNodes, getNodeOutput);
+      this.renderNodeWithWasm(nodeId, operatorName, ctx, totalTime, deltaTime, getInputNodes, getNodeOutput);
     };
   }
   
@@ -286,11 +309,10 @@ class WasmOperatorManager {
     ctx: CanvasRenderingContext2D, 
     totalTime: number, 
     deltaTime: number, 
-    width: number, 
-    height: number, 
     getInputNodes: () => any, 
     getNodeOutput: (nodeId: string) => ImageData | null
   ) {
+    const { width, height } = this.currentConfig;
     // Ensure operator instance exists
     if (!this.operatorInstances.has(nodeId)) {
       this.createOperatorInstance(nodeId, operatorName);
@@ -462,8 +484,13 @@ class WasmOperatorManager {
     const buffer = new Uint8Array(this.wasmModule.HEAPU8.buffer, this.buffers[bufferIndex], this.bufferSize);
     const data = imageData.data;
     
-    // Convert RGBA to RGB
-    for (let i = 0; i < width * height; i++) {
+    // Use the current config dimensions for buffer operations
+    const configWidth = this.currentConfig.width;
+    const configHeight = this.currentConfig.height;
+    
+    // Convert RGBA to RGB, handling potential size differences between canvas and buffer
+    const pixelCount = Math.min(width * height, configWidth * configHeight);
+    for (let i = 0; i < pixelCount; i++) {
       buffer[i * 3] = data[i * 4];     // R
       buffer[i * 3 + 1] = data[i * 4 + 1]; // G  
       buffer[i * 3 + 2] = data[i * 4 + 2]; // B
@@ -474,10 +501,15 @@ class WasmOperatorManager {
     if (!this.wasmModule || !this.buffers[bufferIndex]) return;
     
     const buffer = new Uint8Array(this.wasmModule.HEAPU8.buffer, this.buffers[bufferIndex], this.bufferSize);
-    const imageData = new ImageData(width, height);
+    
+    // Use the current config dimensions for buffer operations
+    const configWidth = this.currentConfig.width;
+    const configHeight = this.currentConfig.height;
+    
+    const imageData = new ImageData(configWidth, configHeight);
     
     // Convert RGB to RGBA
-    for (let i = 0; i < width * height; i++) {
+    for (let i = 0; i < configWidth * configHeight; i++) {
       imageData.data[i * 4] = buffer[i * 3];     // R
       imageData.data[i * 4 + 1] = buffer[i * 3 + 1]; // G
       imageData.data[i * 4 + 2] = buffer[i * 3 + 2]; // B
@@ -499,6 +531,12 @@ class WasmOperatorManager {
     }
     
     this.buffers = {};
+    
+    // Unsubscribe from render config changes
+    if (this.renderConfigUnsubscribe) {
+      this.renderConfigUnsubscribe();
+      this.renderConfigUnsubscribe = null;
+    }
   }
 }
 
@@ -696,6 +734,17 @@ class CentralizedRenderer {
   private animationFrame: number | null = null;
   private lastFrameTime: number = 0;
   private isRunning: boolean = false;
+  private currentConfig: RenderConfig = { width: 100, height: 50, maxWidth: 500, maxHeight: 500 };
+  private renderConfigUnsubscribe: (() => void) | null = null;
+
+  constructor() {
+    // Subscribe to render config changes ONCE, not on every frame
+    if (typeof window !== 'undefined') {
+      this.renderConfigUnsubscribe = renderConfig.subscribe(config => {
+        this.currentConfig = config;
+      });
+    }
+  }
 
   start() {
     if (this.isRunning) return;
@@ -712,6 +761,14 @@ class CentralizedRenderer {
     }
   }
 
+  cleanup() {
+    this.stop();
+    if (this.renderConfigUnsubscribe) {
+      this.renderConfigUnsubscribe();
+      this.renderConfigUnsubscribe = null;
+    }
+  }
+
   private animate = () => {
     if (!this.isRunning) return;
 
@@ -723,16 +780,10 @@ class CentralizedRenderer {
   }
 
   private renderAllNodesInOrder(currentTime: number) {
-    // Get current nodes and edges
-    let nodes: Node[] = [];
-    let edges: Edge[] = [];
-    flowNodes.subscribe(n => {
-      nodes = n;
-    })();
-    flowEdges.subscribe(e => {
-      edges = e;
-    })();
-
+    // Get current nodes and edges - use get() instead of subscribing on every frame!
+    const nodes = get(flowNodes);
+    const edges = get(flowEdges);
+    
     if (nodes.length === 0) return;
 
     // Calculate execution order using topological sort
@@ -746,13 +797,13 @@ class CentralizedRenderer {
       const nodeDefinition = getNodeDefinition(node.data.type as string);
       if (!nodeDefinition) continue;
 
-      // Create render context for this node
+      // Create render context for this node using current config dimensions
       const renderContext: RenderContext = {
         ctx: null as any, // Will be set by the render function
         totalTime: globalTimestamp / 1000, // Convert to seconds for compatibility
         deltaTime,
-        width: 100,
-        height: 50,
+        width: this.currentConfig.width,
+        height: this.currentConfig.height,
         getInputNodes: () => this.getInputNodes(node.id, nodes, edges),
         getNodeOutput: (nodeId: string) => {
           const outputs = get(nodeOutputs);
@@ -768,9 +819,13 @@ class CentralizedRenderer {
         if (ctx) {
           renderContext.ctx = ctx;
           
+          // Ensure canvas dimensions match current config
+          canvasElement.width = this.currentConfig.width;
+          canvasElement.height = this.currentConfig.height;
+          
           // Clear canvas
           ctx.fillStyle = '#000000';
-          ctx.fillRect(0, 0, canvasElement.width, canvasElement.height);
+          ctx.fillRect(0, 0, this.currentConfig.width, this.currentConfig.height);
           
           // Handle input data BEFORE calling render function (for output nodes and others)
           const inputs = this.getInputNodes(node.id, nodes, edges);
@@ -785,7 +840,7 @@ class CentralizedRenderer {
           nodeDefinition.render(renderContext);
           
           // Store output for other nodes
-          const outputData = ctx.getImageData(0, 0, canvasElement.width, canvasElement.height);
+          const outputData = ctx.getImageData(0, 0, this.currentConfig.width, this.currentConfig.height);
           nodeOutputs.update(outputs => {
             outputs.set(node.id, outputData);
             return outputs;
@@ -862,6 +917,13 @@ class CentralizedRenderer {
 
 // Global centralized renderer instance
 const centralizedRenderer = new CentralizedRenderer();
+
+// Global cleanup on page unload
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', () => {
+    centralizedRenderer.cleanup();
+  });
+}
 
 // Start/stop centralized rendering when nodes change
 flowNodes.subscribe(nodes => {

@@ -39,8 +39,9 @@
     </div>
     
     <nav class="bottom-nav" class:hidden={$page.url.pathname.startsWith(`${base}/interact`)}>
-      <a href="{base}/devices" class:active={$page.url.pathname.startsWith(`${base}/devices`)}
-        >Devices
+      <a href="{base}/devices" class:active={$page.url.pathname.startsWith(`${base}/devices`)}>
+        <span class="emoji">💡</span>
+        <span class="label">Devices</span>
         <span 
           class="badge" 
           class:green={connected>0} 
@@ -48,10 +49,22 @@
           data-single-digit={connected >= 0 && connected <= 9 ? 'true' : 'false'}
         >{connected}</span>
       </a>
-      <a href="{base}/patterns" class:active={$page.url.pathname.startsWith(`${base}/patterns`)}>Patterns</a>
-      <a href="{base}/interact" class:active={$page.url.pathname.startsWith(`${base}/interact`)}>Interact</a>
-      <a href="{base}/editor" class:active={$page.url.pathname.startsWith(`${base}/editor`)}>Editor</a>
-      <a href="{base}/settings" class:active={$page.url.pathname.startsWith(`${base}/settings`)}>Settings</a>
+      <a href="{base}/patterns" class:active={$page.url.pathname.startsWith(`${base}/patterns`)}>
+        <span class="emoji">🌈</span>
+        <span class="label">Patterns</span>
+      </a>
+      <a href="{base}/interact" class:active={$page.url.pathname.startsWith(`${base}/interact`)}>
+        <span class="emoji">✋</span>
+        <span class="label">Interact</span>
+      </a>
+      <a href="{base}/editor" class:active={$page.url.pathname.startsWith(`${base}/editor`)}>
+        <span class="emoji">✏️</span>
+        <span class="label">Editor</span>
+      </a>
+      <a href="{base}/settings" class:active={$page.url.pathname.startsWith(`${base}/settings`)}>
+        <span class="emoji">⚙️</span>
+        <span class="label">Settings</span>
+      </a>
     </nav>
   </div>
 </SvelteFlowProvider>
@@ -169,18 +182,46 @@
     box-shadow: 0 2px 8px rgba(102, 126, 234, 0.2);
   }
   
+  /* Emoji and label styles */
+  .bottom-nav .emoji {
+    font-size: 1.2rem;
+    margin-bottom: 0.2rem;
+    display: block;
+  }
+  
+  .bottom-nav .label {
+    font-size: 0.85rem;
+    display: block;
+  }
+  
   /* Mobile responsive navigation */
   @media (max-width: 480px) {
     .bottom-nav a {
-      font-size: 0.75rem;
       padding: 0.5rem 0.25rem;
+    }
+    
+    .bottom-nav .emoji {
+      font-size: 1rem;
+      margin-bottom: 0.15rem;
+    }
+    
+    .bottom-nav .label {
+      font-size: 0.75rem;
     }
   }
   
   @media (max-width: 320px) {
     .bottom-nav a {
-      font-size: 0.7rem;
       padding: 0.5rem 0.1rem;
+    }
+    
+    .bottom-nav .emoji {
+      font-size: 0.9rem;
+      margin-bottom: 0.1rem;
+    }
+    
+    .bottom-nav .label {
+      font-size: 0.7rem;
     }
   }
   

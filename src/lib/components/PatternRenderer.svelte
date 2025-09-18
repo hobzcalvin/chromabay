@@ -4,6 +4,7 @@
   import PatternNode from '$lib/PatternNode.svelte';
   import { SvelteFlow } from '@xyflow/svelte';
   import '@xyflow/svelte/dist/style.css';
+  import { setFullscreenDimensions, resetToDefaultDimensions } from '$lib/renderConfig';
 
   export let width: number = 100;
   export let height: number = 100;
@@ -46,9 +47,13 @@
     if (fullscreen) {
       canvasElement.width = window.innerWidth;
       canvasElement.height = window.innerHeight;
+      // Set the render config to match screen dimensions for high-resolution rendering
+      setFullscreenDimensions(window.innerWidth, window.innerHeight);
     } else {
       canvasElement.width = width;
       canvasElement.height = height;
+      // Reset to default dimensions for non-fullscreen mode
+      resetToDefaultDimensions();
     }
   }
 
@@ -69,7 +74,14 @@
 
   onDestroy(() => {
     if (animationFrame) cancelAnimationFrame(animationFrame);
+    // Reset render config when component is destroyed
+    resetToDefaultDimensions();
   });
+
+  // Watch for fullscreen prop changes and update canvas accordingly
+  $: if (canvasElement) {
+    setupCanvas();
+  }
 </script>
 
 <!-- Hidden flow keeps the rendering pipeline running -->

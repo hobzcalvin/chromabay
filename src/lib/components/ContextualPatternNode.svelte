@@ -3,6 +3,7 @@
   import { onMount, onDestroy, getContext } from 'svelte';
   import { getNodeDefinition, disableIndividualAnimation, type RenderContext } from '$lib/flowStore';
   import { flowNodes as globalFlowNodes, flowEdges as globalFlowEdges, nodeOutputs as globalNodeOutputs, globalStartTime as globalGlobalStartTime } from '$lib/flowStore';
+  import { renderConfig } from '$lib/renderConfig';
   import type { Writable } from 'svelte/store';
   
   let { data, id, type, ...nodeProps }: NodeProps & { type: string } = $props();
@@ -24,9 +25,24 @@
   let animationFrame: number | null = null;
   let lastFrameTime: number;
   
-  // Configurable texture dimensions
-  let textureWidth = 100;
-  let textureHeight = 50;
+  // Dynamic texture dimensions from renderConfig store
+  let textureWidth = $state(100);
+  let textureHeight = $state(50);
+  
+  // Subscribe to render config changes
+  let configUnsubscribe: (() => void) | null = null;
+  
+  onMount(() => {
+    configUnsubscribe = renderConfig.subscribe(config => {
+      textureWidth = config.width;
+      textureHeight = config.height;
+      // Update canvas dimensions if it exists
+      if (canvasElement) {
+        canvasElement.width = textureWidth;
+        canvasElement.height = textureHeight;
+      }
+    });
+  });
   
   // Get the clean node type from data
   const nodeType = data.type as string;
@@ -132,6 +148,9 @@
       outputs.delete(id);
       return outputs;
     });
+    if (configUnsubscribe) {
+      configUnsubscribe();
+    }
   });
   
   const isBlendNode = nodeType === 'blend';
