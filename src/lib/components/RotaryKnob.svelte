@@ -30,14 +30,28 @@
     end: void;
   }>();
   
-  // Sensitivity settings
-  const VERTICAL_SENSITIVITY = 0.2; // Main control: more change per pixel (less pixels needed)
-  const HORIZONTAL_SENSITIVITY = 1; // Fine control: same as old vertical sensitivity
-  
   // Audio knob range: 7 o'clock (210°) to 5 o'clock (150°)
   const MIN_ANGLE = 210; // 7 o'clock position (min value)
   const MAX_ANGLE = 150; // 5 o'clock position (max value)
   const ANGLE_RANGE = 300; // 300 degrees counterclockwise (210° to 150° the long way)
+  
+  // Fixed sensitivity: dragging one knob diameter = full 300° rotation
+  // This is independent of parameter range - it's about visual knob behavior
+  const PIXELS_FOR_FULL_ROTATION = size; // One diameter = full rotation
+  const DEGREES_PER_PIXEL = ANGLE_RANGE / PIXELS_FOR_FULL_ROTATION; // 300° / size pixels
+  
+  // For debugging
+  let lastDeltaY = 0;
+  let lastDeltaX = 0;
+  let lastAngleChange = 0;
+  let lastValueChange = 0;
+  
+  // Debug the calculation setup (enable as needed)
+  // $: {
+  //   const valueRange = max - min;
+  //   console.log(`🎛️ Knob setup: size=${size}px, range=${valueRange} (${min}-${max}), step=${step}`);
+  //   console.log(`🎛️ Calculation: ${PIXELS_FOR_FULL_ROTATION}px = ${ANGLE_RANGE}°, so ${DEGREES_PER_PIXEL.toFixed(3)}°/px`);
+  // }
   
   // Calculate angle from value (210° to 150° counterclockwise for audio knob)
   function valueToAngle(val: number): number {
@@ -166,30 +180,42 @@
       const deltaY = startMousePos.y - event.clientY; // Inverted: up is positive
       const deltaX = event.clientX - startMousePos.x; // Right is positive
       
-      // Calculate value change based on vertical movement
-      const verticalChange = (deltaY / VERTICAL_SENSITIVITY) * (step || 1);
+      // Store for debugging
+      lastDeltaY = deltaY;
+      lastDeltaX = deltaX;
       
-      // Calculate precision adjustment based on horizontal movement
-      const horizontalChange = (deltaX / HORIZONTAL_SENSITIVITY) * (step || 1);
+      // Convert pixel movement to degrees of rotation
+      // Vertical movement = main control, horizontal = fine adjustment
+      const verticalDegrees = deltaY * DEGREES_PER_PIXEL;
+      const horizontalDegrees = deltaX * DEGREES_PER_PIXEL * 0.5; // Fine control
+      const totalDegreeChange = verticalDegrees + horizontalDegrees;
       
-      // Combine both movements
-      const totalChange = verticalChange + horizontalChange;
-      let newValue = startValue + totalChange;
+      lastAngleChange = totalDegreeChange;
+      
+      // Convert degrees to parameter value range
+      const valueRange = max - min;
+      const valueChangeFromDegrees = (totalDegreeChange / ANGLE_RANGE) * valueRange;
+      let newValue = startValue + valueChangeFromDegrees;
+      
+      lastValueChange = valueChangeFromDegrees;
       
       // Clamp to min/max bounds
       newValue = Math.max(min, Math.min(max, newValue));
       
-      // Apply step
+      // Apply step quantization
       const steppedValue = Math.round(newValue / step) * step;
       
-      if (Math.abs(steppedValue - value) >= step * 0.01) { // Small threshold to prevent micro-updates
+      // Debug logging (enable as needed)
+      // console.log(`🎛️ Drag: dy=${deltaY.toFixed(1)}, dx=${deltaX.toFixed(1)} → degrees=${totalDegreeChange.toFixed(1)}° → valueΔ=${valueChangeFromDegrees.toFixed(2)} → final=${steppedValue.toFixed(2)}`);
+      
+      if (Math.abs(steppedValue - value) >= step * 0.01) {
         value = steppedValue;
         dispatch('change', value);
       }
     }
   }
   
-  // Handle touch move
+  // Handle touch move  
   function handleTouchMove(event: TouchEvent) {
     event.preventDefault(); // Prevent scrolling
     
@@ -198,23 +224,34 @@
       const deltaY = startMousePos.y - touch.clientY; // Inverted: up is positive
       const deltaX = touch.clientX - startMousePos.x; // Right is positive
       
-      // Calculate value change based on vertical movement
-      const verticalChange = (deltaY / VERTICAL_SENSITIVITY) * (step || 1);
+      // Store for debugging
+      lastDeltaY = deltaY;
+      lastDeltaX = deltaX;
       
-      // Calculate precision adjustment based on horizontal movement
-      const horizontalChange = (deltaX / HORIZONTAL_SENSITIVITY) * (step || 1);
+      // Convert pixel movement to degrees of rotation
+      const verticalDegrees = deltaY * DEGREES_PER_PIXEL;
+      const horizontalDegrees = deltaX * DEGREES_PER_PIXEL * 0.5; // Fine control
+      const totalDegreeChange = verticalDegrees + horizontalDegrees;
       
-      // Combine both movements
-      const totalChange = verticalChange + horizontalChange;
-      let newValue = startValue + totalChange;
+      lastAngleChange = totalDegreeChange;
+      
+      // Convert degrees to parameter value range
+      const valueRange = max - min;
+      const valueChangeFromDegrees = (totalDegreeChange / ANGLE_RANGE) * valueRange;
+      let newValue = startValue + valueChangeFromDegrees;
+      
+      lastValueChange = valueChangeFromDegrees;
       
       // Clamp to min/max bounds
       newValue = Math.max(min, Math.min(max, newValue));
       
-      // Apply step
+      // Apply step quantization
       const steppedValue = Math.round(newValue / step) * step;
       
-      if (Math.abs(steppedValue - value) >= step * 0.01) { // Small threshold to prevent micro-updates
+      // Debug logging (enable as needed)
+      // console.log(`🎛️ Touch: dy=${deltaY.toFixed(1)}, dx=${deltaX.toFixed(1)} → degrees=${totalDegreeChange.toFixed(1)}° → valueΔ=${valueChangeFromDegrees.toFixed(2)} → final=${steppedValue.toFixed(2)}`);
+      
+      if (Math.abs(steppedValue - value) >= step * 0.01) {
         value = steppedValue;
         dispatch('change', value);
       }
