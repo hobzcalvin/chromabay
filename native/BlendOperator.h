@@ -104,16 +104,49 @@ public:
             return;
         }
         
-        // Blend the two input buffers
-        for (uint32_t y = 0; y < height; y++) {
-            for (uint32_t x = 0; x < width; x++) {
-                uint32_t index = y * width + x;
-                
-                CRGB color1 = inputBuffer1[index];
-                CRGB color2 = inputBuffer2[index];
-                
-                CRGB blended = blend_colors(color1, color2, opacity, blend_mode);
-                outputBuffer[index] = blended;
+        // Special handling for Map blend mode (6)
+        if (blend_mode == 6) {
+            // Map mode: Use first input's brightness for X coord and hue for Y coord to sample second input
+            for (uint32_t y = 0; y < height; y++) {
+                for (uint32_t x = 0; x < width; x++) {
+                    uint32_t index = y * width + x;
+                    
+                    CRGB color1 = inputBuffer1[index];
+                    
+                    // Convert first input to HSV to get hue and brightness
+                    CHSV hsv = rgb2hsv_approximate(color1);
+                    float brightness = hsv.v / 255.0f; // 0-1
+                    float hue_norm = hsv.h / 255.0f;   // 0-1
+                    
+                    // Map brightness to X coordinate and hue to Y coordinate
+                    uint32_t sample_x = (uint32_t)(brightness * (width - 1));
+                    uint32_t sample_y = (uint32_t)(hue_norm * (height - 1));
+                    
+                    // Clamp to bounds
+                    sample_x = (sample_x < width) ? sample_x : width - 1;
+                    sample_y = (sample_y < height) ? sample_y : height - 1;
+                    
+                    // Sample color from second input
+                    uint32_t sample_index = sample_y * width + sample_x;
+                    CRGB sample_color = inputBuffer2[sample_index];
+                    
+                    // Apply opacity blending with the original pixel
+                    CRGB blended = blend_colors(color1, sample_color, opacity, 0); // Use normal blend
+                    outputBuffer[index] = blended;
+                }
+            }
+        } else {
+            // Normal blend modes
+            for (uint32_t y = 0; y < height; y++) {
+                for (uint32_t x = 0; x < width; x++) {
+                    uint32_t index = y * width + x;
+                    
+                    CRGB color1 = inputBuffer1[index];
+                    CRGB color2 = inputBuffer2[index];
+                    
+                    CRGB blended = blend_colors(color1, color2, opacity, blend_mode);
+                    outputBuffer[index] = blended;
+                }
             }
         }
     }
@@ -129,7 +162,7 @@ public:
     std::vector<ParameterInfo> getParameterInfo() const override {
         return {
             ParameterInfo("opacity", "Opacity", ParameterInfo::FLOAT, 0.5f, 0.0f, 1.0f),
-            ParameterInfo("blend_mode", "Blend Mode", ParameterInfo::INT, 0, 0, 5)
+            ParameterInfo("blend_mode", "Blend Mode", ParameterInfo::INT, 0, 0, 6)
         };
     }
 };

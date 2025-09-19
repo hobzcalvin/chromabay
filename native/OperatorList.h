@@ -33,6 +33,7 @@
 #include "PerlinNoiseOperator.h"
 #include "RaindropsOperator.h"
 #include "TestOperator.h"
+#include "RadialRainbowOperator.h"
 
 // Add your new operators here:
 // #include "RainbowOperator.h"
