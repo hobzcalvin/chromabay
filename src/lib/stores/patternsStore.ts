@@ -13,6 +13,7 @@ export const currentPattern = writable<SerializedPattern | null>(null);
 export const currentPatternName = writable<string>('');
 
 const PATTERNS_KEY = 'patterns';
+const CURRENT_PATTERN_KEY = 'currentPattern';
 
 // Web fallback storage for development
 const webStorage = {
@@ -76,24 +77,35 @@ export async function loadPatterns() {
       const patternsData: SerializedPattern[] = JSON.parse(value);
       patterns.set(patternsData);
       
-      // Only set the first pattern as current if no current pattern is already set
-      const current = getCurrentPattern();
-      if (patternsData.length > 0 && !current) {
-        currentPattern.set(patternsData[0]);
-        currentPatternName.set(patternsData[0].meta?.name || 'Unnamed Pattern');
-        console.log('🎯 Set first pattern as current:', patternsData[0].meta?.name);
-      } else if (current && patternsData.length > 0) {
-        // Verify the current pattern still exists in the loaded patterns
-        const currentExists = patternsData.some(p => p.meta?.name === current.meta?.name);
-        if (!currentExists) {
-          // Current pattern was deleted, switch to first available
-          currentPattern.set(patternsData[0]);
-          currentPatternName.set(patternsData[0].meta?.name || 'Unnamed Pattern');
-          console.log('🔄 Current pattern no longer exists, switched to:', patternsData[0].meta?.name);
+      // Load the saved current pattern name
+      const savedCurrentPatternName = await loadCurrentPatternName();
+      
+      // Try to find and set the saved current pattern
+      let patternToSet: SerializedPattern | null = null;
+      
+      if (savedCurrentPatternName && patternsData.length > 0) {
+        // Look for the saved pattern
+        patternToSet = patternsData.find(p => p.meta?.name === savedCurrentPatternName) || null;
+        
+        if (patternToSet) {
+          currentPattern.set(patternToSet);
+          currentPatternName.set(patternToSet.meta?.name || 'Unnamed Pattern');
+          console.log('✅ Restored saved current pattern:', patternToSet.meta?.name);
         } else {
-          console.log('👍 Keeping current pattern:', current.meta?.name);
+          console.log('⚠️ Saved current pattern no longer exists:', savedCurrentPatternName);
         }
       }
+      
+      // If no saved pattern was found or restored, default to first pattern
+      if (!patternToSet && patternsData.length > 0) {
+        patternToSet = patternsData[0];
+        currentPattern.set(patternToSet);
+        currentPatternName.set(patternToSet.meta?.name || 'Unnamed Pattern');
+        // Save this as the new current pattern
+        await saveCurrentPatternName(patternToSet.meta?.name || 'Unnamed Pattern');
+        console.log('🎯 Set first pattern as current:', patternToSet.meta?.name);
+      }
+      
       console.log('✅ Loaded patterns:', patternsData.length, 'patterns from', useWebFallback ? 'localStorage' : 'Capacitor Preferences');
     } else {
       // No patterns exist, create the default one
@@ -102,6 +114,8 @@ export async function loadPatterns() {
       patterns.set([defaultPattern]);
       currentPattern.set(defaultPattern);
       currentPatternName.set(defaultPattern.meta?.name || 'Unnamed Pattern');
+      // Save this as the current pattern
+      await saveCurrentPatternName(defaultPattern.meta?.name || 'Unnamed Pattern');
       console.log('✅ Created default pattern:', defaultPattern.meta?.name);
     }
   } catch (error) {
@@ -111,6 +125,8 @@ export async function loadPatterns() {
     patterns.set([defaultPattern]);
     currentPattern.set(defaultPattern);
     currentPatternName.set(defaultPattern.meta?.name || 'Unnamed Pattern');
+    // Save this as the current pattern
+    await saveCurrentPatternName(defaultPattern.meta?.name || 'Unnamed Pattern');
     console.log('🔄 Fallback to default pattern due to error');
   }
 }
@@ -155,6 +171,26 @@ function getCurrentPattern(): SerializedPattern | null {
   }
 }
 
+// Save the current pattern name to storage
+async function saveCurrentPatternName(patternName: string) {
+  try {
+    await storage.set({ key: CURRENT_PATTERN_KEY, value: patternName });
+  } catch (error) {
+    console.error('❌ Error saving current pattern name:', error);
+  }
+}
+
+// Load the current pattern name from storage
+async function loadCurrentPatternName(): Promise<string | null> {
+  try {
+    const { value } = await storage.get({ key: CURRENT_PATTERN_KEY });
+    return value;
+  } catch (error) {
+    console.error('❌ Error loading current pattern name:', error);
+    return null;
+  }
+}
+
 // Save current pattern with new serialized data
 export async function saveCurrentPattern(serializedPattern: SerializedPattern, name?: string) {
   try {
@@ -173,6 +209,8 @@ export async function saveCurrentPattern(serializedPattern: SerializedPattern, n
       currentPattern.set(updatedPattern);
       if (name) {
         currentPatternName.set(name);
+        // Save the current pattern name to persist selection
+        await saveCurrentPatternName(name);
       }
       
       // Mark pattern as clean after saving
@@ -199,6 +237,8 @@ export async function saveAsPattern(serializedPattern: SerializedPattern, name: 
     await savePattern(newPattern);
     currentPattern.set(newPattern);
     currentPatternName.set(name);
+    // Save the current pattern name to persist selection
+    await saveCurrentPatternName(name);
   } catch (error) {
     console.error('❌ Error saving pattern as:', error);
     throw error;
@@ -241,6 +281,8 @@ export async function renameCurrentPattern(newName: string) {
       patterns.set(existingPatterns);
       currentPattern.set(updatedPattern);
       currentPatternName.set(newName);
+      // Save the current pattern name to persist selection
+      await saveCurrentPatternName(newName);
       console.log('✏️ Renamed pattern from:', oldName, 'to:', newName);
     }
   } catch (error) {
@@ -280,6 +322,8 @@ export async function deleteCurrentPattern() {
     patterns.set(filteredPatterns);
     currentPattern.set(filteredPatterns[0]);
     currentPatternName.set(filteredPatterns[0].meta?.name || 'Unnamed Pattern');
+    // Save the current pattern name to persist selection
+    await saveCurrentPatternName(filteredPatterns[0].meta?.name || 'Unnamed Pattern');
     console.log('🗑️ Deleted pattern:', currentName);
   } catch (error) {
     console.error('❌ Error deleting pattern:', error);
@@ -296,6 +340,8 @@ export async function switchToPattern(patternName: string) {
     if (pattern) {
       currentPattern.set(pattern);
       currentPatternName.set(pattern.meta?.name || 'Unnamed Pattern');
+      // Save the current pattern name to persist selection
+      await saveCurrentPatternName(pattern.meta?.name || 'Unnamed Pattern');
       console.log('🔄 Switched to pattern:', pattern.meta?.name);
     }
   } catch (error) {
@@ -344,6 +390,8 @@ export async function deletePatternByName(patternName: string) {
     if (current && current.meta?.name === patternName) {
       currentPattern.set(filteredPatterns[0]);
       currentPatternName.set(filteredPatterns[0].meta?.name || 'Unnamed Pattern');
+      // Save the current pattern name to persist selection
+      await saveCurrentPatternName(filteredPatterns[0].meta?.name || 'Unnamed Pattern');
     }
     
     console.log('🗑️ Deleted pattern:', patternName);
