@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { getNodeDefinition, setNodeParameter, getNodeParameter, deleteNode, nodeParameters, type Parameter } from '../flowStore';
-  import { getParameterInteractive, setParameterInteractive, MAX_INTERACTIVE_PARAMS } from '../stores/interactiveStore';
+  import { getParameterInteractive, setParameterInteractive, MAX_INTERACTIVE_PARAMS, interactiveParameters } from '../stores/interactiveStore';
   import type { Node } from '@xyflow/svelte';
 
   export let node: Node;
@@ -19,6 +19,15 @@
 
   let popoverElement: HTMLElement;
   $: nodeDefinition = getNodeDefinition(node.data.type as string);
+  
+  // Reactive helper to get interactive state (subscribes to store changes)
+  $: getParameterInteractiveReactive = (nodeId: string, paramName: string): boolean => {
+    const nodeParams = $interactiveParameters.get(nodeId);
+    if (nodeParams?.has(paramName)) {
+      return nodeParams.get(paramName) || false;
+    }
+    return false;
+  };
 
   // Calculate popover position
   function getPopoverPosition() {
@@ -167,7 +176,7 @@
               <input 
                 type="checkbox" 
                 id="interactive-{inputId}"
-                checked={getParameterInteractive(node.id, param.name)}
+                checked={getParameterInteractiveReactive(node.id, param.name)}
                 onchange={(e) => handleInteractiveToggle(param, e)}
               />
               <label for="interactive-{inputId}" class="hand-emoji" title="Interactive parameter (shows knob on interact page)">🖐️</label>

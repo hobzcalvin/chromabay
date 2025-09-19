@@ -29,6 +29,23 @@ import { get } from 'svelte/store';
   // Make sure dynamicKnobs is reactive
   // $: console.log('🎛️ dynamicKnobs updated:', dynamicKnobs.length);
   
+  // Reactive statement to regenerate knobs when interactive parameters change
+  $: {
+    // Wait for stores to be properly loaded and watch interactive parameters
+    if ($flowNodes.length > 0 && $interactiveParameters) {
+      const newKnobs = generateDynamicKnobs();
+      if (newKnobs.length !== dynamicKnobs.length || 
+          newKnobs.some((knob, i) => 
+            !dynamicKnobs[i] || 
+            knob.nodeId !== dynamicKnobs[i]?.nodeId || 
+            knob.paramName !== dynamicKnobs[i]?.paramName
+          )) {
+        dynamicKnobs = newKnobs;
+        console.log('🎛️ Reactively updated knobs:', dynamicKnobs.length);
+      }
+    }
+  }
+  
   // Track previous knob values to detect changes
   let previousKnobValues = new Map<string, number>();
   
@@ -156,11 +173,7 @@ import { get } from 'svelte/store';
         console.log('🔄 No current pattern found, using default for interact mode');
       }
       
-      // Generate dynamic knobs after pattern is loaded
-      console.log('🎛️ About to generate dynamic knobs...');
-      const newKnobs = generateDynamicKnobs();
-      console.log('🎛️ Generated knobs:', newKnobs.length);
-      dynamicKnobs = newKnobs; // Trigger reactivity
+      // Dynamic knobs will be generated reactively via the $: statement above
       
       // Force sync the loaded pattern to connected devices
       forceSyncCurrentPattern();
@@ -168,10 +181,7 @@ import { get } from 'svelte/store';
       console.error('❌ Failed to load patterns in interact mode:', error);
       // Fallback to default pattern on error
       initializeDefaultPattern();
-      // Generate knobs even for default pattern
-      console.log('🔄 Generating knobs for default pattern...');
-      const newKnobs = generateDynamicKnobs();
-      dynamicKnobs = newKnobs; // Trigger reactivity
+      // Dynamic knobs will be generated reactively via the $: statement above
       // Still try to sync the default pattern
       forceSyncCurrentPattern();
     }

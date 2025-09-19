@@ -48,6 +48,14 @@ export function setParameterInteractive(nodeId: string, paramName: string, inter
     return params;
   });
   
+  // Trigger auto-save when interactive parameters change
+  if (typeof window !== 'undefined') {
+    // Dynamic import to avoid circular dependency
+    import('../flowStore').then(({ triggerAutoSave }) => {
+      triggerAutoSave(`interactive parameter ${interactive ? 'enabled' : 'disabled'}`);
+    }).catch(console.error);
+  }
+  
   return true;
 }
 

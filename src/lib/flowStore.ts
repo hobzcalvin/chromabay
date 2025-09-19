@@ -30,6 +30,26 @@ export const nodeParameters = writable<Map<string, Map<string, any>>>(new Map())
 // Auto-save timeout for debouncing
 let autoSaveTimeout: ReturnType<typeof setTimeout> | undefined;
 
+// Centralized auto-save function with debouncing
+export function triggerAutoSave(reason: string): void {
+  clearTimeout(autoSaveTimeout);
+  autoSaveTimeout = setTimeout(async () => {
+    try {
+      const { saveCurrentPattern } = await import('$lib/stores/patternsStore');
+      const { currentPatternName } = await import('$lib/stores/patternsStore');
+      const { get } = await import('svelte/store');
+      
+      const currentName = get(currentPatternName);
+      const serialized = serializeCurrentPattern(currentName);
+      await saveCurrentPattern(serialized);
+      
+      console.log(`📊 Auto-saved pattern after ${reason}`);
+    } catch (error) {
+      console.error('❌ Failed to auto-save pattern:', error);
+    }
+  }, 500); // 500ms debounce
+}
+
 // Helper function to get parameter value for a node
 export function getNodeParameter(nodeId: string, paramName: string, defaultValue: any): any {
   let currentParams: Map<string, Map<string, any>> = new Map();
@@ -54,24 +74,9 @@ export function setNodeParameter(nodeId: string, paramName: string, value: any):
     return params;
   });
   
-  // Auto-save: Save current pattern whenever a parameter changes
-  // We use a debounced approach to avoid too many saves during rapid changes
-  clearTimeout(autoSaveTimeout);
-  autoSaveTimeout = setTimeout(async () => {
-    try {
-      const { saveCurrentPattern } = await import('$lib/stores/patternsStore');
-      const { currentPatternName } = await import('$lib/stores/patternsStore');
-      const { get } = await import('svelte/store');
-      
-      const currentName = get(currentPatternName);
-      const serialized = serializeCurrentPattern(currentName);
-      await saveCurrentPattern(serialized);
-      
-      console.log('📊 Auto-saved pattern after parameter change');
-    } catch (error) {
-      console.error('❌ Failed to auto-save pattern:', error);
-    }
-  }, 500); // 500ms debounce
+// Auto-save: Save current pattern whenever a parameter changes
+// We use a debounced approach to avoid too many saves during rapid changes
+triggerAutoSave('parameter change');
 }
 
 // Helper function to ensure all parameters are initialized for a node
@@ -1304,10 +1309,26 @@ if (typeof window !== 'undefined') {
   // Wait for next tick to ensure all modules are initialized
   setTimeout(() => {
     try {
-      // Subscribe to pattern changes for auto-sync
-      flowNodes.subscribe(() => syncPatternIfChanged());
-      flowEdges.subscribe(() => syncPatternIfChanged());
-      nodeParameters.subscribe(() => syncPatternIfChanged());
+      // Subscribe to pattern changes for auto-sync AND auto-save
+      flowNodes.subscribe(() => {
+        syncPatternIfChanged();
+        triggerAutoSave('node change');
+      });
+      flowEdges.subscribe(() => {
+        syncPatternIfChanged();
+        triggerAutoSave('edge change');
+      });
+      nodeParameters.subscribe(() => {
+        syncPatternIfChanged();
+        // Note: parameter changes already trigger auto-save via setNodeParameter
+      });
+      
+      // Subscribe to interactive parameters changes for auto-save
+      import('$lib/stores/interactiveStore').then(({ interactiveParameters }) => {
+        interactiveParameters.subscribe(() => {
+          triggerAutoSave('interactive parameters change');
+        });
+      }).catch(console.error);
     } catch (error) {
       console.error('Error setting up pattern sync subscriptions:', error);
     }
