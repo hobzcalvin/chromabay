@@ -25,7 +25,8 @@
 		"esp32:upload": "cd esp32 && pio run --target upload",
 		"esp32:monitor": "cd esp32 && pio device monitor --baud 115200",
 		"esp32:full": "npm run esp32:upload && npm run esp32:monitor",
-		"wasm:compile": "cd native && fastled . --just-compile --force-compile --web && mkdir -p ../static/native && cp fastled_js/fastled.js ../static/native/ && cp fastled_js/fastled.wasm ../static/native/ && echo '✅ WASM files compiled and copied to static/native/'"
+		"wasm:compile": "cd native && fastled . --just-compile --force-compile --localhost && mkdir -p ../static/native && cp fastled_js/fastled.js ../static/native/ && cp fastled_js/fastled.wasm ../static/native/ && echo '✅ WASM files compiled and copied to static/native/'",
+		"wasm:compile:newbroken": "cd native && fastled . --just-compile --force-compile --web && mkdir -p ../static/native && cp fastled_js/fastled.js ../static/native/ && cp fastled_js/fastled.wasm ../static/native/ && echo '✅ WASM files compiled and copied to static/native/'"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-auto": "^6.0.0",
