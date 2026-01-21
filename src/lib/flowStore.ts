@@ -1211,6 +1211,14 @@ export async function loadSerializedPattern(serializedPattern: SerializedPattern
     // Clear loading state
     patternLoading = false;
     
+    // If the pattern is empty (0 nodes), this indicates corrupted data or WASM timing issues
+    // Initialize a default pattern instead
+    if (nodes.length === 0) {
+      console.warn('Loaded pattern has 0 nodes, initializing default pattern instead');
+      initializeDefaultPattern();
+      return;
+    }
+    
     // Force sync the loaded pattern to connected devices
     forceSyncCurrentPattern();
     
