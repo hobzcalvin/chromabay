@@ -588,27 +588,26 @@
             {@const settings = getDeviceSettings(device.deviceId)}
             
             <div class="device-card connected">
-            <div class="device-header">
-              <div class="device-info">
-                <h3>{device.name}</h3>
-                <p class="device-id">{device.deviceId}</p>
-                {#if settings.deviceInfo}
-                  <p class="fw-version">FW: {settings.deviceInfo.fw_ver}</p>
-                {/if}
-                <span class="status-badge connected">Connected</span>
+              <div class="device-header">
+                <div class="device-info">
+                  <h3>{device.name}</h3>
+                  <p class="device-id">{device.deviceId}</p>
+                  {#if settings.deviceInfo}
+                    <p class="fw-version">FW: {settings.deviceInfo.fw_ver}</p>
+                  {/if}
+                  <span class="status-badge connected">Connected</span>
+                </div>
+                <div class="device-actions">
+                  <button class="btn danger small" on:click={() => handleDisconnect(device.deviceId)} disabled={settings.otaInProgress}>
+                    Disconnect
+                  </button>
+                  <button class="btn secondary small" on:click={() => toggleSettings(device.deviceId)}>
+                    {settings.showSettings ? 'Hide Settings' : 'Show Settings'}
+                  </button>
+                </div>
               </div>
-              <div class="device-actions">
-                <button class="btn danger small" on:click={() => handleDisconnect(device.deviceId)} disabled={settings.otaInProgress}>
-                  Disconnect
-                </button>
-                <button class="btn secondary small" on:click={() => toggleSettings(device.deviceId)}>
-                  {settings.showSettings ? 'Hide Settings' : 'Show Settings'}
-                </button>
-              </div>
-            </div>
 
             {#if settings.showSettings}
-              <!-- Same settings content as mobile version above -->
               <div class="device-settings">
                 <!-- Device Info -->
                 {#if settings.deviceInfo}
