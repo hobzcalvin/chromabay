@@ -1,28 +1,50 @@
 <script lang="ts">
   import { onMount, createEventDispatcher } from 'svelte';
   
-  interface Point {
-    x: number;
-    y: number;
-  }
-  
   // Props
   export let value: number = 50;
   export let min: number = 0;
   export let max: number = 100;
   export let step: number = 1;
-  export let unlockDistance: number = 50;
-  export let preciseMode: boolean = true;
   export let size: number = 200;
+  
+  // Sensitivity options
+  const angleSlideRatio: number = 2.0; // Degrees per pixel during slide
+  const angleScrollRatio: number = 0.5; // Degrees per scroll pixel
   
   // State
   let isDragging: boolean = false;
-  let dragDistance: number = 0;
-  let startMousePos: Point = { x: 0, y: 0 };
-  let startValue: number = 0;
-  let centerPoint: Point = { x: 0, y: 0 };
   let svgElement: SVGSVGElement;
   let containerElement: HTMLDivElement;
+  
+  // Tracking state
+  let isTracking: boolean = false;
+  let isTurning: boolean = false;
+  
+  // Gesture detection
+  let spinDetected: boolean = false;
+  let slideXDetected: boolean = false;
+  let slideYDetected: boolean = false;
+  
+  // Touch tracking
+  let initialTouchLeft: number = 0;
+  let initialTouchTop: number = 0;
+  let lastTouchLeft: number = 0;
+  let lastTouchTop: number = 0;
+  let initialTouchLocationX: 'left' | 'right' = 'left';
+  let initialTouchLocationY: 'top' | 'bottom' = 'top';
+  
+  // Center tracking
+  let centerPageX: number = 0;
+  let centerPageY: number = 0;
+  
+  // Spin tracking
+  let initialAngleDiff: number = 0;
+  let currentAngle: number = 0;
+  
+  // Gesture thresholds
+  const MINIMUM_TRACKING_FOR_GESTURE = 10;
+  const MINIMUM_TRACKING_FOR_SPIN = 20;
   
   const dispatch = createEventDispatcher<{
     start: void;
@@ -30,261 +52,233 @@
     end: void;
   }>();
   
-  // Audio knob range: 7 o'clock (210°) to 5 o'clock (150°)
-  const MIN_ANGLE = 210; // 7 o'clock position (min value)
-  const MAX_ANGLE = 150; // 5 o'clock position (max value)
-  const ANGLE_RANGE = 300; // 300 degrees counterclockwise (210° to 150° the long way)
+  // Audio knob range: 7 o'clock to 5 o'clock (270° sweep going clockwise)
+  // In SVG rotation: 0° = indicator pointing up, CW positive
+  const ANGLE_MIN = -135; // 7 o'clock (min value)
+  const ANGLE_MAX = 135;  // 5 o'clock (max value)  
+  const ANGLE_RANGE = ANGLE_MAX - ANGLE_MIN; // 270°
   
-  // Fixed sensitivity: dragging one knob diameter = full 300° rotation
-  // This is independent of parameter range - it's about visual knob behavior
-  const PIXELS_FOR_FULL_ROTATION = size; // One diameter = full rotation
-  const DEGREES_PER_PIXEL = ANGLE_RANGE / PIXELS_FOR_FULL_ROTATION; // 300° / size pixels
-  
-  // For debugging
-  let lastDeltaY = 0;
-  let lastDeltaX = 0;
-  let lastAngleChange = 0;
-  let lastValueChange = 0;
-  
-  // Debug the calculation setup (enable as needed)
-  // $: {
-  //   const valueRange = max - min;
-  //   console.log(`🎛️ Knob setup: size=${size}px, range=${valueRange} (${min}-${max}), step=${step}`);
-  //   console.log(`🎛️ Calculation: ${PIXELS_FOR_FULL_ROTATION}px = ${ANGLE_RANGE}°, so ${DEGREES_PER_PIXEL.toFixed(3)}°/px`);
-  // }
-  
-  // Calculate angle from value (210° to 150° counterclockwise for audio knob)
+  // Calculate SVG rotation angle from value
   function valueToAngle(val: number): number {
     const normalized = (val - min) / (max - min);
-    // Go counterclockwise from 210° for 300°
-    let angle = MIN_ANGLE + normalized * ANGLE_RANGE;
-    // Handle wrap-around
-    if (angle >= 360) angle -= 360;
+    return ANGLE_MIN + normalized * ANGLE_RANGE;
+  }
+  
+  // Calculate value from SVG rotation angle
+  function angleToValue(ang: number): number {
+    const normalized = (ang - ANGLE_MIN) / ANGLE_RANGE;
+    return min + normalized * (max - min);
+  }
+  
+  // Calculate angle from screen coordinates to center (for spin gesture)
+  // Returns angle where 0° = up, CW positive (matching SVG rotation)
+  function angleFromCoord(x: number, y: number, cx: number, cy: number): number {
+    const dx = x - cx;
+    const dy = y - cy;
+    // atan2 gives angle from positive X axis, CCW positive
+    // We want angle from negative Y axis (up), CW positive
+    let angle = Math.atan2(dx, -dy) * (180 / Math.PI);
     return angle;
   }
   
-  // Calculate value from angle, returns null if outside valid range
-  function angleToValue(angle: number): number | null {
-    // Normalize angle to 0-360 range
-    angle = ((angle % 360) + 360) % 360;
-    
-    // Add tolerance for easier min/max value access
-    const tolerance = 10;
-    
-    // Calculate distance from MIN_ANGLE (210°) going counterclockwise
-    let angleDistance: number;
-    
-    if (angle >= MIN_ANGLE) {
-      // From 210° to 360°
-      angleDistance = angle - MIN_ANGLE;
-    } else {
-      // From 0° to angle (continuing counterclockwise from 360°)
-      angleDistance = (360 - MIN_ANGLE) + angle;
-    }
-    
-    // Special case: check if we're close to min value from the "backward" direction
-    // (e.g., angles like 200°, 190° should give us min value)
-    if (angle < MIN_ANGLE && angle > MIN_ANGLE - tolerance) {
-      return min;
-    }
-    
-    // Check if we're within the valid range (with tolerance at the end)
-    if (angleDistance <= ANGLE_RANGE + tolerance) {
-      // Clamp angleDistance to the actual range to prevent going beyond min/max
-      const clampedDistance = Math.min(angleDistance, ANGLE_RANGE);
-      const progress = clampedDistance / ANGLE_RANGE;
-      return min + progress * (max - min);
-    } else {
-      // Outside valid range, return null to indicate invalid position
-      return null;
-    }
-  }
-  
-  // Get mouse position relative to center
-  function getMouseAngle(event: MouseEvent): number {
+  // Update center location
+  function updateCenterLocation(): void {
     const rect = svgElement.getBoundingClientRect();
-    const centerX = rect.left + rect.width / 2;
-    const centerY = rect.top + rect.height / 2;
-    
-    const deltaX = event.clientX - centerX;
-    const deltaY = event.clientY - centerY;
-    
-    // Calculate angle in degrees (0-360)
-    let angle = Math.atan2(deltaY, deltaX) * (180 / Math.PI);
-    // Convert to 0-360 range and offset by 90 degrees to start at top
-    angle = (angle + 90 + 360) % 360;
-    
-    return angle;
+    centerPageX = rect.left + rect.width / 2;
+    centerPageY = rect.top + rect.height / 2;
   }
   
-  // Get touch position relative to center (same logic as mouse)
-  function getTouchAngle(event: TouchEvent): number {
-    const rect = svgElement.getBoundingClientRect();
-    const centerX = rect.left + rect.width / 2;
-    const centerY = rect.top + rect.height / 2;
-    
-    const touch = event.touches[0] || event.changedTouches[0];
-    const deltaX = touch.clientX - centerX;
-    const deltaY = touch.clientY - centerY;
-    
-    // Calculate angle in degrees (0-360)
-    let angle = Math.atan2(deltaY, deltaX) * (180 / Math.PI);
-    // Convert to 0-360 range and offset by 90 degrees to start at top
-    angle = (angle + 90 + 360) % 360;
-    
-    return angle;
+  // Constrain value to bounds
+  function constrain(val: number, minVal: number, maxVal: number): number {
+    return Math.max(minVal, Math.min(maxVal, val));
   }
   
-  // Calculate angular difference, handling wrap-around
-  function getAngleDifference(startAngle: number, currentAngle: number): number {
-    let diff = currentAngle - startAngle;
+  // Apply value change with step quantization
+  function applyValue(newValue: number): void {
+    newValue = constrain(newValue, min, max);
+    const steppedValue = Math.round(newValue / step) * step;
     
-    // Handle wrap-around for smoother rotation
-    if (diff > 180) {
-      diff -= 360;
-    } else if (diff < -180) {
-      diff += 360;
+    if (Math.abs(steppedValue - value) >= step * 0.01) {
+      value = steppedValue;
+      dispatch('change', value);
+    }
+  }
+  
+  // Get angle from current gesture
+  function getAngleFromGesture(touchLeft: number, touchTop: number): number {
+    let ang = currentAngle;
+    
+    if (spinDetected) {
+      // Calculate angle from touch position to center
+      const touchAngle = angleFromCoord(touchLeft, touchTop, centerPageX, centerPageY);
+      ang = touchAngle - initialAngleDiff;
+    } else {
+      if (slideXDetected) {
+        const change = (touchLeft - lastTouchLeft) * angleSlideRatio;
+        // At top: right = CW = increase angle; at bottom: right = CCW = decrease
+        ang += (initialTouchLocationY === 'top') ? change : -change;
+      }
+      
+      if (slideYDetected) {
+        const change = (touchTop - lastTouchTop) * angleSlideRatio;
+        // At right: down = CW = increase angle; at left: down = CCW = decrease  
+        ang += (initialTouchLocationX === 'right') ? change : -change;
+      }
     }
     
-    return diff;
+    return ang;
   }
   
-  // Handle mouse down
-  function handleMouseDown(event: MouseEvent) {
+  // Validate and apply angle
+  function validateAndApplyAngle(newAngle: number): void {
+    const constrainedAngle = constrain(newAngle, ANGLE_MIN, ANGLE_MAX);
+    currentAngle = constrainedAngle;
+    const newValue = angleToValue(constrainedAngle);
+    applyValue(newValue);
+  }
+  
+  // Handle pointer down
+  function handlePointerDown(clientX: number, clientY: number): void {
+    updateCenterLocation();
+    
+    isTracking = true;
+    isTurning = false;
+    spinDetected = false;
+    slideXDetected = false;
+    slideYDetected = false;
+    
+    initialTouchLeft = clientX;
+    initialTouchTop = clientY;
+    lastTouchLeft = clientX;
+    lastTouchTop = clientY;
+    
+    // Determine which side of the knob we started on
+    initialTouchLocationX = clientX >= centerPageX ? 'right' : 'left';
+    initialTouchLocationY = clientY >= centerPageY ? 'bottom' : 'top';
+    
+    // Initialize current angle from current value
+    currentAngle = valueToAngle(value);
+    
+    // Calculate initial angle difference for spin gesture
+    const touchAngle = angleFromCoord(clientX, clientY, centerPageX, centerPageY);
+    initialAngleDiff = touchAngle - currentAngle;
+    
     isDragging = true;
-    startMousePos = { x: event.clientX, y: event.clientY };
-    startValue = value;
-    
     dispatch('start');
+  }
+  
+  // Handle pointer move
+  function handlePointerMove(clientX: number, clientY: number): void {
+    if (!isTracking) return;
+    
+    const distanceX = Math.abs(clientX - initialTouchLeft);
+    const distanceY = Math.abs(clientY - initialTouchTop);
+    const distanceFromCenter = Math.sqrt(
+      Math.pow(clientX - centerPageX, 2) + Math.pow(clientY - centerPageY, 2)
+    );
+    
+    // Detect gesture type if not yet turning
+    if (!isTurning) {
+      // Check for spin gesture
+      if (distanceFromCenter > MINIMUM_TRACKING_FOR_SPIN) {
+        const movementAngle = Math.abs(
+          angleFromCoord(clientX, clientY, centerPageX, centerPageY) -
+          angleFromCoord(initialTouchLeft, initialTouchTop, centerPageX, centerPageY)
+        );
+        
+        if (movementAngle > 5 && distanceFromCenter > size * 0.2) {
+          spinDetected = true;
+          isTurning = true;
+        }
+      }
+      
+      // Check for slide gestures if spin not detected
+      if (!spinDetected) {
+        if (distanceY > MINIMUM_TRACKING_FOR_GESTURE && distanceY > distanceX * 1.5) {
+          slideYDetected = true;
+          isTurning = true;
+        } else if (distanceX > MINIMUM_TRACKING_FOR_GESTURE && distanceX > distanceY * 1.5) {
+          slideXDetected = true;
+          isTurning = true;
+        }
+      }
+    }
+    
+    if (isTurning) {
+      const newAngle = getAngleFromGesture(clientX, clientY);
+      validateAndApplyAngle(newAngle);
+    }
+    
+    lastTouchLeft = clientX;
+    lastTouchTop = clientY;
+  }
+  
+  // Handle pointer up
+  function handlePointerUp(): void {
+    isTracking = false;
+    isTurning = false;
+    isDragging = false;
+    spinDetected = false;
+    slideXDetected = false;
+    slideYDetected = false;
+    dispatch('end');
+  }
+  
+  // Mouse event handlers
+  function handleMouseDown(event: MouseEvent): void {
+    handlePointerDown(event.clientX, event.clientY);
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
   }
   
-  // Handle touch start
-  function handleTouchStart(event: TouchEvent) {
-    event.preventDefault(); // Prevent scrolling and other touch behaviors
-    
-    isDragging = true;
-    const touch = event.touches[0];
-    startMousePos = { x: touch.clientX, y: touch.clientY };
-    startValue = value;
-    
-    dispatch('start');
-    document.addEventListener('touchmove', handleTouchMove, { passive: false });
-    document.addEventListener('touchend', handleTouchEnd);
+  function handleMouseMove(event: MouseEvent): void {
+    handlePointerMove(event.clientX, event.clientY);
   }
   
-  // Handle mouse move
-  function handleMouseMove(event: MouseEvent) {
-    if (isDragging) {
-      const deltaY = startMousePos.y - event.clientY; // Inverted: up is positive
-      const deltaX = event.clientX - startMousePos.x; // Right is positive
-      
-      // Store for debugging
-      lastDeltaY = deltaY;
-      lastDeltaX = deltaX;
-      
-      // Convert pixel movement to degrees of rotation
-      // Vertical movement = main control, horizontal = fine adjustment
-      const verticalDegrees = deltaY * DEGREES_PER_PIXEL;
-      const horizontalDegrees = deltaX * DEGREES_PER_PIXEL * 0.5; // Fine control
-      const totalDegreeChange = verticalDegrees + horizontalDegrees;
-      
-      lastAngleChange = totalDegreeChange;
-      
-      // Convert degrees to parameter value range
-      const valueRange = max - min;
-      const valueChangeFromDegrees = (totalDegreeChange / ANGLE_RANGE) * valueRange;
-      let newValue = startValue + valueChangeFromDegrees;
-      
-      lastValueChange = valueChangeFromDegrees;
-      
-      // Clamp to min/max bounds
-      newValue = Math.max(min, Math.min(max, newValue));
-      
-      // Apply step quantization
-      const steppedValue = Math.round(newValue / step) * step;
-      
-      // Debug logging (enable as needed)
-      // console.log(`🎛️ Drag: dy=${deltaY.toFixed(1)}, dx=${deltaX.toFixed(1)} → degrees=${totalDegreeChange.toFixed(1)}° → valueΔ=${valueChangeFromDegrees.toFixed(2)} → final=${steppedValue.toFixed(2)}`);
-      
-      if (Math.abs(steppedValue - value) >= step * 0.01) {
-        value = steppedValue;
-        dispatch('change', value);
-      }
-    }
-  }
-  
-  // Handle touch move  
-  function handleTouchMove(event: TouchEvent) {
-    event.preventDefault(); // Prevent scrolling
-    
-    if (isDragging) {
-      const touch = event.touches[0];
-      const deltaY = startMousePos.y - touch.clientY; // Inverted: up is positive
-      const deltaX = touch.clientX - startMousePos.x; // Right is positive
-      
-      // Store for debugging
-      lastDeltaY = deltaY;
-      lastDeltaX = deltaX;
-      
-      // Convert pixel movement to degrees of rotation
-      const verticalDegrees = deltaY * DEGREES_PER_PIXEL;
-      const horizontalDegrees = deltaX * DEGREES_PER_PIXEL * 0.5; // Fine control
-      const totalDegreeChange = verticalDegrees + horizontalDegrees;
-      
-      lastAngleChange = totalDegreeChange;
-      
-      // Convert degrees to parameter value range
-      const valueRange = max - min;
-      const valueChangeFromDegrees = (totalDegreeChange / ANGLE_RANGE) * valueRange;
-      let newValue = startValue + valueChangeFromDegrees;
-      
-      lastValueChange = valueChangeFromDegrees;
-      
-      // Clamp to min/max bounds
-      newValue = Math.max(min, Math.min(max, newValue));
-      
-      // Apply step quantization
-      const steppedValue = Math.round(newValue / step) * step;
-      
-      // Debug logging (enable as needed)
-      // console.log(`🎛️ Touch: dy=${deltaY.toFixed(1)}, dx=${deltaX.toFixed(1)} → degrees=${totalDegreeChange.toFixed(1)}° → valueΔ=${valueChangeFromDegrees.toFixed(2)} → final=${steppedValue.toFixed(2)}`);
-      
-      if (Math.abs(steppedValue - value) >= step * 0.01) {
-        value = steppedValue;
-        dispatch('change', value);
-      }
-    }
-  }
-  
-  // Handle mouse up
-  function handleMouseUp() {
-    isDragging = false;
-    dragDistance = 0;
-    dispatch('end');
+  function handleMouseUp(): void {
+    handlePointerUp();
     document.removeEventListener('mousemove', handleMouseMove);
     document.removeEventListener('mouseup', handleMouseUp);
   }
   
-  // Handle touch end
-  function handleTouchEnd() {
-    isDragging = false;
-    dragDistance = 0;
-    dispatch('end');
+  // Touch event handlers
+  function handleTouchStart(event: TouchEvent): void {
+    event.preventDefault();
+    const touch = event.touches[0];
+    handlePointerDown(touch.clientX, touch.clientY);
+    document.addEventListener('touchmove', handleTouchMove, { passive: false });
+    document.addEventListener('touchend', handleTouchEnd);
+  }
+  
+  function handleTouchMove(event: TouchEvent): void {
+    event.preventDefault();
+    const touch = event.touches[0];
+    handlePointerMove(touch.clientX, touch.clientY);
+  }
+  
+  function handleTouchEnd(): void {
+    handlePointerUp();
     document.removeEventListener('touchmove', handleTouchMove);
     document.removeEventListener('touchend', handleTouchEnd);
+  }
+  
+  // Scroll/wheel event handler
+  function handleWheel(event: WheelEvent): void {
+    event.preventDefault();
+    
+    currentAngle = valueToAngle(value);
+    const scrollDelta = event.deltaY * angleScrollRatio;
+    // Scroll down = increase angle (CW), scroll up = decrease
+    const newAngle = currentAngle + scrollDelta;
+    validateAndApplyAngle(newAngle);
   }
   
   // Reactive values
   $: angle = valueToAngle(value);
   $: displayValue = value.toFixed(1);
   
-  // Remove pie slice - s10 doesn't have it
-  
   onMount(() => {
-    // Handle keyboard events
-    function handleKeyDown(event: KeyboardEvent) {
+    function handleKeyDown(event: KeyboardEvent): void {
       if (event.key === 'ArrowUp' || event.key === 'ArrowRight') {
         event.preventDefault();
         value = Math.min(max, value + step);
@@ -304,16 +298,23 @@
   });
 </script>
 
+<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <div 
   bind:this={containerElement}
   class="rotary-knob-container"
+  role="slider"
+  aria-valuenow={value}
+  aria-valuemin={min}
+  aria-valuemax={max}
   tabindex="0"
   style="width: {size}px; height: {size}px;"
 >
+<!-- svelte-ignore a11y_no_static_element_interactions -->
 <svg 
   bind:this={svgElement}
   on:mousedown={handleMouseDown}
   on:touchstart={handleTouchStart}
+  on:wheel={handleWheel}
   class="rotary-knob {isDragging ? 'dragging' : ''}"
   xmlns="http://www.w3.org/2000/svg" 
   xmlns:xlink="http://www.w3.org/1999/xlink" 
