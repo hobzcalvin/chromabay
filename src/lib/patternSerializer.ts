@@ -801,8 +801,17 @@ export async function deserializePatternWhenReady(
   serializedPattern: SerializedPattern,
   maxWaitMs: number = 5000
 ): Promise<{ nodes: Node[]; edges: Edge[]; nodeParameters: Map<string, Map<string, any>> }> {
+  // Helper to check if WASM operators are actually loaded
+  // We need more than just the output node, and we need at least one pattern operator
+  const isWasmReady = () => {
+    if (NODE_TYPES.length <= 1) return false;
+    // Also verify that actual pattern operators are loaded (not just output)
+    const hasPatternOperator = NODE_TYPES.some(nt => nt.type !== 'output' && nt.type !== '');
+    return hasPatternOperator;
+  };
+  
   // Check if WASM operators are already loaded
-  if (NODE_TYPES.length > 1) { // More than just the output node
+  if (isWasmReady()) {
     return deserializePattern(serializedPattern);
   }
   
@@ -813,7 +822,7 @@ export async function deserializePatternWhenReady(
     }, maxWaitMs);
     
     const checkReady = () => {
-      if (NODE_TYPES.length > 1) {
+      if (isWasmReady()) {
         clearTimeout(timeout);
         try {
           const result = deserializePattern(serializedPattern);
@@ -822,8 +831,8 @@ export async function deserializePatternWhenReady(
           reject(error);
         }
       } else {
-        // Check again in 100ms
-        setTimeout(checkReady, 100);
+        // Check again in 50ms
+        setTimeout(checkReady, 50);
       }
     };
     
@@ -831,13 +840,22 @@ export async function deserializePatternWhenReady(
     if (typeof window !== 'undefined') {
       const onWasmReady = () => {
         window.removeEventListener('wasmReady', onWasmReady);
-        clearTimeout(timeout);
-        try {
-          const result = deserializePattern(serializedPattern);
-          resolve(result);
-        } catch (error) {
-          reject(error);
-        }
+        // Don't immediately deserialize - wait a tick for NODE_TYPES to be populated
+        // by the flowStore's wasmReady handler
+        setTimeout(() => {
+          if (isWasmReady()) {
+            clearTimeout(timeout);
+            try {
+              const result = deserializePattern(serializedPattern);
+              resolve(result);
+            } catch (error) {
+              reject(error);
+            }
+          } else {
+            // Keep checking if not ready yet
+            checkReady();
+          }
+        }, 10);
       };
       window.addEventListener('wasmReady', onWasmReady);
     }
