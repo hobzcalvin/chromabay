@@ -426,7 +426,6 @@
       bind:showAddNodeDropdown 
       bind:addNodeDropdownRef 
       {handleAddNode}
-      {NODE_TYPES}
     />
   </div>
   

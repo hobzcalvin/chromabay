@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { serializeCurrentPattern } from '$lib/flowStore';
+  import { serializeCurrentPattern, nodeTypesStore } from '$lib/flowStore';
   import { 
     currentPatternName,
     saveCurrentPattern,
@@ -11,8 +11,17 @@
   } from '$lib/stores/patternsStore';
   import { syncPatternToAllDevices } from '$lib/ble';
   
-  // Props for Add Node functionality
-  let { showAddNodeDropdown = $bindable(false), addNodeDropdownRef = $bindable(), handleAddNode, NODE_TYPES } = $props();
+  // Props for Add Node functionality (NODE_TYPES removed - using store instead)
+  let { showAddNodeDropdown = $bindable(false), addNodeDropdownRef = $bindable(), handleAddNode } = $props();
+  
+  // Local reactive state that mirrors the store
+  let nodeTypes = $state<any[]>([]);
+  
+  // Keep local state in sync with store
+  $effect(() => {
+    nodeTypes = $nodeTypesStore;
+    console.log('PatternActions: nodeTypes updated to', nodeTypes.length, 'operators');
+  });
   
   // Action dropdown state
   let showDropdown = $state(false);
@@ -230,7 +239,7 @@
       
       {#if showAddNodeDropdown}
         <div class="dropdown-menu">
-          {#each NODE_TYPES.slice(1) as nodeType}
+          {#each nodeTypes.slice(1) as nodeType}
             <button onclick={() => handleAddNode(nodeType)}>
               {nodeType.name}
             </button>

@@ -587,23 +587,41 @@ export function getWasmOperatorManager(): WasmOperatorManager | null {
   return wasmOperatorManager;
 }
 
-// Dynamic NODE_TYPES loaded from WASM
+// Dynamic NODE_TYPES loaded from WASM - using a writable store for reactivity
+export const nodeTypesStore = writable<NodeDefinition[]>([]);
+
+// Legacy export that returns the current value (for backwards compatibility with non-reactive code)
+export function getNodeTypes(): NodeDefinition[] {
+  return get(nodeTypesStore);
+}
+
+// For code that still uses NODE_TYPES directly (read-only access to current value)
+// Note: This is NOT reactive - use nodeTypesStore for reactive access
 export let NODE_TYPES: NodeDefinition[] = [];
 
 function loadOperatorsFromWasm() {
   const manager = getWasmOperatorManager();
+  let operators: NodeDefinition[];
+  
   if (manager) {
-    NODE_TYPES = manager.getAvailableOperators();
-    console.log(`Loaded ${NODE_TYPES.length} operators from WASM:`, NODE_TYPES.map(op => op.name));
+    operators = manager.getAvailableOperators();
+    console.log(`Loaded ${operators.length} operators from WASM:`, operators.map(op => op.name));
   } else {
     // Fallback for SSR
-    NODE_TYPES = [{
+    operators = [{
       name: 'Output',
       type: 'output', 
       params: [],
       render: () => {}
     }];
   }
+  
+  // Update the store (triggers reactive updates in subscribed components)
+  nodeTypesStore.set(operators);
+  console.log(`nodeTypesStore updated with ${operators.length} operators`);
+  
+  // Also update the legacy variable for non-reactive code
+  NODE_TYPES = operators;
 }
 
 // Initialize operators
