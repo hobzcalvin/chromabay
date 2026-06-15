@@ -124,6 +124,12 @@ export interface RenderContext {
   getInputNodes: () => any;
   getNodeOutput: (nodeId: string) => ImageData | null;
   nodeId: string;
+  // Optional isolated stores for off-canvas renderers (e.g. the patterns-page
+  // preview) that don't live in the global flow stores. When omitted, the WASM
+  // render path falls back to the global flowNodes/nodeParameters — so the
+  // editor's behavior is unchanged.
+  nodes?: Node[];
+  nodeParameters?: Map<string, Map<string, any>>;
 }
 
 // Type for node definition - now WASM-based
@@ -338,40 +344,38 @@ class WasmOperatorManager {
   }
   
   private createWasmRenderFunction(operatorName: string) {
-    return ({ ctx, totalTime, deltaTime, width, height, getInputNodes, getNodeOutput, nodeId }: RenderContext) => {
-      this.renderNodeWithWasm(nodeId, operatorName, ctx, totalTime, deltaTime, getInputNodes, getNodeOutput);
+    return ({ ctx, totalTime, deltaTime, width, height, getInputNodes, getNodeOutput, nodeId, nodes, nodeParameters: ctxParams }: RenderContext) => {
+      this.renderNodeWithWasm(nodeId, operatorName, ctx, totalTime, deltaTime, getInputNodes, getNodeOutput, nodes, ctxParams);
     };
   }
-  
+
   private renderNodeWithWasm(
-    nodeId: string, 
-    operatorName: string, 
-    ctx: CanvasRenderingContext2D, 
-    totalTime: number, 
-    deltaTime: number, 
-    getInputNodes: () => any, 
-    getNodeOutput: (nodeId: string) => ImageData | null
+    nodeId: string,
+    operatorName: string,
+    ctx: CanvasRenderingContext2D,
+    totalTime: number,
+    deltaTime: number,
+    getInputNodes: () => any,
+    getNodeOutput: (nodeId: string) => ImageData | null,
+    // When provided (off-canvas previews with isolated stores), use these instead
+    // of the global flowNodes/nodeParameters. Falls back to globals otherwise.
+    contextNodes?: Node[],
+    contextNodeParameters?: Map<string, Map<string, any>>
   ) {
     const { width, height } = this.currentConfig;
     // Ensure operator instance exists
     if (!this.operatorInstances.has(nodeId)) {
       this.createOperatorInstance(nodeId, operatorName);
     }
-    
-    // Set parameters from the store
-    let currentParams: Map<string, Map<string, any>> = new Map();
-    nodeParameters.subscribe(params => {
-      currentParams = params;
-    })();
+
+    // Set parameters from the provided store, or the global store as a fallback.
+    const currentParams = contextNodeParameters ?? get(nodeParameters);
     const nodeParams = currentParams.get(nodeId) || new Map();
     this.setNodeParameters(nodeId, nodeParams);
-    
-    // Get current nodes to assign buffers based on lane positions
-    let currentNodes: Node[] = [];
-    flowNodes.subscribe(nodes => {
-      currentNodes = nodes;
-    })();
-    
+
+    // Node list used for lane-based buffer assignment: provided (isolated) or global.
+    const currentNodes: Node[] = contextNodes ?? get(flowNodes);
+
     // Find the current node to get its lane-based buffer assignment
     const currentNode = currentNodes.find(n => n.id === nodeId);
     const outputBufferIndex = currentNode ? getNodeBuffer(currentNode) : 0;

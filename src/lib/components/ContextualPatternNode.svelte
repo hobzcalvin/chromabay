@@ -2,23 +2,25 @@
   import { Handle, Position, type NodeProps } from '@xyflow/svelte';
   import { onMount, onDestroy, getContext } from 'svelte';
   import { getNodeDefinition, disableIndividualAnimation, type RenderContext } from '$lib/flowStore';
-  import { flowNodes as globalFlowNodes, flowEdges as globalFlowEdges, nodeOutputs as globalNodeOutputs, globalStartTime as globalGlobalStartTime } from '$lib/flowStore';
+  import { flowNodes as globalFlowNodes, flowEdges as globalFlowEdges, nodeOutputs as globalNodeOutputs, globalStartTime as globalGlobalStartTime, nodeParameters as globalNodeParameters } from '$lib/flowStore';
   import { renderConfig } from '$lib/renderConfig';
   import type { Writable } from 'svelte/store';
-  
+
   let { data, id, type, ...nodeProps }: NodeProps & { type: string } = $props();
-  
+
   // Get local stores from context (if available) or fall back to global
   const contextFlowNodes = getContext<Writable<any[]>>('flowNodes');
   const contextFlowEdges = getContext<Writable<any[]>>('flowEdges');
   const contextNodeOutputs = getContext<Writable<Map<string, ImageData>>>('nodeOutputs');
   const contextGlobalStartTime = getContext<Writable<number>>('globalStartTime');
-  
+  const contextNodeParameters = getContext<Writable<Map<string, Map<string, any>>>>('nodeParameters');
+
   // Use context stores if available, otherwise fall back to global
   const flowNodes = contextFlowNodes || globalFlowNodes;
   const flowEdges = contextFlowEdges || globalFlowEdges;
   const nodeOutputs = contextNodeOutputs || globalNodeOutputs;
   const globalStartTime = contextGlobalStartTime || globalGlobalStartTime;
+  const nodeParameters = contextNodeParameters || globalNodeParameters;
   
   let canvasElement: HTMLCanvasElement;
   let ctx: CanvasRenderingContext2D | null = null;
@@ -125,7 +127,13 @@
         height: textureHeight,
         getInputNodes,
         getNodeOutput,
-        nodeId: id
+        nodeId: id,
+        // Pass the (context-local or global) stores so the WASM render path uses
+        // THESE nodes/params for buffer assignment + parameters. In the editor
+        // these are the global stores (unchanged behavior); in an isolated
+        // preview they are the preview's local stores (fixes the black preview).
+        nodes: $flowNodes,
+        nodeParameters: $nodeParameters
       };
       
       nodeDefinition.render(renderContext);
