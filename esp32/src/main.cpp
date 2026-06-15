@@ -79,6 +79,17 @@ static uint8_t* patternBuffer = nullptr;
 static size_t patternBufferSize = 0;
 static bool newPatternAvailable = false;
 
+// LED Config Storage
+// Like patterns, incoming LED configuration is staged here by the BLE write
+// callback and applied later from loop() (see processReceivedLedConfig). The
+// BLE callback runs on the NimBLE host task while the render loop runs on the
+// Arduino task; applying the config (which frees/reallocates the renderer's
+// pixel buffers and destroys/recreates LED strips) directly from the callback
+// races with update()/render() and corrupts the output buffers.
+static uint8_t* ledConfigBuffer = nullptr;
+static size_t ledConfigBufferSize = 0;
+static volatile bool newLedConfigAvailable = false;
+
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
 String receivedData = "";
@@ -735,84 +746,30 @@ class LedConfigSetCallbacks : public NimBLECharacteristicCallbacks {
         std::string value = pCharacteristic->getValue();
         if (value.length() > 0) {
             Serial.printf("LED Config update received: %d bytes\n", value.length());
-            
-            // Parse MessagePack data
-            mpack_reader_t reader;
-            mpack_reader_init_data(&reader, value.data(), value.length());
-            
-            try {
-                uint32_t map_count = mpack_expect_map(&reader);
-                LedConfig::FullLedConfiguration newConfig;
-                
-                for (uint32_t i = 0; i < map_count; ++i) {
-                    char key_buffer[16];
-                    mpack_expect_cstr(&reader, key_buffer, sizeof(key_buffer));
-                    
-                    if (strcmp(key_buffer, "gb") == 0) {
-                        newConfig.globalBrightness = mpack_expect_u8(&reader);
-                    } else if (strcmp(key_buffer, "strips") == 0) {
-                        uint32_t strips_count = mpack_expect_array(&reader);
-                        newConfig.strips.reserve(strips_count);
-                        
-                        for (uint32_t s = 0; s < strips_count; ++s) {
-                            uint32_t strip_map_count = mpack_expect_map(&reader);
-                            LedConfig::LedStripConfig stripConfig;
-                            
-                            for (uint32_t k = 0; k < strip_map_count; ++k) {
-                                char strip_key[16];
-                                mpack_expect_cstr(&reader, strip_key, sizeof(strip_key));
-                                
-                                if (strcmp(strip_key, "cs") == 0) {
-                                    stripConfig.chipset = static_cast<LedConfig::LedChipset>(mpack_expect_u8(&reader));
-                                } else if (strcmp(strip_key, "pin") == 0) {
-                                    stripConfig.pin = mpack_expect_u8(&reader);
-                                } else if (strcmp(strip_key, "num") == 0) {
-                                    stripConfig.numLeds = mpack_expect_u16(&reader);
-                                } else if (strcmp(strip_key, "co") == 0) {
-                                    stripConfig.colorOrder = static_cast<LedConfig::ColorOrderValue>(mpack_expect_u8(&reader));
-                                } else if (strcmp(strip_key, "rmt") == 0) {
-                                    stripConfig.rmtChannel = mpack_expect_u8(&reader);
-                                } else if (strcmp(strip_key, "w") == 0) {
-                                    stripConfig.width = mpack_expect_u16(&reader);
-                                } else if (strcmp(strip_key, "h") == 0) {
-                                    stripConfig.height = mpack_expect_u16(&reader);
-                                } else if (strcmp(strip_key, "ort") == 0) {
-                                    stripConfig.orientation = mpack_expect_u8(&reader);
-                                } else {
-                                    mpack_discard(&reader);
-                                }
-                            }
-                            mpack_done_map(&reader);
-                            
-                            if (stripConfig.numLeds > 0) {
-                                newConfig.strips.push_back(stripConfig);
-                            }
-                        }
-                        mpack_done_array(&reader);
-                    } else {
-                        mpack_discard(&reader);
-                    }
-                }
-                mpack_done_map(&reader);
-                
-                // Apply the new configuration
-                configMgr.applyConfiguration(newConfig);
-                
-                // Update pattern renderer matrix config
-                if (patternRenderer) {
-                    patternRenderer->updateMatrixConfig();
-                }
-                
-                // Save configuration to file
-                configMgr.saveConfiguration();
-                
-                Serial.println("LED Configuration updated successfully");
-                
-            } catch (...) {
-                Serial.println("Error parsing LED configuration MessagePack data");
+
+            // Stage the raw MessagePack for the render loop to apply. We must NOT
+            // apply it here: this callback runs on the BLE host task, while the
+            // render loop runs on the Arduino task. Applying the config frees and
+            // reallocates the renderer's pixel buffers and destroys/recreates the
+            // LED strips, which races with update()/render() and corrupts the
+            // output buffers. processReceivedLedConfig() applies it safely from
+            // loop(), mirroring how patterns are handled.
+            if (ledConfigBuffer != nullptr) {
+                free(ledConfigBuffer);
+                ledConfigBuffer = nullptr;
+                ledConfigBufferSize = 0;
             }
-            
-            mpack_reader_destroy(&reader);
+
+            ledConfigBufferSize = value.length();
+            ledConfigBuffer = (uint8_t*)malloc(ledConfigBufferSize);
+
+            if (ledConfigBuffer != nullptr) {
+                memcpy(ledConfigBuffer, value.data(), ledConfigBufferSize);
+                newLedConfigAvailable = true;
+            } else {
+                Serial.println("LED Config: Failed to allocate memory for config");
+                ledConfigBufferSize = 0;
+            }
         }
     }
 };
@@ -896,8 +853,103 @@ void processReceivedPattern() {
     
     // Mark pattern as processed
     newPatternAvailable = false;
-    
+
     //Serial.println("Pattern processing completed");
+}
+
+// Function to process a staged LED configuration. Runs from loop() on the
+// Arduino task, so applying the config (reallocating renderer buffers and
+// recreating LED strips) never races with update()/render().
+void processReceivedLedConfig() {
+    if (!newLedConfigAvailable || ledConfigBuffer == nullptr) {
+        return;
+    }
+
+    // Parse MessagePack data
+    mpack_reader_t reader;
+    mpack_reader_init_data(&reader, (const char*)ledConfigBuffer, ledConfigBufferSize);
+
+    try {
+        uint32_t map_count = mpack_expect_map(&reader);
+        LedConfig::FullLedConfiguration newConfig;
+
+        for (uint32_t i = 0; i < map_count; ++i) {
+            char key_buffer[16];
+            mpack_expect_cstr(&reader, key_buffer, sizeof(key_buffer));
+
+            if (strcmp(key_buffer, "gb") == 0) {
+                newConfig.globalBrightness = mpack_expect_u8(&reader);
+            } else if (strcmp(key_buffer, "strips") == 0) {
+                uint32_t strips_count = mpack_expect_array(&reader);
+                newConfig.strips.reserve(strips_count);
+
+                for (uint32_t s = 0; s < strips_count; ++s) {
+                    uint32_t strip_map_count = mpack_expect_map(&reader);
+                    LedConfig::LedStripConfig stripConfig;
+
+                    for (uint32_t k = 0; k < strip_map_count; ++k) {
+                        char strip_key[16];
+                        mpack_expect_cstr(&reader, strip_key, sizeof(strip_key));
+
+                        if (strcmp(strip_key, "cs") == 0) {
+                            stripConfig.chipset = static_cast<LedConfig::LedChipset>(mpack_expect_u8(&reader));
+                        } else if (strcmp(strip_key, "pin") == 0) {
+                            stripConfig.pin = mpack_expect_u8(&reader);
+                        } else if (strcmp(strip_key, "num") == 0) {
+                            stripConfig.numLeds = mpack_expect_u16(&reader);
+                        } else if (strcmp(strip_key, "co") == 0) {
+                            stripConfig.colorOrder = static_cast<LedConfig::ColorOrderValue>(mpack_expect_u8(&reader));
+                        } else if (strcmp(strip_key, "rmt") == 0) {
+                            stripConfig.rmtChannel = mpack_expect_u8(&reader);
+                        } else if (strcmp(strip_key, "w") == 0) {
+                            stripConfig.width = mpack_expect_u16(&reader);
+                        } else if (strcmp(strip_key, "h") == 0) {
+                            stripConfig.height = mpack_expect_u16(&reader);
+                        } else if (strcmp(strip_key, "ort") == 0) {
+                            stripConfig.orientation = mpack_expect_u8(&reader);
+                        } else {
+                            mpack_discard(&reader);
+                        }
+                    }
+                    mpack_done_map(&reader);
+
+                    if (stripConfig.numLeds > 0) {
+                        newConfig.strips.push_back(stripConfig);
+                    }
+                }
+                mpack_done_array(&reader);
+            } else {
+                mpack_discard(&reader);
+            }
+        }
+        mpack_done_map(&reader);
+
+        // Apply the new configuration. Safe here: we are on the loop task and run
+        // outside update()/render(), so nothing else touches the renderer buffers
+        // or LED strips while we reallocate/recreate them.
+        configMgr.applyConfiguration(newConfig);
+
+        // Update pattern renderer matrix config
+        if (patternRenderer) {
+            patternRenderer->updateMatrixConfig();
+        }
+
+        // Save configuration to file
+        configMgr.saveConfiguration();
+
+        Serial.println("LED Configuration updated successfully");
+
+    } catch (...) {
+        Serial.println("Error parsing LED configuration MessagePack data");
+    }
+
+    mpack_reader_destroy(&reader);
+
+    // Mark config as processed and release the staging buffer
+    newLedConfigAvailable = false;
+    free(ledConfigBuffer);
+    ledConfigBuffer = nullptr;
+    ledConfigBufferSize = 0;
 }
 
 // pushCRGBToStrip function removed - pattern renderer handles LED output directly
@@ -1097,8 +1149,10 @@ void loop() {
         }
     }
 
-    // Process received patterns
+    // Process received patterns and LED configuration changes on the loop task,
+    // so they never race with update()/render() above.
     processReceivedPattern();
+    processReceivedLedConfig();
 
     // Periodically update device info characteristic (for heap value)
     if (currentTime - lastHeapUpdateTime >= heapUpdateInterval) {
