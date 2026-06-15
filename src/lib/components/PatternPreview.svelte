@@ -2,7 +2,7 @@
   import { onMount, onDestroy, setContext } from 'svelte';
   import { writable } from 'svelte/store';
   import type { SerializedPattern } from '$lib/patternSerializer';
-  import { deserializePattern } from '$lib/patternSerializer';
+  import { deserializePatternWhenReady } from '$lib/patternSerializer';
   import ContextualPatternNode from './ContextualPatternNode.svelte';
   import { SvelteFlow, type Node, type Edge } from '@xyflow/svelte';
   import '@xyflow/svelte/dist/style.css';
@@ -63,13 +63,19 @@
     canvasElement.width = size;
     canvasElement.height = size;
 
-    // Deserialize the pattern and load it into LOCAL stores
-    const { nodes, edges, nodeParameters } = deserializePattern(pattern);
-    
-    localFlowNodes.set(nodes);
-    localFlowEdges.set(edges);
-    localNodeParameters.set(nodeParameters);
-    
+    // Deserialize once WASM operators are available. Using the synchronous
+    // deserializePattern here raced WASM init on (re)load: with only the Output
+    // operator loaded, every real node type ("rainbow", "blend", …) is unknown
+    // and dropped, leaving an empty graph and a permanently black preview.
+    // deserializePatternWhenReady waits for the operators first.
+    deserializePatternWhenReady(pattern)
+      .then(({ nodes, edges, nodeParameters }) => {
+        localFlowNodes.set(nodes);
+        localFlowEdges.set(edges);
+        localNodeParameters.set(nodeParameters);
+      })
+      .catch((err) => console.warn('PatternPreview: failed to deserialize pattern', err));
+
     animate();
   });
 
