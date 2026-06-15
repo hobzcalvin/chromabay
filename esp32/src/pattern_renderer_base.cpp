@@ -239,58 +239,25 @@ void PatternRendererBase::render() {
                 // Get color from logical position in pattern buffer
                 int patternIndex = logicalY * matrixWidth + logicalX;
                 if (patternIndex >= totalPixels) continue;
-                
+
                 CRGB color = patternBuffer[patternIndex];
-                
-                // Map logical coordinates to physical coordinates using orientation
-                uint16_t physicalX = logicalX;
-                uint16_t physicalY = logicalY;
-                
-                // Apply rotation (bits 0-1 of orientation)
-                uint8_t rotation = config.orientation & 0x03;
-                switch (rotation) {
-                    case 1: // 90° clockwise
-                        {
-                            uint16_t temp = physicalX;
-                            physicalX = physicalY;
-                            physicalY = matrixWidth - 1 - temp;
-                        }
-                        break;
-                    case 2: // 180°
-                        physicalX = matrixWidth - 1 - physicalX;
-                        physicalY = matrixHeight - 1 - physicalY;
-                        break;
-                    case 3: // 270° clockwise (90° counter-clockwise)
-                        {
-                            uint16_t temp = physicalX;
-                            physicalX = matrixHeight - 1 - physicalY;
-                            physicalY = temp;
-                        }
-                        break;
-                    default: // 0° - no rotation
-                        break;
-                }
-                
-                // Apply horizontal flip (bit 2 of orientation)
-                if (config.orientation & 0x04) {
-                    physicalX = matrixWidth - 1 - physicalX;
-                }
-                
-                // Calculate final LED index considering serpentine layout (bit 3 of orientation)
-                int ledIndex;
-                if (config.orientation & 0x08) {
-                    // Serpentine: odd rows are reversed
-                    if (physicalY % 2 == 1) {
-                        ledIndex = physicalY * matrixWidth + (matrixWidth - 1 - physicalX);
-                    } else {
-                        ledIndex = physicalY * matrixWidth + physicalX;
-                    }
-                } else {
-                    // Normal row-major order
-                    ledIndex = physicalY * matrixWidth + physicalX;
-                }
-                
-                // Set the LED color
+
+                // Map the logical pixel to a physical LED index. For a real 2D
+                // matrix, defer to LedStripConfig::xyToIndex() — the single source
+                // of truth for rotation/flip/serpentine (also used by
+                // setPixelColorXY). The previous open-coded mapping here used
+                // matrixWidth as the row stride even after a 90deg/270deg
+                // rotation, which scrambles the image on NON-square matrices and
+                // disagreed with xyToIndex.
+                //
+                // A linear strip also reaches this branch (getMatrixWidth/Height
+                // fall back to a sqrt-based square when width/height are unset),
+                // but xyToIndex only handles real matrices, so keep the plain
+                // row-major index in that case to preserve existing behavior.
+                int ledIndex = config.isMatrix()
+                    ? config.xyToIndex(logicalX, logicalY)
+                    : patternIndex;
+
                 if (ledIndex >= 0 && ledIndex < config.numLeds) {
                     strip->setPixelColor(ledIndex, color);
                 }
