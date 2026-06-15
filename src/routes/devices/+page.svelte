@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { dev } from '$app/environment';
   import { 
     initBle, 
@@ -45,6 +45,15 @@
   let devices: any[] = [];
   let statusMessage = '';
   let isWeb = false;
+
+  // Stale-device purge for native scanning. BLE LE scan only reports devices as
+  // they are *discovered* — there is no "device lost" event. So we refresh a
+  // per-device lastSeen on every advertisement and drop devices we haven't heard
+  // from for a while, otherwise powered-off / out-of-range devices linger in the
+  // list forever (until the scan is restarted).
+  const STALE_DEVICE_MS = 10000;
+  const PURGE_INTERVAL_MS = 2000;
+  let scanPurgeTimer: ReturnType<typeof setInterval> | null = null;
 
   // Device states - keyed by deviceId
   let deviceSettings: Record<string, {
@@ -207,13 +216,26 @@
     scanning = true;
     devices = [];
     statusMessage = isWeb ? 'Opening device picker...' : 'Scanning for devices...';
-    
+
+    // Continuous scanning (native) needs stale-device purging; the web picker is
+    // one-shot and auto-connects, so it doesn't.
+    if (!isWeb) {
+      startScanPurgeTimer();
+    }
+
     startScan((result) => {
+      // Refresh lastSeen on every advertisement (not just the first sighting) so
+      // the purge timer can detect devices that have gone out of range.
+      const now = Date.now();
       const existingDevice = devices.find(d => d.deviceId === result.device.deviceId);
       if (!existingDevice) {
-        devices = [...devices, result.device];
+        devices = [...devices, { ...result.device, lastSeen: now, rssi: result.rssi }];
+      } else {
+        existingDevice.lastSeen = now;
+        if (result.rssi !== undefined) existingDevice.rssi = result.rssi;
+        devices = [...devices]; // reassign so Svelte re-renders
       }
-      
+
       // Handle auto-connection for web
       if (isWeb && result.autoConnected) {
         statusMessage = `Connected to ${result.device.name}!`;
@@ -227,6 +249,7 @@
       }
     }).catch((error: any) => {
       scanning = false;
+      stopScanPurgeTimer();
       if (error.name === 'NotFoundError') {
         statusMessage = 'No device selected or no devices found';
       } else if (error.name === 'SecurityError') {
@@ -238,9 +261,35 @@
     });
   }
 
+  function startScanPurgeTimer() {
+    stopScanPurgeTimer();
+    scanPurgeTimer = setInterval(() => {
+      const cutoff = Date.now() - STALE_DEVICE_MS;
+      const remaining = devices.filter(d => (d.lastSeen ?? 0) >= cutoff);
+      if (remaining.length !== devices.length) {
+        devices = remaining; // reassign so Svelte re-renders the pruned list
+        if (!isWeb) {
+          statusMessage = `Scanning... ${devices.length} device(s) nearby.`;
+        }
+      }
+    }, PURGE_INTERVAL_MS);
+  }
+
+  function stopScanPurgeTimer() {
+    if (scanPurgeTimer !== null) {
+      clearInterval(scanPurgeTimer);
+      scanPurgeTimer = null;
+    }
+  }
+
+  onDestroy(() => {
+    stopScanPurgeTimer();
+  });
+
   async function handleStopScan() {
     try {
       await stopScan();
+      stopScanPurgeTimer();
       scanning = false;
       statusMessage = `Scan stopped. Found ${devices.length} devices.`;
     } catch (error: any) {
