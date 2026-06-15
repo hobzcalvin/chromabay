@@ -1,7 +1,7 @@
 {
-  "version": "main-fc7467c",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-main-fc7467c.zip",
-  "buildDate": "2026-06-15 23:07:46 UTC",
-  "commitHash": "fc7467c436fa63b8fe0166334559e4a30a05bd5c",
-  "commitMessage": "Fix pattern previews going black when they deserialize before WASM is ready"
+  "version": "0.0.1.69",
+  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-0.0.1.69.zip",
+  "buildDate": "2026-06-15 23:26:03 UTC",
+  "commitHash": "fbf6df85038d77f64920c46ce74bdd69163b9065",
+  "commitMessage": "Auto-publish firmware on main + prettier deploy versions"
 }
