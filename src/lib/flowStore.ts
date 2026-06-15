@@ -30,6 +30,15 @@ export const nodeParameters = writable<Map<string, Map<string, any>>>(new Map())
 // Auto-save timeout for debouncing
 let autoSaveTimeout: ReturnType<typeof setTimeout> | undefined;
 
+// True only when the global flow store actually holds an editable pattern.
+// serializeCurrentPattern drops the output node, so an empty store — or one with
+// just the output node — serializes to 0 nodes. That state means "no pattern is
+// loaded into the editor" (e.g. the patterns page renders isolated previews and
+// never populates the global store), NOT "the user cleared the pattern".
+function hasEditablePattern(): boolean {
+  return get(flowNodes).some(n => (n.data as { type?: string })?.type !== 'output');
+}
+
 // Centralized auto-save function with debouncing
 export function triggerAutoSave(reason: string): void {
   // Never autosave while a pattern is being loaded. loadSerializedPattern bulk-
@@ -41,11 +50,17 @@ export function triggerAutoSave(reason: string): void {
   // on patternLoading; autosave must too.
   if (patternLoading) return;
 
+  // Never autosave an empty editor over the stored pattern. This is the
+  // "current pattern cleared on reload" bug: visiting the patterns page (which
+  // never loads a pattern into the global store) let the initial subscription
+  // fire an autosave of 0 nodes, clobbering the real current pattern.
+  if (!hasEditablePattern()) return;
+
   clearTimeout(autoSaveTimeout);
   autoSaveTimeout = setTimeout(async () => {
-    // A load may have started in the 500ms since this was scheduled; don't
-    // persist over it.
-    if (patternLoading) return;
+    // A load may have started, or the editor emptied, in the 500ms since this
+    // was scheduled — don't persist over the stored pattern.
+    if (patternLoading || !hasEditablePattern()) return;
     try {
       const { saveCurrentPattern } = await import('$lib/stores/patternsStore');
       const { currentPatternName } = await import('$lib/stores/patternsStore');
