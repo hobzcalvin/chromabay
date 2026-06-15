@@ -1,320 +1,160 @@
 <script lang="ts">
-  import { onMount, createEventDispatcher } from 'svelte';
-  
+  import { onMount, onDestroy, createEventDispatcher } from 'svelte';
+  // Vendored gesture engine (jherrm/knobs). It owns ALL the interaction behavior
+  // — circular spin (with distance-based precision), vertical/horizontal slide,
+  // and scroll — exactly like the reference. We keep our own SVG visuals and just
+  // consume the value it publishes.
+  import { Knob } from '$lib/vendor/knob.js';
+
   // Props
   export let value: number = 50;
   export let min: number = 0;
   export let max: number = 100;
   export let step: number = 1;
   export let size: number = 200;
-  
-  // Sensitivity options
-  const angleSlideRatio: number = 2.0; // Degrees per pixel during slide
-  const angleScrollRatio: number = 0.5; // Degrees per scroll pixel
-  
-  // State
-  let isDragging: boolean = false;
-  let svgElement: SVGSVGElement;
-  let containerElement: HTMLDivElement;
-  
-  // Tracking state
-  let isTracking: boolean = false;
-  let isTurning: boolean = false;
-  
-  // Gesture detection
-  let spinDetected: boolean = false;
-  let slideXDetected: boolean = false;
-  let slideYDetected: boolean = false;
-  
-  // Touch tracking
-  let initialTouchLeft: number = 0;
-  let initialTouchTop: number = 0;
-  let lastTouchLeft: number = 0;
-  let lastTouchTop: number = 0;
-  let initialTouchLocationX: 'left' | 'right' = 'left';
-  let initialTouchLocationY: 'top' | 'bottom' = 'top';
-  
-  // Center tracking
-  let centerPageX: number = 0;
-  let centerPageY: number = 0;
-  
-  // Spin tracking
-  let initialAngleDiff: number = 0;
-  let currentAngle: number = 0;
-  
-  // Gesture thresholds
-  const MINIMUM_TRACKING_FOR_GESTURE = 10;
-  const MINIMUM_TRACKING_FOR_SPIN = 20;
-  
+
   const dispatch = createEventDispatcher<{
     start: void;
     change: number;
     end: void;
   }>();
-  
-  // Audio knob range: 7 o'clock to 5 o'clock (270° sweep going clockwise)
-  // In SVG rotation: 0° = indicator pointing up, CW positive
-  const ANGLE_MIN = -135; // 7 o'clock (min value)
-  const ANGLE_MAX = 135;  // 5 o'clock (max value)  
+
+  let containerElement: HTMLDivElement;
+  let knob: Knob | null = null;
+  let isDragging = false;
+  let isInteracting = false;
+
+  // Visual mapping (unchanged): the SVG knob rotates from -135° (min) to +135°
+  // (max) — a 270° audio-style sweep. We drive the rotation purely from `value`,
+  // so Knob.js's internal angle convention never has to match ours.
+  const ANGLE_MIN = -135;
+  const ANGLE_MAX = 135;
   const ANGLE_RANGE = ANGLE_MAX - ANGLE_MIN; // 270°
-  
-  // Calculate SVG rotation angle from value
+
   function valueToAngle(val: number): number {
-    const normalized = (val - min) / (max - min);
-    return ANGLE_MIN + normalized * ANGLE_RANGE;
+    const t = max - min === 0 ? 0 : (val - min) / (max - min);
+    return ANGLE_MIN + t * ANGLE_RANGE;
   }
-  
-  // Calculate value from SVG rotation angle
-  function angleToValue(ang: number): number {
-    const normalized = (ang - ANGLE_MIN) / ANGLE_RANGE;
-    return min + normalized * (max - min);
+
+  function quantize(v: number): number {
+    const stepped = step > 0 ? Math.round(v / step) * step : v;
+    return Math.max(min, Math.min(max, stepped));
   }
-  
-  // Calculate angle from screen coordinates to center (for spin gesture)
-  // Returns angle where 0° = up, CW positive (matching SVG rotation)
-  function angleFromCoord(x: number, y: number, cx: number, cy: number): number {
-    const dx = x - cx;
-    const dy = y - cy;
-    // atan2 gives angle from positive X axis, CCW positive
-    // We want angle from negative Y axis (up), CW positive
-    let angle = Math.atan2(dx, -dy) * (180 / Math.PI);
-    return angle;
-  }
-  
-  // Update center location
-  function updateCenterLocation(): void {
-    const rect = svgElement.getBoundingClientRect();
-    centerPageX = rect.left + rect.width / 2;
-    centerPageY = rect.top + rect.height / 2;
-  }
-  
-  // Constrain value to bounds
-  function constrain(val: number, minVal: number, maxVal: number): number {
-    return Math.max(minVal, Math.min(maxVal, val));
-  }
-  
-  // Apply value change with step quantization
-  function applyValue(newValue: number): void {
-    newValue = constrain(newValue, min, max);
-    const steppedValue = Math.round(newValue / step) * step;
-    
-    if (Math.abs(steppedValue - value) >= step * 0.01) {
-      value = steppedValue;
+
+  // Knob.js publishes on every change (gesture or programmatic). It owns the
+  // behavior; we just take the value (quantized to our step) and re-render.
+  function onKnobUpdate(instance: Knob): void {
+    const next = quantize(instance.val());
+    if (next !== value) {
+      value = next;
       dispatch('change', value);
     }
   }
-  
-  // Get angle from current gesture
-  function getAngleFromGesture(touchLeft: number, touchTop: number): number {
-    let ang = currentAngle;
-    
-    if (spinDetected) {
-      // Calculate angle from touch position to center
-      const touchAngle = angleFromCoord(touchLeft, touchTop, centerPageX, centerPageY);
-      ang = touchAngle - initialAngleDiff;
-    } else {
-      if (slideXDetected) {
-        const change = (touchLeft - lastTouchLeft) * angleSlideRatio;
-        // At top: right = CW = increase angle; at bottom: right = CCW = decrease
-        ang += (initialTouchLocationY === 'top') ? change : -change;
-      }
-      
-      if (slideYDetected) {
-        const change = (touchTop - lastTouchTop) * angleSlideRatio;
-        // At right: down = CW = increase angle; at left: down = CCW = decrease  
-        ang += (initialTouchLocationX === 'right') ? change : -change;
-      }
-    }
-    
-    return ang;
+
+  // Feed the knob its on-screen geometry so the spin gesture pivots on the
+  // visual center (it derives the center from position + size).
+  function syncGeometry(): void {
+    if (!knob || !containerElement) return;
+    const rect = containerElement.getBoundingClientRect();
+    knob.setDimensions(rect.width, rect.height);
+    knob.setPosition(rect.left + window.scrollX, rect.top + window.scrollY);
   }
-  
-  // Validate and apply angle
-  function validateAndApplyAngle(newAngle: number): void {
-    const constrainedAngle = constrain(newAngle, ANGLE_MIN, ANGLE_MAX);
-    currentAngle = constrainedAngle;
-    const newValue = angleToValue(constrainedAngle);
-    applyValue(newValue);
-  }
-  
-  // Handle pointer down
-  function handlePointerDown(clientX: number, clientY: number): void {
-    updateCenterLocation();
-    
-    isTracking = true;
-    isTurning = false;
-    spinDetected = false;
-    slideXDetected = false;
-    slideYDetected = false;
-    
-    initialTouchLeft = clientX;
-    initialTouchTop = clientY;
-    lastTouchLeft = clientX;
-    lastTouchTop = clientY;
-    
-    // Determine which side of the knob we started on
-    initialTouchLocationX = clientX >= centerPageX ? 'right' : 'left';
-    initialTouchLocationY = clientY >= centerPageY ? 'bottom' : 'top';
-    
-    // Initialize current angle from current value
-    currentAngle = valueToAngle(value);
-    
-    // Calculate initial angle difference for spin gesture
-    const touchAngle = angleFromCoord(clientX, clientY, centerPageX, centerPageY);
-    initialAngleDiff = touchAngle - currentAngle;
-    
+
+  function onPointerDown(e: PointerEvent): void {
+    if (!knob) return;
+    isInteracting = true;
     isDragging = true;
+    syncGeometry();
+    containerElement.setPointerCapture(e.pointerId);
+    knob.doTouchStart([{ pageX: e.pageX, pageY: e.pageY }], e.timeStamp);
     dispatch('start');
   }
-  
-  // Handle pointer move
-  function handlePointerMove(clientX: number, clientY: number): void {
-    if (!isTracking) return;
-    
-    const distanceX = Math.abs(clientX - initialTouchLeft);
-    const distanceY = Math.abs(clientY - initialTouchTop);
-    const distanceFromCenter = Math.sqrt(
-      Math.pow(clientX - centerPageX, 2) + Math.pow(clientY - centerPageY, 2)
-    );
-    
-    // Detect gesture type if not yet turning
-    if (!isTurning) {
-      // Check for spin gesture
-      if (distanceFromCenter > MINIMUM_TRACKING_FOR_SPIN) {
-        const movementAngle = Math.abs(
-          angleFromCoord(clientX, clientY, centerPageX, centerPageY) -
-          angleFromCoord(initialTouchLeft, initialTouchTop, centerPageX, centerPageY)
-        );
-        
-        if (movementAngle > 5 && distanceFromCenter > size * 0.2) {
-          spinDetected = true;
-          isTurning = true;
-        }
-      }
-      
-      // Check for slide gestures if spin not detected
-      if (!spinDetected) {
-        if (distanceY > MINIMUM_TRACKING_FOR_GESTURE && distanceY > distanceX * 1.5) {
-          slideYDetected = true;
-          isTurning = true;
-        } else if (distanceX > MINIMUM_TRACKING_FOR_GESTURE && distanceX > distanceY * 1.5) {
-          slideXDetected = true;
-          isTurning = true;
-        }
-      }
-    }
-    
-    if (isTurning) {
-      const newAngle = getAngleFromGesture(clientX, clientY);
-      validateAndApplyAngle(newAngle);
-    }
-    
-    lastTouchLeft = clientX;
-    lastTouchTop = clientY;
+
+  function onPointerMove(e: PointerEvent): void {
+    if (!knob || !isInteracting) return;
+    knob.doTouchMove([{ pageX: e.pageX, pageY: e.pageY }], e.timeStamp);
   }
-  
-  // Handle pointer up
-  function handlePointerUp(): void {
-    isTracking = false;
-    isTurning = false;
+
+  function onPointerUp(e: PointerEvent): void {
+    if (!knob || !isInteracting) return;
+    knob.doTouchEnd(e.timeStamp);
+    isInteracting = false;
     isDragging = false;
-    spinDetected = false;
-    slideXDetected = false;
-    slideYDetected = false;
+    try { containerElement.releasePointerCapture(e.pointerId); } catch { /* not captured */ }
     dispatch('end');
   }
-  
-  // Mouse event handlers
-  function handleMouseDown(event: MouseEvent): void {
-    handlePointerDown(event.clientX, event.clientY);
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
+
+  function onWheel(e: WheelEvent): void {
+    if (!knob) return;
+    e.preventDefault();
+    syncGeometry();
+    knob.doMouseScroll(-e.deltaY, e.timeStamp, e.pageX, e.pageY);
   }
-  
-  function handleMouseMove(event: MouseEvent): void {
-    handlePointerMove(event.clientX, event.clientY);
+
+  function onKeyDown(e: KeyboardEvent): void {
+    if (e.key === 'ArrowUp' || e.key === 'ArrowRight') {
+      e.preventDefault();
+      value = quantize(value + step);
+      knob?.val(value);
+      dispatch('change', value);
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') {
+      e.preventDefault();
+      value = quantize(value - step);
+      knob?.val(value);
+      dispatch('change', value);
+    }
   }
-  
-  function handleMouseUp(): void {
-    handlePointerUp();
-    document.removeEventListener('mousemove', handleMouseMove);
-    document.removeEventListener('mouseup', handleMouseUp);
+
+  // Reflect external value changes (e.g. a store update) into the knob — but not
+  // mid-gesture, when the user is the source of truth.
+  $: if (knob && !isInteracting && quantize(knob.val()) !== quantize(value)) {
+    knob.val(value);
   }
-  
-  // Touch event handlers
-  function handleTouchStart(event: TouchEvent): void {
-    event.preventDefault();
-    const touch = event.touches[0];
-    handlePointerDown(touch.clientX, touch.clientY);
-    document.addEventListener('touchmove', handleTouchMove, { passive: false });
-    document.addEventListener('touchend', handleTouchEnd);
-  }
-  
-  function handleTouchMove(event: TouchEvent): void {
-    event.preventDefault();
-    const touch = event.touches[0];
-    handlePointerMove(touch.clientX, touch.clientY);
-  }
-  
-  function handleTouchEnd(): void {
-    handlePointerUp();
-    document.removeEventListener('touchmove', handleTouchMove);
-    document.removeEventListener('touchend', handleTouchEnd);
-  }
-  
-  // Scroll/wheel event handler
-  function handleWheel(event: WheelEvent): void {
-    event.preventDefault();
-    
-    currentAngle = valueToAngle(value);
-    const scrollDelta = event.deltaY * angleScrollRatio;
-    // Scroll down = increase angle (CW), scroll up = decrease
-    const newAngle = currentAngle + scrollDelta;
-    validateAndApplyAngle(newAngle);
-  }
-  
-  // Reactive values
+
+  onMount(() => {
+    // Knob.js reads min/max/value + the data-gesture-* options off the element.
+    containerElement.setAttribute('min', String(min));
+    containerElement.setAttribute('max', String(max));
+    containerElement.setAttribute('value', String(value));
+    knob = new Knob(containerElement, onKnobUpdate);
+    syncGeometry();
+    window.addEventListener('resize', syncGeometry);
+  });
+
+  onDestroy(() => {
+    window.removeEventListener('resize', syncGeometry);
+  });
+
+  // Reactive values driving the SVG
   $: angle = valueToAngle(value);
   $: displayValue = value.toFixed(1);
-  
-  onMount(() => {
-    function handleKeyDown(event: KeyboardEvent): void {
-      if (event.key === 'ArrowUp' || event.key === 'ArrowRight') {
-        event.preventDefault();
-        value = Math.min(max, value + step);
-        dispatch('change', value);
-      } else if (event.key === 'ArrowDown' || event.key === 'ArrowLeft') {
-        event.preventDefault();
-        value = Math.max(min, value - step);
-        dispatch('change', value);
-      }
-    }
-    
-    containerElement.addEventListener('keydown', handleKeyDown);
-    
-    return () => {
-      containerElement.removeEventListener('keydown', handleKeyDown);
-    };
-  });
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-<div 
+<!-- Knob.js reads min/max/value + the data-gesture-* options off this element. -->
+<div
   bind:this={containerElement}
-  class="rotary-knob-container"
+  class="rotary-knob-container {isDragging ? 'dragging' : ''}"
   role="slider"
   aria-valuenow={value}
   aria-valuemin={min}
   aria-valuemax={max}
   tabindex="0"
-  style="width: {size}px; height: {size}px;"
+  data-angle-start="-135"
+  data-angle-end="135"
+  data-gesture-spin-enabled="true"
+  data-gesture-slidex-enabled="true"
+  data-gesture-slidey-enabled="true"
+  data-gesture-scroll-enabled="true"
+  style="width: {size}px; height: {size}px; touch-action: none;"
+  on:pointerdown={onPointerDown}
+  on:pointermove={onPointerMove}
+  on:pointerup={onPointerUp}
+  on:pointercancel={onPointerUp}
+  on:wheel={onWheel}
+  on:keydown={onKeyDown}
 >
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<svg 
-  bind:this={svgElement}
-  on:mousedown={handleMouseDown}
-  on:touchstart={handleTouchStart}
-  on:wheel={handleWheel}
+<svg
   class="rotary-knob {isDragging ? 'dragging' : ''}"
   xmlns="http://www.w3.org/2000/svg" 
   xmlns:xlink="http://www.w3.org/1999/xlink" 
