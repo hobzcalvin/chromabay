@@ -815,52 +815,76 @@ export async function deserializePatternWhenReady(
     return deserializePattern(serializedPattern);
   }
   
-  // Wait for WASM to be ready
+  // Wait for WASM to be ready.
+  //
+  // Two readiness signals race here: a 50ms poll and the `wasmReady` event. The
+  // previous implementation never cancelled one when the other (or the timeout)
+  // won, so it leaked the poll timer and the event listener, kept polling
+  // forever after a timeout, and could run deserialize (with its side effects)
+  // even after the promise had already rejected. A single `settled` guard plus a
+  // shared `cleanup()` invoked on every exit path fixes all of that.
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      reject(new Error(`WASM operators not loaded within ${maxWaitMs}ms. Falling back to basic deserialization.`));
-    }, maxWaitMs);
-    
-    const checkReady = () => {
-      if (isWasmReady()) {
-        clearTimeout(timeout);
-        try {
-          const result = deserializePattern(serializedPattern);
-          resolve(result);
-        } catch (error) {
-          reject(error);
-        }
-      } else {
-        // Check again in 50ms
-        setTimeout(checkReady, 50);
+    let settled = false;
+    let pollHandle: ReturnType<typeof setTimeout> | null = null;
+
+    const cleanup = () => {
+      clearTimeout(maxWaitTimeout);
+      if (pollHandle !== null) {
+        clearTimeout(pollHandle);
+        pollHandle = null;
+      }
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('wasmReady', onWasmReady);
       }
     };
-    
-    // If we're in a browser environment, also listen for the wasmReady event
+
+    const finishResolve = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      try {
+        resolve(deserializePattern(serializedPattern));
+      } catch (error) {
+        reject(error);
+      }
+    };
+
+    const finishReject = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+
+    const maxWaitTimeout = setTimeout(() => {
+      finishReject(new Error(`WASM operators not loaded within ${maxWaitMs}ms. Falling back to basic deserialization.`));
+    }, maxWaitMs);
+
+    const poll = () => {
+      if (settled) return;
+      if (isWasmReady()) {
+        finishResolve();
+      } else {
+        pollHandle = setTimeout(poll, 50);
+      }
+    };
+
+    // Hoisted so cleanup() can reference it before this point.
+    function onWasmReady() {
+      // Don't deserialize immediately — wait a tick for NODE_TYPES to be
+      // populated by flowStore's own wasmReady handler.
+      setTimeout(() => {
+        if (!settled && isWasmReady()) {
+          finishResolve();
+        }
+      }, 10);
+    }
+
     if (typeof window !== 'undefined') {
-      const onWasmReady = () => {
-        window.removeEventListener('wasmReady', onWasmReady);
-        // Don't immediately deserialize - wait a tick for NODE_TYPES to be populated
-        // by the flowStore's wasmReady handler
-        setTimeout(() => {
-          if (isWasmReady()) {
-            clearTimeout(timeout);
-            try {
-              const result = deserializePattern(serializedPattern);
-              resolve(result);
-            } catch (error) {
-              reject(error);
-            }
-          } else {
-            // Keep checking if not ready yet
-            checkReady();
-          }
-        }, 10);
-      };
       window.addEventListener('wasmReady', onWasmReady);
     }
-    
-    checkReady();
+
+    poll();
   });
 }
 
