@@ -106,10 +106,17 @@ int ota_received_size = 0;
 uint8_t received_signature[FIRMWARE_SIGNATURE_LENGTH];
 bool signature_received = false;
 
-// Signature verification task variables
+// Signature verification task variables.
+// volatile: written by the verification task, read by loop() on the Arduino task.
 TaskHandle_t signature_task_handle = nullptr;
-bool signature_verification_complete = false;
-bool signature_verification_result = false;
+volatile bool signature_verification_complete = false;
+volatile bool signature_verification_result = false;
+
+// OTA finalize is deferred from the BLE callback to loop() so it doesn't block
+// the BLE host task. While true, loop() watches signature_verification_complete
+// and finalizes (or times out) the update. See finalizeOtaIfReady().
+volatile bool ota_finalizing = false;
+unsigned long ota_finalize_start_ms = 0;
 
 // Structure to pass data to signature verification task
 struct SignatureVerificationData {
@@ -483,92 +490,17 @@ class OTAControlCallbacks : public NimBLECharacteristicCallbacks {
                     return;
                 }
                 
-                // Wait for signature verification to complete (with timeout)
-                const int max_wait_seconds = 30;
-                int wait_count = 0;
-                
-                while (!signature_verification_complete && wait_count < (max_wait_seconds * 10)) {
-                    delay(100); // Wait 100ms
-                    wait_count++;
-                }
-                
-                if (!signature_verification_complete) {
-                    Serial.println("OTA Error: Signature verification timed out!");
-                    if (pOTAStatusCharacteristic) {
-                        const char* msg = "OTA_ERR_SIG_TIMEOUT";
-                        pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
-                        pOTAStatusCharacteristic->notify();
-                    }
-                    esp_ota_abort(ota_handle);
-                    ota_in_progress = false;
-                    ota_handle = 0;
-                    ota_received_size = 0;
-                    signature_received = false;
-                    return;
-                }
-                
-                // Check verification result
-                if (!signature_verification_result) {
-                    Serial.println("OTA Error: Firmware signature verification FAILED!");
-                    if (pOTAStatusCharacteristic) {
-                        const char* msg = "OTA_ERR_SIG_INVALID";
-                        pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
-                        pOTAStatusCharacteristic->notify();
-                    }
-                    esp_ota_abort(ota_handle);
-                    ota_in_progress = false;
-                    ota_handle = 0;
-                    ota_received_size = 0;
-                    signature_received = false;
-                    return;
-                }
-                
-                Serial.println("OTA: Firmware signature verification PASSED.");
-
-                Serial.printf("OTA End command received. Finalizing update... (Total received: %d bytes)\n", ota_received_size);
-            esp_err_t err = esp_ota_end(ota_handle);
-            if (err == ESP_OK) {
-                Serial.println("OTA: Firmware write completed successfully.");
-                if (pOTAStatusCharacteristic) {
-                    const char* msg = "OTA_VALIDATING";
-                    pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
-                    pOTAStatusCharacteristic->notify();
-                    delay(10); // Allow BLE notification to send
-                }
-                
-                Serial.println("OTA: Setting new firmware as boot partition...");
-                err = esp_ota_set_boot_partition(update_partition);
-                if (err == ESP_OK) {
-                    Serial.println("OTA: Boot partition updated successfully. Rebooting in 2 seconds...");
-                    if (pOTAStatusCharacteristic) {
-                        const char* msg = "OTA_SUCCESS_REBOOTING";
-                        pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
-                        pOTAStatusCharacteristic->notify();
-                        delay(100); // Allow BLE notification to send before reboot
-                    }
-                    delay(2000); // Give time for final messages
-                    esp_restart();
-                } else {
-                    Serial.printf("OTA Error: esp_ota_set_boot_partition failed! (%s)\n", esp_err_to_name(err));
-                    if (pOTAStatusCharacteristic) {
-                        String errorMsg = "OTA_ERR_SET_BOOT:" + String(esp_err_to_name(err));
-                        pOTAStatusCharacteristic->setValue((uint8_t*)errorMsg.c_str(), errorMsg.length());
-                        pOTAStatusCharacteristic->notify();
-                    }
-                }
-            } else {
-                Serial.printf("OTA Error: esp_ota_end failed! (%s)\n", esp_err_to_name(err));
-                if (pOTAStatusCharacteristic) {
-                    String errorMsg = "OTA_ERR_END_FAILED:" + String(esp_err_to_name(err));
-                    pOTAStatusCharacteristic->setValue((uint8_t*)errorMsg.c_str(), errorMsg.length());
-                    pOTAStatusCharacteristic->notify();
-                }
-            }
-                // Reset OTA state after attempting to end, unless rebooting
-                ota_in_progress = false;
-                ota_handle = 0; 
-                ota_received_size = 0;
-                signature_received = false;
+                // Signature verification runs on its own task. Do NOT block the
+                // BLE host task waiting for it: spinning here for up to 30s
+                // starves the whole BLE stack (connection supervision included)
+                // and typically drops the link mid-finalize, and the
+                // notifications below may never flush. Flag the finalize and let
+                // loop() complete it (verify result -> esp_ota_end ->
+                // set_boot_partition -> restart) once the result is ready.
+                // See finalizeOtaIfReady().
+                ota_finalizing = true;
+                ota_finalize_start_ms = millis();
+                return;
 
             } else if (strcmp(value, "ABORT_OTA") == 0) {
                 if (ota_in_progress) {
@@ -952,6 +884,100 @@ void processReceivedLedConfig() {
     ledConfigBufferSize = 0;
 }
 
+// Finalize a pending OTA update from the loop task once the signature
+// verification task has produced a result (or timed out). This runs the work
+// that used to block the BLE host-task callback: verify result -> esp_ota_end ->
+// set_boot_partition -> restart. Running it from loop() keeps the BLE stack
+// responsive throughout the finalize.
+void finalizeOtaIfReady() {
+    if (!ota_finalizing) return;
+
+    // Still verifying: enforce the 30s timeout, otherwise keep waiting.
+    if (!signature_verification_complete) {
+        if (millis() - ota_finalize_start_ms >= 30000) {
+            Serial.println("OTA Error: Signature verification timed out!");
+            if (pOTAStatusCharacteristic) {
+                const char* msg = "OTA_ERR_SIG_TIMEOUT";
+                pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
+                pOTAStatusCharacteristic->notify();
+            }
+            esp_ota_abort(ota_handle);
+            ota_finalizing = false;
+            ota_in_progress = false;
+            ota_handle = 0;
+            ota_received_size = 0;
+            signature_received = false;
+        }
+        return;
+    }
+
+    // Verification finished — we own the finalize from here.
+    ota_finalizing = false;
+
+    if (!signature_verification_result) {
+        Serial.println("OTA Error: Firmware signature verification FAILED!");
+        if (pOTAStatusCharacteristic) {
+            const char* msg = "OTA_ERR_SIG_INVALID";
+            pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
+            pOTAStatusCharacteristic->notify();
+        }
+        esp_ota_abort(ota_handle);
+        ota_in_progress = false;
+        ota_handle = 0;
+        ota_received_size = 0;
+        signature_received = false;
+        return;
+    }
+
+    Serial.println("OTA: Firmware signature verification PASSED.");
+    Serial.printf("OTA End command received. Finalizing update... (Total received: %d bytes)\n", ota_received_size);
+
+    esp_err_t err = esp_ota_end(ota_handle);
+    if (err == ESP_OK) {
+        Serial.println("OTA: Firmware write completed successfully.");
+        if (pOTAStatusCharacteristic) {
+            const char* msg = "OTA_VALIDATING";
+            pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
+            pOTAStatusCharacteristic->notify();
+            delay(10); // Allow BLE notification to send
+        }
+
+        Serial.println("OTA: Setting new firmware as boot partition...");
+        err = esp_ota_set_boot_partition(update_partition);
+        if (err == ESP_OK) {
+            Serial.println("OTA: Boot partition updated successfully. Rebooting in 2 seconds...");
+            if (pOTAStatusCharacteristic) {
+                const char* msg = "OTA_SUCCESS_REBOOTING";
+                pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
+                pOTAStatusCharacteristic->notify();
+                delay(100); // Allow BLE notification to send before reboot
+            }
+            delay(2000); // Give time for final messages
+            esp_restart();
+        } else {
+            Serial.printf("OTA Error: esp_ota_set_boot_partition failed! (%s)\n", esp_err_to_name(err));
+            if (pOTAStatusCharacteristic) {
+                String errorMsg = "OTA_ERR_SET_BOOT:" + String(esp_err_to_name(err));
+                pOTAStatusCharacteristic->setValue((uint8_t*)errorMsg.c_str(), errorMsg.length());
+                pOTAStatusCharacteristic->notify();
+            }
+        }
+    } else {
+        Serial.printf("OTA Error: esp_ota_end failed! (%s)\n", esp_err_to_name(err));
+        if (pOTAStatusCharacteristic) {
+            String errorMsg = "OTA_ERR_END_FAILED:" + String(esp_err_to_name(err));
+            pOTAStatusCharacteristic->setValue((uint8_t*)errorMsg.c_str(), errorMsg.length());
+            pOTAStatusCharacteristic->notify();
+        }
+    }
+
+    // Reset OTA state after attempting to end (unless we already rebooted).
+    ota_in_progress = false;
+    ota_handle = 0;
+    ota_received_size = 0;
+    signature_received = false;
+}
+
 // pushCRGBToStrip function removed - pattern renderer handles LED output directly
 
 void setup() {
@@ -1153,6 +1179,9 @@ void loop() {
     // so they never race with update()/render() above.
     processReceivedPattern();
     processReceivedLedConfig();
+
+    // Finalize a pending OTA off the BLE host task (verify result, end, reboot)
+    finalizeOtaIfReady();
 
     // Periodically update device info characteristic (for heap value)
     if (currentTime - lastHeapUpdateTime >= heapUpdateInterval) {
