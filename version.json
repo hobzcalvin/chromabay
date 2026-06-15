@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.71",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-0.0.1.71.zip",
-  "buildDate": "2026-06-15T23:32:56Z",
-  "commitHash": "edcd2c671fdf922ca364515ab138edfad1b31960",
-  "commitMessage": "Show build date in local timezone + commit hash in footer"
+  "version": "0.0.1.72",
+  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-0.0.1.72.zip",
+  "buildDate": "2026-06-15T23:36:27Z",
+  "commitHash": "e4a4306d5f6d408008d7e57f94992b1168f1ce37",
+  "commitMessage": "Stop pattern previews from wiping interactive parameters"
 }
