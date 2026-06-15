@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.69",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-0.0.1.69.zip",
-  "buildDate": "2026-06-15 23:26:03 UTC",
-  "commitHash": "fbf6df85038d77f64920c46ce74bdd69163b9065",
-  "commitMessage": "Auto-publish firmware on main + prettier deploy versions"
+  "version": "0.0.1.70",
+  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-0.0.1.70.zip",
+  "buildDate": "2026-06-15 23:28:10 UTC",
+  "commitHash": "c8879da3011d31a823efa2310e6eb8b486f85f73",
+  "commitMessage": "Fix infinite reactive loop that froze the page (effect_update_depth_exceeded)"
 }
