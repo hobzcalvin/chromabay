@@ -198,32 +198,58 @@ export async function stopScan(): Promise<void> {
   }
 }
 
+// Shared cleanup for any disconnect path: the native onDisconnect callback, the
+// web `gattserverdisconnected` event, or an explicit disconnectFromDevice().
+// Idempotent — safe to call more than once for the same device.
+function handleDeviceDisconnected(deviceId: string): void {
+  console.log(`Device ${deviceId} disconnected — cleaning up`);
+  const info = connectedDevices.get(deviceId);
+  // Remove the web disconnect listener so it doesn't accumulate across reconnects
+  // (the underlying BluetoothDevice object persists).
+  if (info?.device && info.onDisconnect && typeof info.device.removeEventListener === 'function') {
+    info.device.removeEventListener('gattserverdisconnected', info.onDisconnect);
+  }
+  connectedDevices.delete(deviceId);
+  removeConnectedDevice(deviceId);
+  // Critical: stop the timestamp-sync interval, otherwise it keeps writing to a
+  // dead handle every 10s (e.g. after an ESP32 OTA reboot).
+  stopTimestampSync(deviceId);
+}
+
 export async function connectToDevice(device: any): Promise<void> {
   try {
     if (isWeb()) {
       const gattServer = await device.webDevice.gatt.connect();
-      
-      // Listen for disconnection events
-      device.webDevice.addEventListener('gattserverdisconnected', () => {
-        console.log('Device disconnected via GATT event');
-        connectedDevices.delete(device.deviceId);
-        removeConnectedDevice(device.deviceId);
-      });
-      
+
+      // Replace any stale listener from a previous connect before adding a new
+      // one, and keep a reference so it can be removed on disconnect.
+      const prev = connectedDevices.get(device.deviceId);
+      if (prev?.onDisconnect) {
+        device.webDevice.removeEventListener('gattserverdisconnected', prev.onDisconnect);
+      }
+      const onDisconnect = () => handleDeviceDisconnected(device.deviceId);
+      device.webDevice.addEventListener('gattserverdisconnected', onDisconnect);
+
       connectedDevices.set(device.deviceId, {
         device: device.webDevice,
         gattServer: gattServer,
-        services: null
+        services: null,
+        onDisconnect
       });
       console.log('Connected to device via Web Bluetooth');
-      
+
       // Start timestamp synchronization for this device
       startTimestampSync(device.deviceId);
     } else {
-      await BleClient.connect(device.deviceId);
+      // Pass an onDisconnect callback so native disconnects (out of range, OTA
+      // reboot, power loss) are detected and cleaned up — previously they were
+      // never noticed, leaving stale "connected" devices and a leaked sync timer.
+      await BleClient.connect(device.deviceId, (disconnectedId: string) => {
+        handleDeviceDisconnected(disconnectedId);
+      });
       connectedDevices.set(device.deviceId, { device: device }); // Store native device info
       console.log('Connected to device via Capacitor');
-      
+
       // Start timestamp synchronization for this device
       startTimestampSync(device.deviceId);
     }
@@ -262,12 +288,9 @@ export async function disconnectFromDevice(deviceId: string): Promise<void> {
     } else {
       await BleClient.disconnect(deviceId);
     }
-    connectedDevices.delete(deviceId);
-    removeConnectedDevice(deviceId);
-    
-    // Stop timestamp synchronization for this device
-    stopTimestampSync(deviceId);
-    
+    // Centralized cleanup (also runs from the disconnect event/callback; idempotent).
+    handleDeviceDisconnected(deviceId);
+
     console.log('Disconnected from device');
   } catch (error) {
     console.error('Error disconnecting from device:', error);
