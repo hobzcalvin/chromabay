@@ -913,18 +913,22 @@ export async function getLedConfiguration(deviceId: string): Promise<LedConfigur
     const decodedConfig = msgpackDecode(rawData) as any;
     console.log(`[LED Config] Decoded config:`, decodedConfig);
     
-    // Convert from ESP32 format to our interface
+    // Convert from ESP32 format to our interface.
+    // Use ?? (nullish) not || here: several of these fields have a legitimate
+    // value of 0 that || would wrongly replace with the default — e.g. brightness
+    // 0 (off) -> 255, colorOrder RGB (0) -> GRB, chipset NONE (0), GPIO pin 0.
+    // The set path writes raw values, so || made get/set asymmetric/lossy.
     const config: LedConfiguration = {
-      globalBrightness: decodedConfig.gb || 255,
+      globalBrightness: decodedConfig.gb ?? 255,
       strips: (decodedConfig.strips || []).map((strip: any) => ({
-        chipset: strip.cs || LedChipsets.WS2812_RGB,
-        pin: strip.pin || 13,
-        numLeds: strip.num || 100,
-        colorOrder: strip.co || ColorOrders.GRB,
-        rmtChannel: strip.rmt || 0,
-        width: strip.w || 0,
-        height: strip.h || 0,
-        orientation: strip.ort || 0
+        chipset: strip.cs ?? LedChipsets.WS2812_RGB,
+        pin: strip.pin ?? 13,
+        numLeds: strip.num ?? 100,
+        colorOrder: strip.co ?? ColorOrders.GRB,
+        rmtChannel: strip.rmt ?? 0,
+        width: strip.w ?? 0,
+        height: strip.h ?? 0,
+        orientation: strip.ort ?? 0
       }))
     };
     
