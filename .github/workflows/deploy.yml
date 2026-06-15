@@ -77,7 +77,7 @@ jobs:
             echo "Using base+build version: $VERSION"
           fi
           echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
-          echo "BUILD_DATE=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_OUTPUT
+          echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT  # ISO 8601 UTC so the app can localize it
           echo "COMMIT_HASH=${{ github.sha }}" >> $GITHUB_OUTPUT
           echo "COMMIT_MESSAGE=$(git log -1 --pretty=%B | head -1)" >> $GITHUB_OUTPUT
 

@@ -83,9 +83,22 @@
   const buildInfo = {
     version: import.meta.env.VITE_VERSION || 'dev',
     commitHash: import.meta.env.VITE_COMMIT_HASH || 'dev',
-    buildDate: import.meta.env.VITE_BUILD_DATE || new Date().toISOString().slice(0, 19).replace('T', ' ') + ' UTC',
+    buildDate: import.meta.env.VITE_BUILD_DATE || new Date().toISOString(),
     commitMessage: import.meta.env.VITE_COMMIT_MESSAGE || 'Development build'
   };
+
+  // The build date is baked in as a UTC timestamp; show it in the viewer's local
+  // timezone so "how current is this?" is obvious at a glance. Falls back to the
+  // raw string if it isn't parseable.
+  function formatBuildDate(raw: string): string {
+    const d = new Date(raw);
+    if (isNaN(d.getTime())) return raw;
+    return d.toLocaleString(undefined, {
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      timeZoneName: 'short'
+    });
+  }
 
   onMount(async () => {
     isWeb = Capacitor.getPlatform() === 'web';
@@ -725,7 +738,7 @@
   <footer>
     <p>Built with SvelteKit + Capacitor + Bluetooth LE</p>
     <div class="build-info">
-      <p>📦 Version: <code>{buildInfo.version}</code> • 🕒 {buildInfo.buildDate}</p>
+      <p>📦 Version: <code>{buildInfo.version}</code> • <code>{buildInfo.commitHash.slice(0, 7)}</code> • 🕒 {formatBuildDate(buildInfo.buildDate)}</p>
     </div>
   </footer>
 </main>
