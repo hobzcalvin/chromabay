@@ -49,25 +49,28 @@ uint16_t PatternRendererBase::getMatrixWidth() const {
     if (config.width > 0) {
         return config.width;
     } else {
-        // Linear strip - use square dimensions
-        uint16_t side = (uint16_t)sqrt(config.numLeds);
-        return side;
+        // Linear strip (no matrix dimensions): treat it as a 1 x numLeds row so
+        // every LED is driven. The previous sqrt(numLeds) "square" left the tail
+        // LEDs of any non-perfect-square strip permanently dark (e.g. 300 LEDs
+        // rendered as 17x17 = 289, leaving 11 dark) and folded a 2D image onto a
+        // 1D strip, which isn't meaningful anyway.
+        return config.numLeds;
     }
 }
 
 uint16_t PatternRendererBase::getMatrixHeight() const {
     if (!ledManager || ledManager->getNumStrips() == 0) return 8; // Default fallback
-    
+
     const LedConfig::LedBus* strip = ledManager->getStrip(0);
     if (!strip) return 8; // Default fallback
-    
+
     const auto& config = strip->getConfig();
     if (config.height > 0) {
         return config.height;
     } else {
-        // Linear strip - use square dimensions
-        uint16_t side = (uint16_t)sqrt(config.numLeds);
-        return side;
+        // Linear strip: a single row (see getMatrixWidth). totalPixels then
+        // equals numLeds and the strip is driven 1:1.
+        return 1;
     }
 }
 
