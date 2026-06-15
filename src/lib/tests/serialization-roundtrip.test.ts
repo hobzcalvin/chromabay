@@ -108,11 +108,7 @@ function runProblematicJsonRoundtripTest(): boolean {
 import { describe, it, expect } from 'vitest';
 
 describe('pattern serialization round-trip', () => {
-  // KNOWN BUG (documented here, fixed in the follow-up serializer PR): when two
-  // nodes write the same buffer, serializePattern reorders them and the data-flow
-  // graph is silently rewired on round-trip. `it.fails` asserts this currently
-  // fails; the serializer fix flips it back to `it`.
-  it.fails('round-trips a known-problematic multi-blend graph', () => {
+  it('round-trips a known-problematic multi-blend graph', () => {
     expect(runProblematicJsonRoundtripTest()).toBe(true);
   });
 });

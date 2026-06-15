@@ -298,44 +298,52 @@ export function serializePattern(
       });
   }
 
-  /* --- 2. group by level and apply reader-first ordering ------------ */
-  const grouped: Map<number, Node[]> = new Map();
-  orderedNodesFullGraph.forEach(n => {
+  /* --- 2. apply reader-first ordering WITHIN each level, in place -----
+   *
+   * `orderedNodesFullGraph` already places each generator immediately before
+   * its earliest consumer (see topologicalSort's second pass).  That placement
+   * is essential: when two nodes write the *same* buffer (e.g. two generators
+   * both feeding buffer 1), the deserializer resolves each consumer's input to
+   * the **nearest preceding writer** of that buffer, so a writer must stay next
+   * to the consumer it feeds.  Collapsing nodes into strict level-order would
+   * hoist every generator to the front and let one same-buffer writer shadow
+   * another — silently rewiring the graph on round-trip.
+   *
+   * So we keep the topo order as the backbone and only reorder nodes **among
+   * the slots their own level already occupies**: within a level we still put
+   * pure readers ahead of in-place overwriters of the same buffer, but we never
+   * move a node across levels (which would undo generator placement). For
+   * simple patterns where the topo order already equals level order this is
+   * identical to the previous behaviour.
+   * ------------------------------------------------------------------ */
+  const positionsByLevel = new Map<number, number[]>();
+  orderedNodesFullGraph.forEach((n, pos) => {
     const lvl = levelMap.get(n.id) ?? 0;
-    if (!grouped.has(lvl)) grouped.set(lvl, []);
-    grouped.get(lvl)!.push(n);
+    if (!positionsByLevel.has(lvl)) positionsByLevel.set(lvl, []);
+    positionsByLevel.get(lvl)!.push(pos);
   });
 
-  const conflictSafeOrder: Node[] = [];
-  Array.from(grouped.keys()).sort((a,b)=>a-b).forEach(lvl => {
-    const group = grouped.get(lvl)!;
-    // Determine if this level actually mixes readers and writers.
-    // If every node has the same overwrite status we keep original
-    // topological order to avoid unnecessary shuffling (e.g. generators).
+  const conflictSafeOrder: Node[] = [...orderedNodesFullGraph];
+  positionsByLevel.forEach((positions) => {
+    const group = positions.map(pos => orderedNodesFullGraph[pos]);
+
+    // Only reorder when this level mixes readers and in-place overwriters;
+    // otherwise preserve the topo order (e.g. all generators) untouched.
     const hasWriter = group.some(overwritesRead);
     const hasReader = group.some(n => !overwritesRead(n));
+    if (!hasWriter || !hasReader) return;
 
-    let orderedGroup: Node[];
-    if (hasWriter && hasReader) {
-      // Only when the group contains both readers **and** writers do we
-      // reorder to ensure writers execute after all readers.
-      orderedGroup = group
-        .map((n, idx) => ({
-          n,
-          priority: overwritesRead(n) ? 1 : 0,
-          idx
-        }))
-        .sort((a, b) => {
-          if (a.priority !== b.priority) return a.priority - b.priority; // readers first
-          return a.idx - b.idx; // stable for same priority
-        })
-        .map(v => v.n);
-    } else {
-      // All readers or all writers – preserve original order
-      orderedGroup = group;
-    }
+    const orderedGroup = group
+      .map((n, idx) => ({ n, priority: overwritesRead(n) ? 1 : 0, idx }))
+      .sort((a, b) => {
+        if (a.priority !== b.priority) return a.priority - b.priority; // readers first
+        return a.idx - b.idx; // stable for same priority
+      })
+      .map(v => v.n);
 
-    conflictSafeOrder.push(...orderedGroup);
+    // Write the reordered group back into the exact slots this level occupied,
+    // leaving every other level's position (and generator placement) intact.
+    positions.forEach((pos, i) => { conflictSafeOrder[pos] = orderedGroup[i]; });
   });
   
   // Step 2: Find output node and determine final output buffer
