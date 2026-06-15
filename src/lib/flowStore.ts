@@ -32,17 +32,29 @@ let autoSaveTimeout: ReturnType<typeof setTimeout> | undefined;
 
 // Centralized auto-save function with debouncing
 export function triggerAutoSave(reason: string): void {
+  // Never autosave while a pattern is being loaded. loadSerializedPattern bulk-
+  // mutates the editor stores (nodeParameters/flowNodes/flowEdges .set), which
+  // fires the store subscriptions below and would schedule a save of transient,
+  // mid-load state — and serializeCurrentPattern uses the *current* pattern name,
+  // so a load-triggered save can persist the just-loaded content under the
+  // previous pattern's name and clobber it. syncPatternIfChanged already guards
+  // on patternLoading; autosave must too.
+  if (patternLoading) return;
+
   clearTimeout(autoSaveTimeout);
   autoSaveTimeout = setTimeout(async () => {
+    // A load may have started in the 500ms since this was scheduled; don't
+    // persist over it.
+    if (patternLoading) return;
     try {
       const { saveCurrentPattern } = await import('$lib/stores/patternsStore');
       const { currentPatternName } = await import('$lib/stores/patternsStore');
       const { get } = await import('svelte/store');
-      
+
       const currentName = get(currentPatternName);
       const serialized = serializeCurrentPattern(currentName);
       await saveCurrentPattern(serialized);
-      
+
       console.log(`📊 Auto-saved pattern after ${reason}`);
     } catch (error) {
       console.error('❌ Failed to auto-save pattern:', error);
@@ -1206,6 +1218,9 @@ export function forceSyncCurrentPattern(): void {
 }
 
 export async function loadSerializedPattern(serializedPattern: SerializedPattern): Promise<void> {
+  // Cancel any autosave a prior edit scheduled, so it can't fire mid-load and
+  // persist the wrong (about-to-be-replaced) content.
+  clearTimeout(autoSaveTimeout);
   // Set loading state to prevent syncing during loading
   patternLoading = true;
   
