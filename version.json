@@ -1,7 +1,7 @@
 {
-  "version": "main-04b141d",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-main-04b141d.zip",
-  "buildDate": "2026-06-15 21:59:57 UTC",
-  "commitHash": "04b141d0656f2643c3e762f3c7efddec595721f1",
-  "commitMessage": "Auto-deploy GitHub Pages on push to main"
+  "version": "main-da8cbb4",
+  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-main-da8cbb4.zip",
+  "buildDate": "2026-06-15 22:47:39 UTC",
+  "commitHash": "da8cbb4868448550552b1493e06edfc6fc7b58b6",
+  "commitMessage": "Stop autosave from clearing the current pattern on reload"
 }
