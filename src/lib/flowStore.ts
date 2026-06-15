@@ -559,11 +559,21 @@ class WasmOperatorManager {
     ctx.putImageData(imageData, 0, 0);
   }
   
+  // Destroy every WASM operator instance — used when loading/switching to a
+  // whole new pattern. Without this, replacing the node store leaks the old
+  // patterns' WASM-side instances (they were only ever freed one-at-a-time by
+  // deleteNode). Instances are recreated lazily on the next render.
+  destroyAllInstances(): void {
+    for (const [nodeId] of this.operatorInstances) {
+      this.destroyOperatorInstance(nodeId);
+    }
+  }
+
   cleanup(): void {
     for (const [nodeId] of this.operatorInstances) {
       this.destroyOperatorInstance(nodeId);
     }
-    
+
     if (this.wasmModule) {
       for (const buffer of Object.values(this.buffers)) {
         this.wasmModule._free(buffer);
@@ -1110,6 +1120,13 @@ export function deleteNode(nodeId: string): void {
   if (manager) {
     manager.destroyOperatorInstance(nodeId);
   }
+
+  // Drop this node's cached output so it doesn't linger (and can't be returned
+  // for a future node that reuses the id).
+  nodeOutputs.update(outputs => {
+    outputs.delete(nodeId);
+    return outputs;
+  });
 }
 
 // Pattern serialization imports and utilities
@@ -1223,7 +1240,16 @@ export async function loadSerializedPattern(serializedPattern: SerializedPattern
   clearTimeout(autoSaveTimeout);
   // Set loading state to prevent syncing during loading
   patternLoading = true;
-  
+
+  // Tear down the outgoing pattern's WASM operator instances and cached outputs
+  // before loading the new one. Otherwise switching patterns leaks a WASM
+  // operator instance (and an ImageData) per node of every previously-loaded
+  // pattern — only deleteNode ever freed them. New instances are recreated
+  // lazily on the next render.
+  const outgoingManager = getWasmOperatorManager();
+  if (outgoingManager) outgoingManager.destroyAllInstances();
+  nodeOutputs.set(new Map());
+
   try {
     // Use the new async deserializer that waits for WASM to be ready
     const { nodes, edges, nodeParameters: newNodeParameters } = await deserializePatternWhenReady(serializedPattern);
