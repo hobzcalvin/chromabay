@@ -14,14 +14,12 @@
   // Props for Add Node functionality (NODE_TYPES removed - using store instead)
   let { showAddNodeDropdown = $bindable(false), addNodeDropdownRef = $bindable(), handleAddNode } = $props();
   
-  // Local reactive state that mirrors the store
-  let nodeTypes = $state<any[]>([]);
-  
-  // Keep local state in sync with store
-  $effect(() => {
-    nodeTypes = $nodeTypesStore;
-    console.log('PatternActions: nodeTypes updated to', nodeTypes.length, 'operators');
-  });
+  // Mirror the store as a derived value. Previously this was a $state written
+  // inside an $effect that also READ it (via nodeTypes.length in the log) — a
+  // self-referential effect that re-triggered itself endlessly, spamming
+  // "nodeTypes updated" and finally throwing effect_update_depth_exceeded, which
+  // froze the whole page. $derived is the correct, loop-free pattern.
+  let nodeTypes = $derived($nodeTypesStore);
   
   // Action dropdown state
   let showDropdown = $state(false);
