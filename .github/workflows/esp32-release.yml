@@ -2,8 +2,19 @@ name: ESP32 Firmware Release
 
 on:
   push:
+    branches:
+      - main
+    paths:
+      - 'esp32/**'
+      - '.github/workflows/esp32-release.yml'
     tags:
       - 'fwv*'
+  workflow_dispatch:
+
+concurrency:
+  # Shared with deploy.yml so the two never push to gh-pages simultaneously.
+  group: "gh-pages-publish"
+  cancel-in-progress: false
 
 jobs:
   build-and-sign:
@@ -49,20 +60,39 @@ jobs:
         gcc -Wall -std=c99 psa_sign_firmware.c -lmbedcrypto -o psa_sign_firmware
         chmod +x psa_sign_firmware
         
+    - name: Determine firmware version
+      id: version
+      run: |
+        if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+          # Tagged release: use the clean tag (e.g. fwv0.0.20)
+          VERSION="${GITHUB_REF#refs/tags/}"
+        else
+          # Auto build on main: base from firmware_version.h + monotonic CI build
+          # number → e.g. fwv0.0.19.143 (unique + newest-first sortable).
+          BASE=$(grep '#define FIRMWARE_VERSION' esp32/src/firmware_version.h | sed 's/.*"\(.*\)".*/\1/')
+          VERSION="${BASE}.${{ github.run_number }}"
+        fi
+        echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+        echo "Firmware version: ${VERSION}"
+
+    - name: Stamp firmware version into source
+      run: |
+        # Make the built binary report exactly the version we publish to the OTA
+        # registry, so the app's "device up to date?" comparison matches.
+        sed -i "s/#define FIRMWARE_VERSION \".*\"/#define FIRMWARE_VERSION \"${{ steps.version.outputs.VERSION }}\"/" esp32/src/firmware_version.h
+        grep '#define FIRMWARE_VERSION' esp32/src/firmware_version.h
+
     - name: Build firmware
       run: |
         cd esp32
         pio run
-        
+
     - name: Sign firmware with PSA crypto
       run: |
         ./psa_sign_firmware esp32/.pio/build/esp32dev/firmware.bin private_key.raw firmware.sig
           
-    - name: Get version from tag
-      id: version
-      run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-          
     - name: Create release
+      if: startsWith(github.ref, 'refs/tags/')  # GitHub Releases only for real fwv* tags, not every main build
       uses: softprops/action-gh-release@v2
       with:
         files: |

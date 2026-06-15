@@ -19,7 +19,9 @@ permissions:
   id-token: write
 
 concurrency:
-  group: "pages"
+  # Shared with esp32-release.yml so the two never push to gh-pages at the same
+  # time (e.g. a commit touching both src/ and esp32/ triggers both).
+  group: "gh-pages-publish"
   cancel-in-progress: false
 
 jobs:
@@ -67,8 +69,12 @@ jobs:
             VERSION="manual-${TIMESTAMP}-${SHORT_SHA}"
             echo "Using manual timestamp version: $VERSION"
           else
-            VERSION="${{ github.ref_name }}-$(echo ${{ github.sha }} | cut -c1-7)"
-            echo "Using branch+hash version: $VERSION"
+            # Plain push to main: base version from package.json + monotonic CI
+            # build number → e.g. 0.0.1.143 (prettier than branch-hash, and it
+            # changes every deploy so the live-update client detects it).
+            BASE_VERSION=$(node -p "require('./package.json').version")
+            VERSION="${BASE_VERSION}.${{ github.run_number }}"
+            echo "Using base+build version: $VERSION"
           fi
           echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
           echo "BUILD_DATE=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_OUTPUT
@@ -132,4 +138,8 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./docs
           publish_branch: gh-pages
-          enable_jekyll: false 
+          enable_jekyll: false
+          # Don't delete files already on gh-pages that aren't in ./docs — the
+          # ESP32 firmware registry (firmware/…) is published there by
+          # esp32-release.yml and must survive a Pages deploy.
+          keep_files: true
