@@ -603,7 +603,14 @@ export function deserializePattern(
   // Track how many nodes have been placed in a given lane at a given level
   // Key format: `${laneBufferIndex}-${level}`
   const laneLevelCounts = new Map<string, number>();
-  
+
+  // Maps each ORIGINAL serialized-node index to the SvelteFlow node created for
+  // it. Unknown node types are skipped (not pushed), so positional indices into
+  // svelteFlowNodes no longer line up with serializedPattern.nodes once anything
+  // is skipped. Edge reconstruction must resolve nodes through this map, not by
+  // positional index, or edges get wired to the wrong nodes.
+  const indexToNode = new Map<number, Node>();
+
   // Step 2: Create nodes based on serialized data
   serializedPattern.nodes.forEach((sNode, index) => {
     const nodeDefinition = getNodeDefinition(sNode.t);
@@ -695,24 +702,28 @@ export function deserializePattern(
     // For visual consistency in PatternNode if it reads data.parameters directly
     newNode.data.parameters = Object.fromEntries(currentParamsForNode.entries());
     
-    // Add node to collection
+    // Add node to collection, keyed by its original serialized index
     svelteFlowNodes.push(newNode);
+    indexToNode.set(index, newNode);
   });
   
   // Step 3: Create edges based on input/output buffer relationships
   serializedPattern.nodes.forEach((sNode, targetIndex) => {
-    // Skip if node wasn't created (due to unknown type)
-    if (targetIndex >= svelteFlowNodes.length) return;
-    
-    const targetNodeId = svelteFlowNodes[targetIndex].id;
-    
+    // Resolve the target node by its original index. If it was skipped (unknown
+    // type), there is no node to wire to.
+    const targetNode = indexToNode.get(targetIndex);
+    if (!targetNode) return;
+
+    const targetNodeId = targetNode.id;
+
     // Create edge for primary input
     if (sNode.i !== undefined) {
       // Find the source node by looking backwards for the most recent node that outputs to this buffer
       const sourceIndex = findSourceNodeIndex(serializedPattern.nodes, targetIndex, sNode.i);
-      
-      if (sourceIndex !== undefined && sourceIndex < svelteFlowNodes.length) {
-        const sourceNodeId = svelteFlowNodes[sourceIndex].id;
+      const sourceNode = sourceIndex !== undefined ? indexToNode.get(sourceIndex) : undefined;
+
+      if (sourceNode) {
+        const sourceNodeId = sourceNode.id;
         svelteFlowEdges.push({
           id: `e_${sourceNodeId}_${targetNodeId}_i1_${Date.now()}`,
           source: sourceNodeId,
@@ -722,14 +733,15 @@ export function deserializePattern(
         });
       }
     }
-    
+
     // Create edge for secondary input (blend nodes only)
     if (sNode.t === 'blend' && sNode.i2 !== undefined) {
       // Find the source node by looking backwards for the most recent node that outputs to this buffer
       const sourceIndex = findSourceNodeIndex(serializedPattern.nodes, targetIndex, sNode.i2);
-      
-      if (sourceIndex !== undefined && sourceIndex < svelteFlowNodes.length) {
-        const sourceNodeId = svelteFlowNodes[sourceIndex].id;
+      const sourceNode = sourceIndex !== undefined ? indexToNode.get(sourceIndex) : undefined;
+
+      if (sourceNode) {
+        const sourceNodeId = sourceNode.id;
         svelteFlowEdges.push({
           id: `e_${sourceNodeId}_${targetNodeId}_i2_${Date.now()}`,
           source: sourceNodeId,
@@ -770,8 +782,9 @@ export function deserializePattern(
     let sourceForOutput: string | undefined;
     for (let i = serializedPattern.nodes.length - 1; i >= 0; i--) {
       const node = serializedPattern.nodes[i];
-      if (node.o === finalOutputBuffer && i < svelteFlowNodes.length - 1) { // -1 because output node is last
-        sourceForOutput = svelteFlowNodes[i].id;
+      const created = indexToNode.get(i); // skip unknown/uncreated nodes
+      if (node.o === finalOutputBuffer && created) {
+        sourceForOutput = created.id;
         break;
       }
     }

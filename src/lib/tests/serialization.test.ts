@@ -366,6 +366,56 @@ test('Pattern with nodes but no connections', () => {
   return passed;
 });
 
+// Test 7: An unknown node type in the MIDDLE of the list must not misalign edges.
+// Regression: deserialization used to index svelteFlowNodes positionally, but
+// unknown types are skipped (not pushed), so once one is skipped the positions
+// no longer match serializedPattern.nodes — edges got wired to the wrong nodes
+// (or dropped). Deserialization must resolve nodes by their original index.
+test('Deserialization handles an unknown node type mid-list without misaligning edges', () => {
+  const serialized: SerializedPattern = {
+    nodes: [
+      { t: 'definitely_not_a_real_operator', o: 0 }, // index 0 — unknown, skipped on load
+      { t: 'rainbow', o: 0 },                         // index 1
+      { t: 'blend', o: 1, i: 0, i2: 0 },              // index 2 — reads buffer 0 (rainbow)
+    ],
+    meta: { output: 1, name: 'UnknownMidList' },
+  };
+
+  const { nodes, edges } = deserializePattern(serialized);
+
+  let passed = true;
+
+  const rainbow = nodes.find(n => n.data.type === 'rainbow');
+  const blend = nodes.find(n => n.data.type === 'blend');
+  const output = nodes.find(n => n.data.type === 'output');
+
+  passed = passed && assert(!!rainbow && !!blend && !!output,
+    'rainbow, blend and reconstructed output nodes should all be present');
+  passed = passed && assert(
+    !nodes.some(n => n.data.type === 'definitely_not_a_real_operator'),
+    'the unknown node type should be dropped, not created'
+  );
+
+  // The blend reads buffer 0, whose only writer is the rainbow node. Its input
+  // edge(s) must originate from rainbow — not a positionally-shifted wrong node.
+  const blendInputEdges = edges.filter(e => e.target === blend?.id);
+  passed = passed && assert(blendInputEdges.length > 0,
+    'blend should have its input edge(s) reconstructed');
+  passed = passed && assert(
+    blendInputEdges.every(e => e.source === rainbow?.id),
+    'every blend input edge should originate from the rainbow node'
+  );
+
+  // No edge may dangle: every endpoint must be a node that actually exists.
+  const nodeIds = new Set(nodes.map(n => n.id));
+  passed = passed && assert(
+    edges.every(e => nodeIds.has(e.source) && nodeIds.has(e.target)),
+    'all edges must reference existing nodes (no dangling references to the dropped node)'
+  );
+
+  return passed;
+});
+
 // Bridge the self-collected `tests` into Vitest. Operator definitions are loaded
 // from the real WASM module by the test harness setup (see harness/setup.ts), so
 // these run fully headless.
