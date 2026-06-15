@@ -202,7 +202,6 @@ import { get } from 'svelte/store';
                 max={knob.max}
                 step={knob.step}
                 size={dynamicKnobs.length > 4 ? 150 : 200}
-                preciseMode={false}
               />
         <div class="knob-label">{knob.paramLabel}</div>
       </div>
