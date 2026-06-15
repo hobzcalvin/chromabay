@@ -191,10 +191,10 @@ test('Deserialization back to the correct nodes and edges', () => {
 // Test 3: Complex patterns with blend nodes
 test('Complex patterns with blend nodes', () => {
   const nodes: Node[] = [
-    createTestNode('1', 'rainbow', LANES.LEFT, 100, { speed: 0.2 }),
-    createTestNode('2', 'gradient', LANES.RIGHT, 100, { color1: '#ff0000', color2: '#0000ff' }),
-    createTestNode('3', 'blend', LANES.CENTER, 200, { opacity: 0.7, blendMode: 'multiply' }),
-    createTestNode('4', 'output', LANES.CENTER, 300) 
+    createTestNode('1', 'rainbow', LANES.LEFT, 100, { speed: 60 }),
+    createTestNode('2', 'gradient', LANES.RIGHT, 100, { start_hue: 64, end_hue: 192 }),
+    createTestNode('3', 'blend', LANES.CENTER, 200, { opacity: 0.7, blend_mode: 2 }),
+    createTestNode('4', 'output', LANES.CENTER, 300)
   ];
   
   const edges: Edge[] = [
@@ -227,7 +227,7 @@ test('Complex patterns with blend nodes', () => {
   passed = passed && assert(!!blendNode, 'Blend node should be present');
   
   passed = passed && assert(
-    blendNode?.p?.opacity === 0.7 && blendNode?.p?.blendMode === 'multiply',
+    blendNode?.p?.opacity === 0.7 && blendNode?.p?.blend_mode === 2,
     'Blend node parameters should be preserved'
   );
   
@@ -242,8 +242,8 @@ test('Complex patterns with blend nodes', () => {
 // Test 4: Round-trip serialization/deserialization integrity
 test('Round-trip serialization/deserialization integrity', () => {
   const originalNodes: Node[] = [
-    createTestNode('1', 'rainbow', LANES.LEFT, 100, { speed: 0.2, saturation: 0.9 }),
-    createTestNode('2', 'perlin_noise', LANES.RIGHT, 100, { scale: 0.5, octaves: 4 }),
+    createTestNode('1', 'rainbow', LANES.LEFT, 100, { speed: 60, saturation: 200 }),
+    createTestNode('2', 'perlinnoise', LANES.RIGHT, 100, { scale: 0.5, speed: 25 }),
     createTestNode('3', 'blend', LANES.CENTER, 200, { opacity: 0.6 }),
     createTestNode('4', 'output', LANES.CENTER, 300) 
   ];
@@ -298,9 +298,12 @@ test('Empty pattern serialization', () => {
   
   const { nodes: deserializedNodes, edges: deserializedEdges } = deserializePattern(serialized);
   
+  // deserializePattern returns an empty graph for empty input by design; the
+  // caller (loadSerializedPattern in flowStore) detects 0 nodes and injects a
+  // default pattern instead. The serializer itself does not synthesize nodes.
   passed = passed && assert(
-    deserializedNodes.length === 1 && deserializedNodes[0].data.type === 'output' && deserializedEdges.length === 0,
-    `Deserialized empty pattern should have 1 output node and 0 edges. Got nodes: ${deserializedNodes.length}, edges: ${deserializedEdges.length}`
+    deserializedNodes.length === 0 && deserializedEdges.length === 0,
+    `Deserialized empty pattern should be empty (default-pattern fallback lives in the caller). Got nodes: ${deserializedNodes.length}, edges: ${deserializedEdges.length}`
   );
   
   return passed;
@@ -343,39 +346,35 @@ test('Pattern with nodes but no connections', () => {
   
   const { nodes: deserializedNodes, edges: deserializedEdges } = deserializePattern(serialized);
   
+  // The serialized format is buffer-based: meta.output defaults to buffer 0, so
+  // deserialization always reconstructs the output node and wires the last node
+  // writing to buffer 0 (rainbow) into it. The gradient (buffer 1) stays
+  // disconnected. Hence 3 nodes (rainbow + gradient + reconstructed output) and
+  // 1 implicit output edge.
   passed = passed && assert(
-    deserializedNodes.length === 3 && deserializedEdges.length === 0,
-    `Deserialized pattern should have 3 nodes and 0 edges. Got nodes: ${deserializedNodes.length}, edges: ${deserializedEdges.length}`
+    deserializedNodes.length === 3 && deserializedEdges.length === 1,
+    `Deserialized pattern should have 3 nodes and 1 implicit output edge. Got nodes: ${deserializedNodes.length}, edges: ${deserializedEdges.length}`
+  );
+
+  const outputNode = deserializedNodes.find(n => n.data.type === 'output');
+  const rainbowNode2 = deserializedNodes.find(n => n.data.type === 'rainbow');
+  passed = passed && assert(
+    deserializedEdges[0]?.source === rainbowNode2?.id && deserializedEdges[0]?.target === outputNode?.id,
+    'The single edge should connect the buffer-0 writer (rainbow) to the output node'
   );
   
   return passed;
 });
 
-// Run all tests
-console.log('Running pattern serialization tests...\n');
+// Bridge the self-collected `tests` into Vitest. Operator definitions are loaded
+// from the real WASM module by the test harness setup (see harness/setup.ts), so
+// these run fully headless.
+import { describe, it, expect } from 'vitest';
 
-tests.forEach(({ name, fn }) => {
-  console.log(`Testing: ${name}`);
-  try {
-    const passed = fn();
-    if (passed) {
-      console.log(`  ✅ Passed\n`);
-      passedTests++;
-    } else {
-      console.log(`  ❌ Failed\n`);
-      failedTests++;
-    }
-  } catch (error) {
-    console.error(`  ❌ Error: ${error}\n`);
-    failedTests++;
+describe('pattern serialization', () => {
+  for (const { name, fn } of tests) {
+    it(name, () => {
+      expect(fn()).toBe(true);
+    });
   }
 });
-
-// Report results
-console.log(`Test Results: ${passedTests} passed, ${failedTests} failed`);
-if (failedTests === 0) {
-  console.log('✅ All tests passed!');
-} else {
-  console.log('❌ Some tests failed.');
-  process.exit(1); // Exit with error code if tests fail
-}

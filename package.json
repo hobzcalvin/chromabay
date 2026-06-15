@@ -9,6 +9,9 @@
 		"build:dev": "NODE_ENV=development vite build",
 		"preview": "vite preview",
 		"prepare": "husky",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"test:ui": "vitest --ui",
 		"check": "npx svelte-kit sync && npx svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "npx svelte-kit sync && npx svelte-check --tsconfig ./tsconfig.json --watch",
 		"sync": "npx cap sync",
@@ -35,13 +38,16 @@
 		"@sveltejs/vite-plugin-svelte": "^5.0.0",
 		"@types/msgpack": "^0.0.34",
 		"@types/node": "^24.0.6",
+		"@vitest/ui": "^4.1.9",
 		"chokidar": "^4.0.3",
 		"gh-pages": "^6.3.0",
 		"husky": "^9.1.7",
+		"jsdom": "^29.1.1",
 		"svelte": "^5.0.0",
 		"svelte-check": "^4.0.0",
 		"typescript": "^5.0.0",
-		"vite": "^6.2.6"
+		"vite": "^6.2.6",
+		"vitest": "^4.1.9"
 	},
 	"dependencies": {
 		"@capacitor-community/bluetooth-le": "^7.1.1",
@@ -56,5 +62,9 @@
 		"@xyflow/svelte": "^1.0.2",
 		"capacitor-plugin-ios-webview-configurator": "^0.4.0",
 		"pixi.js": "^8.10.1"
+	},
+	"allowScripts": {
+		"esbuild@0.25.5": true,
+		"fsevents@2.3.3": true
 	}
 }
