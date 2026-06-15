@@ -1,5 +1,6 @@
 #include "pattern_renderer_base.h"
 #include <Arduino.h>
+#include <new> // std::nothrow
 
 // PatternRendererBase implementation using native operators
 PatternRendererBase::PatternRendererBase(LedConfig::LedManager* ledMgr) 
@@ -17,11 +18,27 @@ void PatternRendererBase::allocateBuffers() {
         deallocateBuffers();
     }
     
-    uint16_t totalPixels = getTotalPixels();
+    uint32_t totalPixels = getTotalPixels();
+    if (totalPixels == 0) {
+        Serial.println("PatternRenderer: refusing to allocate 0-pixel buffers");
+        return; // buffersAllocated stays false; update()/render() bail via their guards
+    }
+
     buffers = new CRGB*[NUM_BUFFERS];
     for (int i = 0; i < NUM_BUFFERS; i++) {
-        buffers[i] = new CRGB[totalPixels];
-        for (int j = 0; j < totalPixels; j++) {
+        buffers[i] = new (std::nothrow) CRGB[totalPixels];
+        if (!buffers[i]) {
+            // Out of memory — the configured matrix is too large for available
+            // RAM. Roll back instead of writing into a null/short buffer (which
+            // would corrupt the heap once operators render width*height pixels).
+            Serial.printf("PatternRenderer: failed to allocate %u-pixel buffer (out of memory)\n",
+                          (unsigned)totalPixels);
+            for (int k = 0; k < i; k++) delete[] buffers[k];
+            delete[] buffers;
+            buffers = nullptr;
+            return; // buffersAllocated stays false
+        }
+        for (uint32_t j = 0; j < totalPixels; j++) {
             buffers[i][j] = CRGB::Black;
         }
     }
@@ -74,8 +91,11 @@ uint16_t PatternRendererBase::getMatrixHeight() const {
     }
 }
 
-uint16_t PatternRendererBase::getTotalPixels() const {
-    return getMatrixWidth() * getMatrixHeight();
+uint32_t PatternRendererBase::getTotalPixels() const {
+    // uint32 so width*height can't overflow a uint16 for larger matrices
+    // (e.g. 300x300 = 90000) — truncation there sized buffers far too small and
+    // let operators write past them (heap corruption).
+    return (uint32_t)getMatrixWidth() * (uint32_t)getMatrixHeight();
 }
 
 void PatternRendererBase::initializeFromLedConfig() {
@@ -93,7 +113,7 @@ void PatternRendererBase::initializeFromLedConfig() {
     const auto& config = strip->getConfig();
     uint16_t width = getMatrixWidth();
     uint16_t height = getMatrixHeight();
-    uint16_t pixels = getTotalPixels();
+    uint32_t pixels = getTotalPixels();
     
     if (config.width > 0 && config.height > 0) {
         Serial.printf("PatternRenderer: Matrix mode %dx%d (%d pixels)\n", width, height, pixels);
@@ -116,8 +136,8 @@ void PatternRendererBase::updateMatrixConfig() {
 void PatternRendererBase::clearBuffer(int bufferIndex) {
     if (bufferIndex < 0 || bufferIndex >= NUM_BUFFERS || !buffersAllocated) return;
     
-    uint16_t totalPixels = getTotalPixels();
-    for (int i = 0; i < totalPixels; i++) {
+    uint32_t totalPixels = getTotalPixels();
+    for (uint32_t i = 0; i < totalPixels; i++) {
         buffers[bufferIndex][i] = CRGB::Black;
     }
 }
@@ -227,7 +247,7 @@ void PatternRendererBase::render() {
     const auto& config = strip->getConfig();
     uint16_t matrixWidth = getMatrixWidth();
     uint16_t matrixHeight = getMatrixHeight();
-    uint16_t totalPixels = getTotalPixels();
+    uint32_t totalPixels = getTotalPixels();
     
     // Check if this is a matrix layout (has width and height)
     if (matrixWidth > 0 && matrixHeight > 0) {
@@ -265,8 +285,8 @@ void PatternRendererBase::render() {
         }
     } else {
         // Linear strip - direct 1:1 mapping
-        uint16_t pixelCount = min(totalPixels, config.numLeds);
-        for (int i = 0; i < pixelCount; i++) {
+        uint32_t pixelCount = min(totalPixels, (uint32_t)config.numLeds);
+        for (uint32_t i = 0; i < pixelCount; i++) {
             strip->setPixelColor(i, patternBuffer[i]);
         }
     }

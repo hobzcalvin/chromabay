@@ -61,7 +61,7 @@ protected:
     // Get current dimensions from LED config (single source of truth)
     uint16_t getMatrixWidth() const;
     uint16_t getMatrixHeight() const;
-    uint16_t getTotalPixels() const;
+    uint32_t getTotalPixels() const;
     
 public:
     PatternRendererBase(LedConfig::LedManager* ledMgr);
