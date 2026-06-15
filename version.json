@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.70",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-0.0.1.70.zip",
-  "buildDate": "2026-06-15 23:28:10 UTC",
-  "commitHash": "c8879da3011d31a823efa2310e6eb8b486f85f73",
-  "commitMessage": "Fix infinite reactive loop that froze the page (effect_update_depth_exceeded)"
+  "version": "0.0.1.71",
+  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-0.0.1.71.zip",
+  "buildDate": "2026-06-15T23:32:56Z",
+  "commitHash": "edcd2c671fdf922ca364515ab138edfad1b31960",
+  "commitMessage": "Show build date in local timezone + commit hash in footer"
 }
