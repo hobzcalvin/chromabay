@@ -36,6 +36,14 @@
 					
 					console.log('✅ fastled function found, calling it...');
 					wasmModule = await fastled({
+						// Pin asset resolution to where fastled.js actually lives
+						// (…/native/). Without this, Emscripten guesses the .wasm
+						// path relative to the document, which 404s under a base
+						// path (e.g. GitHub Pages at /blumon/<route>). Uses the same
+						// SvelteKit assets placeholder as the script tag above.
+						locateFile: function(path) {
+							return '/blumon/native/' + path;
+						},
 						// Capture WASM stdout/stderr
 						print: function(text) {
 							console.log('[WASM stdout]:', text);
@@ -71,10 +79,10 @@
 		</script>
 		
 		
-		<link rel="modulepreload" href="/blumon/_app/immutable/entry/start.BW7i24TF.js">
-		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/CZWKUYTV.js">
+		<link rel="modulepreload" href="/blumon/_app/immutable/entry/start.Cfvt--3L.js">
+		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/2EmpKwjH.js">
 		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/BB0stol0.js">
-		<link rel="modulepreload" href="/blumon/_app/immutable/entry/app.BQkVXYpH.js">
+		<link rel="modulepreload" href="/blumon/_app/immutable/entry/app.iZsyk9zZ.js">
 		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/C-1WR47l.js">
 		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/F2h60W2r.js">
 		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/BMy6cpQz.js">
@@ -86,7 +94,7 @@
 		<div style="display: contents">
 			<script>
 				{
-					__sveltekit_p01vst = {
+					__sveltekit_ryix2t = {
 						base: "/blumon",
 						assets: "/blumon"
 					};
@@ -94,8 +102,8 @@
 					const element = document.currentScript.parentElement;
 
 					Promise.all([
-						import("/blumon/_app/immutable/entry/start.BW7i24TF.js"),
-						import("/blumon/_app/immutable/entry/app.BQkVXYpH.js")
+						import("/blumon/_app/immutable/entry/start.Cfvt--3L.js"),
+						import("/blumon/_app/immutable/entry/app.iZsyk9zZ.js")
 					]).then(([kit, app]) => {
 						kit.start(app, element);
 					});
