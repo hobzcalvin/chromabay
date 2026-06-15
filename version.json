@@ -1,7 +1,7 @@
 {
-  "version": "main-da8cbb4",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-main-da8cbb4.zip",
-  "buildDate": "2026-06-15 22:47:39 UTC",
-  "commitHash": "da8cbb4868448550552b1493e06edfc6fc7b58b6",
-  "commitMessage": "Stop autosave from clearing the current pattern on reload"
+  "version": "main-fc7467c",
+  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-main-fc7467c.zip",
+  "buildDate": "2026-06-15 23:07:46 UTC",
+  "commitHash": "fc7467c436fa63b8fe0166334559e4a30a05bd5c",
+  "commitMessage": "Fix pattern previews going black when they deserialize before WASM is ready"
 }
