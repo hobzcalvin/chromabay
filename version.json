@@ -1,7 +1,7 @@
 {
-  "version": "manual-20260615-215854-372955c",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-manual-20260615-215854-372955c.zip",
-  "buildDate": "2026-06-15 21:58:54 UTC",
-  "commitHash": "372955c2cb41b69d69e69c6062ddfa949a0c3f19",
-  "commitMessage": "Fix WASM failing to load on GitHub Pages (wrong .wasm path under base path)"
+  "version": "main-04b141d",
+  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-main-04b141d.zip",
+  "buildDate": "2026-06-15 21:59:57 UTC",
+  "commitHash": "04b141d0656f2643c3e762f3c7efddec595721f1",
+  "commitMessage": "Auto-deploy GitHub Pages on push to main"
 }
