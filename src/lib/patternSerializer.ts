@@ -583,12 +583,27 @@ function calculateDependencyLevels(
  * @param serializedPattern - The serialized pattern
  * @returns Object containing reconstructed nodes, edges, and parameters
  */
+export interface DeserializeOptions {
+  /**
+   * Whether to apply this pattern's interactive-parameter flags to the GLOBAL
+   * interactiveParameters store. True for the real editor/interact load; MUST be
+   * false for isolated previews (patterns page), which otherwise clear+rewrite
+   * the shared store keyed to their own node IDs and trigger an autosave that
+   * strips the live pattern's interactive flags.
+   */
+  applyInteractiveParameters?: boolean;
+}
+
 export function deserializePattern(
-  serializedPattern: SerializedPattern
+  serializedPattern: SerializedPattern,
+  options: DeserializeOptions = {}
 ): { nodes: Node[]; edges: Edge[]; nodeParameters: Map<string, Map<string, any>> } {
-  
-  // Clear existing interactive parameters before loading new pattern
-  interactiveParameters.set(new Map());
+  const applyInteractiveParameters = options.applyInteractiveParameters ?? true;
+
+  // Clear existing interactive parameters before loading new pattern (global load only)
+  if (applyInteractiveParameters) {
+    interactiveParameters.set(new Map());
+  }
   const svelteFlowNodes: Node[] = [];
   const svelteFlowEdges: Edge[] = [];
   const newNodeParameters = new Map<string, Map<string, any>>();
@@ -692,8 +707,9 @@ export function deserializePattern(
     // Store parameters
     newNodeParameters.set(nodeId, currentParamsForNode);
     
-    // Restore interactive parameters
-    if (sNode.x) {
+    // Restore interactive parameters (global load only; previews must not touch
+    // the shared interactiveParameters store).
+    if (sNode.x && applyInteractiveParameters) {
       for (const paramName in sNode.x) {
         setParameterInteractive(nodeId, paramName, true);
       }
@@ -820,7 +836,8 @@ export function deserializePattern(
  */
 export async function deserializePatternWhenReady(
   serializedPattern: SerializedPattern,
-  maxWaitMs: number = 5000
+  maxWaitMs: number = 5000,
+  options: DeserializeOptions = {}
 ): Promise<{ nodes: Node[]; edges: Edge[]; nodeParameters: Map<string, Map<string, any>> }> {
   // Helper to check if WASM operators are actually loaded
   // We need more than just the output node, and we need at least one pattern operator
@@ -833,7 +850,7 @@ export async function deserializePatternWhenReady(
   
   // Check if WASM operators are already loaded
   if (isWasmReady()) {
-    return deserializePattern(serializedPattern);
+    return deserializePattern(serializedPattern, options);
   }
   
   // Wait for WASM to be ready.
@@ -864,7 +881,7 @@ export async function deserializePatternWhenReady(
       settled = true;
       cleanup();
       try {
-        resolve(deserializePattern(serializedPattern));
+        resolve(deserializePattern(serializedPattern, options));
       } catch (error) {
         reject(error);
       }

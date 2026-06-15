@@ -68,7 +68,10 @@
     // operator loaded, every real node type ("rainbow", "blend", …) is unknown
     // and dropped, leaving an empty graph and a permanently black preview.
     // deserializePatternWhenReady waits for the operators first.
-    deserializePatternWhenReady(pattern)
+    // applyInteractiveParameters: false — previews are isolated; they must not
+    // touch the global interactiveParameters store (doing so clobbered the live
+    // pattern's interactive flags, so navigating to /patterns lost the knobs).
+    deserializePatternWhenReady(pattern, 5000, { applyInteractiveParameters: false })
       .then(({ nodes, edges, nodeParameters }) => {
         localFlowNodes.set(nodes);
         localFlowEdges.set(edges);
