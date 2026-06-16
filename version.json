@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.72",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-0.0.1.72.zip",
-  "buildDate": "2026-06-15T23:36:27Z",
-  "commitHash": "e4a4306d5f6d408008d7e57f94992b1168f1ce37",
-  "commitMessage": "Stop pattern previews from wiping interactive parameters"
+  "version": "0.0.1.73",
+  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-0.0.1.73.zip",
+  "buildDate": "2026-06-16T17:47:13Z",
+  "commitHash": "9678af9ea30268524be4231ba9b1451c5384ceaf",
+  "commitMessage": "Make disconnect resilient + fix stale iOS simulator UDID"
 }
