@@ -19,7 +19,7 @@ const connectedDevices = new Map<string, any>();
 // Import device store for UI state management
 import { removeConnectedDevice, addConnectedDevice, updateDeviceInfo } from './stores/deviceStore';
 
-// Blumon LED Service UUID - the only service we care about for general commands
+// ChromaBay LED Service UUID - the only service we care about for general commands
 const LED_SERVICE_UUID = 'a0be83e4-8dc9-47f0-ab40-b19721d20ed1';
 // Original RX/TX Characteristics (still useful for general commands)
 const CHARACTERISTIC_UUID_RX = 'a0be83e5-8dc9-47f0-ab40-b19721d20ed1';

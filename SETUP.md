@@ -1,8 +1,8 @@
-# 🔵 Blumon - GitHub Pages Setup Guide
+# 🔵 ChromaBay - GitHub Pages Setup Guide
 
 ## ✅ **Setup Complete!**
 
-Your Blumon project is now fully configured with automatic GitHub Pages deployment via the `docs/` folder and pre-commit hooks.
+Your ChromaBay project is now fully configured with automatic GitHub Pages deployment via the `docs/` folder and pre-commit hooks.
 
 ## 📋 **What's Already Configured:**
 
@@ -27,7 +27,7 @@ git push origin main
 4. Choose **main** branch and **/ (root)** folder
 5. Click **Save**
 
-Your site will be available at: `https://hobzcalvin.github.io/blumon/`
+Your site will be available at: `https://hobzcalvin.github.io/chromabay/`
 
 ### 3. **Development Workflow**
 ```bash
@@ -106,7 +106,7 @@ If you encounter **"Operation not permitted"** errors on corporate laptops:
 
 ## 🏢 **Project Structure:**
 ```
-blumon/
+chromabay/
 ├── src/routes/+page.svelte    # Main app UI
 ├── src/lib/ble.ts            # BLE helper functions
 ├── build/                    # Built files (auto-generated)
@@ -130,7 +130,7 @@ blumon/
 
 ## 🎉 **You're All Set!**
 
-Your Blumon app is production-ready with zero-config deployment. Just commit your changes and they'll automatically appear on GitHub Pages!
+Your ChromaBay app is production-ready with zero-config deployment. Just commit your changes and they'll automatically appear on GitHub Pages!
 
 ---
 Built with ⚡ by **ReVolt Labs** 

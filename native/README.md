@@ -1,6 +1,6 @@
 # Native C++ WASM Operator System
 
-This directory contains the C++ FastLED-based operator system that gets compiled to WebAssembly for use in the Blumon app.
+This directory contains the C++ FastLED-based operator system that gets compiled to WebAssembly for use in the ChromaBay app.
 
 ## Architecture
 
@@ -30,7 +30,7 @@ This generates the `fastled_js/` folder containing:
 - `fastled.wasm` - Compiled WebAssembly binary
 - Supporting files for browser integration
 
-## Integration with Blumon App
+## Integration with ChromaBay App
 
 1. **Static Files**: The `fastled_js/` folder is copied to `static/native/fastled_js/`
 2. **HTML Integration**: `src/app.html` loads the WASM module globally

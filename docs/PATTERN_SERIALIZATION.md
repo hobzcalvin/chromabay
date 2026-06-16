@@ -1,6 +1,6 @@
 # Pattern Serialization Guide
 
-This document explains how Blumon converts the visual node graph you build in the editor into a compact payload that can be transmitted over Bluetooth Low Energy (BLE) to an ESP32.  
+This document explains how ChromaBay converts the visual node graph you build in the editor into a compact payload that can be transmitted over Bluetooth Low Energy (BLE) to an ESP32.  
 It is intended for **frontend developers** extending the editor _and_ **firmware developers** implementing the decoding / rendering pipeline on the micro-controller.
 
 ---

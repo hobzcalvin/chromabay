@@ -28,7 +28,7 @@ LedConfig::ConfigManager configMgr(ledMgr);
 // Pattern renderer instance
 PatternRendererBase* patternRenderer = nullptr;
 
-// NimBLE LED Service (Blumon custom LED service UUID - restored)
+// NimBLE LED Service (ChromaBay custom LED service UUID - restored)
 #define SERVICE_UUID           "a0be83e4-8dc9-47f0-ab40-b19721d20ed1"
 // Original RX/TX Characteristics
 #define CHARACTERISTIC_UUID_RX "a0be83e5-8dc9-47f0-ab40-b19721d20ed1"
@@ -364,7 +364,7 @@ class CharacteristicCallbacks: public NimBLECharacteristicCallbacks {
                     pTxCharacteristic->notify();
                 }
             } else if (receivedData == "info") {
-                String response = "Blumon ESP32 - LedManager Rainbow Demo (NimBLE)";
+                String response = "ChromaBay ESP32 - LedManager Rainbow Demo (NimBLE)";
                  if (pTxCharacteristic) {
                     pTxCharacteristic->setValue((uint8_t*)response.c_str(), response.length());
                     pTxCharacteristic->notify();
@@ -1074,7 +1074,7 @@ void setup() {
     }
     
     // Initialize BLE
-    NimBLEDevice::init("Blumon_ESP32"); 
+    NimBLEDevice::init("ChromaBay_ESP32"); 
     pServer = NimBLEDevice::createServer();
     if (!pServer) {
         Serial.println("ERROR: Failed to create BLE server!");

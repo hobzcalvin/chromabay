@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Blumon Release Script
+# ChromaBay Release Script
 # Usage: ./scripts/release.sh [patch|minor|major|version]
 # Examples:
 #   ./scripts/release.sh patch    # 1.0.0 -> 1.0.1
@@ -17,7 +17,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-echo -e "${BLUE}🔵 Blumon Release Script${NC}"
+echo -e "${BLUE}🔵 ChromaBay Release Script${NC}"
 echo -e "${BLUE}========================${NC}"
 
 # Check if we're on main branch
@@ -119,8 +119,8 @@ git push origin "$NEW_VERSION"
 echo -e "${GREEN}🎉 Release $NEW_VERSION created successfully!${NC}"
 echo -e "${BLUE}📋 What happens next:${NC}"
 echo -e "  1. GitHub Actions will build and deploy to Pages"
-echo -e "  2. Check deployment status: https://github.com/hobzcalvin/blumon/actions"
-echo -e "  3. Visit your app: https://hobzcalvin.github.io/blumon"
+echo -e "  2. Check deployment status: https://github.com/hobzcalvin/chromabay/actions"
+echo -e "  3. Visit your app: https://hobzcalvin.github.io/chromabay"
 echo -e "  4. The app will show version $NEW_VERSION in the footer"
 
 echo -e "${GREEN}✅ Done!${NC}" 

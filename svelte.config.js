@@ -21,8 +21,8 @@ const config = {
 			strict: true
 		}),
 		paths: {
-			// Only use /blumon base path for GitHub Pages, not for iOS app or local dev
-			base: process.env.GITHUB_PAGES ? '/blumon' : ''
+			// Only use /chromabay base path for GitHub Pages, not for iOS app or local dev
+			base: process.env.GITHUB_PAGES ? '/chromabay' : ''
 		}
 	}
 };

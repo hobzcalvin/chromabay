@@ -1,4 +1,4 @@
-# 🔵 Blumon
+# 🔵 ChromaBay
 
 ESP32 Bluetooth Low Energy Monitor built with SvelteKit + Capacitor.
 
@@ -13,7 +13,7 @@ ESP32 Bluetooth Low Energy Monitor built with SvelteKit + Capacitor.
 
 ## 📱 Deployment
 
-The app is deployed to GitHub Pages at: https://hobzcalvin.github.io/blumon
+The app is deployed to GitHub Pages at: https://hobzcalvin.github.io/chromabay
 
 ### Release Process
 
@@ -202,7 +202,7 @@ plugins: {
 }
 ```
 
-The system checks for updates by fetching `/blumon/version.json` from GitHub Pages and comparing versions.
+The system checks for updates by fetching `/chromabay/version.json` from GitHub Pages and comparing versions.
 
 ---
 

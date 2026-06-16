@@ -174,7 +174,7 @@ git push origin "$NEW_VERSION"
 echo -e "${GREEN}🎉 ESP32 Firmware Release $NEW_VERSION created successfully!${NC}"
 echo -e "${BLUE}📋 What happens next:${NC}"
 echo -e "  1. GitHub Actions will build, sign, and create release"
-echo -e "  2. Check deployment status: https://github.com/hobzcalvin/blumon/actions"
+echo -e "  2. Check deployment status: https://github.com/hobzcalvin/chromabay/actions"
 echo -e "  3. Signed firmware will be available in GitHub releases"
 echo -e "  4. Use BLE OTA client to update ESP32 devices securely"
 

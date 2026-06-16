@@ -1,4 +1,4 @@
-# Cursor Rules for Blumon Project
+# Cursor Rules for ChromaBay Project
 
 ## Development Server
 - NEVER run `npm run dev` - the user handles this themselves

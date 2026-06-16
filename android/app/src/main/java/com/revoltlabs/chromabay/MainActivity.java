@@ -1,4 +1,4 @@
-package com.revoltlabs.blumon;
+package com.revoltlabs.chromabay;
 
 import com.getcapacitor.BridgeActivity;
 

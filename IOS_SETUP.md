@@ -1,4 +1,4 @@
-# 📱 iOS Development Setup - Blumon
+# 📱 iOS Development Setup - ChromaBay
 
 ## 🚀 Quick Start
 
@@ -35,7 +35,7 @@ npx cap open ios
 
 ### Working Capacitor Config
 - **webDir**: `'build'` (matches SvelteKit output)
-- **appId**: `'com.revoltlabs.blumon'`
+- **appId**: `'com.revoltlabs.chromabay'`
 - **Deployment Target**: iOS 14.0+ (compatible with most devices)
 
 ### Fresh iOS Project Benefits

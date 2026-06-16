@@ -39,7 +39,7 @@
 						// Pin asset resolution to where fastled.js actually lives
 						// (…/native/). Without this, Emscripten guesses the .wasm
 						// path relative to the document, which 404s under a base
-						// path (e.g. GitHub Pages at /blumon/<route>). Uses the same
+						// path (e.g. GitHub Pages at /chromabay/<route>). Uses the same
 						// SvelteKit assets placeholder as the script tag above.
 						locateFile: function(path) {
 							return '%sveltekit.assets%/native/' + path;

@@ -63,7 +63,7 @@
   $: connectedDevicesList = getConnectedDevicesList($connectedDevices);
 
   let firmwareRegistry: FirmwareRegistryEntry[] = [];
-  let espFirmwareRegistryUrl = "https://hobzcalvin.github.io/blumon/firmware/esp32/esp32_firmware_registry.json";
+  let espFirmwareRegistryUrl = "https://hobzcalvin.github.io/chromabay/firmware/esp32/esp32_firmware_registry.json";
 
   // Fetch firmware registry on app load
   async function initializeFirmwareRegistry() {
@@ -392,7 +392,7 @@
     settings.showUpdateConfirmation = false;
     settings.otaStatus = { statusMessage: 'Starting OTA update...', progress: 0 };
     
-    const baseUrl = 'https://hobzcalvin.github.io/blumon';
+    const baseUrl = 'https://hobzcalvin.github.io/chromabay';
     const firmwareUrl = `${baseUrl}/${settings.latestFirmware.path}`;
     const signatureUrl = `${baseUrl}/${settings.latestFirmware.signaturePath}`;
 
@@ -460,7 +460,7 @@
 
 <main>
   <header>
-    <h1>🔵 Blumon</h1>
+    <h1>🔵 ChromaBay</h1>
     <p class="subtitle">ESP32 Bluetooth Low Energy Monitor</p>
     <p class="company">by ReVolt Labs</p>
   </header>

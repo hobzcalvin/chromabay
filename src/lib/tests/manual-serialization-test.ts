@@ -166,5 +166,5 @@ console.log('Review the output above for correctness.');
 
 // Example of how to use this for further testing:
 // 1. Copy the `compressedPattern` string.
-// 2. Send it to your ESP32 via BLE (e.g., using the Blumon app's write characteristic feature).
+// 2. Send it to your ESP32 via BLE (e.g., using the ChromaBay app's write characteristic feature).
 // 3. Observe the ESP32's behavior and serial logs to see if it correctly interprets the pattern.

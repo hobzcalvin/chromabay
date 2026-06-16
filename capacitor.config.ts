@@ -1,8 +1,8 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.revoltlabs.blumon',
-  appName: 'Blumon',
+  appId: 'com.revoltlabs.chromabay',
+  appName: 'ChromaBay',
   webDir: 'build',
   server: {
     androidScheme: 'http',
