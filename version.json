@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.75",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.75.zip",
-  "buildDate": "2026-06-16T22:27:23Z",
-  "commitHash": "6b6401e91a8b17a11c73ad696d8dcb23d56540d9",
-  "commitMessage": "Add ChromaBay logo / app icon (rainbow node-tree)"
+  "version": "0.0.1.76",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.76.zip",
+  "buildDate": "2026-06-16T22:37:16Z",
+  "commitHash": "c6845e935b6b68d4682fea2137b581583cd4ef8b",
+  "commitMessage": "Tighten icon: full-bleed square, fill the canvas, drop rounded corners"
 }
