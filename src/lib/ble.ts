@@ -288,14 +288,18 @@ export async function disconnectFromDevice(deviceId: string): Promise<void> {
     } else {
       await BleClient.disconnect(deviceId);
     }
-    // Centralized cleanup (also runs from the disconnect event/callback; idempotent).
-    handleDeviceDisconnected(deviceId);
-
-    console.log('Disconnected from device');
   } catch (error) {
-    console.error('Error disconnecting from device:', error);
-    throw error;
+    // A failing transport disconnect almost always means the device is already
+    // gone (stale handle, peer dropped, or — in dev — the injected TEST device
+    // that was never a real BLE connection). The user asked to disconnect, so
+    // treat this as already-disconnected and fall through to cleanup rather than
+    // surfacing a "Failed to disconnect" error and leaving a phantom in the list.
+    console.warn('Transport disconnect failed; treating as already disconnected:', error);
   }
+  // Centralized cleanup (also runs from the disconnect event/callback; idempotent)
+  // — always run it so the device is removed from the UI regardless of the above.
+  handleDeviceDisconnected(deviceId);
+  console.log('Disconnected from device');
 }
 
 export function isDeviceConnected(deviceId: string): boolean {
