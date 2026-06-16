@@ -6,7 +6,7 @@
       <stop offset="0.55" stop-color="#070D1C"/>
       <stop offset="1"    stop-color="#0A2236"/>
     </linearGradient>
-    <radialGradient id="water" cx="50%" cy="96%" r="55%">
+    <radialGradient id="water" cx="50%" cy="92%" r="60%">
       <stop offset="0"   stop-color="#16557F" stop-opacity="0.55"/>
       <stop offset="1"   stop-color="#16557F" stop-opacity="0"/>
     </radialGradient>
@@ -39,37 +39,41 @@
     <radialGradient id="nCyan"    cx="36%" cy="32%" r="82%"><stop offset="0" stop-color="#AEE9FF"/><stop offset="1" stop-color="#34C8FF"/></radialGradient>
   </defs>
 
-  <rect width="1024" height="1024" rx="224" fill="url(#bg)"/>
-  <rect width="1024" height="1024" rx="224" fill="url(#water)"/>
+  <!-- Full-bleed square background (no rounded corners; the OS/store masks it) -->
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <rect width="1024" height="1024" fill="url(#water)"/>
 
-  <!-- Branches -->
-  <g filter="url(#glow)" stroke-linecap="round" opacity="0.95">
-    <line x1="512" y1="888" x2="512" y2="680" stroke="url(#eTrunk)" stroke-width="22"/>
-    <line x1="512" y1="680" x2="360" y2="540" stroke="url(#eT1L)" stroke-width="18"/>
-    <line x1="512" y1="680" x2="664" y2="540" stroke="url(#eT1R)" stroke-width="18"/>
-    <line x1="360" y1="540" x2="430" y2="250" stroke="url(#eLy)" stroke-width="15"/>
-    <line x1="360" y1="540" x2="288" y2="300" stroke="url(#eLl)" stroke-width="15"/>
-    <line x1="360" y1="540" x2="190" y2="410" stroke="url(#eLg)" stroke-width="15"/>
-    <line x1="664" y1="540" x2="594" y2="250" stroke="url(#eRv)" stroke-width="15"/>
-    <line x1="664" y1="540" x2="736" y2="300" stroke="url(#eRb)" stroke-width="15"/>
-    <line x1="664" y1="540" x2="834" y2="410" stroke="url(#eRc)" stroke-width="15"/>
-  </g>
+  <!-- Tree scaled up + recentered to fill the canvas (minimal padding) -->
+  <g transform="translate(512,512) scale(1.33) translate(-512,-569)">
+    <!-- Branches -->
+    <g filter="url(#glow)" stroke-linecap="round" opacity="0.95">
+      <line x1="512" y1="888" x2="512" y2="680" stroke="url(#eTrunk)" stroke-width="22"/>
+      <line x1="512" y1="680" x2="360" y2="540" stroke="url(#eT1L)" stroke-width="18"/>
+      <line x1="512" y1="680" x2="664" y2="540" stroke="url(#eT1R)" stroke-width="18"/>
+      <line x1="360" y1="540" x2="430" y2="250" stroke="url(#eLy)" stroke-width="15"/>
+      <line x1="360" y1="540" x2="288" y2="300" stroke="url(#eLl)" stroke-width="15"/>
+      <line x1="360" y1="540" x2="190" y2="410" stroke="url(#eLg)" stroke-width="15"/>
+      <line x1="664" y1="540" x2="594" y2="250" stroke="url(#eRv)" stroke-width="15"/>
+      <line x1="664" y1="540" x2="736" y2="300" stroke="url(#eRb)" stroke-width="15"/>
+      <line x1="664" y1="540" x2="834" y2="410" stroke="url(#eRc)" stroke-width="15"/>
+    </g>
 
-  <!-- Nodes (rounded squares) -->
-  <g filter="url(#glow)">
-    <!-- trunk (stacked, red) -->
-    <rect x="466" y="842" width="92" height="92" rx="24" fill="url(#nRed)"/>
-    <rect x="466" y="634" width="92" height="92" rx="24" fill="url(#nRed)"/>
-    <!-- split tier -->
-    <rect x="314" y="494" width="92" height="92" rx="24" fill="url(#nOrange)"/>
-    <rect x="618" y="494" width="92" height="92" rx="24" fill="url(#nMagenta)"/>
-    <!-- canopy: warm up the left -->
-    <rect x="384" y="204" width="92" height="92" rx="24" fill="url(#nYellow)"/>
-    <rect x="242" y="254" width="92" height="92" rx="24" fill="url(#nLime)"/>
-    <rect x="144" y="364" width="92" height="92" rx="24" fill="url(#nGreen)"/>
-    <!-- canopy: cool up the right -->
-    <rect x="548" y="204" width="92" height="92" rx="24" fill="url(#nViolet)"/>
-    <rect x="690" y="254" width="92" height="92" rx="24" fill="url(#nBlue)"/>
-    <rect x="788" y="364" width="92" height="92" rx="24" fill="url(#nCyan)"/>
+    <!-- Nodes (rounded squares) -->
+    <g filter="url(#glow)">
+      <!-- trunk (stacked, red) -->
+      <rect x="466" y="842" width="92" height="92" rx="24" fill="url(#nRed)"/>
+      <rect x="466" y="634" width="92" height="92" rx="24" fill="url(#nRed)"/>
+      <!-- split tier -->
+      <rect x="314" y="494" width="92" height="92" rx="24" fill="url(#nOrange)"/>
+      <rect x="618" y="494" width="92" height="92" rx="24" fill="url(#nMagenta)"/>
+      <!-- canopy: warm up the left -->
+      <rect x="384" y="204" width="92" height="92" rx="24" fill="url(#nYellow)"/>
+      <rect x="242" y="254" width="92" height="92" rx="24" fill="url(#nLime)"/>
+      <rect x="144" y="364" width="92" height="92" rx="24" fill="url(#nGreen)"/>
+      <!-- canopy: cool up the right -->
+      <rect x="548" y="204" width="92" height="92" rx="24" fill="url(#nViolet)"/>
+      <rect x="690" y="254" width="92" height="92" rx="24" fill="url(#nBlue)"/>
+      <rect x="788" y="364" width="92" height="92" rx="24" fill="url(#nCyan)"/>
+    </g>
   </g>
 </svg>
