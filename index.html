@@ -2,7 +2,7 @@
 <html lang="en">
 	<head>
 		<meta charset="utf-8" />
-		<link rel="icon" href="/blumon/favicon.png" />
+		<link rel="icon" href="/chromabay/favicon.png" />
 		<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 		<script>
 			// GitHub Pages SPA routing handler
@@ -19,7 +19,7 @@
 		</script>
 		
 		<!-- FastLED WASM Operator System -->
-		<script src="/blumon/native/fastled.js"></script>
+		<script src="/chromabay/native/fastled.js"></script>
 		<script>
 			// Global WASM module initialization
 			let wasmModule = null;
@@ -39,10 +39,10 @@
 						// Pin asset resolution to where fastled.js actually lives
 						// (…/native/). Without this, Emscripten guesses the .wasm
 						// path relative to the document, which 404s under a base
-						// path (e.g. GitHub Pages at /blumon/<route>). Uses the same
+						// path (e.g. GitHub Pages at /chromabay/<route>). Uses the same
 						// SvelteKit assets placeholder as the script tag above.
 						locateFile: function(path) {
-							return '/blumon/native/' + path;
+							return '/chromabay/native/' + path;
 						},
 						// Capture WASM stdout/stderr
 						print: function(text) {
@@ -79,31 +79,31 @@
 		</script>
 		
 		
-		<link rel="modulepreload" href="/blumon/_app/immutable/entry/start.CJgsT0zu.js">
-		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/DaFAMvmc.js">
-		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/BB0stol0.js">
-		<link rel="modulepreload" href="/blumon/_app/immutable/entry/app.D2PQhOkb.js">
-		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/C-1WR47l.js">
-		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/F2h60W2r.js">
-		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/BMy6cpQz.js">
-		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/DO2mpnaL.js">
-		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/YtW-CGOD.js">
-		<link rel="modulepreload" href="/blumon/_app/immutable/chunks/B0xBETLN.js">
+		<link rel="modulepreload" href="/chromabay/_app/immutable/entry/start.ozvSMBwV.js">
+		<link rel="modulepreload" href="/chromabay/_app/immutable/chunks/AWKKLwAQ.js">
+		<link rel="modulepreload" href="/chromabay/_app/immutable/chunks/BB0stol0.js">
+		<link rel="modulepreload" href="/chromabay/_app/immutable/entry/app.JZ4ekU6h.js">
+		<link rel="modulepreload" href="/chromabay/_app/immutable/chunks/C-1WR47l.js">
+		<link rel="modulepreload" href="/chromabay/_app/immutable/chunks/F2h60W2r.js">
+		<link rel="modulepreload" href="/chromabay/_app/immutable/chunks/BMy6cpQz.js">
+		<link rel="modulepreload" href="/chromabay/_app/immutable/chunks/DO2mpnaL.js">
+		<link rel="modulepreload" href="/chromabay/_app/immutable/chunks/YtW-CGOD.js">
+		<link rel="modulepreload" href="/chromabay/_app/immutable/chunks/B0xBETLN.js">
 	</head>
 	<body data-sveltekit-preload-data="hover">
 		<div style="display: contents">
 			<script>
 				{
-					__sveltekit_1i91oos = {
-						base: "/blumon",
-						assets: "/blumon"
+					__sveltekit_jpokpp = {
+						base: "/chromabay",
+						assets: "/chromabay"
 					};
 
 					const element = document.currentScript.parentElement;
 
 					Promise.all([
-						import("/blumon/_app/immutable/entry/start.CJgsT0zu.js"),
-						import("/blumon/_app/immutable/entry/app.D2PQhOkb.js")
+						import("/chromabay/_app/immutable/entry/start.ozvSMBwV.js"),
+						import("/chromabay/_app/immutable/entry/app.JZ4ekU6h.js")
 					]).then(([kit, app]) => {
 						kit.start(app, element);
 					});

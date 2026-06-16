@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.73",
-  "downloadUrl": "https://hobzcalvin.github.io/blumon/live-update-0.0.1.73.zip",
-  "buildDate": "2026-06-16T17:47:13Z",
-  "commitHash": "9678af9ea30268524be4231ba9b1451c5384ceaf",
-  "commitMessage": "Make disconnect resilient + fix stale iOS simulator UDID"
+  "version": "0.0.1.74",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.74.zip",
+  "buildDate": "2026-06-16T21:38:57Z",
+  "commitHash": "1e6c44681bd1bc0b06d7afefe7ed6ca3ad9959bb",
+  "commitMessage": "Rebrand Blumon → ChromaBay (+ rename repo to chromabay)"
 }
