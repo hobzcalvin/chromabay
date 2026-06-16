@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.74",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.74.zip",
-  "buildDate": "2026-06-16T21:38:57Z",
-  "commitHash": "1e6c44681bd1bc0b06d7afefe7ed6ca3ad9959bb",
-  "commitMessage": "Rebrand Blumon → ChromaBay (+ rename repo to chromabay)"
+  "version": "0.0.1.75",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.75.zip",
+  "buildDate": "2026-06-16T22:27:23Z",
+  "commitHash": "6b6401e91a8b17a11c73ad696d8dcb23d56540d9",
+  "commitMessage": "Add ChromaBay logo / app icon (rainbow node-tree)"
 }
