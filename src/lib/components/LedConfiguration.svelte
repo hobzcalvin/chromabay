@@ -90,10 +90,6 @@
                     <option value={ColorOrders.BGR}>BGR</option>
                   </select>
                 </label>
-                <label>
-                  RMT Channel:
-                  <input id={buildId('rmtchannel', index)} name="rmtchannel" type="number" min="0" max="7" bind:value={strip.rmtChannel} />
-                </label>
               </div>
               <div class="control-row">
                 <label>

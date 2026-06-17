@@ -285,14 +285,19 @@ public:
         
         bool allStripsAdded = true;
         for (size_t i = 0; i < config.strips.size(); i++) {
-            const auto& stripConfig = config.strips[i];
+            LedStripConfig stripConfig = config.strips[i];
+            // RMT channel is an implementation detail, not a user setting: each strip
+            // needs its own hardware lane, so just assign sequentially by index. This
+            // ignores whatever the app sent (which defaulted every strip to 0 and made
+            // them collide).
+            stripConfig.rmtChannel = (uint8_t)i;
             Serial.printf("Strip %d:\n", i);
             Serial.printf("  Chipset: %d\n", static_cast<int>(stripConfig.chipset));
             Serial.printf("  Pin: %d\n", stripConfig.pin);
             Serial.printf("  NumLeds: %d\n", stripConfig.numLeds);
             Serial.printf("  ColorOrder: %d\n", static_cast<int>(stripConfig.colorOrder));
-            Serial.printf("  RMT Channel: %d\n", stripConfig.rmtChannel);
-            
+            Serial.printf("  RMT Channel (auto): %d\n", stripConfig.rmtChannel);
+
             if (!_ledManager.addStrip(stripConfig)) {
                 Serial.print(F("[ConfigManager] Failed to add strip to LedManager: Pin "));
                 Serial.println(stripConfig.pin);
