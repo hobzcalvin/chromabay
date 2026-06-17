@@ -129,6 +129,19 @@ export async function enableBle(): Promise<void> {
   }
 }
 
+/**
+ * React to the system Bluetooth adapter being toggled on/off (native only).
+ * Web Bluetooth has no adapter-state event, so this is a no-op there.
+ */
+export async function startBleStateNotifications(cb: (enabled: boolean) => void): Promise<void> {
+  if (isWeb()) return;
+  try {
+    await BleClient.startEnabledNotifications(cb);
+  } catch (error) {
+    console.error('Failed to start BLE state notifications:', error);
+  }
+}
+
 export async function startScan(
   callback: (result: any) => void
 ): Promise<void> {

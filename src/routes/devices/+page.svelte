@@ -7,6 +7,7 @@
     enableBle, 
     startScan, 
     stopScan,
+    startBleStateNotifications,
     connectToDevice,
     disconnectFromDevice,
     isDeviceConnected,
@@ -112,7 +113,24 @@
       console.error('BLE initialization failed:', error);
       statusMessage = 'BLE not supported on this platform';
     }
-    
+
+    // Native: react to the system Bluetooth toggle, and always scan (no button).
+    if (!isWeb) {
+      startBleStateNotifications((enabled) => {
+        bleEnabled = enabled;
+        if (enabled) {
+          statusMessage = 'Bluetooth is ready!';
+          handleStartScan();
+        } else {
+          statusMessage = 'Bluetooth is off';
+          scanning = false;
+          devices = [];
+          stopScan().catch(() => {});
+        }
+      });
+      if (bleEnabled) handleStartScan(); // always scanning on mobile
+    }
+
     // Initialize firmware registry
     await initializeFirmwareRegistry();
     
@@ -237,10 +255,9 @@
         statusMessage = `Device selected but connection failed: ${result.connectError.message}`;
       }
     }).then(() => {
-      scanning = false;
-      if (!isWeb) {
-        statusMessage = `Scan complete. Found ${devices.length} device(s).`;
-      }
+      // Web: the picker has closed. Native: requestLEScan resolves once the scan
+      // has STARTED and keeps running via the callback, so stay "scanning".
+      if (isWeb) scanning = false;
     }).catch((error: any) => {
       scanning = false;
       if (error.name === 'NotFoundError') {
@@ -274,6 +291,11 @@
       
       // Auto-load device info and LED config
       const settings = getDeviceSettings(device.deviceId);
+      // Reset any stale OTA state from a previous (possibly interrupted) session
+      // so the UI never shows a frozen "Updating…"/progress bar after reconnect.
+      settings.otaInProgress = false;
+      settings.otaStatus = null;
+      settings.otaSuccess = false;
       await loadDeviceInfo(device.deviceId);
       await loadLedConfig(device.deviceId);
       // Auto-check for firmware updates
@@ -505,14 +527,10 @@
       {/if}
       
       {#if bleEnabled}
-        {#if !scanning}
-          <button class="btn primary" on:click={handleStartScan}>
-            {isWeb ? 'Select ESP32 Device' : 'Scan for ESP32s'}
-          </button>
-        {:else if !isWeb}
-          <button class="btn secondary" on:click={handleStopScan}>
-            Stop Scanning
-          </button>
+        {#if isWeb}
+          <button class="btn primary" on:click={handleStartScan}>Select ESP32 Device</button>
+        {:else}
+          <p class="scan-status">{scanning ? '🔍 Scanning for ESP32s…' : 'Starting scan…'}</p>
         {/if}
       {/if}
     </div>
