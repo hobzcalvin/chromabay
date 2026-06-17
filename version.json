@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.86",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.86.zip",
-  "buildDate": "2026-06-17T18:08:16Z",
-  "commitHash": "282ad5ffd904c616423d5d572fec79fa8e570eb5",
-  "commitMessage": "Render loop: create node 2D contexts with willReadFrequently"
+  "version": "0.0.1.87",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.87.zip",
+  "buildDate": "2026-06-17T18:18:39Z",
+  "commitHash": "5260d90c4be975d039348e50d51758c56df8099c",
+  "commitMessage": "Fix 100x-slow preview: WASM renderOperator takes real ms (drop the /100 wrapper)"
 }
