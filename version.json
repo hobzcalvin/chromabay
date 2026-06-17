@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.76",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.76.zip",
-  "buildDate": "2026-06-16T22:37:16Z",
-  "commitHash": "c6845e935b6b68d4682fea2137b581583cd4ef8b",
-  "commitMessage": "Tighten icon: full-bleed square, fill the canvas, drop rounded corners"
+  "version": "0.0.1.77",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.77.zip",
+  "buildDate": "2026-06-17T05:04:09Z",
+  "commitHash": "8537e62e54a7a6ddfc749ce0b4826b3700440493",
+  "commitMessage": "Fix firmware-update detection and stop deploys clobbering the registry"
 }
