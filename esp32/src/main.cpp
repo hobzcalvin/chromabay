@@ -766,6 +766,56 @@ class TimestampSyncCallbacks : public NimBLECharacteristicCallbacks {
     }
 };
 
+// The last-applied pattern is persisted here so it survives a power cycle.
+static const char* PATTERN_FILE = "/current_pattern.mp";
+
+// Persist the raw MessagePack of the currently-applied pattern to flash.
+static void savePatternToFlash(const uint8_t* buf, size_t size) {
+    if (buf == nullptr || size == 0) return;
+    File f = LittleFS.open(PATTERN_FILE, FILE_WRITE);
+    if (!f) {
+        Serial.println("Pattern persist: failed to open file for write");
+        return;
+    }
+    size_t written = f.write(buf, size);
+    f.close();
+    if (written == size) {
+        Serial.printf("Pattern persisted to flash (%u bytes)\n", (unsigned)size);
+    } else {
+        Serial.printf("Pattern persist: short write (%u/%u) — removing\n", (unsigned)written, (unsigned)size);
+        LittleFS.remove(PATTERN_FILE); // don't leave a corrupt partial file
+    }
+}
+
+// Restore the last-applied pattern from flash into the renderer (called on boot).
+static void restorePatternFromFlash() {
+    if (patternRenderer == nullptr || !LittleFS.exists(PATTERN_FILE)) {
+        Serial.println("No saved pattern to restore");
+        return;
+    }
+    File f = LittleFS.open(PATTERN_FILE, FILE_READ);
+    if (!f) {
+        Serial.println("Pattern restore: failed to open file");
+        return;
+    }
+    size_t size = f.size();
+    if (size == 0) { f.close(); return; }
+    uint8_t* buf = (uint8_t*)malloc(size);
+    if (buf == nullptr) {
+        Serial.println("Pattern restore: malloc failed");
+        f.close();
+        return;
+    }
+    size_t readBytes = f.read(buf, size);
+    f.close();
+    if (readBytes == size && patternRenderer->loadPatternFromMessagePack(buf, size)) {
+        Serial.printf("Restored saved pattern from flash (%u bytes)\n", (unsigned)size);
+    } else {
+        Serial.println("Pattern restore: failed to load saved pattern");
+    }
+    free(buf);
+}
+
 // Function to process received pattern data
 void processReceivedPattern() {
     if (!newPatternAvailable || patternBuffer == nullptr || patternRenderer == nullptr) {
@@ -779,6 +829,8 @@ void processReceivedPattern() {
     
     if (success) {
         //Serial.println("Pattern loaded successfully into renderer");
+        // Persist so the pattern survives a power cycle (restored in setup()).
+        savePatternToFlash(patternBuffer, patternBufferSize);
     } else {
         Serial.println("Failed to load pattern into renderer");
     }
@@ -1051,6 +1103,9 @@ void setup() {
             Serial.println("Pattern renderer initialized");
             // Update with current LED configuration
             patternRenderer->updateMatrixConfig();
+            // Restore the last-running pattern from flash (if any) so it resumes
+            // on power-on instead of starting blank.
+            restorePatternFromFlash();
         } else {
             Serial.println("ERROR: Failed to initialize pattern renderer!");
             criticalSystemsOK = false;
