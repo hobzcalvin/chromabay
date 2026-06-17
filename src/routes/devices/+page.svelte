@@ -367,13 +367,17 @@
 
   async function checkForUpdateSilently(deviceId: string) {
     const settings = getDeviceSettings(deviceId);
-    if (!settings.deviceInfo || firmwareRegistry.length === 0) return;
-    
+    // Don't bail when device info is missing — if we can't read the current
+    // version we should still surface the latest firmware and offer it.
+    if (firmwareRegistry.length === 0) return;
+
     try {
-      settings.latestFirmware = findLatestFirmware(firmwareRegistry, settings.deviceInfo.hw_ver);
-      if (settings.latestFirmware && settings.latestFirmware.version !== settings.deviceInfo.fw_ver) {
-        settings.showUpdateConfirmation = true;
-      }
+      settings.latestFirmware = findLatestFirmware(firmwareRegistry, settings.deviceInfo?.hw_ver);
+      // Offer an update unless we positively know the device is already on the
+      // latest version. Unknown current version => offer (better to ask).
+      settings.showUpdateConfirmation =
+        !!settings.latestFirmware &&
+        settings.deviceInfo?.fw_ver !== settings.latestFirmware.version;
       deviceSettings = { ...deviceSettings };
     } catch (error: any) {
       console.error('Silent firmware check error:', error);
@@ -570,20 +574,19 @@
                         </div>
                       {/if}
                     </div>
-                  {:else if settings.showUpdateConfirmation && settings.latestFirmware}
+                  {:else if settings.latestFirmware && settings.deviceInfo?.fw_ver === settings.latestFirmware.version}
+                    <p>Firmware is up to date - Current: {settings.deviceInfo.fw_ver}</p>
+                  {:else if settings.latestFirmware}
                     <div class="update-available">
-                      <p>New firmware available: <strong>{settings.latestFirmware.version}</strong></p>
+                      <p>Latest firmware: <strong>{settings.latestFirmware.version}</strong> (current: {settings.deviceInfo?.fw_ver || 'unknown'})</p>
                       <div class="update-actions">
                         <button class="btn success" on:click={() => handlePerformOTAUpdate(device.deviceId)}>
                           Update to {settings.latestFirmware.version}
                         </button>
-                        <button class="btn secondary small" on:click={() => settings.showUpdateConfirmation = false}>
-                          Dismiss
-                        </button>
                       </div>
                     </div>
                   {:else}
-                    <p>Firmware is up to date - Current: {settings.deviceInfo?.fw_ver || 'Unknown'}</p>
+                    <p>No firmware available in the registry yet.</p>
                   {/if}
                 </div>
               </div>
@@ -662,20 +665,19 @@
                         </div>
                       {/if}
                     </div>
-                  {:else if settings.showUpdateConfirmation && settings.latestFirmware}
+                  {:else if settings.latestFirmware && settings.deviceInfo?.fw_ver === settings.latestFirmware.version}
+                    <p>Firmware is up to date - Current: {settings.deviceInfo.fw_ver}</p>
+                  {:else if settings.latestFirmware}
                     <div class="update-available">
-                      <p>New firmware available: <strong>{settings.latestFirmware.version}</strong></p>
+                      <p>Latest firmware: <strong>{settings.latestFirmware.version}</strong> (current: {settings.deviceInfo?.fw_ver || 'unknown'})</p>
                       <div class="update-actions">
                         <button class="btn success" on:click={() => handlePerformOTAUpdate(device.deviceId)}>
                           Update to {settings.latestFirmware.version}
                         </button>
-                        <button class="btn secondary small" on:click={() => settings.showUpdateConfirmation = false}>
-                          Dismiss
-                        </button>
                       </div>
                     </div>
                   {:else}
-                    <p>Firmware is up to date - Current: {settings.deviceInfo?.fw_ver || 'Unknown'}</p>
+                    <p>No firmware available in the registry yet.</p>
                   {/if}
                 </div>
               </div>

@@ -507,15 +507,25 @@ export async function fetchFirmwareRegistry(registryUrl: string = "/firmware/esp
   }
 }
 
-export function findLatestFirmware(registry: FirmwareRegistryEntry[], currentHwVersion: string): FirmwareRegistryEntry | null {
-  const compatibleFirmwares = registry.filter(entry => entry.hardwareVersion === currentHwVersion);
-  if (compatibleFirmwares.length === 0) {
-    console.log(`[OTA] No compatible firmware found for hardware version: ${currentHwVersion}`);
+export function findLatestFirmware(registry: FirmwareRegistryEntry[], currentHwVersion?: string): FirmwareRegistryEntry | null {
+  if (registry.length === 0) {
+    console.log('[OTA] Firmware registry is empty');
     return null;
   }
-  // Assuming registry is sorted newest first by the GHA
-  const latest = compatibleFirmwares[0];
-  console.log(`[OTA] Latest compatible firmware found: ${latest.version} for HW ${currentHwVersion}`);
+  // Newest entry by build date (don't rely on registry ordering).
+  const byDateDesc = [...registry].sort((a, b) => b.date.localeCompare(a.date));
+  // Prefer firmware matching the device's hardware version, but never let a
+  // hardware mismatch hide an available update — fall back to newest overall.
+  // (All targets are generic ESP32s, so this is belt-and-suspenders.)
+  const compatible = currentHwVersion
+    ? byDateDesc.filter(e => e.hardwareVersion === currentHwVersion)
+    : [];
+  const latest = compatible[0] ?? byDateDesc[0];
+  if (currentHwVersion && compatible.length === 0) {
+    console.log(`[OTA] No firmware tagged for HW ${currentHwVersion}; falling back to newest overall: ${latest.version} (${latest.date})`);
+  } else {
+    console.log(`[OTA] Latest firmware: ${latest.version} (${latest.date})`);
+  }
   return latest;
 }
 

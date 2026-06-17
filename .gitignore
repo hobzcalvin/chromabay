@@ -16,6 +16,12 @@ static/native/*
 !static/native/fastled.js
 !static/native/fastled.wasm
 
+# Firmware registry + binaries — these live ONLY on gh-pages, published by
+# esp32-release.yml. Committing them here lets a web deploy clobber the live
+# registry (static/* is copied into the build output).
+/firmware
+static/firmware
+
 # OS
 .DS_Store
 Thumbs.db
