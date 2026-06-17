@@ -257,6 +257,13 @@
   }
   
   .rotary-knob {
+    /* Scale the fixed 207px viewBox down to the container's actual `size`, so the
+       visual center matches the gesture center (which the engine derives from the
+       container's bounding box). A mismatch makes the value jump the instant you
+       start dragging, since spin angle is atan2 around that center. */
+    display: block;
+    width: 100%;
+    height: 100%;
     cursor: pointer;
     transition: transform 0.1s ease;
   }

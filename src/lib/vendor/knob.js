@@ -591,7 +591,9 @@ let Knob;
      * @return {Number} `value`
      */
     val: function(value) {
-      if(value) {
+      // Use != null (not truthiness) so val(0) actually sets — otherwise a knob
+      // resting at 0 (e.g. hue/saturation) never syncs and jumps on the next grab.
+      if(value != null) {
         this.__validateAndPublishValue(value, true);
       }
       return this.__value;
@@ -603,7 +605,7 @@ let Knob;
      * @return {Number} `angle`
      */
     angle: function(angle) {
-      if(angle) {
+      if(angle != null) {
         this.__validateAndPublishAngle(angle, true);
       }
       return this.__angle;
@@ -926,12 +928,18 @@ let Knob;
     __angleFromValue: function(value) {
       const self = this;
 
-      // If angle and value bounds are real, map angle directly to value
+      // If angle and value bounds are real, map angle directly to value.
+      // FIX (chromabay): this must be the TRUE INVERSE of __valueFromAngles, which
+      // maps angleStart->valueMax and angleEnd->valueMin. The upstream code mapped
+      // valueMin->angleStart (the mirror), so val(v) set an angle that
+      // __valueFromAngles then read back as (valueMax+valueMin - v). The result was a
+      // value/indicator jump the instant a gesture started (90° at mid-range, up to
+      // 180° near the ends). Mapping valueMax->angleStart makes the round-trip stable.
       if (isFinite(self.options.valueMin) &&
         isFinite(self.options.valueMax) &&
         self.options.angleStart != Number.NEGATIVE_INFINITY &&
         self.options.angleEnd != Number.POSITIVE_INFINITY) {
-        return map(value, self.options.valueMin, self.options.valueMax, self.options.angleStart, self.options.angleEnd);
+        return map(value, self.options.valueMax, self.options.valueMin, self.options.angleStart, self.options.angleEnd);
       }
 
       // If bounds aren't real, just increase/decrease angle based on the change in value.
@@ -1077,7 +1085,10 @@ let Knob;
   }
 })();
 
-// Vendored from https://github.com/jherrm/knobs (jherrm/knobs). Only this single
-// line is added — the gesture logic above is unmodified. ES export so the Svelte
-// RotaryKnob can import the otherwise-global `Knob`.
+// Vendored from https://github.com/jherrm/knobs (jherrm/knobs). Modifications from
+// upstream, each marked with a "FIX (chromabay)" comment:
+//   - __angleFromValue: made the true inverse of __valueFromAngles (was mirrored,
+//     causing a value jump on grab).
+//   - val()/angle(): use `!= null` instead of truthiness so a value/angle of 0 sets.
+// Plus this ES export so the Svelte RotaryKnob can import the otherwise-global `Knob`.
 export { Knob };

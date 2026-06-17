@@ -25,7 +25,41 @@ import { get } from 'svelte/store';
   }
   
   let dynamicKnobs: InteractiveKnob[] = [];
-  
+
+  // --- Knob layouts (1-6) ---
+  // Deliberate, evenly-spaced positions as [left%, top%] of the screen. Tuned for a
+  // phone held vertically (single column when few; two columns + corners when many)
+  // but the percentages + responsive sizing below adapt to any aspect ratio.
+  //   1: center · 2-3: stacked vertically · 4: corners · 5: corners + center
+  //   6: two columns of three
+  const KNOB_LAYOUTS: Record<number, [number, number][]> = {
+    1: [[50, 50]],
+    2: [[50, 33], [50, 67]],
+    3: [[50, 22], [50, 50], [50, 78]],
+    4: [[28, 28], [72, 28], [28, 72], [72, 72]],
+    5: [[28, 27], [72, 27], [50, 50], [28, 73], [72, 73]],
+    6: [[30, 22], [70, 22], [30, 50], [70, 50], [30, 78], [70, 78]],
+  };
+  // Columns/rows each layout occupies, for sizing knobs so they never overlap.
+  const LAYOUT_COLS: Record<number, number> = { 1: 1, 2: 1, 3: 1, 4: 2, 5: 2, 6: 2 };
+  const LAYOUT_ROWS: Record<number, number> = { 1: 1, 2: 2, 3: 3, 4: 2, 5: 3, 6: 3 };
+
+  let innerWidth = 0;
+  let innerHeight = 0;
+
+  $: knobCount = Math.min(dynamicKnobs.length, 6);
+  $: knobPositions = KNOB_LAYOUTS[knobCount] ?? [];
+  // Fit each knob inside its grid cell, reserving room for the label, then clamp.
+  $: knobSize = (() => {
+    if (knobCount === 0 || innerWidth === 0 || innerHeight === 0) return 160;
+    const cellW = innerWidth / LAYOUT_COLS[knobCount];
+    const cellH = innerHeight / LAYOUT_ROWS[knobCount];
+    const byWidth = cellW * 0.8;
+    const byHeight = cellH * 0.78 - 36; // ~36px reserved for the label
+    return Math.round(Math.max(88, Math.min(byWidth, byHeight, 240)));
+  })();
+  $: labelFontPx = Math.round(Math.max(11, Math.min(18, knobSize * 0.1)));
+
   // Make sure dynamicKnobs is reactive
   // $: console.log('🎛️ dynamicKnobs updated:', dynamicKnobs.length);
   
@@ -188,22 +222,27 @@ import { get } from 'svelte/store';
   });
 </script>
 
+<svelte:window bind:innerWidth bind:innerHeight />
+
 <!-- Full-screen pattern renderer -->
 <PatternRenderer fullscreen={true} />
 
 <!-- Dynamic rotary knobs overlay -->
 {#if dynamicKnobs.length > 0}
-  <div class="knobs-overlay" class:many-knobs={dynamicKnobs.length > 3}>
-    {#each dynamicKnobs as knob (knob.nodeId + '-' + knob.paramName)}
-      <div class="knob-container">
-              <RotaryKnob
-                bind:value={knob.value}
-                min={knob.min}
-                max={knob.max}
-                step={knob.step}
-                size={dynamicKnobs.length > 4 ? 150 : 200}
-              />
-        <div class="knob-label">{knob.paramLabel}</div>
+  <div class="knobs-overlay">
+    {#each dynamicKnobs.slice(0, 6) as knob, i (knob.nodeId + '-' + knob.paramName)}
+      <div
+        class="knob-container"
+        style="left: {knobPositions[i]?.[0] ?? 50}%; top: {knobPositions[i]?.[1] ?? 50}%;"
+      >
+        <RotaryKnob
+          bind:value={knob.value}
+          min={knob.min}
+          max={knob.max}
+          step={knob.step}
+          size={knobSize}
+        />
+        <div class="knob-label" style="font-size: {labelFontPx}px; max-width: {knobSize + 48}px;">{knob.paramLabel}</div>
       </div>
     {/each}
   </div>
@@ -216,39 +255,33 @@ import { get } from 'svelte/store';
 
 
 <style>
+  /* Full-screen overlay; knobs are positioned absolutely from the layout table.
+     The overlay itself ignores pointer events so taps in the gaps reach the
+     pattern behind it; each knob re-enables them. */
   .knobs-overlay {
     position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
+    inset: 0;
     z-index: 10;
-    pointer-events: auto;
-    display: flex;
-    gap: 60px;
-    align-items: center;
-    flex-wrap: wrap;
-    justify-content: center;
-    max-width: 90vw;
-  }
-  
-  .knobs-overlay.many-knobs {
-    gap: 40px;
+    pointer-events: none;
   }
 
   .knob-container {
+    position: absolute;
+    transform: translate(-50%, -50%);
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 16px;
+    gap: 10px;
+    pointer-events: auto;
   }
 
   .knob-label {
     color: white;
-    font-size: 18px;
     font-weight: 500;
     text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8);
     text-align: center;
     pointer-events: none;
+    line-height: 1.2;
   }
 
   .no-knobs-message {
@@ -274,27 +307,9 @@ import { get } from 'svelte/store';
     margin-bottom: 16px;
   }
 
-  /* Responsive design for mobile */
+  /* Responsive design for mobile. The knob grid handles its own sizing/spacing via
+     percentages + JS; only the no-knobs message needs tweaking here. */
   @media (max-width: 768px) {
-    .knobs-overlay {
-      flex-direction: column;
-      gap: 40px;
-      max-height: 80vh;
-      overflow-y: auto;
-    }
-    
-    .knobs-overlay.many-knobs {
-      gap: 30px;
-    }
-    
-    .knob-container {
-      gap: 12px;
-    }
-    
-    .knob-label {
-      font-size: 16px;
-    }
-    
     .no-knobs-message {
       font-size: 16px;
       padding: 0 20px;
