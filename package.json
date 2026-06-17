@@ -28,6 +28,8 @@
 		"esp32:upload": "cd esp32 && pio run --target upload && echo -e '\\a'",
 		"esp32:monitor": "cd esp32 && pio device monitor --baud 115200",
 		"esp32:full": "npm run esp32:upload && npm run esp32:monitor",
+		"drive": "node automation/drive.mjs",
+		"verify:wasm": "node automation/verify-wasm.mjs",
 		"wasm:compile": "cd native && fastled . --just-compile --force-compile --localhost && mkdir -p ../static/native && cp fastled_js/fastled.js ../static/native/ && cp fastled_js/fastled.wasm ../static/native/ && echo '✅ WASM files compiled and copied to static/native/'",
 		"wasm:compile:newbroken": "cd native && fastled . --just-compile --force-compile --web && mkdir -p ../static/native && cp fastled_js/fastled.js ../static/native/ && cp fastled_js/fastled.wasm ../static/native/ && echo '✅ WASM files compiled and copied to static/native/'"
 	},
@@ -43,6 +45,7 @@
 		"gh-pages": "^6.3.0",
 		"husky": "^9.1.7",
 		"jsdom": "^29.1.1",
+		"playwright": "^1.61.0",
 		"svelte": "^5.0.0",
 		"svelte-check": "^4.0.0",
 		"typescript": "^5.0.0",
