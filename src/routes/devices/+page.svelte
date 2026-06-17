@@ -152,8 +152,11 @@
     // Initialize firmware registry
     await initializeFirmwareRegistry();
     
-    // CREATE FAKE DEVICE FOR TESTING (dev mode only)
-    if (dev) {
+    // CREATE FAKE DEVICE FOR TESTING (dev mode only, and only when explicitly opted
+    // in via localStorage — otherwise it clutters the real connected-device list and
+    // gets mistaken for a real device. Enable with:
+    //   localStorage.setItem('chromabay:fakeDevice', '1')
+    if (dev && typeof localStorage !== 'undefined' && localStorage.getItem('chromabay:fakeDevice') === '1') {
       setTimeout(() => {
         const fakeDeviceId = 'fake-test-device-12345';
         const fakeName = 'TEST ESP32 Device';
