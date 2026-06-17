@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.83",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.83.zip",
-  "buildDate": "2026-06-17T17:03:43Z",
-  "commitHash": "d7b91f73155e2a6c874701a46139ef79985fda74",
-  "commitMessage": "Firmware: R/G/B power-on test (0.5s each) before the saved pattern"
+  "version": "0.0.1.84",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.84.zip",
+  "buildDate": "2026-06-17T17:20:18Z",
+  "commitHash": "01f812d128297fbc34aff7b9714483aa4ff0360c",
+  "commitMessage": "Patterns: single global cycle control (default 30s, min 1, fixes disabled input)"
 }
