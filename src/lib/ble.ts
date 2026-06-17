@@ -23,8 +23,17 @@ const connectedDevices = new Map<string, any>();
 // this single chain makes them run strictly one at a time. (OTA's tight write loop
 // deliberately does NOT go through here.)
 let bleOpChain: Promise<unknown> = Promise.resolve();
+const BLE_OP_TIMEOUT_MS = 15000;
 function bleSerial<T>(op: () => Promise<T>): Promise<T> {
-  const run = bleOpChain.then(op, op); // run after the previous op regardless of its outcome
+  // Wrap with a timeout so a single hung BLE op (e.g. a peripheral that vanished
+  // mid-operation) can't wedge the whole queue and silently block every later op.
+  const guarded = () => Promise.race<T>([
+    op(),
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error('BLE op timed out')), BLE_OP_TIMEOUT_MS)
+    )
+  ]);
+  const run = bleOpChain.then(guarded, guarded); // run after the previous op regardless of its outcome
   bleOpChain = run.then(() => {}, () => {}); // never let one failure break the chain
   return run;
 }
@@ -1012,6 +1021,9 @@ export const ColorOrders = {
 // LED Configuration Functions
 
 export async function getLedConfiguration(deviceId: string): Promise<LedConfiguration> {
+  // Logged OUTSIDE the queue so you can see the request was made even if the queue
+  // is backed up behind a slow/hung op.
+  console.log(`[LED Config] ⏳ queued read for ${deviceId}`);
   return bleSerial(async () => {
    try {
     console.log(`[LED Config] Reading config from ${deviceId}…`);

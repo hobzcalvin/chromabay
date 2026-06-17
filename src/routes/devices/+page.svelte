@@ -72,9 +72,11 @@
   // auto-connected devices never loaded their LED config until Settings was opened.
   let initializedDevices = new Set<string>();
   $effect(() => {
+    console.log(`[devices] connected list changed → ${connectedDevicesList.length} device(s):`, connectedDevicesList.map(d => d.deviceId));
     for (const d of connectedDevicesList) {
       if (!initializedDevices.has(d.deviceId)) {
         initializedDevices.add(d.deviceId);
+        console.log(`[devices] initializing ${d.deviceId}`);
         // untrack: initConnectedDevice reads/writes deviceSettings; we only want this
         // effect to re-run on connectedDevicesList changes, not on every state edit.
         untrack(() => initConnectedDevice(d.deviceId));
@@ -390,11 +392,13 @@
   async function loadLedConfig(deviceId: string) {
     const settings = getDeviceSettings(deviceId);
     settings.ledConfigLoading = true;
+    console.log(`[devices] loadLedConfig → ${deviceId}`);
     try {
       settings.ledConfig = await getLedConfiguration(deviceId);
       liveBrightness[deviceId] = settings.ledConfig.globalBrightness;
+      console.log(`[devices] ✅ config loaded for ${deviceId}: ${settings.ledConfig.strips.length} strip(s), brightness ${settings.ledConfig.globalBrightness}`);
     } catch (error: any) {
-      console.error('Get LED config error:', error);
+      console.error(`[devices] ❌ config load FAILED for ${deviceId}:`, error);
       settings.ledConfig = null;
     } finally {
       settings.ledConfigLoading = false;
