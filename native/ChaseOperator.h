@@ -48,19 +48,19 @@ public:
         CRGB chase_color = chase_hsv;
 
         // Proportional bar sizing with 1-pixel minimum.
+        int w = (int)width;
         int barWidth = (int)fmax(1.0f, (size / 100.0f) * (float)width);
-        // Map the [0,1) phase across [-barWidth, width] so the bar creeps IN from
-        // the left edge (startX begins fully off-screen at -barWidth) and creeps
-        // OFF the right edge symmetrically, instead of popping in fully at x=0.
-        float position = normalizedPosition * (float)(width + barWidth) - (float)barWidth;
+        if (barWidth > w) barWidth = w;
+        // Map the [0,1) phase across the full width so the bar travels one whole loop
+        // per cycle, and wrap each pixel toroidally: a bar running off the right edge
+        // reappears on the left (half off right => half on left), with no off-screen gap.
+        float position = normalizedPosition * (float)width;
         int startX = (int)floorf(position);
-        
-        for (int x = startX; x < startX + barWidth && x < (int)width; x++) {
-            if (x >= 0) {
-                for (uint32_t y = 0; y < height; y++) {
-                    uint32_t index = y * width + x;
-                    outputBuffer[index] = chase_color;
-                }
+
+        for (int i = 0; i < barWidth; i++) {
+            int px = ((startX + i) % w + w) % w;
+            for (uint32_t y = 0; y < height; y++) {
+                outputBuffer[y * width + px] = chase_color;
             }
         }
     }
