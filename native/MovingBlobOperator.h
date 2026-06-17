@@ -2,12 +2,18 @@
 
 #include "BaseOperator.h"
 #include <cmath>
+#include <cstdint>
 
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
-
-// Moving Blob operator - creates multiple moving circular blobs
+// Moving Blob operator - three RGB blobs that wander the display with organic,
+// pseudo-random motion. Ported from a reference random-walk model: each blob picks a
+// random velocity + direction, holds it for a random number of frames, then re-rolls.
+// This replaces the old Perlin-noise positioning, which looked mechanical/on-rails.
+//
+// The blobs wrap toroidally (pop off one edge, reappear on the opposite one).
+//
+// Motion is intentionally NOT time-synced across devices: state lives in the operator
+// instance and the RNG is seeded per-instance, so each device drifts independently
+// (the previous version used the shared synced clock, so every device moved alike).
 class MovingBlobOperator : public BaseOperator {
 public:
     void render(
@@ -20,119 +26,110 @@ public:
         uint32_t /* deltaTimeMs */,
         const std::vector<ParameterValue>& parameters
     ) override {
-        float speed = getFloat(parameters, 0, 0.5f);
-        float red_size = getFloat(parameters, 1, 0.3f);
-        float green_size = getFloat(parameters, 2, 0.3f);
-        float blue_size = getFloat(parameters, 3, 0.3f);
-        
-        uint32_t totalPixels = width * height;
-        
-        // Clear the buffer
-        for (uint32_t i = 0; i < totalPixels; i++) {
-            outputBuffer[i] = CRGB::Black;
+        if (width == 0 || height == 0) return;
+
+        float speed = getFloat(parameters, 0, 0.5f);          // 0..1 (was settings.hue)
+        float blob_size[3] = {                                 // 0..1 each (was saturation)
+            getFloat(parameters, 1, 0.3f),
+            getFloat(parameters, 2, 0.3f),
+            getFloat(parameters, 3, 0.3f)
+        };
+
+        const float fw = (float)width;
+        const float fh = (float)height;
+        const float maxDim = fw > fh ? fw : fh;
+
+        // Lazy one-time init: blobs start centered; seed the RNG with per-instance
+        // entropy so two devices running the same pattern diverge.
+        if (!initialized_) {
+            for (int c = 0; c < 3; c++) {
+                xPos_[c] = fw * 0.5f;
+                yPos_[c] = fh * 0.5f;
+                steps_[c] = 0;
+            }
+            rng_ = (uint32_t)((uintptr_t)this) ^ (timestampMs * 2654435761u) ^ 0x9e3779b9u;
+            if (rng_ == 0) rng_ = 0xDEADBEEFu;
+            initialized_ = true;
         }
-        
-        // Time factor for Perlin noise animation (speed now 0-10 range)
-        uint16_t time_factor = (uint16_t)(timestampMs * speed * 250.0f);
-        
-        // Store blob sizes and colors
-        float blob_sizes[3] = { red_size, green_size, blue_size };
-        CRGB blob_colors[3] = { CRGB::Red, CRGB::Green, CRGB::Blue };
-        
-        // Create RGB blobs
-        const int num_blobs = 3;
-        for (int blob = 0; blob < num_blobs; blob++) {
-            // Skip blob if size is 0 (no blob)
-            if (blob_sizes[blob] <= 0.0f) continue;
-            // Use Perlin noise to create organic movement for each blob
-            // Each blob has different noise coordinates to move independently
-            uint16_t blob_noise_base = blob * 10000; // Separate noise space for each blob
-            
-            // Give each blob independent time progression
-            float time_scale = 1.0f + (blob * 0.3f); // Each blob moves at slightly different speed
-            uint16_t blob_time_offset = blob * 20000; // Each blob starts at different time offset
-            uint16_t blob_time_factor = blob_time_offset + (uint16_t)(time_factor * time_scale);
-            
-            // Generate X position using Perlin noise (3x range: -1.0 to 2.0)
-            // Use inoise16 for much higher precision (65536 values vs 256)
-            uint16_t noise_x = inoise16(blob_noise_base, blob_time_factor, 0);
-            float blob_x_raw = -1.0f + 3.0f * ((float)noise_x / 65535.0f);
-            
-            // Generate Y position using Perlin noise (3x range: -1.0 to 2.0)
-            // Use inoise16 for much higher precision (65536 values vs 256)
-            uint16_t noise_y = inoise16(blob_noise_base, blob_time_factor, 10000);
-            float blob_y_raw = -1.0f + 3.0f * ((float)noise_y / 65535.0f);
-            
-            // Calculate blob size based on parameter (1.0 = full display coverage)
-            float current_blob_size = blob_sizes[blob];
-            // Convert to radius: size 1.0 should cover roughly entire display diagonal
-            float blob_radius = current_blob_size * 3.0f; // 0.7 gives good full coverage at 1.0
-            
-            // Loop through all pixels
-            for (uint32_t y = 0; y < height; y++) {
-                for (uint32_t x = 0; x < width; x++) {
-                    uint32_t index = y * width + x;
-                    
-                    // Get normalized coordinates
-                    float norm_x = (float)x / (float)width;
-                    float norm_y = (float)y / (float)height;
-                    
-                    // Calculate distance from blob center considering wrapping
-                    // We need to check the blob at multiple virtual positions due to wrapping
-                    float min_distance = 999999.0f; // Start with a large value
-                    
-                    // Check blob at various wrapped positions (-1, 0, +1 offsets for both x and y)
-                    for (int wrap_x = -1; wrap_x <= 1; wrap_x++) {
-                        for (int wrap_y = -1; wrap_y <= 1; wrap_y++) {
-                            float virtual_blob_x = blob_x_raw + wrap_x;
-                            float virtual_blob_y = blob_y_raw + wrap_y;
-                            
-                            float dx = norm_x - virtual_blob_x;
-                            float dy = norm_y - virtual_blob_y;
-                            float distance = sqrt(dx * dx + dy * dy);
-                            
-                            if (distance < min_distance) {
-                                min_distance = distance;
-                            }
-                        }
-                    }
-                    
-                    float distance = min_distance;
-                    
-                    // Calculate intensity based on distance and blob radius (soft falloff)
-                    float intensity = 1.0f - (distance / blob_radius);
-                    intensity = fmax(0.0f, intensity);
-                    //intensity = intensity * intensity; // Quadratic falloff for smoother edges
-                    
-                    if (intensity > 0.0f) {
-                        // Get existing pixel color
-                        CRGB existing_color = outputBuffer[index];
-                        
-                        // Create new blob color using the RGB color with intensity
-                        CRGB base_color = blob_colors[blob];
-                        CRGB blob_color = CRGB(
-                            (uint8_t)(base_color.r * intensity),
-                            (uint8_t)(base_color.g * intensity),
-                            (uint8_t)(base_color.b * intensity)
-                        );
-                        
-                        // Blend with existing color (additive)
-                        uint16_t new_r = existing_color.r + blob_color.r;
-                        uint16_t new_g = existing_color.g + blob_color.g;
-                        uint16_t new_b = existing_color.b + blob_color.b;
-                        
-                        // Clamp to 255
-                        outputBuffer[index] = CRGB(
-                            (uint8_t)fmin(255, new_r),
-                            (uint8_t)fmin(255, new_g),
-                            (uint8_t)fmin(255, new_b)
-                        );
-                    }
+
+        // Per-frame duration in ms, derived from the timestamp (don't trust deltaTimeMs).
+        uint32_t dt;
+        if (haveLastTs_) {
+            dt = (timestampMs >= lastTs_) ? (timestampMs - lastTs_) : 16u;
+        } else {
+            dt = 16u;
+        }
+        lastTs_ = timestampMs;
+        haveLastTs_ = true;
+        if (dt < 1u) dt = 1u;
+        if (dt > 100u) dt = 100u; // clamp so a stall doesn't teleport a blob
+
+        // Blob radius in pixels (size 1.0 ~ largest display dimension).
+        float size[3] = { blob_size[0] * maxDim, blob_size[1] * maxDim, blob_size[2] * maxDim };
+
+        // --- Render the blobs (per-channel linear falloff, wrapping distance) ---
+        for (uint32_t y = 0; y < height; y++) {
+            for (uint32_t x = 0; x < width; x++) {
+                uint8_t rgb[3] = { 0, 0, 0 };
+                for (int c = 0; c < 3; c++) {
+                    if (size[c] <= 0.0f) continue;
+                    float xd = wrapDist((float)x, xPos_[c], fw);
+                    float yd = wrapDist((float)y, yPos_[c], fh);
+                    float dist = sqrtf(xd * xd + yd * yd);
+                    float v = 255.0f * (size[c] - fminf(size[c], dist)) / size[c];
+                    if (v < 0.0f) v = 0.0f;
+                    else if (v > 255.0f) v = 255.0f;
+                    rgb[c] = (uint8_t)v;
                 }
+                outputBuffer[y * width + x] = CRGB(rgb[0], rgb[1], rgb[2]);
             }
         }
+
+        // Re-roll all segments immediately if the speed changed (apply it live).
+        if (speed != lastSpeed_) {
+            for (int c = 0; c < 3; c++) steps_[c] = 0;
+            lastSpeed_ = speed;
+        }
+
+        // --- Move the blobs ---
+        // On a >1px display, allow an axis increment near zero so motion isn't always
+        // diagonal; a single-pixel display forces movement along the meaningful axis.
+        bool allowZero = (width > 1 || height > 1);
+        long rangeX = (long)(fw * speed * 255.0f);
+        long rangeY = (long)(fh * speed * 255.0f);
+        for (int c = 0; c < 3; c++) {
+            if (steps_[c] <= 0) {
+                long loX = allowZero ? 0 : rangeX / 2;
+                long loY = allowZero ? 0 : rangeY / 2;
+                // pixels per ms; +100 guarantees a minimum drift even at speed 0.
+                xInc_[c] = (float)(randRange(loX, rangeX) + 100) / 50000.0f;
+                yInc_[c] = (float)(randRange(loY, rangeY) + 100) / 50000.0f;
+                if (randRange(0, 2)) xInc_[c] = -xInc_[c];
+                if (randRange(0, 2)) yInc_[c] = -yInc_[c];
+                // Hold this heading for a random span of frames (scaled by frame time)...
+                long candidate = randRange((long)dt * 5, (long)dt * 25);
+                // ...but cap the segment so a blob travels at most a couple of display
+                // lengths before re-rolling, instead of cycling around and around.
+                float pxPerMs = sqrtf(xInc_[c] * xInc_[c] + yInc_[c] * yInc_[c]);
+                if (pxPerMs > 0.0f) {
+                    const float MAX_SEGMENT_TRAVEL = maxDim * 2.0f; // ~2 traversals max
+                    long maxSteps = (long)(MAX_SEGMENT_TRAVEL / (pxPerMs * (float)dt));
+                    if (maxSteps < 1) maxSteps = 1;
+                    if (candidate > maxSteps) candidate = maxSteps;
+                }
+                steps_[c] = candidate < 1 ? 1 : candidate;
+            }
+            xPos_[c] += xInc_[c] * (float)dt;
+            yPos_[c] += yInc_[c] * (float)dt;
+            // Toroidal wrap.
+            while (xPos_[c] >= fw) xPos_[c] -= fw;
+            while (xPos_[c] < 0.0f) xPos_[c] += fw;
+            while (yPos_[c] >= fh) yPos_[c] -= fh;
+            while (yPos_[c] < 0.0f) yPos_[c] += fh;
+            steps_[c]--;
+        }
     }
-    
+
     const char* getName() const override {
         return "movingblob";
     }
@@ -140,7 +137,7 @@ public:
     const char* getDisplayName() const override {
         return "Moving Blobs";
     }
-    
+
     std::vector<ParameterInfo> getParameterInfo() const override {
         return {
             ParameterInfo("speed", "Speed", ParameterInfo::FLOAT, 0.5f, 0.0f, 1.0f),
@@ -149,6 +146,38 @@ public:
             ParameterInfo("blue_size", "Blue Blob Size", ParameterInfo::FLOAT, 0.3f, 0.0f, 1.0f)
         };
     }
+
+private:
+    // Wrapping (toroidal) distance between two coordinates on an axis of length span.
+    static inline float wrapDist(float a, float b, float span) {
+        float d = fabsf(a - b);
+        float w = span - d;
+        return d < w ? d : w;
+    }
+
+    // Per-instance xorshift32 PRNG (independent per blob set -> devices diverge).
+    inline uint32_t nextRand() {
+        uint32_t x = rng_;
+        x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+        rng_ = x;
+        return x;
+    }
+    // Half-open [lo, hi); returns lo if the range is empty.
+    inline long randRange(long lo, long hi) {
+        if (hi <= lo) return lo;
+        return lo + (long)(nextRand() % (uint32_t)(hi - lo));
+    }
+
+    bool initialized_ = false;
+    bool haveLastTs_ = false;
+    uint32_t lastTs_ = 0;
+    uint32_t rng_ = 0;
+    float lastSpeed_ = -1.0f;
+    float xPos_[3] = {0, 0, 0};
+    float yPos_[3] = {0, 0, 0};
+    float xInc_[3] = {0, 0, 0};
+    float yInc_[3] = {0, 0, 0};
+    long steps_[3] = {0, 0, 0};
 };
 
-REGISTER_OPERATOR(MovingBlobOperator); 
+REGISTER_OPERATOR(MovingBlobOperator);
