@@ -1044,9 +1044,12 @@ export async function setLedConfiguration(deviceId: string, config: LedConfigura
  */
 export async function sendTimestampSync(deviceId: string): Promise<void> {
   try {
-    // Get current system time in milliseconds
-    const currentTimestamp = Date.now();
-    
+    // Canonical clock = integer ms since page load (performance.now), the SAME
+    // clock the browser preview feeds its operators (see flowStore). Devices sync
+    // to THIS so preview and hardware render the same frame. Monotonic (no NTP
+    // jumps); resets on page reload, which the next periodic sync corrects.
+    const currentTimestamp = Math.floor(performance.now());
+
     // Convert to 64-bit little-endian binary format
     const buffer = new ArrayBuffer(8);
     const view = new DataView(buffer);
