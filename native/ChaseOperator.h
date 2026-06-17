@@ -42,16 +42,18 @@ public:
         // Use normalized speed (0-1 coordinate system) instead of width-dependent
         float normalizedSpeed = speed / 100.0f; // Speed parameter now represents % of width per second
         float normalizedPosition = fmod(timeInSeconds * normalizedSpeed, 1.0f);
-        float position = normalizedPosition * (float)width;
-        
+
         // Create chase color
         CHSV chase_hsv((uint8_t)hue, (uint8_t)saturation, (uint8_t)value);
         CRGB chase_color = chase_hsv;
-        
-        // Draw vertical bar at current position
-        int startX = (int)position;
-        // Use proportional sizing with 1-pixel minimum
+
+        // Proportional bar sizing with 1-pixel minimum.
         int barWidth = (int)fmax(1.0f, (size / 100.0f) * (float)width);
+        // Map the [0,1) phase across [-barWidth, width] so the bar creeps IN from
+        // the left edge (startX begins fully off-screen at -barWidth) and creeps
+        // OFF the right edge symmetrically, instead of popping in fully at x=0.
+        float position = normalizedPosition * (float)(width + barWidth) - (float)barWidth;
+        int startX = (int)floorf(position);
         
         for (int x = startX; x < startX + barWidth && x < (int)width; x++) {
             if (x >= 0) {
