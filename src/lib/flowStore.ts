@@ -439,13 +439,13 @@ class WasmOperatorManager {
     }
     
     // Execute the WASM operator
-    // The WASM operators are the SAME C++ as the ESP32 firmware (compiled by
-    // native/build-wasm.sh), so they must be fed the IDENTICAL time quantity or
-    // the preview and hardware drift apart. The firmware feeds real wall-clock
-    // milliseconds (its clock is synced to Date.now() over BLE) wrapped at 1e6
-    // (floatFriendlyTime in pattern_renderer_base.cpp). Match it exactly — NOT
-    // performance.now() (a different epoch) and NOT a *100 scale.
-    const operatorTimestamp = Date.now() % 1000000;
+    // Browser preview timescale. This intentionally runs ~100x faster than
+    // wall-clock — the historical scale the patterns were authored/viewed at.
+    // Feeding real ms (Date.now()) made the preview ~100x too slow ("insanely
+    // slow", regressed in a9e7343). Keep the *100 scale. (Matching the ESP32's
+    // real-ms clock for true preview↔hardware sync is a SEPARATE, deferred
+    // problem — doing it here without rescaling the operators breaks the preview.)
+    const operatorTimestamp = Math.floor(performance.now() * 100) & 0xFFFFFFFF;
     const deltaTimeMs = Math.floor(deltaTime * 1000);
     
     // Get buffer pointers - use 0 as null pointer for unused inputs
