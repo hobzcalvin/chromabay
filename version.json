@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.82",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.82.zip",
-  "buildDate": "2026-06-17T16:33:39Z",
-  "commitHash": "a9e73437578dc245319a269240991d794eceec28",
-  "commitMessage": "Self-hosted WASM build (emcc + FastLED stub) — replaces the 3rd-party web compiler"
+  "version": "0.0.1.83",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.83.zip",
+  "buildDate": "2026-06-17T17:03:43Z",
+  "commitHash": "d7b91f73155e2a6c874701a46139ef79985fda74",
+  "commitMessage": "Firmware: R/G/B power-on test (0.5s each) before the saved pattern"
 }
