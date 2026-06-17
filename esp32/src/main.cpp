@@ -52,6 +52,9 @@ PatternRendererBase* patternRenderer = nullptr;
 // Timestamp Sync Characteristic - for synchronizing time across devices
 #define CHARACTERISTIC_UUID_TIMESTAMP_SYNC "a0be83ef-8dc9-47f0-ab40-b19721d20ed1"
 
+// Brightness Characteristic - live global brightness (single byte, applied immediately)
+#define CHARACTERISTIC_UUID_BRIGHTNESS "a0be83f1-8dc9-47f0-ab40-b19721d20ed1"
+
 // OTA Constants
 #define MAX_BLE_CHUNK_SIZE 500 
 
@@ -78,10 +81,27 @@ NimBLECharacteristic* pTimestampSyncCharacteristic = nullptr;
 // Playlist Sync Characteristic (pattern cycling)
 NimBLECharacteristic* pPlaylistSyncCharacteristic = nullptr;
 
+// Brightness Characteristic (live global brightness)
+NimBLECharacteristic* pBrightnessCharacteristic = nullptr;
+
 // Pattern Storage
 static uint8_t* patternBuffer = nullptr;
 static size_t patternBufferSize = 0;
 static bool newPatternAvailable = false;
+// Guards the pattern buffer hand-off between the BLE host task (onWrite) and the
+// Arduino loop task (processReceivedPattern). Without it, a rapid follow-up write
+// (e.g. dragging a slider) frees patternBuffer while loadPatternFromMessagePack is
+// mid-parse on the loop task -> use-after-free -> garbage frame (rainbow artifacts).
+static portMUX_TYPE patternMux = portMUX_INITIALIZER_UNLOCKED;
+
+// Live global brightness: the app sends a single byte on each slider tick. We stage
+// it here (BLE task) and apply it from loop() via ledMgr.setGlobalBrightness() — the
+// lightweight path that just rescales output at show(), no strip reallocation. The
+// persisted save is debounced so dragging doesn't thrash flash.
+static volatile bool newBrightnessAvailable = false;
+static volatile uint8_t pendingBrightness = 255;
+static bool brightnessDirty = false;
+static uint32_t brightnessChangedAtMs = 0;
 
 // Pattern cycling (playlist): the app sends an ordered set of patterns + an
 // interval; each device picks the active one from its SYNCED clock so all
@@ -725,30 +745,30 @@ class LedConfigSetCallbacks : public NimBLECharacteristicCallbacks {
 class PatternSyncCallbacks : public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic* pCharacteristic) {
         std::string rxValue = pCharacteristic->getValue();
-        
-        if (rxValue.length() > 0) {
-            //Serial.printf("Pattern Sync: Received %d bytes\n", rxValue.length());
-            
-            // Free existing pattern buffer if it exists
-            if (patternBuffer != nullptr) {
-                free(patternBuffer);
-                patternBuffer = nullptr;
-                patternBufferSize = 0;
-            }
-            
-            // Allocate new buffer and copy pattern data
-            patternBufferSize = rxValue.length();
-            patternBuffer = (uint8_t*)malloc(patternBufferSize);
-            
-            if (patternBuffer != nullptr) {
-                memcpy(patternBuffer, rxValue.data(), patternBufferSize);
-                newPatternAvailable = true;
-                //Serial.println("Pattern Sync: Pattern received and stored successfully");
-            } else {
-                Serial.println("Pattern Sync: Failed to allocate memory for pattern");
-                patternBufferSize = 0;
-            }
+        if (rxValue.length() == 0) return;
+
+        // Build the new buffer OUTSIDE the critical section — malloc/free must not
+        // run while holding a portMUX spinlock.
+        size_t len = rxValue.length();
+        uint8_t* buf = (uint8_t*)malloc(len);
+        if (buf == nullptr) {
+            Serial.println("Pattern Sync: Failed to allocate memory for pattern");
+            return;
         }
+        memcpy(buf, rxValue.data(), len);
+
+        // Atomically publish the new buffer to the loop task. We only swap pointers
+        // under the lock; the previous unconsumed buffer is freed afterwards, outside
+        // the lock. The loop task takes ownership before parsing (see
+        // processReceivedPattern), so it can never read a buffer we free here.
+        uint8_t* old = nullptr;
+        portENTER_CRITICAL(&patternMux);
+        old = patternBuffer;
+        patternBuffer = buf;
+        patternBufferSize = len;
+        newPatternAvailable = true;
+        portEXIT_CRITICAL(&patternMux);
+        if (old != nullptr) free(old);
     }
 };
 
@@ -795,6 +815,19 @@ class TimestampSyncCallbacks : public NimBLECharacteristicCallbacks {
                          syncedTimestampMs, syncedLocalTime);
         } else {
             Serial.printf("Invalid timestamp sync length: %d bytes (expected 8)\n", value.length());
+        }
+    }
+};
+
+// Live global brightness. The app writes a single byte (0-255) on each slider tick.
+// We only stage it here; applying touches the LED strips and must run on the loop
+// task (see processReceivedBrightness).
+class BrightnessCallbacks : public NimBLECharacteristicCallbacks {
+    void onWrite(NimBLECharacteristic* pCharacteristic) {
+        std::string value = pCharacteristic->getValue();
+        if (value.length() >= 1) {
+            pendingBrightness = (uint8_t)value[0];
+            newBrightnessAvailable = true;
         }
     }
 };
@@ -941,30 +974,52 @@ void updateCycle() {
 
 // Function to process received pattern data
 void processReceivedPattern() {
-    if (!newPatternAvailable || patternBuffer == nullptr || patternRenderer == nullptr) {
-        return;
+    if (patternRenderer == nullptr) return;
+
+    // Take exclusive ownership of the pending buffer under the lock, so a concurrent
+    // BLE write (rapid slider drags) can't free it while we parse below.
+    uint8_t* buf = nullptr;
+    size_t size = 0;
+    portENTER_CRITICAL(&patternMux);
+    if (newPatternAvailable && patternBuffer != nullptr) {
+        buf = patternBuffer;
+        size = patternBufferSize;
+        patternBuffer = nullptr;
+        patternBufferSize = 0;
+        newPatternAvailable = false;
     }
-    
-    //Serial.println("Processing received pattern...");
-    
-    // Try to load the pattern into the pattern renderer
-    bool success = patternRenderer->loadPatternFromMessagePack(patternBuffer, patternBufferSize);
-    
+    portEXIT_CRITICAL(&patternMux);
+    if (buf == nullptr) return;
+
+    // We own `buf` now — onWrite will only ever touch a newer buffer, never this one.
+    bool success = patternRenderer->loadPatternFromMessagePack(buf, size);
     if (success) {
-        //Serial.println("Pattern loaded successfully into renderer");
         // A directly-set pattern stops any active cycling.
         cyclingActive = false;
         lastCycleIndex = -1;
         // Persist so the pattern survives a power cycle (restored in setup()).
-        savePatternToFlash(patternBuffer, patternBufferSize);
+        savePatternToFlash(buf, size);
     } else {
         Serial.println("Failed to load pattern into renderer");
     }
-    
-    // Mark pattern as processed
-    newPatternAvailable = false;
 
-    //Serial.println("Pattern processing completed");
+    free(buf);
+}
+
+// Apply staged live brightness from the loop task, and persist it once the slider
+// has settled (debounced to avoid hammering flash during a drag).
+void processReceivedBrightness() {
+    if (newBrightnessAvailable) {
+        uint8_t b = pendingBrightness;
+        newBrightnessAvailable = false;
+        ledMgr.setGlobalBrightness(b);
+        brightnessDirty = true;
+        brightnessChangedAtMs = millis();
+    }
+    if (brightnessDirty && (millis() - brightnessChangedAtMs > 1500)) {
+        configMgr.saveConfiguration();
+        brightnessDirty = false;
+    }
 }
 
 // Function to process a staged LED configuration. Runs from loop() on the
@@ -1305,6 +1360,10 @@ void setup() {
 
             pPlaylistSyncCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_PLAYLIST_SYNC, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY);
             pPlaylistSyncCharacteristic->setCallbacks(new PlaylistSyncCallbacks());
+
+            // Brightness Characteristic (live global brightness, single byte)
+            pBrightnessCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_BRIGHTNESS, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR | NIMBLE_PROPERTY::READ);
+            pBrightnessCharacteristic->setCallbacks(new BrightnessCallbacks());
             
             pService->start();
             updateDeviceInfoCharacteristic();
@@ -1371,6 +1430,7 @@ void loop() {
     processReceivedPattern();
     processReceivedPlaylist();
     processReceivedLedConfig();
+    processReceivedBrightness();
 
     // Finalize a pending OTA off the BLE host task (verify result, end, reboot)
     finalizeOtaIfReady();
