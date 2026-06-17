@@ -21,44 +21,27 @@
     currentName = name;
   });
 
-  // --- Per-device pattern cycling. UI state is ephemeral; the DEVICE persists the
-  // playlist and cycles off its synced clock, so all connected devices switch
-  // together (and keep cycling even if the app disconnects).
-  let cycle: Record<string, { enabled: boolean; interval: number }> = {};
+  // --- Pattern cycling: ONE control for all connected devices. Each device
+  // persists the playlist and cycles off its synced clock, so they switch together.
   $: connectedList = getConnectedDevicesList($connectedDevices);
+  let cycleEnabled = false;
+  let cycleSeconds = 30;
 
-  function getCycle(id: string) {
-    if (!cycle[id]) cycle[id] = { enabled: false, interval: 10 };
-    return cycle[id];
-  }
-
-  async function applyCycle(deviceId: string) {
-    const c = getCycle(deviceId);
-    try {
-      if (c.enabled) {
-        const pats = get(patterns);
-        if (pats.length > 0) await sendPlaylistToDevice(deviceId, pats, c.interval);
-      } else {
-        const cur = get(currentPattern) || get(patterns)[0];
-        if (cur) await sendSinglePatternToDevice(deviceId, cur); // stops cycling on the device
+  async function applyCycle() {
+    cycleSeconds = Math.max(1, Math.floor(Number(cycleSeconds) || 1));
+    for (const device of connectedList) {
+      try {
+        if (cycleEnabled) {
+          const pats = get(patterns);
+          if (pats.length > 0) await sendPlaylistToDevice(device.deviceId, pats, cycleSeconds);
+        } else {
+          const cur = get(currentPattern) || get(patterns)[0];
+          if (cur) await sendSinglePatternToDevice(device.deviceId, cur); // stops cycling
+        }
+      } catch (e) {
+        console.error('Cycle update failed for', device.deviceId, e);
       }
-    } catch (e) {
-      console.error('Cycle update failed for', deviceId, e);
     }
-  }
-
-  function toggleCycle(deviceId: string) {
-    const c = getCycle(deviceId);
-    c.enabled = !c.enabled;
-    cycle = { ...cycle };
-    applyCycle(deviceId);
-  }
-
-  function onIntervalChange(deviceId: string, value: number) {
-    const c = getCycle(deviceId);
-    c.interval = Math.max(1, Math.floor(value) || 1);
-    cycle = { ...cycle };
-    if (c.enabled) applyCycle(deviceId);
   }
 
   // Swipe state
@@ -209,27 +192,12 @@
   </div>
 
   {#if connectedList.length > 0}
-    <div class="cycle-section" style="background:#1a1a2e;border-radius:12px;padding:12px 16px;margin:0 0 16px;">
-      <h2 style="margin:0 0 4px;font-size:1rem;">🔁 Auto-cycle on devices</h2>
-      <p class="subtitle" style="margin:0 0 10px;">Each device rotates through all patterns on its synced clock — connected devices switch together.</p>
-      {#each connectedList as device (device.deviceId)}
-        {@const c = getCycle(device.deviceId)}
-        <div class="cycle-row" style="display:flex;align-items:center;gap:12px;padding:6px 0;">
-          <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{device.name || 'Device'}</span>
-          <label style="display:flex;align-items:center;gap:6px;">
-            <input type="checkbox" checked={c.enabled} onchange={() => toggleCycle(device.deviceId)} />
-            Cycle
-          </label>
-          <label style="display:flex;align-items:center;gap:6px;opacity:{c.enabled ? 1 : 0.5};">
-            every
-            <input type="number" min="1" max="3600" value={c.interval} style="width:56px;"
-              disabled={!c.enabled}
-              onchange={(e) => onIntervalChange(device.deviceId, +e.currentTarget.value)} />
-            s
-          </label>
-        </div>
-      {/each}
-    </div>
+    <label class="cycle-control" style="display:flex;align-items:center;gap:8px;margin:0 0 16px;">
+      <input type="checkbox" bind:checked={cycleEnabled} onchange={applyCycle} />
+      cycle every
+      <input type="number" min="1" step="1" bind:value={cycleSeconds} disabled={!cycleEnabled} onchange={applyCycle} style="width:64px;" />
+      seconds
+    </label>
   {/if}
 
   {#if patternsList.length === 0}
