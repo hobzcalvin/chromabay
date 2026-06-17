@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.80",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.80.zip",
-  "buildDate": "2026-06-17T07:34:20Z",
-  "commitHash": "4887fe8f15cd0c71dd158c7bd2cdb3118b86fac7",
-  "commitMessage": "Add verify:render — headless WASM render+motion gate"
+  "version": "0.0.1.81",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.81.zip",
+  "buildDate": "2026-06-17T15:29:42Z",
+  "commitHash": "6908519ea44465034a0b82bb029d9feabd18ec2c",
+  "commitMessage": "App: per-device pattern auto-cycle UI + BLE playlist send"
 }
