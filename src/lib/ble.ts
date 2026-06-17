@@ -34,6 +34,7 @@ const CHARACTERISTIC_UUID_OTA_SIGNATURE = "a0be83eb-8dc9-47f0-ab40-b19721d20ed1"
 
 // Pattern Sync Characteristic - for sending messagepack-encoded patterns
 const CHARACTERISTIC_UUID_PATTERN_SYNC = "a0be83ec-8dc9-47f0-ab40-b19721d20ed1";
+const CHARACTERISTIC_UUID_PLAYLIST_SYNC = "a0be83f0-8dc9-47f0-ab40-b19721d20ed1"; // pattern cycling
 
 // LED Configuration Characteristics - for getting/setting strip configuration
 const CHARACTERISTIC_UUID_LED_CONFIG_GET = "a0be83ed-8dc9-47f0-ab40-b19721d20ed1";
@@ -809,6 +810,41 @@ export async function syncPatternToAllDevices(): Promise<void> {
     console.error('Error during pattern sync:', error);
     throw error;
   }
+}
+
+/**
+ * Send a pattern-cycling playlist to ONE device. The device cycles through the
+ * patterns on its SYNCHRONIZED clock, so all connected devices switch together.
+ * Framing (matches firmware PlaylistSyncCallbacks): [u32 intervalMs][u32 count]
+ * then count x ([u32 len][pattern MessagePack]), little-endian.
+ */
+export async function sendPlaylistToDevice(deviceId: string, patterns: any[], intervalSeconds: number): Promise<void> {
+  if (!patterns || patterns.length === 0) return;
+  const intervalMs = Math.max(1, Math.round(intervalSeconds * 1000));
+  const blobs = patterns.map((p) => msgpackEncode(p) as Uint8Array);
+  const total = 8 + blobs.reduce((s, b) => s + 4 + b.byteLength, 0);
+  const out = new Uint8Array(total);
+  const dv = new DataView(out.buffer);
+  let pos = 0;
+  dv.setUint32(pos, intervalMs, true); pos += 4;
+  dv.setUint32(pos, blobs.length, true); pos += 4;
+  for (const b of blobs) {
+    dv.setUint32(pos, b.byteLength, true); pos += 4;
+    out.set(b, pos); pos += b.byteLength;
+  }
+  const dataView = new DataView(out.buffer, 0, total);
+  console.log(`[Playlist] Sending ${blobs.length} patterns, ${intervalMs}ms, ${total} bytes to ${deviceId}`);
+  await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_PLAYLIST_SYNC, dataView);
+}
+
+/**
+ * Stop cycling on ONE device by sending it a single pattern (the firmware
+ * disables cycling whenever a single pattern is applied directly).
+ */
+export async function sendSinglePatternToDevice(deviceId: string, pattern: any): Promise<void> {
+  const msgpackData = msgpackEncode(pattern) as Uint8Array;
+  const dataView = new DataView(msgpackData.buffer, msgpackData.byteOffset, msgpackData.byteLength);
+  await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_PATTERN_SYNC, dataView);
 }
 
 /**
