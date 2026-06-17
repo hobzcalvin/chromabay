@@ -3,86 +3,74 @@ import { defineConfig, type Plugin, type ViteDevServer } from 'vite';
 import { spawn } from 'child_process';
 import { watch } from 'chokidar';
 import path from 'path';
-import fs from 'fs';
 
-// Custom plugin to watch native directory and recompile WASM
+// Custom plugin to watch native/ and recompile the WASM preview on change via our
+// self-hosted build (native/build-wasm.sh, which also deploys to static/native).
 function fastledWatcher(): Plugin {
 	return {
 		name: 'fastled-watcher',
 		configureServer(server: ViteDevServer) {
+			const buildScript = path.resolve('native', 'build-wasm.sh');
 			let isCompiling = false;
-			
-			// Watch native directory, but ignore the output folder
+			let pending = false;
+
+			function compile() {
+				if (isCompiling) { pending = true; return; } // coalesce edits during a build
+				isCompiling = true;
+
+				// `bash native/build-wasm.sh` — same command as `npm run wasm:compile`.
+				const child = spawn('bash', [buildScript], { cwd: process.cwd(), stdio: 'pipe' });
+
+				let output = '';
+				child.stdout?.on('data', (data) => { output += data.toString(); });
+				child.stderr?.on('data', (data) => { output += data.toString(); });
+
+				// CRITICAL: handle spawn failure (e.g. ENOENT) here. Without an 'error'
+				// listener Node throws an unhandled 'error' event that crashes the whole
+				// dev server — which is exactly what used to happen.
+				child.on('error', (err) => {
+					console.error('❌ Could not run native/build-wasm.sh:', err.message);
+					isCompiling = false;
+					runPending();
+				});
+
+				child.on('close', (code) => {
+					if (code === 0) {
+						console.log('✅ WASM compiled → browser reloading...');
+						server.ws.send({ type: 'full-reload' });
+					} else {
+						console.error('❌ WASM compilation failed (exit ' + code + ')');
+						console.log(output);
+					}
+					isCompiling = false;
+					runPending();
+				});
+			}
+
+			function runPending() {
+				if (pending) { pending = false; compile(); }
+			}
+
+			// Watch native/ source files, ignoring build output + the FastLED checkout.
 			const watcher = watch('native', {
 				ignored: [
-					'**/fastled_js/**',  // Ignore output to prevent loops
+					'**/fastled_js/**',     // build output
+					'**/.fastled-src/**',   // bootstrapped FastLED source
 					'**/node_modules/**'
 				],
 				ignoreInitial: true,
 				persistent: true,
 				usePolling: false
 			});
-			
+
 			console.log('👀 Watching native/ for WASM auto-compilation...');
-			
-			watcher.on('change', async (filePath) => {
-				if (isCompiling) return;
-				
-				// Only compile for source files
-				if (!/\.(h|ino|cpp|c)$/.test(filePath)) return;
-				
+
+			watcher.on('change', (filePath) => {
+				if (!/\.(h|ino|cpp|c)$/.test(filePath)) return; // source files only
 				console.log(`🔧 ${path.basename(filePath)} changed → compiling WASM...`);
-				isCompiling = true;
-				
-				try {
-					const child = spawn('fastled', ['--just-compile', '--force-compile', '--web'], {
-						cwd: path.resolve('native'),
-						stdio: 'pipe'
-					});
-					
-					let output = '';
-					child.stdout?.on('data', (data) => { output += data.toString(); });
-					child.stderr?.on('data', (data) => { output += data.toString(); });
-					
-					child.on('close', (code) => {
-						if (code === 0) {
-							// Copy essential files to static directory
-							try {
-								const staticDir = path.join(process.cwd(), 'static', 'native');
-								const sourceDir = path.join(process.cwd(), 'native', 'fastled_js');
-								
-								if (!fs.existsSync(staticDir)) {
-									fs.mkdirSync(staticDir, { recursive: true });
-								}
-								
-								const filesToCopy = ['fastled.js', 'fastled.wasm'];
-								filesToCopy.forEach(file => {
-									const srcPath = path.join(sourceDir, file);
-									const destPath = path.join(staticDir, file);
-									if (fs.existsSync(srcPath)) {
-										fs.copyFileSync(srcPath, destPath);
-									}
-								});
-								
-								console.log('✅ WASM compiled → browser reloading...');
-								server.ws.send({ type: 'full-reload' });
-							} catch (error) {
-								console.error('❌ Failed to copy WASM files:', error);
-							}
-						} else {
-							console.error('❌ WASM compilation failed');
-							// Only show full output on error
-							console.log(output);
-						}
-						isCompiling = false;
-					});
-					
-				} catch (error) {
-					console.error('❌ Failed to start WASM compilation:', error);
-					isCompiling = false;
-				}
+				compile();
 			});
-			
+
 			// Cleanup on server close
 			server.httpServer?.on('close', () => {
 				watcher.close();
