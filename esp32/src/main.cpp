@@ -43,6 +43,7 @@ PatternRendererBase* patternRenderer = nullptr;
 
 // Pattern Sync Characteristic - for receiving messagepack-encoded patterns
 #define CHARACTERISTIC_UUID_PATTERN_SYNC "a0be83ec-8dc9-47f0-ab40-b19721d20ed1"
+#define CHARACTERISTIC_UUID_PLAYLIST_SYNC "a0be83f0-8dc9-47f0-ab40-b19721d20ed1" // pattern cycling playlist
 
 // LED Configuration Characteristics - for getting/setting strip configuration
 #define CHARACTERISTIC_UUID_LED_CONFIG_GET "a0be83ed-8dc9-47f0-ab40-b19721d20ed1"
@@ -74,10 +75,24 @@ NimBLECharacteristic* pLedConfigSetCharacteristic = nullptr;
 // Timestamp Sync Characteristic
 NimBLECharacteristic* pTimestampSyncCharacteristic = nullptr;
 
+// Playlist Sync Characteristic (pattern cycling)
+NimBLECharacteristic* pPlaylistSyncCharacteristic = nullptr;
+
 // Pattern Storage
 static uint8_t* patternBuffer = nullptr;
 static size_t patternBufferSize = 0;
 static bool newPatternAvailable = false;
+
+// Pattern cycling (playlist): the app sends an ordered set of patterns + an
+// interval; each device picks the active one from its SYNCED clock so all
+// connected devices switch at the same instant.
+static uint8_t* playlistBuffer = nullptr;
+static size_t playlistBufferSize = 0;
+static bool newPlaylistAvailable = false;
+static std::vector<std::vector<uint8_t>> playlistPatterns; // per-pattern MessagePack blobs
+static uint32_t playlistIntervalMs = 0;
+static bool cyclingActive = false;
+static int lastCycleIndex = -1;
 
 // LED Config Storage
 // Like patterns, incoming LED configuration is staged here by the BLE write
@@ -737,6 +752,24 @@ class PatternSyncCallbacks : public NimBLECharacteristicCallbacks {
     }
 };
 
+// Playlist Sync Callbacks - receives a pattern-cycling playlist (raw framed blob)
+class PlaylistSyncCallbacks : public NimBLECharacteristicCallbacks {
+    void onWrite(NimBLECharacteristic* pCharacteristic) {
+        std::string rxValue = pCharacteristic->getValue();
+        if (rxValue.length() == 0) return;
+        if (playlistBuffer != nullptr) { free(playlistBuffer); playlistBuffer = nullptr; playlistBufferSize = 0; }
+        playlistBufferSize = rxValue.length();
+        playlistBuffer = (uint8_t*)malloc(playlistBufferSize);
+        if (playlistBuffer != nullptr) {
+            memcpy(playlistBuffer, rxValue.data(), playlistBufferSize);
+            newPlaylistAvailable = true;
+        } else {
+            playlistBufferSize = 0;
+            Serial.println("Playlist Sync: malloc failed");
+        }
+    }
+};
+
 // Timestamp Sync Callbacks - for receiving timestamp synchronization from mobile app
 class TimestampSyncCallbacks : public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic* pCharacteristic) {
@@ -768,6 +801,7 @@ class TimestampSyncCallbacks : public NimBLECharacteristicCallbacks {
 
 // The last-applied pattern is persisted here so it survives a power cycle.
 static const char* PATTERN_FILE = "/current_pattern.mp";
+static const char* PLAYLIST_FILE = "/playlist.bin";
 
 // Persist the raw MessagePack of the currently-applied pattern to flash.
 static void savePatternToFlash(const uint8_t* buf, size_t size) {
@@ -780,6 +814,7 @@ static void savePatternToFlash(const uint8_t* buf, size_t size) {
     size_t written = f.write(buf, size);
     f.close();
     if (written == size) {
+        LittleFS.remove(PLAYLIST_FILE); // single pattern overrides any saved playlist
         Serial.printf("Pattern persisted to flash (%u bytes)\n", (unsigned)size);
     } else {
         Serial.printf("Pattern persist: short write (%u/%u) — removing\n", (unsigned)written, (unsigned)size);
@@ -816,6 +851,94 @@ static void restorePatternFromFlash() {
     free(buf);
 }
 
+// --- Pattern cycling (playlist) ---
+// Playlist framing: [u32 intervalMs][u32 count] then count x ([u32 len][len bytes]),
+// little-endian. Each pattern blob is the same MessagePack the single-pattern path
+// consumes, so cycling reuses loadPatternFromMessagePack unchanged.
+static bool parsePlaylist(const uint8_t* buf, size_t size) {
+    if (buf == nullptr || size < 8) return false;
+    size_t pos = 0;
+    uint32_t intervalMs = 0, count = 0;
+    memcpy(&intervalMs, buf + pos, 4); pos += 4;
+    memcpy(&count, buf + pos, 4); pos += 4;
+    if (intervalMs == 0 || count == 0 || count > 256) return false;
+    std::vector<std::vector<uint8_t>> pats;
+    for (uint32_t i = 0; i < count; i++) {
+        if (pos + 4 > size) return false;
+        uint32_t len = 0; memcpy(&len, buf + pos, 4); pos += 4;
+        if (len == 0 || pos + len > size) return false;
+        pats.emplace_back(buf + pos, buf + pos + len);
+        pos += len;
+    }
+    playlistPatterns = std::move(pats);
+    playlistIntervalMs = intervalMs;
+    return true;
+}
+
+static void savePlaylistToFlash(const uint8_t* buf, size_t size) {
+    File f = LittleFS.open(PLAYLIST_FILE, FILE_WRITE);
+    if (!f) { Serial.println("Playlist persist: open failed"); return; }
+    size_t written = f.write(buf, size);
+    f.close();
+    if (written == size) {
+        LittleFS.remove(PATTERN_FILE); // playlist mode overrides any saved single pattern
+        Serial.printf("Playlist persisted to flash (%u bytes)\n", (unsigned)size);
+    } else {
+        LittleFS.remove(PLAYLIST_FILE);
+        Serial.println("Playlist persist: short write — removed");
+    }
+}
+
+static bool restorePlaylistFromFlash() {
+    if (!LittleFS.exists(PLAYLIST_FILE)) return false;
+    File f = LittleFS.open(PLAYLIST_FILE, FILE_READ);
+    if (!f) return false;
+    size_t size = f.size();
+    if (size == 0) { f.close(); return false; }
+    uint8_t* buf = (uint8_t*)malloc(size);
+    if (buf == nullptr) { f.close(); return false; }
+    size_t readBytes = f.read(buf, size);
+    f.close();
+    bool ok = (readBytes == size) && parsePlaylist(buf, size);
+    free(buf);
+    if (ok) {
+        cyclingActive = true;
+        lastCycleIndex = -1; // force apply on first updateCycle
+        Serial.printf("Restored playlist from flash: %u patterns, %lu ms\n", (unsigned)playlistPatterns.size(), (unsigned long)playlistIntervalMs);
+    }
+    return ok;
+}
+
+// Apply a freshly-received playlist (called from loop()).
+void processReceivedPlaylist() {
+    if (!newPlaylistAvailable || playlistBuffer == nullptr) return;
+    if (parsePlaylist(playlistBuffer, playlistBufferSize)) {
+        cyclingActive = true;
+        lastCycleIndex = -1; // force apply on next updateCycle
+        savePlaylistToFlash(playlistBuffer, playlistBufferSize);
+        Serial.printf("Playlist set: %u patterns, %lu ms interval\n", (unsigned)playlistPatterns.size(), (unsigned long)playlistIntervalMs);
+    } else {
+        Serial.println("Playlist: parse failed");
+    }
+    newPlaylistAvailable = false;
+}
+
+// Switch the active pattern based on the SYNCED clock so every connected device
+// changes at the same wall-clock instant. Called every render tick.
+void updateCycle() {
+    if (!cyclingActive || patternRenderer == nullptr) return;
+    size_t count = playlistPatterns.size();
+    if (count == 0 || playlistIntervalMs == 0) return;
+    unsigned long t = getSynchronizedTime();
+    int index = (int)((t / playlistIntervalMs) % (unsigned long)count);
+    if (index != lastCycleIndex) {
+        lastCycleIndex = index;
+        const std::vector<uint8_t>& blob = playlistPatterns[index];
+        patternRenderer->loadPatternFromMessagePack(blob.data(), blob.size());
+        Serial.printf("Cycle -> pattern %d/%u @ %lu ms\n", index, (unsigned)count, t);
+    }
+}
+
 // Function to process received pattern data
 void processReceivedPattern() {
     if (!newPatternAvailable || patternBuffer == nullptr || patternRenderer == nullptr) {
@@ -829,6 +952,9 @@ void processReceivedPattern() {
     
     if (success) {
         //Serial.println("Pattern loaded successfully into renderer");
+        // A directly-set pattern stops any active cycling.
+        cyclingActive = false;
+        lastCycleIndex = -1;
         // Persist so the pattern survives a power cycle (restored in setup()).
         savePatternToFlash(patternBuffer, patternBufferSize);
     } else {
@@ -1103,9 +1229,9 @@ void setup() {
             Serial.println("Pattern renderer initialized");
             // Update with current LED configuration
             patternRenderer->updateMatrixConfig();
-            // Restore the last-running pattern from flash (if any) so it resumes
-            // on power-on instead of starting blank.
-            restorePatternFromFlash();
+            // Restore on power-on: prefer a saved cycling playlist, else the last
+            // single pattern, so the device resumes instead of starting blank.
+            if (!restorePlaylistFromFlash()) restorePatternFromFlash();
         } else {
             Serial.println("ERROR: Failed to initialize pattern renderer!");
             criticalSystemsOK = false;
@@ -1170,6 +1296,9 @@ void setup() {
             // Timestamp Sync Characteristic
             pTimestampSyncCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_TIMESTAMP_SYNC, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY);
             pTimestampSyncCharacteristic->setCallbacks(new TimestampSyncCallbacks());
+
+            pPlaylistSyncCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_PLAYLIST_SYNC, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY);
+            pPlaylistSyncCharacteristic->setCallbacks(new PlaylistSyncCallbacks());
             
             pService->start();
             updateDeviceInfoCharacteristic();
@@ -1225,6 +1354,7 @@ void loop() {
         
         // Pause pattern rendering if OTA is in progress to free up resources
         if (patternRenderer != nullptr && !ota_in_progress) {
+            updateCycle();   // pick the synced playlist pattern before rendering
             patternRenderer->update();
             patternRenderer->render();
         }
@@ -1233,6 +1363,7 @@ void loop() {
     // Process received patterns and LED configuration changes on the loop task,
     // so they never race with update()/render() above.
     processReceivedPattern();
+    processReceivedPlaylist();
     processReceivedLedConfig();
 
     // Finalize a pending OTA off the BLE host task (verify result, end, reboot)
