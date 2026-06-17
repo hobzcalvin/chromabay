@@ -54,6 +54,7 @@
     deviceInfo: DeviceInfo | null;
     otaStatus: OTAUpdateStatus | null;
     otaInProgress: boolean;
+    otaSuccess: boolean;
     checkingForUpdate: boolean;
     showUpdateConfirmation: boolean;
     latestFirmware: FirmwareRegistryEntry | null;
@@ -158,6 +159,7 @@
           showUpdateConfirmation: false,
           checkingForUpdate: false,
           otaInProgress: false,
+          otaSuccess: false,
           otaStatus: null
         };
         
@@ -192,6 +194,7 @@
         deviceInfo: null,
         otaStatus: null,
         otaInProgress: false,
+        otaSuccess: false,
         checkingForUpdate: false,
         showUpdateConfirmation: false,
         latestFirmware: null
@@ -367,11 +370,17 @@
 
   async function checkForUpdateSilently(deviceId: string) {
     const settings = getDeviceSettings(deviceId);
-    // Don't bail when device info is missing — if we can't read the current
-    // version we should still surface the latest firmware and offer it.
-    if (firmwareRegistry.length === 0) return;
-
     try {
+      // Lazily (re)fetch the registry if the one-shot mount load failed or raced
+      // a remount — otherwise an empty registry sticks and we'd wrongly show
+      // "no firmware available" even though the live registry is fine.
+      if (firmwareRegistry.length === 0) {
+        firmwareRegistry = await fetchFirmwareRegistry(espFirmwareRegistryUrl);
+      }
+      if (firmwareRegistry.length === 0) return;
+
+      // Don't bail when device info is missing — if we can't read the current
+      // version we should still surface the latest firmware and offer it.
       settings.latestFirmware = findLatestFirmware(firmwareRegistry, settings.deviceInfo?.hw_ver);
       // Offer an update unless we positively know the device is already on the
       // latest version. Unknown current version => offer (better to ask).
@@ -393,9 +402,11 @@
     if (!settings.latestFirmware) return;
     
     settings.otaInProgress = true;
+    settings.otaSuccess = false;
     settings.showUpdateConfirmation = false;
     settings.otaStatus = { statusMessage: 'Starting OTA update...', progress: 0 };
-    
+    deviceSettings = { ...deviceSettings };
+
     const baseUrl = 'https://hobzcalvin.github.io/chromabay';
     const firmwareUrl = `${baseUrl}/${settings.latestFirmware.path}`;
     const signatureUrl = `${baseUrl}/${settings.latestFirmware.signaturePath}`;
@@ -410,13 +421,29 @@
           if (status.isError || status.isComplete) {
             settings.otaInProgress = false;
           }
+          if (status.isComplete && !status.isError) {
+            settings.otaSuccess = true;
+          }
+          // The status callback fires outside Svelte reactivity — reassign so the
+          // progress bar and success state actually re-render.
+          deviceSettings = { ...deviceSettings };
         }
       );
       statusMessage = 'OTA update completed successfully!';
+      // Briefly show success, then return to a fresh-load state: re-read device
+      // info (now reporting the new version) and re-check for updates.
+      setTimeout(async () => {
+        settings.otaSuccess = false;
+        deviceSettings = { ...deviceSettings };
+        try { await loadDeviceInfo(deviceId); } catch (e) { /* device may still be rebooting */ }
+        await checkForUpdateSilently(deviceId);
+      }, 4000);
     } catch (error: any) {
       statusMessage = 'OTA update failed';
       console.error('OTA update error:', error);
       settings.otaInProgress = false;
+      settings.otaSuccess = false;
+      deviceSettings = { ...deviceSettings };
     }
   }
 
@@ -568,12 +595,12 @@
                   {#if settings.otaInProgress}
                     <div class="ota-progress">
                       <p>{settings.otaStatus?.statusMessage || 'Updating...'}</p>
-                      {#if settings.otaStatus?.progress !== undefined}
-                        <div class="progress-bar">
-                          <div class="progress-fill" style="width: {settings.otaStatus.progress}%"></div>
-                        </div>
-                      {/if}
+                      <div class="progress-bar">
+                        <div class="progress-fill" style="width: {settings.otaStatus?.progress ?? 0}%"></div>
+                      </div>
                     </div>
+                  {:else if settings.otaSuccess}
+                    <p style="color: #4caf50; font-weight: 600;">✓ Update complete — device restarting…</p>
                   {:else if settings.latestFirmware && settings.deviceInfo?.fw_ver === settings.latestFirmware.version}
                     <p>Firmware is up to date - Current: {settings.deviceInfo.fw_ver}</p>
                   {:else if settings.latestFirmware}
@@ -659,12 +686,12 @@
                   {#if settings.otaInProgress}
                     <div class="ota-progress">
                       <p>{settings.otaStatus?.statusMessage || 'Updating...'}</p>
-                      {#if settings.otaStatus?.progress !== undefined}
-                        <div class="progress-bar">
-                          <div class="progress-fill" style="width: {settings.otaStatus.progress}%"></div>
-                        </div>
-                      {/if}
+                      <div class="progress-bar">
+                        <div class="progress-fill" style="width: {settings.otaStatus?.progress ?? 0}%"></div>
+                      </div>
                     </div>
+                  {:else if settings.otaSuccess}
+                    <p style="color: #4caf50; font-weight: 600;">✓ Update complete — device restarting…</p>
                   {:else if settings.latestFirmware && settings.deviceInfo?.fw_ver === settings.latestFirmware.version}
                     <p>Firmware is up to date - Current: {settings.deviceInfo.fw_ver}</p>
                   {:else if settings.latestFirmware}
