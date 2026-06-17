@@ -43,6 +43,9 @@ const CHARACTERISTIC_UUID_LED_CONFIG_SET = "a0be83ee-8dc9-47f0-ab40-b19721d20ed1
 // Timestamp Sync Characteristic - for synchronizing time across devices
 const CHARACTERISTIC_UUID_TIMESTAMP_SYNC = "a0be83ef-8dc9-47f0-ab40-b19721d20ed1";
 
+// Brightness Characteristic - live global brightness (single byte, applied immediately)
+const CHARACTERISTIC_UUID_BRIGHTNESS = "a0be83f1-8dc9-47f0-ab40-b19721d20ed1";
+
 const MAX_BLE_CHUNK_SIZE = 500; // Should match ESP32's definition
 
 // --- OTA Interfaces ---
@@ -858,6 +861,31 @@ export async function sendSinglePatternToDevice(deviceId: string, pattern: any):
   const msgpackData = msgpackEncode(pattern) as Uint8Array;
   const dataView = new DataView(msgpackData.buffer, msgpackData.byteOffset, msgpackData.byteLength);
   await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_PATTERN_SYNC, dataView);
+}
+
+/**
+ * Set the live global brightness on ONE device. Writes a single byte (0-255) to the
+ * dedicated brightness characteristic — the firmware applies it immediately (no strip
+ * reallocation) and persists it after the slider settles. Safe to call rapidly while
+ * dragging a slider; uses write-without-response so it never blocks the UI.
+ */
+export async function sendBrightnessToDevice(deviceId: string, brightness: number): Promise<void> {
+  const clamped = Math.max(0, Math.min(255, Math.round(brightness)));
+  const dataView = new DataView(new Uint8Array([clamped]).buffer);
+  try {
+    if (isWeb()) {
+      const deviceInfo = connectedDevices.get(deviceId);
+      if (!deviceInfo?.gattServer) throw new Error('Device not connected');
+      const service = await deviceInfo.gattServer.getPrimaryService(LED_SERVICE_UUID);
+      const characteristic = await service.getCharacteristic(CHARACTERISTIC_UUID_BRIGHTNESS);
+      await characteristic.writeValueWithoutResponse(dataView);
+    } else {
+      await BleClient.writeWithoutResponse(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_BRIGHTNESS, dataView);
+    }
+  } catch (error) {
+    console.error(`Error sending brightness to ${deviceId}:`, error);
+    throw error;
+  }
 }
 
 /**
