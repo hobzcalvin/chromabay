@@ -1,5 +1,12 @@
 [
   {
+    "version": "fwv0.0.19.25",
+    "hardwareVersion": "hwv0.0.1",
+    "path": "firmware/esp32/fwv0.0.19.25/firmware.bin",
+    "signaturePath": "firmware/esp32/fwv0.0.19.25/firmware.sig",
+    "date": "2026-06-17T23:51:10Z"
+  },
+  {
     "version": "fwv0.0.19.24",
     "hardwareVersion": "hwv0.0.1",
     "path": "firmware/esp32/fwv0.0.19.24/firmware.bin",
