@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.81",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.81.zip",
-  "buildDate": "2026-06-17T15:29:42Z",
-  "commitHash": "6908519ea44465034a0b82bb029d9feabd18ec2c",
-  "commitMessage": "App: per-device pattern auto-cycle UI + BLE playlist send"
+  "version": "0.0.1.82",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.82.zip",
+  "buildDate": "2026-06-17T16:33:39Z",
+  "commitHash": "a9e73437578dc245319a269240991d794eceec28",
+  "commitMessage": "Self-hosted WASM build (emcc + FastLED stub) — replaces the 3rd-party web compiler"
 }
