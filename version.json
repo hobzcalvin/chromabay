@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.85",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.85.zip",
-  "buildDate": "2026-06-17T17:37:24Z",
-  "commitHash": "45cb3248fe23ef20acce1217430fa6a936df5125",
-  "commitMessage": "Fix insanely-slow preview: restore *100 browser timescale (regressed in a9e7343)"
+  "version": "0.0.1.86",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.86.zip",
+  "buildDate": "2026-06-17T18:08:16Z",
+  "commitHash": "282ad5ffd904c616423d5d572fec79fa8e570eb5",
+  "commitMessage": "Render loop: create node 2D contexts with willReadFrequently"
 }
