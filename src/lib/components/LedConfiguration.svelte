@@ -3,14 +3,24 @@
   import { LedChipsets, ColorOrders } from '$lib/ble';
   import { getRotation, getFlipH, getSerpentine, setRotation, setFlipH, setSerpentine } from '$lib/ble';
 
-  // Props
-  export let settings: any;
-  export let deviceId: string;
-  export let idPrefix: string = ''; // '' for mobile, 'web-' for web
-  export let onAddStrip: (deviceId: string) => void;
-  export let onRemoveStrip: (deviceId: string, index: number) => void;
-  export let onSaveConfig: (deviceId: string) => void;
-  export let onReactivityUpdate: () => void;
+  // Props. `settings` is the parent's deeply-reactive $state, so binding the strip
+  // inputs below mutates it directly and the UI updates in place — no manual refresh
+  // callback needed.
+  let {
+    settings,
+    deviceId,
+    idPrefix = '', // '' for mobile, 'web-' for web
+    onAddStrip,
+    onRemoveStrip,
+    onSaveConfig
+  }: {
+    settings: any;
+    deviceId: string;
+    idPrefix?: string;
+    onAddStrip: (deviceId: string) => void;
+    onRemoveStrip: (deviceId: string, index: number) => void;
+    onSaveConfig: (deviceId: string) => void;
+  } = $props();
 
   // Build ID with prefix
   function buildId(base: string, stripIndex?: number): string {
@@ -28,23 +38,17 @@
     <p>Loading...</p>
   {:else if settings.ledConfig}
     <div class="led-config">
-      <label>
-        Global Brightness:
-        <input type="range" min="0" max="255" bind:value={settings.ledConfig.globalBrightness} on:change={onReactivityUpdate} />
-        <span>{settings.ledConfig.globalBrightness}</span>
-      </label>
-
       <div class="strips-section">
         <div class="section-header">
           <h5>LED Strips ({settings.ledConfig.strips.length})</h5>
-          <button class="btn primary small" on:click={() => onAddStrip(deviceId)}>Add Strip</button>
+          <button class="btn primary small" onclick={() => onAddStrip(deviceId)}>Add Strip</button>
         </div>
 
         {#each settings.ledConfig.strips as strip, index}
           <div class="strip-card">
             <div class="strip-header">
               <h6>Strip {index + 1}</h6>
-              <button class="btn danger small" on:click={() => onRemoveStrip(deviceId, index)} disabled={settings.ledConfig.strips.length <= 1}>Remove</button>
+              <button class="btn danger small" onclick={() => onRemoveStrip(deviceId, index)} disabled={settings.ledConfig.strips.length <= 1}>Remove</button>
             </div>
             <div class="strip-controls">
               <div class="control-row">
@@ -108,7 +112,7 @@
                   <div class="control-row">
                     <label>
                       Rotation:
-                      <select id={buildId('rotation', index)} name="rotation" value={currentRotation} on:change={(e) => { strip.orientation = setRotation(strip.orientation, parseInt(e.currentTarget.value)); onReactivityUpdate(); }}>
+                      <select id={buildId('rotation', index)} name="rotation" value={currentRotation} onchange={(e) => { strip.orientation = setRotation(strip.orientation, parseInt(e.currentTarget.value)); }}>
                         <option value="0">0° (No rotation)</option>
                         <option value="1">90° Clockwise</option>
                         <option value="2">180°</option>
@@ -116,11 +120,11 @@
                       </select>
                     </label>
                     <label>
-                      <input id={buildId('flip', index)} name="flip" type="checkbox" checked={getFlipH(strip.orientation)} on:change={(e) => { strip.orientation = setFlipH(strip.orientation, e.currentTarget.checked); onReactivityUpdate(); }} />
+                      <input id={buildId('flip', index)} name="flip" type="checkbox" checked={getFlipH(strip.orientation)} onchange={(e) => { strip.orientation = setFlipH(strip.orientation, e.currentTarget.checked); }} />
                       Flip Horizontally
                     </label>
                     <label>
-                      <input id={buildId('serpentine', index)} name="serpentine" type="checkbox" checked={getSerpentine(strip.orientation)} on:change={(e) => { strip.orientation = setSerpentine(strip.orientation, e.currentTarget.checked); onReactivityUpdate(); }} />
+                      <input id={buildId('serpentine', index)} name="serpentine" type="checkbox" checked={getSerpentine(strip.orientation)} onchange={(e) => { strip.orientation = setSerpentine(strip.orientation, e.currentTarget.checked); }} />
                       Serpentine Layout
                     </label>
                   </div>
@@ -131,7 +135,7 @@
         {/each}
       </div>
 
-      <button class="btn primary" on:click={() => onSaveConfig(deviceId)} disabled={settings.ledConfigLoading}>
+      <button class="btn primary" onclick={() => onSaveConfig(deviceId)} disabled={settings.ledConfigLoading}>
         Save Configuration
       </button>
     </div>
@@ -158,46 +162,6 @@
     align-items: center;
     gap: 0.5rem;
     margin-bottom: 1rem;
-  }
-
-  .led-config label span {
-    min-width: 3rem;
-    text-align: right;
-    font-family: monospace;
-    font-size: 0.9rem;
-  }
-
-  .led-config input[type="range"] {
-    flex: 1;
-    margin: 0 0.5rem;
-    -webkit-appearance: none;
-    appearance: none;
-    height: 6px;
-    border-radius: 3px;
-    background: rgba(255, 255, 255, 0.3);
-    outline: none;
-    cursor: pointer;
-  }
-
-  .led-config input[type="range"]::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    background: #3b82f6;
-    cursor: pointer;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-  }
-
-  .led-config input[type="range"]::-moz-range-thumb {
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    background: #3b82f6;
-    cursor: pointer;
-    border: none;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
   }
 
   .section-header {

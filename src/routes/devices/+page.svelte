@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { dev } from '$app/environment';
   import { 
     initBle, 
@@ -25,6 +25,7 @@
     // LED Configuration Imports
     getLedConfiguration,
     setLedConfiguration,
+    sendBrightnessToDevice,
     type LedConfiguration,
     type LedStripConfig,
     LedChipsets,
@@ -40,14 +41,15 @@
   import { connectedDevices, getConnectedDevicesList, type ConnectedDevice } from '$lib/stores/deviceStore';
   import LedConfigurationComponent from '$lib/components/LedConfiguration.svelte';
 
-  let bleSupported = false;
-  let bleEnabled = false;
-  let scanning = false;
-  let devices: any[] = [];
-  let statusMessage = '';
-  let isWeb = false;
+  let bleSupported = $state(false);
+  let bleEnabled = $state(false);
+  let scanning = $state(false);
+  let devices: any[] = $state([]);
+  let statusMessage = $state('');
+  let isWeb = $state(false);
 
-  // Device states - keyed by deviceId
+  // Device states - keyed by deviceId. $state is deeply reactive (proxied), so
+  // mutating deviceSettings[id].foo updates the UI in place — no manual reassign.
   let deviceSettings: Record<string, {
     showSettings: boolean;
     ledConfig: LedConfiguration | null;
@@ -59,12 +61,28 @@
     checkingForUpdate: boolean;
     showUpdateConfirmation: boolean;
     latestFirmware: FirmwareRegistryEntry | null;
-  }> = {};
+  }> = $state({});
 
   // Connected devices from store
-  $: connectedDevicesList = getConnectedDevicesList($connectedDevices);
+  const connectedDevicesList = $derived(getConnectedDevicesList($connectedDevices));
 
-  let firmwareRegistry: FirmwareRegistryEntry[] = [];
+  // Load per-device data as a REACTION to a device being connected, regardless of
+  // HOW it connected (native button, web auto-connect, or reconnect after reboot).
+  // Previously each connect path initialized state differently, so e.g. web
+  // auto-connected devices never loaded their LED config until Settings was opened.
+  let initializedDevices = new Set<string>();
+  $effect(() => {
+    for (const d of connectedDevicesList) {
+      if (!initializedDevices.has(d.deviceId)) {
+        initializedDevices.add(d.deviceId);
+        // untrack: initConnectedDevice reads/writes deviceSettings; we only want this
+        // effect to re-run on connectedDevicesList changes, not on every state edit.
+        untrack(() => initConnectedDevice(d.deviceId));
+      }
+    }
+  });
+
+  let firmwareRegistry: FirmwareRegistryEntry[] = $state([]);
   let espFirmwareRegistryUrl = "https://hobzcalvin.github.io/chromabay/firmware/esp32/esp32_firmware_registry.json";
 
   // Fetch firmware registry on app load
@@ -182,7 +200,9 @@
         };
         
         deviceSettings[fakeDeviceId] = fakeSettings;
-        deviceSettings = { ...deviceSettings };
+        initializedDevices.add(fakeDeviceId); // it has hardcoded data; skip BLE init
+
+        liveBrightness[fakeDeviceId] = fakeSettings.ledConfig.globalBrightness;
         
         statusMessage = 'Fake test device created for debugging';
         console.log('Fake device created:', fakeDeviceId, fakeSettings);
@@ -288,29 +308,38 @@
       statusMessage = `Connecting to ${device.name}...`;
       await connectToDevice(device);
       statusMessage = `Connected to ${device.name}!`;
-      
-      // Auto-load device info and LED config
-      const settings = getDeviceSettings(device.deviceId);
-      // Reset any stale OTA state from a previous (possibly interrupted) session
-      // so the UI never shows a frozen "Updating…"/progress bar after reconnect.
-      settings.otaInProgress = false;
-      settings.otaStatus = null;
-      settings.otaSuccess = false;
-      await loadDeviceInfo(device.deviceId);
-      await loadLedConfig(device.deviceId);
-      // Auto-check for firmware updates
-      await checkForUpdateSilently(device.deviceId);
-      
-      await startOTAStatusNotifications(device.deviceId, (status) => {
+      // Data loading happens in initConnectedDevice, triggered reactively once the
+      // device lands in the connectedDevices store — same path web auto-connect uses.
+    } catch (error: any) {
+      statusMessage = `Failed to connect to ${device.name}`;
+      console.error('Connect error:', error);
+    }
+  }
+
+  // Single place that loads everything a connected device needs. Called once per
+  // device by the reactive block above, no matter which connect path was used.
+  async function initConnectedDevice(deviceId: string) {
+    const settings = getDeviceSettings(deviceId);
+    // Reset any stale OTA state from a previous (possibly interrupted) session so the
+    // UI never shows a frozen "Updating…"/progress bar after reconnect.
+    settings.otaInProgress = false;
+    settings.otaStatus = null;
+    settings.otaSuccess = false;
+    try {
+      // Load the LED config FIRST: the always-visible brightness slider depends only
+      // on it, so this is what gates the slider appearing. Device info / update check
+      // can follow. (Sequential, not parallel — concurrent GATT reads can error.)
+      await loadLedConfig(deviceId);
+      await loadDeviceInfo(deviceId);
+      await checkForUpdateSilently(deviceId);
+      await startOTAStatusNotifications(deviceId, (status) => {
         settings.otaStatus = status;
         if (status.isError || status.isComplete) {
           settings.otaInProgress = false;
         }
-        deviceSettings = { ...deviceSettings };
       });
     } catch (error: any) {
-      statusMessage = `Failed to connect to ${device.name}`;
-      console.error('Connect error:', error);
+      console.error(`Failed to initialize connected device ${deviceId}:`, error);
     }
   }
 
@@ -326,8 +355,9 @@
       await disconnectFromDevice(deviceId);
       statusMessage = `Disconnected from ${device.name}`;
       
-      // Clear device settings
+      // Clear device settings + init marker so a future reconnect re-initializes.
       delete deviceSettings[deviceId];
+      initializedDevices.delete(deviceId);
     } catch (error: any) {
       statusMessage = 'Failed to disconnect';
       console.error('Disconnect error:', error);
@@ -343,15 +373,12 @@
       await loadLedConfig(deviceId);
     }
     
-    deviceSettings = { ...deviceSettings };
   }
 
   async function loadDeviceInfo(deviceId: string) {
     const settings = getDeviceSettings(deviceId);
     try {
       settings.deviceInfo = await getDeviceInfo(deviceId);
-      // Force reactivity update
-      deviceSettings = { ...deviceSettings };
     } catch (error: any) {
       console.error('Get device info error:', error);
     }
@@ -362,15 +389,12 @@
     settings.ledConfigLoading = true;
     try {
       settings.ledConfig = await getLedConfiguration(deviceId);
-      // Force reactivity update
-      deviceSettings = { ...deviceSettings };
+      liveBrightness[deviceId] = settings.ledConfig.globalBrightness;
     } catch (error: any) {
       console.error('Get LED config error:', error);
       settings.ledConfig = null;
     } finally {
       settings.ledConfigLoading = false;
-      // Force reactivity update
-      deviceSettings = { ...deviceSettings };
     }
   }
 
@@ -388,6 +412,48 @@
     } finally {
       settings.ledConfigLoading = false;
     }
+  }
+
+  // Live brightness: applies immediately as the slider moves (no Save button). We
+  // throttle the BLE writes so a fast drag doesn't flood the connection, but always
+  // send a trailing write so the final resting value lands. The firmware applies it
+  // instantly and persists once the slider settles.
+  const BRIGHTNESS_MIN_INTERVAL_MS = 40;
+  let brightnessThrottle: Record<string, { last: number; timer: any; pending: number | null }> = {};
+  // Slider value lives here, NOT in deviceSettings, so dragging it doesn't churn the
+  // shared device-settings object on every input event — the slider updates in place.
+  let liveBrightness: Record<string, number> = $state({});
+
+  function sendBrightnessThrottled(deviceId: string, value: number) {
+    let t = brightnessThrottle[deviceId];
+    if (!t) { t = brightnessThrottle[deviceId] = { last: 0, timer: null, pending: null }; }
+    const now = performance.now();
+    const elapsed = now - t.last;
+    if (elapsed >= BRIGHTNESS_MIN_INTERVAL_MS) {
+      t.last = now;
+      t.pending = null;
+      sendBrightnessToDevice(deviceId, value).catch((e) => console.error('Brightness send failed:', e));
+    } else {
+      t.pending = value;
+      if (!t.timer) {
+        t.timer = setTimeout(() => {
+          t.timer = null;
+          if (t!.pending != null) {
+            const v = t!.pending; t!.pending = null;
+            t!.last = performance.now();
+            sendBrightnessToDevice(deviceId, v).catch((e) => console.error('Brightness send failed:', e));
+          }
+        }, BRIGHTNESS_MIN_INTERVAL_MS - elapsed);
+      }
+    }
+  }
+
+  function handleBrightnessInput(deviceId: string, value: number) {
+    const settings = getDeviceSettings(deviceId);
+    // Keep ledConfig in sync so a later "Save Configuration" persists the same value.
+    if (settings.ledConfig) settings.ledConfig.globalBrightness = value;
+    liveBrightness[deviceId] = value; // reactive, drives slider + readout in place
+    sendBrightnessThrottled(deviceId, value);
   }
 
   async function checkForUpdateSilently(deviceId: string) {
@@ -409,7 +475,6 @@
       settings.showUpdateConfirmation =
         !!settings.latestFirmware &&
         settings.deviceInfo?.fw_ver !== settings.latestFirmware.version;
-      deviceSettings = { ...deviceSettings };
     } catch (error: any) {
       console.error('Silent firmware check error:', error);
     }
@@ -427,7 +492,6 @@
     settings.otaSuccess = false;
     settings.showUpdateConfirmation = false;
     settings.otaStatus = { statusMessage: 'Starting OTA update...', progress: 0 };
-    deviceSettings = { ...deviceSettings };
 
     const baseUrl = 'https://hobzcalvin.github.io/chromabay';
     const firmwareUrl = `${baseUrl}/${settings.latestFirmware.path}`;
@@ -448,7 +512,6 @@
           }
           // The status callback fires outside Svelte reactivity — reassign so the
           // progress bar and success state actually re-render.
-          deviceSettings = { ...deviceSettings };
         }
       );
       statusMessage = 'OTA update completed successfully!';
@@ -456,7 +519,6 @@
       // info (now reporting the new version) and re-check for updates.
       setTimeout(async () => {
         settings.otaSuccess = false;
-        deviceSettings = { ...deviceSettings };
         try { await loadDeviceInfo(deviceId); } catch (e) { /* device may still be rebooting */ }
         await checkForUpdateSilently(deviceId);
       }, 4000);
@@ -465,7 +527,6 @@
       console.error('OTA update error:', error);
       settings.otaInProgress = false;
       settings.otaSuccess = false;
-      deviceSettings = { ...deviceSettings };
     }
   }
 
@@ -484,14 +545,12 @@
       orientation: 0
     };
     settings.ledConfig.strips = [...settings.ledConfig.strips, newStrip];
-    deviceSettings = { ...deviceSettings };
   }
 
   function removeLedStrip(deviceId: string, index: number) {
     const settings = getDeviceSettings(deviceId);
     if (!settings.ledConfig) return;
     settings.ledConfig.strips = settings.ledConfig.strips.filter((_: any, i: number) => i !== index);
-    deviceSettings = { ...deviceSettings };
   }
 
   function updateStripOrientation(deviceId: string, stripIndex: number, field: 'rotation' | 'flipH' | 'serpentine', value: number | boolean) {
@@ -507,7 +566,6 @@
     } else if (field === 'serpentine' && typeof value === 'boolean') {
       strip.orientation = setSerpentine(strip.orientation, value);
     }
-    deviceSettings = { ...deviceSettings };
   }
 </script>
 
@@ -521,14 +579,14 @@
   <section class="controls">
     <div class="control-buttons">
       {#if !bleEnabled && bleSupported}
-        <button class="btn primary" on:click={handleEnableBle}>
+        <button class="btn primary" onclick={handleEnableBle}>
           Enable Bluetooth
         </button>
       {/if}
       
       {#if bleEnabled}
         {#if isWeb}
-          <button class="btn primary" on:click={handleStartScan}>Select ESP32 Device</button>
+          <button class="btn primary" onclick={handleStartScan}>Select ESP32 Device</button>
         {:else}
           <p class="scan-status">{scanning ? '🔍 Scanning for ESP32s…' : 'Starting scan…'}</p>
         {/if}
@@ -554,9 +612,8 @@
       <!-- Show connected devices first on mobile -->
       {#if !isWeb}
         {#each connectedDevicesList as device (device.deviceId)}
-          {#key deviceSettings}
-            {@const settings = getDeviceSettings(device.deviceId)}
-            
+          {@const settings = deviceSettings[device.deviceId]}
+          {#if settings}
             <div class="device-card connected">
               <div class="device-header">
               <div class="device-info">
@@ -568,14 +625,24 @@
                 <span class="status-badge connected">Connected</span>
               </div>
               <div class="device-actions">
-                <button class="btn danger small" on:click={() => handleDisconnect(device.deviceId)} disabled={settings.otaInProgress}>
+                <button class="btn danger small" onclick={() => handleDisconnect(device.deviceId)} disabled={settings.otaInProgress}>
                   Disconnect
                 </button>
-                <button class="btn secondary small" on:click={() => toggleSettings(device.deviceId)}>
+                <button class="btn secondary small" onclick={() => toggleSettings(device.deviceId)}>
                   {settings.showSettings ? 'Hide Settings' : 'Show Settings'}
                 </button>
               </div>
             </div>
+
+            {#if settings.ledConfig}
+              <div class="brightness-bar">
+                <span class="bri-label">Brightness</span>
+                <input type="range" min="0" max="255"
+                  value={liveBrightness[device.deviceId] ?? settings.ledConfig.globalBrightness}
+                  oninput={(e) => handleBrightnessInput(device.deviceId, parseInt(e.currentTarget.value))} />
+                <span class="bri-value">{liveBrightness[device.deviceId] ?? settings.ledConfig.globalBrightness}</span>
+              </div>
+            {/if}
 
             {#if settings.showSettings}
               <div class="device-settings">
@@ -590,7 +657,7 @@
                         <div><strong>Free Heap:</strong> {settings.deviceInfo.heap} bytes</div>
                       {/if}
                     </div>
-                    <button class="btn secondary small" on:click={() => loadDeviceInfo(device.deviceId)}>
+                    <button class="btn secondary small" onclick={() => loadDeviceInfo(device.deviceId)}>
                       Refresh Info
                     </button>
                   </div>
@@ -604,7 +671,6 @@
                   onAddStrip={addLedStrip}
                   onRemoveStrip={removeLedStrip}
                   onSaveConfig={saveLedConfig}
-                  onReactivityUpdate={() => { deviceSettings = { ...deviceSettings }; }}
                 />
 
                 <!-- Firmware Update -->
@@ -625,7 +691,7 @@
                     <div class="update-available">
                       <p>Latest firmware: <strong>{settings.latestFirmware.version}</strong> (current: {settings.deviceInfo?.fw_ver || 'unknown'})</p>
                       <div class="update-actions">
-                        <button class="btn success" on:click={() => handlePerformOTAUpdate(device.deviceId)}>
+                        <button class="btn success" onclick={() => handlePerformOTAUpdate(device.deviceId)}>
                           Update to {settings.latestFirmware.version}
                         </button>
                       </div>
@@ -637,7 +703,7 @@
               </div>
             {/if}
           </div>
-          {/key}
+          {/if}
         {/each}
       {/if}
 
@@ -645,9 +711,8 @@
       {#if isWeb}
         <!-- Web: Only show connected devices -->
         {#each connectedDevicesList as device (device.deviceId)}
-          {#key deviceSettings}
-            {@const settings = getDeviceSettings(device.deviceId)}
-            
+          {@const settings = deviceSettings[device.deviceId]}
+          {#if settings}
             <div class="device-card connected">
               <div class="device-header">
                 <div class="device-info">
@@ -659,14 +724,24 @@
                   <span class="status-badge connected">Connected</span>
                 </div>
                 <div class="device-actions">
-                  <button class="btn danger small" on:click={() => handleDisconnect(device.deviceId)} disabled={settings.otaInProgress}>
+                  <button class="btn danger small" onclick={() => handleDisconnect(device.deviceId)} disabled={settings.otaInProgress}>
                     Disconnect
                   </button>
-                  <button class="btn secondary small" on:click={() => toggleSettings(device.deviceId)}>
+                  <button class="btn secondary small" onclick={() => toggleSettings(device.deviceId)}>
                     {settings.showSettings ? 'Hide Settings' : 'Show Settings'}
                   </button>
                 </div>
               </div>
+
+            {#if settings.ledConfig}
+              <div class="brightness-bar">
+                <span class="bri-label">Brightness</span>
+                <input type="range" min="0" max="255"
+                  value={liveBrightness[device.deviceId] ?? settings.ledConfig.globalBrightness}
+                  oninput={(e) => handleBrightnessInput(device.deviceId, parseInt(e.currentTarget.value))} />
+                <span class="bri-value">{liveBrightness[device.deviceId] ?? settings.ledConfig.globalBrightness}</span>
+              </div>
+            {/if}
 
             {#if settings.showSettings}
               <div class="device-settings">
@@ -681,7 +756,7 @@
                         <div><strong>Free Heap:</strong> {settings.deviceInfo.heap} bytes</div>
                       {/if}
                     </div>
-                    <button class="btn secondary small" on:click={() => loadDeviceInfo(device.deviceId)}>
+                    <button class="btn secondary small" onclick={() => loadDeviceInfo(device.deviceId)}>
                       Refresh Info
                     </button>
                   </div>
@@ -695,7 +770,6 @@
                   onAddStrip={addLedStrip}
                   onRemoveStrip={removeLedStrip}
                   onSaveConfig={saveLedConfig}
-                  onReactivityUpdate={() => { deviceSettings = { ...deviceSettings }; }}
                 />
 
                 <!-- Firmware Update -->
@@ -716,7 +790,7 @@
                     <div class="update-available">
                       <p>Latest firmware: <strong>{settings.latestFirmware.version}</strong> (current: {settings.deviceInfo?.fw_ver || 'unknown'})</p>
                       <div class="update-actions">
-                        <button class="btn success" on:click={() => handlePerformOTAUpdate(device.deviceId)}>
+                        <button class="btn success" onclick={() => handlePerformOTAUpdate(device.deviceId)}>
                           Update to {settings.latestFirmware.version}
                         </button>
                       </div>
@@ -728,7 +802,7 @@
               </div>
             {/if}
           </div>
-          {/key}
+          {/if}
         {/each}
       {:else}
         <!-- Mobile: Show available devices to connect to -->
@@ -744,7 +818,7 @@
                   <span class="status-badge available">Available</span>
                 </div>
                 <div class="device-actions">
-                  <button class="btn primary small" on:click={() => handleConnect(device)}>
+                  <button class="btn primary small" onclick={() => handleConnect(device)}>
                     Connect
                   </button>
                 </div>
@@ -875,6 +949,60 @@
     justify-content: space-between;
     align-items: center;
     padding: 1.5rem;
+  }
+
+  /* Always-visible live brightness slider (applies immediately, no Save). */
+  .brightness-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0 1.5rem 1.25rem;
+  }
+
+  .brightness-bar .bri-label {
+    font-size: 0.85rem;
+    opacity: 0.85;
+    min-width: 5rem;
+  }
+
+  .brightness-bar .bri-value {
+    min-width: 2.5rem;
+    text-align: right;
+    font-family: monospace;
+    font-size: 0.85rem;
+    opacity: 0.85;
+  }
+
+  .brightness-bar input[type="range"] {
+    flex: 1;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 6px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.3);
+    outline: none;
+    cursor: pointer;
+  }
+
+  .brightness-bar input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #3b82f6;
+    cursor: pointer;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  }
+
+  .brightness-bar input[type="range"]::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #3b82f6;
+    cursor: pointer;
+    border: none;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
   }
 
   .device-info h3 {
