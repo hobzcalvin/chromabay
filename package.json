@@ -31,8 +31,7 @@
 		"drive": "node automation/drive.mjs",
 		"verify:wasm": "node automation/verify-wasm.mjs",
 		"verify:render": "node automation/verify-render.mjs",
-		"wasm:compile": "cd native && fastled . --just-compile --force-compile --localhost && mkdir -p ../static/native && cp fastled_js/fastled.js ../static/native/ && cp fastled_js/fastled.wasm ../static/native/ && echo '✅ WASM files compiled and copied to static/native/'",
-		"wasm:compile:newbroken": "cd native && fastled . --just-compile --force-compile --web && mkdir -p ../static/native && cp fastled_js/fastled.js ../static/native/ && cp fastled_js/fastled.wasm ../static/native/ && echo '✅ WASM files compiled and copied to static/native/'"
+		"wasm:compile": "bash native/build-wasm.sh"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-auto": "^6.0.0",

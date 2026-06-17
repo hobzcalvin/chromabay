@@ -12,6 +12,7 @@ etc
 
 # Native stuff
 native/fastled_js
+native/.fastled-src
 static/native/*
 !static/native/fastled.js
 !static/native/fastled.wasm
