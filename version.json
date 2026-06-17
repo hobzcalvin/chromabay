@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.77",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.77.zip",
-  "buildDate": "2026-06-17T05:04:09Z",
-  "commitHash": "8537e62e54a7a6ddfc749ce0b4826b3700440493",
-  "commitMessage": "Fix firmware-update detection and stop deploys clobbering the registry"
+  "version": "0.0.1.78",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.78.zip",
+  "buildDate": "2026-06-17T06:36:14Z",
+  "commitHash": "ef87e161f4a4807722f407cc286c840a8971240e",
+  "commitMessage": "Add Playwright tooling: headless WASM health check + BLE driving harness"
 }
