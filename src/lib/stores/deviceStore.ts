@@ -18,16 +18,21 @@ export const activeDeviceId = writable<string | null>(null);
 
 // Helper functions
 export function addConnectedDevice(device: ConnectedDevice) {
+  // Return a NEW Map each time. Mutating + returning the same reference can be
+  // missed by derived reactivity ($: list = getList($store)) and keyed {#each}
+  // blocks, leaving the UI stale until the component remounts.
   connectedDevices.update(devices => {
-    devices.set(device.deviceId, device);
-    return devices;
+    const next = new Map(devices);
+    next.set(device.deviceId, device);
+    return next;
   });
 }
 
 export function removeConnectedDevice(deviceId: string) {
   connectedDevices.update(devices => {
-    devices.delete(deviceId);
-    return devices;
+    const next = new Map(devices);
+    next.delete(deviceId);
+    return next;
   });
   
   // Clear active device if this device was active
@@ -42,11 +47,10 @@ export function removeConnectedDevice(deviceId: string) {
 export function updateDeviceInfo(deviceId: string, info: any) {
   connectedDevices.update(devices => {
     const device = devices.get(deviceId);
-    if (device) {
-      device.deviceInfo = info;
-      devices.set(deviceId, device);
-    }
-    return devices;
+    if (!device) return devices;
+    const next = new Map(devices);
+    next.set(deviceId, { ...device, deviceInfo: info });
+    return next;
   });
 }
 
