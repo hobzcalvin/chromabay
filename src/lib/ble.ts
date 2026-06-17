@@ -16,6 +16,19 @@ function isWeb(): boolean {
 // Store connected devices and their GATT servers (internal BLE tracking)
 const connectedDevices = new Map<string, any>();
 
+// Serialize discrete BLE request/response operations across ALL devices. iOS
+// CoreBluetooth (via the Capacitor plugin) drops or mis-routes operations that
+// overlap — which is what made a 2nd device's LED-config read fail (no brightness
+// slider) and pattern writes miss a device. Funneling reads/writes/connects through
+// this single chain makes them run strictly one at a time. (OTA's tight write loop
+// deliberately does NOT go through here.)
+let bleOpChain: Promise<unknown> = Promise.resolve();
+function bleSerial<T>(op: () => Promise<T>): Promise<T> {
+  const run = bleOpChain.then(op, op); // run after the previous op regardless of its outcome
+  bleOpChain = run.then(() => {}, () => {}); // never let one failure break the chain
+  return run;
+}
+
 // Import device store for UI state management
 import { removeConnectedDevice, addConnectedDevice, updateDeviceInfo } from './stores/deviceStore';
 
@@ -96,10 +109,25 @@ function decodeDataViewAsUtf8(dataView: DataView): string {
 
 // --- Existing BLE Functions ---
 
+let unloadHandlerRegistered = false;
+
 export async function initBle(): Promise<void> {
   try {
     await BleClient.initialize();
     console.log('BLE Client initialized successfully');
+
+    // On web, a full page reload (e.g. Vite's WASM auto-reload) tears the page down
+    // WITHOUT closing GATT connections, and Chrome's Web Bluetooth stack then wedges
+    // until you restart Chrome. Cleanly disconnect every device on unload so the
+    // adapter is released. (Native never reloads, so this is web-only.)
+    if (isWeb() && !unloadHandlerRegistered && typeof window !== 'undefined') {
+      unloadHandlerRegistered = true;
+      window.addEventListener('pagehide', () => {
+        for (const info of connectedDevices.values()) {
+          try { info?.gattServer?.disconnect?.(); } catch { /* already gone */ }
+        }
+      });
+    }
   } catch (error) {
     console.error('Failed to initialize BLE client:', error);
     throw error;
@@ -236,7 +264,7 @@ function handleDeviceDisconnected(deviceId: string): void {
 export async function connectToDevice(device: any): Promise<void> {
   try {
     if (isWeb()) {
-      const gattServer = await device.webDevice.gatt.connect();
+      const gattServer = await bleSerial(() => device.webDevice.gatt.connect());
 
       // Replace any stale listener from a previous connect before adding a new
       // one, and keep a reference so it can be removed on disconnect.
@@ -261,9 +289,9 @@ export async function connectToDevice(device: any): Promise<void> {
       // Pass an onDisconnect callback so native disconnects (out of range, OTA
       // reboot, power loss) are detected and cleaned up — previously they were
       // never noticed, leaving stale "connected" devices and a leaked sync timer.
-      await BleClient.connect(device.deviceId, (disconnectedId: string) => {
+      await bleSerial(() => BleClient.connect(device.deviceId, (disconnectedId: string) => {
         handleDeviceDisconnected(disconnectedId);
-      });
+      }));
       connectedDevices.set(device.deviceId, { device: device }); // Store native device info
       console.log('Connected to device via Capacitor');
 
@@ -359,63 +387,63 @@ export async function discoverServices(deviceId: string): Promise<any[]> {
 }
 
 export async function readCharacteristic(deviceId: string, serviceUuid: string, characteristicUuid: string): Promise<string> {
-  // console.log(`[BLE Read] Attempting to read char: ${characteristicUuid} on service: ${serviceUuid} for device: ${deviceId}`); // Less verbose
-  try {
-    let valueDataView: DataView;
-    if (isWeb()) {
-      const deviceInfo = connectedDevices.get(deviceId);
-      if (!deviceInfo?.gattServer) throw new Error('Device not connected');
-      const service = await deviceInfo.gattServer.getPrimaryService(serviceUuid);
-      const characteristic = await service.getCharacteristic(characteristicUuid);
-      valueDataView = await characteristic.readValue();
-    } else {
-      valueDataView = await BleClient.read(deviceId, serviceUuid, characteristicUuid);
+  return bleSerial(async () => {
+    try {
+      let valueDataView: DataView;
+      if (isWeb()) {
+        const deviceInfo = connectedDevices.get(deviceId);
+        if (!deviceInfo?.gattServer) throw new Error('Device not connected');
+        const service = await deviceInfo.gattServer.getPrimaryService(serviceUuid);
+        const characteristic = await service.getCharacteristic(characteristicUuid);
+        valueDataView = await characteristic.readValue();
+      } else {
+        valueDataView = await BleClient.read(deviceId, serviceUuid, characteristicUuid);
+      }
+      return decodeDataViewAsUtf8(valueDataView);
+    } catch (error) {
+      console.error(`Error reading characteristic ${characteristicUuid}:`, error);
+      throw error;
     }
-    
-    const decodedString = decodeDataViewAsUtf8(valueDataView);
-    // console.log(`[BLE Read - ${characteristicUuid}] Decoded string: "${decodedString}" (length: ${decodedString.length})`); // Less verbose
-    return decodedString;
-
-  } catch (error) {
-    console.error(`Error reading characteristic ${characteristicUuid}:`, error);
-    throw error;
-  }
+  });
 }
 
 export async function writeCharacteristic(deviceId: string, serviceUuid: string, characteristicUuid: string, data: string): Promise<void> {
-  try {
-    const dataView = textToDataView(data);
-    if (isWeb()) {
-      const deviceInfo = connectedDevices.get(deviceId);
-      if (!deviceInfo?.gattServer) throw new Error('Device not connected');
-      const service = await deviceInfo.gattServer.getPrimaryService(serviceUuid);
-      const characteristic = await service.getCharacteristic(characteristicUuid);
-      await characteristic.writeValueWithResponse(dataView);
-    } else {
-      await BleClient.write(deviceId, serviceUuid, characteristicUuid, dataView);
+  return bleSerial(async () => {
+    try {
+      const dataView = textToDataView(data);
+      if (isWeb()) {
+        const deviceInfo = connectedDevices.get(deviceId);
+        if (!deviceInfo?.gattServer) throw new Error('Device not connected');
+        const service = await deviceInfo.gattServer.getPrimaryService(serviceUuid);
+        const characteristic = await service.getCharacteristic(characteristicUuid);
+        await characteristic.writeValueWithResponse(dataView);
+      } else {
+        await BleClient.write(deviceId, serviceUuid, characteristicUuid, dataView);
+      }
+    } catch (error) {
+      console.error(`Error writing to characteristic ${characteristicUuid}:`, error);
+      throw error;
     }
-    console.log(`Successfully wrote to characteristic ${characteristicUuid}`);
-  } catch (error) {
-    console.error(`Error writing to characteristic ${characteristicUuid}:`, error);
-    throw error;
-  }
+  });
 }
 
 async function writeCharacteristicWithoutResponse(deviceId: string, serviceUuid: string, characteristicUuid: string, dataView: DataView): Promise<void> {
-  try {
-    if (isWeb()) {
-      const deviceInfo = connectedDevices.get(deviceId);
-      if (!deviceInfo?.gattServer) throw new Error('Device not connected');
-      const service = await deviceInfo.gattServer.getPrimaryService(serviceUuid);
-      const characteristic = await service.getCharacteristic(characteristicUuid);
-      await characteristic.writeValueWithoutResponse(dataView);
-    } else {
-      await BleClient.writeWithoutResponse(deviceId, serviceUuid, characteristicUuid, dataView);
+  return bleSerial(async () => {
+    try {
+      if (isWeb()) {
+        const deviceInfo = connectedDevices.get(deviceId);
+        if (!deviceInfo?.gattServer) throw new Error('Device not connected');
+        const service = await deviceInfo.gattServer.getPrimaryService(serviceUuid);
+        const characteristic = await service.getCharacteristic(characteristicUuid);
+        await characteristic.writeValueWithoutResponse(dataView);
+      } else {
+        await BleClient.writeWithoutResponse(deviceId, serviceUuid, characteristicUuid, dataView);
+      }
+    } catch (error) {
+      console.error(`Error writing (NR) to characteristic ${characteristicUuid}:`, error);
+      throw error;
     }
-  } catch (error) {
-    console.error(`Error writing (NR) to characteristic ${characteristicUuid}:`, error);
-    throw error;
-  }
+  });
 }
 
 
@@ -872,41 +900,44 @@ export async function sendSinglePatternToDevice(deviceId: string, pattern: any):
 export async function sendBrightnessToDevice(deviceId: string, brightness: number): Promise<void> {
   const clamped = Math.max(0, Math.min(255, Math.round(brightness)));
   const dataView = new DataView(new Uint8Array([clamped]).buffer);
-  try {
-    if (isWeb()) {
-      const deviceInfo = connectedDevices.get(deviceId);
-      if (!deviceInfo?.gattServer) throw new Error('Device not connected');
-      const service = await deviceInfo.gattServer.getPrimaryService(LED_SERVICE_UUID);
-      const characteristic = await service.getCharacteristic(CHARACTERISTIC_UUID_BRIGHTNESS);
-      await characteristic.writeValueWithoutResponse(dataView);
-    } else {
-      await BleClient.writeWithoutResponse(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_BRIGHTNESS, dataView);
+  return bleSerial(async () => {
+    try {
+      if (isWeb()) {
+        const deviceInfo = connectedDevices.get(deviceId);
+        if (!deviceInfo?.gattServer) throw new Error('Device not connected');
+        const service = await deviceInfo.gattServer.getPrimaryService(LED_SERVICE_UUID);
+        const characteristic = await service.getCharacteristic(CHARACTERISTIC_UUID_BRIGHTNESS);
+        await characteristic.writeValueWithoutResponse(dataView);
+      } else {
+        await BleClient.writeWithoutResponse(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_BRIGHTNESS, dataView);
+      }
+    } catch (error) {
+      console.error(`Error sending brightness to ${deviceId}:`, error);
+      throw error;
     }
-  } catch (error) {
-    console.error(`Error sending brightness to ${deviceId}:`, error);
-    throw error;
-  }
+  });
 }
 
 /**
  * Writes binary data to a BLE characteristic
  */
 async function writeCharacteristicBinary(deviceId: string, serviceUuid: string, characteristicUuid: string, dataView: DataView): Promise<void> {
-  try {
-    if (isWeb()) {
-      const deviceInfo = connectedDevices.get(deviceId);
-      if (!deviceInfo?.gattServer) throw new Error('Device not connected');
-      const service = await deviceInfo.gattServer.getPrimaryService(serviceUuid);
-      const characteristic = await service.getCharacteristic(characteristicUuid);
-      await characteristic.writeValueWithResponse(dataView);
-    } else {
-      await BleClient.write(deviceId, serviceUuid, characteristicUuid, dataView);
+  return bleSerial(async () => {
+    try {
+      if (isWeb()) {
+        const deviceInfo = connectedDevices.get(deviceId);
+        if (!deviceInfo?.gattServer) throw new Error('Device not connected');
+        const service = await deviceInfo.gattServer.getPrimaryService(serviceUuid);
+        const characteristic = await service.getCharacteristic(characteristicUuid);
+        await characteristic.writeValueWithResponse(dataView);
+      } else {
+        await BleClient.write(deviceId, serviceUuid, characteristicUuid, dataView);
+      }
+    } catch (error) {
+      console.error(`Error writing binary data to characteristic ${characteristicUuid}:`, error);
+      throw error;
     }
-    console.log(`Successfully wrote binary data to characteristic ${characteristicUuid}`);
-  } catch (error) {
-    console.error(`Error writing binary data to characteristic ${characteristicUuid}:`, error);
-    throw error;
-  }
+  });
 }
 
 export interface LedStripConfig {
@@ -981,9 +1012,10 @@ export const ColorOrders = {
 // LED Configuration Functions
 
 export async function getLedConfiguration(deviceId: string): Promise<LedConfiguration> {
-  try {
-    console.log(`[LED Config] Getting configuration from ${deviceId}`);
-    
+  return bleSerial(async () => {
+   try {
+    console.log(`[LED Config] Reading config from ${deviceId}…`);
+
     // Read the LED config characteristic (returns binary MessagePack data)
     let rawDataView: DataView;
     if (isWeb()) {
@@ -995,15 +1027,18 @@ export async function getLedConfiguration(deviceId: string): Promise<LedConfigur
     } else {
       rawDataView = await BleClient.read(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_LED_CONFIG_GET);
     }
-    
+
     // Convert DataView to Uint8Array for MessagePack decoding
     const rawData = new Uint8Array(rawDataView.buffer, rawDataView.byteOffset, rawDataView.byteLength);
-    console.log(`[LED Config] Raw MessagePack data: ${rawData.length} bytes`);
-    
+
     // Decode MessagePack data
     const decodedConfig = msgpackDecode(rawData) as any;
-    console.log(`[LED Config] Decoded config:`, decodedConfig);
-    
+    const stripCount = Array.isArray(decodedConfig?.strips) ? decodedConfig.strips.length : 0;
+    console.log(
+      `[LED Config] ✅ ${deviceId}: ${rawData.length} bytes, brightness=${decodedConfig?.gb}, strips=${stripCount}`,
+      decodedConfig
+    );
+
     // Convert from ESP32 format to our interface.
     // Use ?? (nullish) not || here: several of these fields have a legitimate
     // value of 0 that || would wrongly replace with the default — e.g. brightness
@@ -1024,10 +1059,11 @@ export async function getLedConfiguration(deviceId: string): Promise<LedConfigur
     };
     
     return config;
-  } catch (error) {
-    console.error('Error getting LED configuration:', error);
+   } catch (error) {
+    console.error(`[LED Config] ❌ ${deviceId}: read/decode failed:`, error);
     throw error;
-  }
+   }
+  });
 }
 
 export async function setLedConfiguration(deviceId: string, config: LedConfiguration): Promise<void> {
