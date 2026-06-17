@@ -905,7 +905,11 @@ class CentralizedRenderer {
       // Find the canvas element for this node (if it exists)
       const canvasElement = document.querySelector(`[data-node-id="${node.id}"] canvas`) as HTMLCanvasElement;
       if (canvasElement) {
-        const ctx = canvasElement.getContext('2d');
+        // willReadFrequently: this loop calls getImageData() on every node every
+        // frame (to pass output downstream). Without this hint the browser keeps
+        // the canvas GPU-side and each readback stalls — that throttled the
+        // editor render loop to ~2fps (masked before by the old 100x timescale).
+        const ctx = canvasElement.getContext('2d', { willReadFrequently: true });
         if (ctx) {
           renderContext.ctx = ctx;
           
