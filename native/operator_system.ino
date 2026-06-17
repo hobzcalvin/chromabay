@@ -226,18 +226,15 @@ extern "C" {
         CRGB* outputBuffer,
         uint32_t width,
         uint32_t height,
-        uint32_t scaledTimestamp,  // Timestamp in 0.01ms units to preserve sub-ms precision
+        uint32_t timestampMs,  // Real milliseconds (same units the ESP32 feeds operators directly)
         uint32_t deltaTimeMs
     ) {
         if (operatorId >= 0 && operatorId < (int)activeOperators.size() && activeOperators[operatorId]) {
             static std::vector<ParameterValue> emptyParams;
-            auto& parameters = (operatorId < (int)operatorParameters.size()) ? 
-                operatorParameters[operatorId] : 
+            auto& parameters = (operatorId < (int)operatorParameters.size()) ?
+                operatorParameters[operatorId] :
                 emptyParams;
-            
-            // Convert back to milliseconds: divide by 100 (0.01ms units → ms)
-            uint32_t timestampMs = scaledTimestamp / 100;
-            
+
             activeOperators[operatorId]->render(
                 inputBuffer1,
                 inputBuffer2,
