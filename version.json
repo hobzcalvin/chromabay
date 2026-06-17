@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.90",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.90.zip",
-  "buildDate": "2026-06-17T23:48:48Z",
-  "commitHash": "a23a3d739a9ed36459416d5acbae8d049a09fc35",
-  "commitMessage": "config: auto-assign RMT channel per strip; drop the manual setting"
+  "version": "0.0.1.91",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.91.zip",
+  "buildDate": "2026-06-17T23:51:35Z",
+  "commitHash": "ab8b70c5b628469e3380492d68afe3c100cce3f4",
+  "commitMessage": "ble/devices: full config-load tracing + queue timeout"
 }
