@@ -41,6 +41,12 @@
 #include "PosterizeOperator.h"
 #include "MirrorOperator.h"
 #include "InvertOperator.h"
+#include "SolidColorOperator.h"
+#include "PlasmaOperator.h"
+#include "WaveOperator.h"
+#include "CometOperator.h"
+#include "StaticOperator.h"
+#include "TwinkleOperator.h"
 
 // Add your new operators here:
 // #include "RainbowOperator.h"
