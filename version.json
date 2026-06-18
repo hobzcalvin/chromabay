@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.112",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.112.zip",
-  "buildDate": "2026-06-18T22:35:36Z",
-  "commitHash": "ffbc3dea892c999080bb7ebb28892956bbff1cf7",
-  "commitMessage": "Patterns: tap selects as current; add ✋ button to open Interact"
+  "version": "0.0.1.113",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.113.zip",
+  "buildDate": "2026-06-18T22:40:44Z",
+  "commitHash": "54df2b54bf28b22cefdcabb29839dbc6a35266b5",
+  "commitMessage": "Fire: spark across the full width (rnd8() capped columns at 256)"
 }
