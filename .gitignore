@@ -41,3 +41,7 @@ vite.config.ts.timestamp-*
 keys/
 *.pem
 *.sig
+
+# App Store Connect API key identifiers (local only)
+ios/.asc.env
+*.p8
