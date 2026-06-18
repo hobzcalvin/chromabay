@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.100",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.100.zip",
-  "buildDate": "2026-06-18T05:16:15Z",
-  "commitHash": "d7e4e5558cd49fcf97faad692c42cf17f98b77df",
-  "commitMessage": "devices: rename control in Device Information"
+  "version": "0.0.1.101",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.101.zip",
+  "buildDate": "2026-06-18T05:27:34Z",
+  "commitHash": "0d589d8a7cf7f46664389bf84e43cbb9c091afd1",
+  "commitMessage": "devices: button-pin control in Device Information"
 }
