@@ -410,6 +410,7 @@
     if (!settings.ledConfig) return;
     
     settings.ledConfigLoading = true;
+    console.log(`[devices] 💾 saveLedConfig → ${deviceId}: SENDING ${settings.ledConfig.strips.length} strip(s)`, JSON.parse(JSON.stringify(settings.ledConfig)));
     try {
       await setLedConfiguration(deviceId, settings.ledConfig);
       statusMessage = 'LED configuration updated successfully';
