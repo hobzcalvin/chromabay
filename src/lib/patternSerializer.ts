@@ -346,22 +346,26 @@ export function serializePattern(
     positions.forEach((pos, i) => { conflictSafeOrder[pos] = orderedGroup[i]; });
   });
   
-  // Step 2: Find output node and determine final output buffer
-  let finalOutputBufferIndex = 0; // Default output buffer
+  // Step 2: Find output node and determine final output buffer.
+  // -1 is a sentinel meaning "nothing is wired to the output" — the device (and
+  // preview) then show black instead of whatever happens to sit in the output's lane
+  // buffer. All nodes are still serialized; this only controls what gets displayed.
+  let finalOutputBufferIndex = 0; // Default output buffer (used when there is no output node)
   const outputNode = allNodes.find(n => n.data.type === 'output');
-  
+
   if (outputNode) {
     const inputEdgesToOutputNode = allEdges.filter(edge => edge.target === outputNode.id);
     if (inputEdgesToOutputNode.length > 0) {
       const sourceNodeId = inputEdgesToOutputNode[0].source;
       const sourceNode = allNodes.find(n => n.id === sourceNodeId);
-      if (sourceNode) {
-        finalOutputBufferIndex = getNodeLaneBuffer(sourceNode);
-      }
+      finalOutputBufferIndex = sourceNode ? getNodeLaneBuffer(sourceNode) : -1;
+    } else {
+      finalOutputBufferIndex = -1; // output node exists but nothing feeds it
     }
   }
   
-  // Step 3: Filter out output node for serialization
+  // Step 3: Filter out output node for serialization (every other node is kept, even
+  // if it isn't wired to the output — disconnected nodes must survive a reload).
   const nodesToSerialize = conflictSafeOrder.filter(node => node.data.type !== 'output');
   
   // Get interactive parameters once before serialization
@@ -781,12 +785,14 @@ export function deserializePattern(
     // Find the maximum dependency level to place output node at the bottom
     const maxLevel = Math.max(...Array.from(dependencyLevels.values())) + 1;
     
-    // Find the correct lane for the output node based on the final output buffer
+    // Find the correct lane for the output node based on the final output buffer.
+    // -1 means "nothing wired to the output"; place it in lane 0 and leave it
+    // unconnected (the source-finding loop below won't match a buffer of -1).
     const finalOutputBuffer = serializedPattern.meta?.output !== undefined ? serializedPattern.meta.output : 0;
-    
+
     // Position output node in the same lane as the final output buffer (pushed to a
     // free row if needed, same as every other node).
-    const outputX = getLaneFromBuffer(finalOutputBuffer);
+    const outputX = getLaneFromBuffer(finalOutputBuffer >= 0 ? finalOutputBuffer : 0);
     const outputNode = createNodeFromType(outputDef, outputNodeId, {
       x: outputX,
       y: placeRow(outputX, maxLevel)

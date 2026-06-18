@@ -257,6 +257,20 @@ void PatternRendererBase::render() {
     if (!hasPattern || !ledManager || !buffersAllocated) return;
     if (ledManager->getNumStrips() == 0) return;
 
+    // Nothing wired to the Output node: meta.output is the sentinel -1 (or otherwise
+    // out of range). Show black rather than whatever a node happens to leave in a lane
+    // buffer, so disconnected nodes can't "bleed" onto the LEDs.
+    if (currentPattern.outputBuffer < 0 || currentPattern.outputBuffer >= NUM_BUFFERS) {
+        for (size_t s = 0; s < ledManager->getNumStrips(); s++) {
+            LedConfig::LedBus* strip = ledManager->getStrip(s);
+            if (!strip) continue;
+            const auto& config = strip->getConfig();
+            for (uint16_t i = 0; i < config.numLeds; i++) strip->setPixelColor(i, CRGB::Black);
+        }
+        ledManager->show();
+        return;
+    }
+
     // Each strip is its OWN canvas: run the full operator graph at the strip's own
     // dimensions into its own LED space. A 1xN linear strip renders the effects at
     // 1xN; a WxH matrix renders at WxH — independent coordinate spaces. The shared
