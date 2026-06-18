@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.97",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.97.zip",
-  "buildDate": "2026-06-18T00:55:33Z",
-  "commitHash": "7570868090cf77fb22bf4258a97e4c7f3abd4132",
-  "commitMessage": "esp32: debounce pattern flash persist (keep updates instant)"
+  "version": "0.0.1.98",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.98.zip",
+  "buildDate": "2026-06-18T04:33:03Z",
+  "commitHash": "141fd80418583657488161804e03dbe43417dcb4",
+  "commitMessage": "layout: load current pattern into flow store on startup"
 }
