@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.101",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.101.zip",
-  "buildDate": "2026-06-18T05:27:34Z",
-  "commitHash": "0d589d8a7cf7f46664389bf84e43cbb9c091afd1",
-  "commitMessage": "devices: button-pin control in Device Information"
+  "version": "0.0.1.102",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.102.zip",
+  "buildDate": "2026-06-18T05:30:25Z",
+  "commitHash": "36634a78141403677e2d8cf6071e0413325d8433",
+  "commitMessage": "docs: button plan — poll the GPIO instead of an interrupt (with rationale)"
 }
