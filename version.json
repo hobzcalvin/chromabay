@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.98",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.98.zip",
-  "buildDate": "2026-06-18T04:33:03Z",
-  "commitHash": "141fd80418583657488161804e03dbe43417dcb4",
-  "commitMessage": "layout: load current pattern into flow store on startup"
+  "version": "0.0.1.99",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.99.zip",
+  "buildDate": "2026-06-18T04:55:41Z",
+  "commitHash": "499b412c084df6fac2deb5e5863388657c3a67d0",
+  "commitMessage": "config UI: always-matrix dims with hand-holding; reordered fields"
 }
