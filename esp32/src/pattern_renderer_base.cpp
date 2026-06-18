@@ -59,15 +59,20 @@ void PatternRendererBase::deallocateBuffers() {
 uint16_t PatternRendererBase::getMatrixWidth() const {
     if (!ledManager || ledManager->getNumStrips() == 0) return 8; // Default fallback
 
-    // Multiple strips are concatenated into one logical 1xN row (see render()): the
-    // canvas width is the sum of all strip lengths so the pattern spans every LED.
+    // Multiple strips MIRROR the same pattern (see render()): the canvas is sized to
+    // the widest strip, and each strip samples the full canvas independently. Using
+    // the max (not strip 0) keeps the canvas stable when a smaller strip is added or
+    // removed, so strips don't share a coordinate space.
     if (ledManager->getNumStrips() > 1) {
-        uint32_t total = 0;
+        uint16_t maxW = 0;
         for (size_t i = 0; i < ledManager->getNumStrips(); i++) {
             const LedConfig::LedBus* s = ledManager->getStrip(i);
-            if (s) total += s->getConfig().numLeds;
+            if (!s) continue;
+            const auto& c = s->getConfig();
+            uint16_t w = c.width > 0 ? c.width : c.numLeds;
+            if (w > maxW) maxW = w;
         }
-        return (uint16_t)total;
+        return maxW > 0 ? maxW : 8;
     }
 
     const LedConfig::LedBus* strip = ledManager->getStrip(0);
@@ -89,8 +94,18 @@ uint16_t PatternRendererBase::getMatrixWidth() const {
 uint16_t PatternRendererBase::getMatrixHeight() const {
     if (!ledManager || ledManager->getNumStrips() == 0) return 8; // Default fallback
 
-    // Concatenated multi-strip mode is a single logical row (see getMatrixWidth).
-    if (ledManager->getNumStrips() > 1) return 1;
+    // Mirror multi-strip mode: canvas height is the tallest strip (see getMatrixWidth).
+    if (ledManager->getNumStrips() > 1) {
+        uint16_t maxH = 0;
+        for (size_t i = 0; i < ledManager->getNumStrips(); i++) {
+            const LedConfig::LedBus* s = ledManager->getStrip(i);
+            if (!s) continue;
+            const auto& c = s->getConfig();
+            uint16_t h = c.height > 0 ? c.height : 1;
+            if (h > maxH) maxH = h;
+        }
+        return maxH > 0 ? maxH : 1;
+    }
 
     const LedConfig::LedBus* strip = ledManager->getStrip(0);
     if (!strip) return 8; // Default fallback
@@ -255,23 +270,36 @@ void PatternRendererBase::render() {
     const CRGB* patternBuffer = getBuffer(currentPattern.outputBuffer);
     if (!patternBuffer || ledManager->getNumStrips() == 0) return;
 
-    // Multiple strips: drive them as one continuous logical strip — global pixel i
-    // maps to the i-th LED walking strip 0, then strip 1, and so on. Every strip's
-    // buffer is written (the old code only ever wrote strip 0, leaving any additional
-    // strips showing uninitialized garbage). Per-strip 2D matrices aren't mapped in
-    // this mode; strips are treated as linear runs (the common multi-strip case).
+    // Multiple strips MIRROR the full pattern: every strip displays the whole canvas
+    // independently (not a shared coordinate space). A matrix strip maps via its own
+    // xyToIndex; a linear strip resamples the full canvas across its length, so a
+    // shorter strip shows the complete pattern scaled down rather than a slice.
     if (ledManager->getNumStrips() > 1) {
-        uint32_t totalPixels = getTotalPixels();
-        uint32_t global = 0;
+        uint16_t cw = getMatrixWidth();
+        uint16_t ch = getMatrixHeight();
+        uint32_t canvasTotal = (uint32_t)cw * (uint32_t)ch;
+        if (canvasTotal == 0) { ledManager->show(); return; }
         for (size_t s = 0; s < ledManager->getNumStrips(); s++) {
             LedConfig::LedBus* st = ledManager->getStrip(s);
             if (!st) continue;
-            uint16_t n = st->getConfig().numLeds;
-            for (uint16_t local = 0; local < n; local++) {
-                if (global < totalPixels) {
-                    st->setPixelColor(local, patternBuffer[global]);
+            const auto& c = st->getConfig();
+            if (c.isMatrix()) {
+                for (uint16_t y = 0; y < c.height; y++) {
+                    for (uint16_t x = 0; x < c.width; x++) {
+                        uint16_t cx = x < cw ? x : (cw - 1);
+                        uint16_t cy = y < ch ? y : (ch - 1);
+                        CRGB color = patternBuffer[(uint32_t)cy * cw + cx];
+                        int ledIndex = c.xyToIndex(x, y);
+                        if (ledIndex >= 0 && ledIndex < c.numLeds) st->setPixelColor(ledIndex, color);
+                    }
                 }
-                global++;
+            } else {
+                uint16_t L = c.numLeds;
+                for (uint16_t j = 0; j < L; j++) {
+                    uint32_t idx = (L <= 1) ? 0 : (uint32_t)j * (canvasTotal - 1) / (L - 1);
+                    if (idx >= canvasTotal) idx = canvasTotal - 1;
+                    st->setPixelColor(j, patternBuffer[idx]);
+                }
             }
         }
         ledManager->show();
