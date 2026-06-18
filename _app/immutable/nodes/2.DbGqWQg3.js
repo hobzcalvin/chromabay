@@ -1,0 +1,1 @@
+import{f as r,a as s}from"../chunks/c2M001PE.js";import{i as t}from"../chunks/gKeZ4jnQ.js";import{p as i,o as m,a as e}from"../chunks/bzkCw6MF.js";import{g as n,b as f}from"../chunks/Cg2aPBne.js";var c=r("<p>Redirecting...</p>");function b(o,a){i(a,!1),m(()=>{n(`${f}/devices`)}),t();var p=c();s(o,p),e()}export{b as component};

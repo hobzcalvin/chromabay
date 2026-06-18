@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.91",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.91.zip",
-  "buildDate": "2026-06-17T23:51:35Z",
-  "commitHash": "ab8b70c5b628469e3380492d68afe3c100cce3f4",
-  "commitMessage": "ble/devices: full config-load tracing + queue timeout"
+  "version": "0.0.1.92",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.92.zip",
+  "buildDate": "2026-06-18T00:17:18Z",
+  "commitHash": "39cb008189f93485ad0b11a00bdd9f60ee30772a",
+  "commitMessage": "esp32: stamp a unique version into local dev builds"
 }
