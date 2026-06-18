@@ -47,31 +47,42 @@
     await loadPatterns();
   });
   
-  async function handlePatternItemClick(pattern: SerializedPattern, event: Event) {
+  // Make a pattern the current one: load it into the flow store (used by Interact and
+  // the Editor) and push it to all connected devices. No navigation.
+  async function selectPattern(pattern: SerializedPattern) {
     const patternName = pattern.meta?.name;
     if (!patternName) return;
-    
-    // If delete area is revealed, close it instead of navigating
-    if (swipeStates[patternName]?.isSwipeRevealed) {
-      swipeStates[patternName].isSwipeRevealed = false;
-      swipeStates = { ...swipeStates }; // Trigger reactivity
-      return;
-    }
-    
-    // Normal tap behavior: Set as current pattern and go to Interact
     console.log('Setting pattern as current:', patternName);
     await switchToPattern(patternName);
-    // Load pattern into flow editor for interact page
     const { loadSerializedPattern } = await import('$lib/flowStore');
     await loadSerializedPattern(pattern);
-    
-    // Sync pattern to all connected devices
     try {
       await syncPatternToAllDevices();
     } catch (error) {
       console.error('Failed to sync pattern to devices:', error);
     }
-    
+  }
+
+  async function handlePatternItemClick(pattern: SerializedPattern, event: Event) {
+    const patternName = pattern.meta?.name;
+    if (!patternName) return;
+
+    // If delete area is revealed, close it instead of selecting
+    if (swipeStates[patternName]?.isSwipeRevealed) {
+      swipeStates[patternName].isSwipeRevealed = false;
+      swipeStates = { ...swipeStates }; // Trigger reactivity
+      return;
+    }
+
+    // Tapping a pattern just selects it as current (no navigation).
+    await selectPattern(pattern);
+  }
+
+  // Hand button: select the pattern AND open the Interact page for it.
+  async function handleInteractTap(pattern: SerializedPattern, event: Event) {
+    event.stopPropagation();
+    if (!pattern.meta?.name) return;
+    await selectPattern(pattern);
     goto(`${base}/interact`);
   }
   
@@ -184,7 +195,7 @@
 <main class="patterns-page" onclick={handleDocumentClick}>
   <div class="header">
     <h1>🎨 Patterns</h1>
-    <p class="subtitle">Tap to interact • Pencil to edit • Trash to delete</p>
+    <p class="subtitle">Tap to select • ✋ to interact • Pencil to edit • Trash to delete</p>
   </div>
 
   {#if connectedList.length > 0}
@@ -232,7 +243,16 @@
             </div>
             
             <div class="action-buttons">
-              <button 
+              <button
+                class="interact-button"
+                onclick={(e) => handleInteractTap(pattern, e)}
+                aria-label="Interact with {patternName}"
+                title="Interact"
+              >
+                ✋
+              </button>
+
+              <button
                 class="edit-button"
                 onclick={(e) => handleEditTap(pattern, e)}
                 aria-label="Edit {patternName}"
@@ -431,7 +451,7 @@
     flex-shrink: 0;
   }
   
-  .edit-button, .delete-button-visible {
+  .interact-button, .edit-button, .delete-button-visible {
     background: rgba(255, 255, 255, 0.1);
     border: 1px solid rgba(255, 255, 255, 0.2);
     padding: 0.5rem;
@@ -442,8 +462,8 @@
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
     backdrop-filter: blur(8px);
   }
-  
-  .edit-button:hover, .delete-button-visible:hover {
+
+  .interact-button:hover, .edit-button:hover, .delete-button-visible:hover {
     background: rgba(255, 255, 255, 0.2);
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
   }
