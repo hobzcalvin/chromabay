@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.105",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.105.zip",
-  "buildDate": "2026-06-18T06:41:30Z",
-  "commitHash": "4deacbfcea42d9566c8e4efe5106c5432a2e9b27",
-  "commitMessage": "operators: Chase angle + 7 new color/effect operators"
+  "version": "0.0.1.106",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.106.zip",
+  "buildDate": "2026-06-18T06:44:30Z",
+  "commitHash": "61b3fdf5cbed818614886ec8660af2f54c5572fb",
+  "commitMessage": "docs: add phased plan for pattern library sync (not implemented)"
 }
