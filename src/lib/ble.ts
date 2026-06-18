@@ -637,7 +637,7 @@ async function writeChunkNoWait(deviceId: string, chunk: ArrayBuffer): Promise<v
 // Number of chunks kept in flight before waiting for ACKs. Conservative so we don't
 // overrun the controller's write-without-response buffer (which would drop chunks — a
 // failed, not bricked, update thanks to signature verification + rollback).
-const OTA_WINDOW = 4;
+const OTA_WINDOW = 8;
 
 export async function startOTAStatusNotifications(deviceId: string, callback: (status: OTAUpdateStatus) => void): Promise<void> {
   console.log(`[OTA] Starting status notifications for ${deviceId}`);

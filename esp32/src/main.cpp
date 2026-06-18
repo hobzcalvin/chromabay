@@ -73,6 +73,9 @@ PatternRendererBase* patternRenderer = nullptr;
 #define MAX_BLE_CHUNK_SIZE 500 
 
 NimBLEServer* pServer = nullptr;
+// Handle of the current central connection (captured in onConnect), so we can request a
+// faster connection interval during OTA. 0xFFFF = none.
+static uint16_t currentConnHandle = 0xFFFF;
 // Original RX/TX Characteristics
 NimBLECharacteristic* pTxCharacteristic = nullptr;
 // OTA Characteristics
@@ -416,16 +419,18 @@ void updateDeviceInfoCharacteristic() {
 static void logPatternState(const char* when);
 
 class ServerCallbacks: public NimBLEServerCallbacks {
-    void onConnect(NimBLEServer* pServer) {
+    void onConnect(NimBLEServer* pServer, ble_gap_conn_desc* desc) {
         deviceConnected = true;
+        currentConnHandle = desc ? desc->conn_handle : 0xFFFF;
         Serial.println("BLE Client Connected");
         logPatternState("connect");
         // Update device info characteristic as heap might have changed or client needs fresh info
-        updateDeviceInfoCharacteristic(); 
+        updateDeviceInfoCharacteristic();
         // Note: Mobile app will send timestamp sync after connection is established
     };
 
     void onDisconnect(NimBLEServer* pServer) {
+        currentConnHandle = 0xFFFF;
         deviceConnected = false;
         Serial.println("BLE Client Disconnected");
         logPatternState("disconnect");
@@ -679,7 +684,14 @@ class OTADataCallbacks : public NimBLECharacteristicCallbacks {
                 return;
             }
             ota_in_progress = true;
-            
+
+            // Ask the central for a fast connection interval (7.5-15ms) for the transfer
+            // so packets fly more often. iOS may clamp this; it's harmless if ignored.
+            // The connection resets on the post-OTA reboot, so no need to restore it.
+            if (pServer && currentConnHandle != 0xFFFF) {
+                pServer->updateConnParams(currentConnHandle, 6, 12, 0, 400);
+            }
+
             // Turn off LEDs during OTA to save power and avoid interference
             if (ledMgr.getNumStrips() > 0 && ledMgr.getStrip(0)) {
                 for(int i = 0; i < ledMgr.getStrip(0)->getLength(); i++) { 
