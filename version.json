@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.92",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.92.zip",
-  "buildDate": "2026-06-18T00:17:18Z",
-  "commitHash": "39cb008189f93485ad0b11a00bdd9f60ee30772a",
-  "commitMessage": "esp32: stamp a unique version into local dev builds"
+  "version": "0.0.1.93",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.93.zip",
+  "buildDate": "2026-06-18T00:26:07Z",
+  "commitHash": "091a829fc0e1334b8e4738f24bb43354c04d8ff5",
+  "commitMessage": "render: drive ALL strips, not just the first"
 }
