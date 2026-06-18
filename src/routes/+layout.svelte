@@ -90,16 +90,21 @@
 </SvelteFlowProvider>
 
 <style>
-  /* Reset and base styles */
-  :global(body) {
+  /* Reset and base styles. The page itself never scrolls — html/body are locked to
+     the viewport and only .content-area scrolls. This pins the bottom nav, kills the
+     whole-app pan/rubber-band on iOS, and removes horizontal scrolling entirely. */
+  :global(html), :global(body) {
     margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;            /* no page scroll on either axis */
+    overscroll-behavior: none;   /* no rubber-band / scroll chaining */
+  }
+
+  :global(body) {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     background: black;
-    min-height: 100vh;
-    padding: 0;
-    /* Allow scrolling on iOS Safari but prevent bounce */
-    overflow-x: hidden;
-    -webkit-overflow-scrolling: touch;
     /* Disable Safari double-tap zoom and touch behaviors */
     touch-action: manipulation;
     -webkit-touch-callout: none;
@@ -119,11 +124,11 @@
   .app-container {
     display: grid;
     grid-template-rows: 1fr auto;
-    grid-template-areas: 
+    grid-template-areas:
       "content"
       "navigation";
-    height: 100vh;
-    width: 100vw;
+    height: 100%;
+    width: 100%;
     /* Handle safe areas properly */
     padding-top: env(safe-area-inset-top, 0px);
     padding-left: env(safe-area-inset-left, 0px);
@@ -147,6 +152,9 @@
     grid-area: content;
     overflow-y: auto;
     overflow-x: hidden;
+    -webkit-overflow-scrolling: touch; /* momentum scroll within the content only */
+    overscroll-behavior: contain;      /* don't chain scroll to the locked body */
+    min-height: 0;                     /* let the grid row shrink so this scrolls, not the page */
     /* Max width and centering for large screens */
     max-width: 1000px;
     margin: 0 auto;
