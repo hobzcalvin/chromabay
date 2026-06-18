@@ -615,9 +615,20 @@ export function deserializePattern(
   
   // Step 1: Calculate dependency levels for proper vertical positioning
   const dependencyLevels = calculateDependencyLevels(serializedPattern.nodes);
-  // Track how many nodes have been placed in a given lane at a given level
-  // Key format: `${laneBufferIndex}-${level}`
-  const laneLevelCounts = new Map<string, number>();
+  // Track every occupied (lane, row) slot so no two nodes ever land on top of each
+  // other. IMPORTANT: a node's X is its output-buffer lane (the serializer reads
+  // position.x to recover the buffer), so we must NOT move nodes sideways to avoid
+  // overlap — that would silently reassign their buffer. Instead, when a lane+row is
+  // taken (e.g. two generators both writing buffer 0, or a stacked node landing on a
+  // genuine next-level node), we push DOWN to the next free row in the same lane. Y
+  // isn't used by serialization, so this is purely cosmetic. Key: `${laneX}:${row}`.
+  const occupiedSlots = new Set<string>();
+  const placeRow = (laneX: number, level: number): number => {
+    let row = level;
+    while (occupiedSlots.has(`${laneX}:${row}`)) row++;
+    occupiedSlots.add(`${laneX}:${row}`);
+    return 50 + row * (NODE_HEIGHT + VERTICAL_SPACING);
+  };
 
   // Maps each ORIGINAL serialized-node index to the SvelteFlow node created for
   // it. Unknown node types are skipped (not pushed), so positional indices into
@@ -638,21 +649,14 @@ export function deserializePattern(
     
     const nodeId = `deserialized_${sNode.t}_${Date.now()}_${index}`;
     
-    // Position node based on its output buffer (x) and dependency level (y)
-    let rawXPos = getLaneFromBuffer(sNode.o);
+    // Position node by output-buffer lane (x) and dependency level (y). X is the lane
+    // for the node's output buffer and must stay exact. If that lane+row is already
+    // taken, placeRow pushes this node down to the next free row in the same lane so
+    // it never overlaps another node (and never sideways into a different buffer).
     const level = dependencyLevels.get(index) || 0;
-    // Calculate base Y position
-    let rawYPos = 50 + level * (NODE_HEIGHT + VERTICAL_SPACING);
-    // Determine if another node already occupies this lane+level;
-    // if so, offset further to avoid overlap
-    const laneLevelKey = `${sNode.o}-${level}`;
-    const alreadyPlaced = laneLevelCounts.get(laneLevelKey) ?? 0;
-    if (alreadyPlaced > 0) {
-      // Add extra spacing for each stacked node
-      rawYPos += alreadyPlaced * (NODE_HEIGHT + VERTICAL_SPACING);
-    }
-    laneLevelCounts.set(laneLevelKey, alreadyPlaced + 1);
-    
+    let rawXPos = getLaneFromBuffer(sNode.o);
+    let rawYPos = placeRow(rawXPos, level);
+
     // Validate and fix position calculations
     if (Number.isNaN(rawXPos) || Number.isNaN(rawYPos)) {
       console.error(`❌ NaN detected in node positions! sNode.o=${sNode.o}, level=${level}, xPos=${rawXPos}, yPos=${rawYPos}`);
@@ -780,10 +784,12 @@ export function deserializePattern(
     // Find the correct lane for the output node based on the final output buffer
     const finalOutputBuffer = serializedPattern.meta?.output !== undefined ? serializedPattern.meta.output : 0;
     
-    // Position output node in the same lane as the final output buffer
+    // Position output node in the same lane as the final output buffer (pushed to a
+    // free row if needed, same as every other node).
+    const outputX = getLaneFromBuffer(finalOutputBuffer);
     const outputNode = createNodeFromType(outputDef, outputNodeId, {
-      x: getLaneFromBuffer(finalOutputBuffer),
-      y: 50 + maxLevel * (NODE_HEIGHT + VERTICAL_SPACING)
+      x: outputX,
+      y: placeRow(outputX, maxLevel)
     });
     
     // Add output node parameters (none for output node)
