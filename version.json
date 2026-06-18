@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.107",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.107.zip",
-  "buildDate": "2026-06-18T06:53:46Z",
-  "commitHash": "c6b4b6cc2301ee80de8a24e6fd6c401d81f3df4f",
-  "commitMessage": "operators: 6 source/generator nodes (draw on a blank canvas)"
+  "version": "0.0.1.108",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.108.zip",
+  "buildDate": "2026-06-18T17:12:03Z",
+  "commitHash": "ce8c518606e6206a766e141f7d3cf8ea53832117",
+  "commitMessage": "ios: App Store icon (margin + opaque), no-encryption flag, one-command release"
 }
