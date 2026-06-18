@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.104",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.104.zip",
-  "buildDate": "2026-06-18T05:50:32Z",
-  "commitHash": "c15bd65b2fb6446f2488cc109f5e6390ac617ade",
-  "commitMessage": "devices: act on button "next" event — advance pattern + sync all"
+  "version": "0.0.1.105",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.105.zip",
+  "buildDate": "2026-06-18T06:41:30Z",
+  "commitHash": "4deacbfcea42d9566c8e4efe5106c5432a2e9b27",
+  "commitMessage": "operators: Chase angle + 7 new color/effect operators"
 }
