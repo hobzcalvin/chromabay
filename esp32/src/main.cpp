@@ -62,6 +62,10 @@ PatternRendererBase* patternRenderer = nullptr;
 // (decimal string; "-1" = none). First pass: single click steps brightness.
 #define CHARACTERISTIC_UUID_BUTTON_PIN "a0be83f3-8dc9-47f0-ab40-b19721d20ed1"
 
+// Button Event Characteristic - NOTIFY a button gesture the app must act on (the app
+// owns the pattern library). Payload is a short string, e.g. "next" (next pattern).
+#define CHARACTERISTIC_UUID_BUTTON_EVENT "a0be83f4-8dc9-47f0-ab40-b19721d20ed1"
+
 // OTA Constants
 #define MAX_BLE_CHUNK_SIZE 500 
 
@@ -99,12 +103,18 @@ static const char* DEVICE_NAME_FILE = "/device_name.txt";
 // Button (physical control). First pass: a single, debounced click steps brightness.
 // Polled in loop() (no ISR yet) to stay clear of the BLE host task. -1 = no button.
 NimBLECharacteristic* pButtonPinCharacteristic = nullptr;
+NimBLECharacteristic* pButtonEventCharacteristic = nullptr;
 static const char* BUTTON_PIN_FILE = "/button_pin.txt";
 static int buttonPin = -1;
 static int buttonLastReading = HIGH;   // INPUT_PULLUP idle = HIGH
 static int buttonStableState = HIGH;
 static uint32_t buttonDebounceAtMs = 0;
 static const uint32_t BUTTON_DEBOUNCE_MS = 30;
+// Click gesture detection: a lone click resolves after the double-click window;
+// a second press within it is a double click.
+static uint8_t buttonClickCount = 0;
+static uint32_t buttonLastPressMs = 0;
+static const uint32_t BUTTON_DOUBLE_GAP_MS = 300;
 
 // Name / button writes arrive on the BLE host task but touch flash + advertising, so
 // (like patterns/config) they're staged here and applied on the loop task. Doing the
@@ -994,17 +1004,43 @@ static void onButtonSingleClick() {
     Serial.printf("Button: brightness %u -> %u\n", b, nb);
 }
 
-// Poll + debounce the button on the loop task. On a clean press (HIGH->LOW), fire.
+// Double click -> next pattern. The device doesn't hold the pattern library, so it
+// notifies the app, which advances the current pattern and syncs all connected devices.
+static void onButtonDoubleClick() {
+    Serial.println("Button: double click -> next pattern");
+    if (pButtonEventCharacteristic) {
+        const char* ev = "next";
+        pButtonEventCharacteristic->setValue((uint8_t*)ev, 4);
+        pButtonEventCharacteristic->notify();
+    }
+}
+
+// Poll + debounce the button on the loop task, then classify clicks: a second press
+// within BUTTON_DOUBLE_GAP_MS is a double click; otherwise a lone click resolves once
+// the window passes. (Single click therefore lags by the window — standard tradeoff.)
 static void processButton() {
     if (buttonPin < 0) return;
+    uint32_t now = millis();
     int reading = digitalRead(buttonPin);
     if (reading != buttonLastReading) {
-        buttonDebounceAtMs = millis();
+        buttonDebounceAtMs = now;
         buttonLastReading = reading;
     }
-    if ((millis() - buttonDebounceAtMs) > BUTTON_DEBOUNCE_MS && reading != buttonStableState) {
+    if ((now - buttonDebounceAtMs) > BUTTON_DEBOUNCE_MS && reading != buttonStableState) {
         buttonStableState = reading;
-        if (buttonStableState == LOW) onButtonSingleClick(); // pressed
+        if (buttonStableState == LOW) { // a debounced press
+            buttonClickCount++;
+            buttonLastPressMs = now;
+            if (buttonClickCount >= 2) {
+                onButtonDoubleClick();
+                buttonClickCount = 0;
+            }
+        }
+    }
+    // Resolve a single click once the double-click window has elapsed with no 2nd press.
+    if (buttonClickCount == 1 && (now - buttonLastPressMs) > BUTTON_DOUBLE_GAP_MS) {
+        buttonClickCount = 0;
+        onButtonSingleClick();
     }
 }
 
@@ -1613,6 +1649,10 @@ void setup() {
                 pButtonPinCharacteristic->setValue((uint8_t*)bp.c_str(), bp.length());
             }
             pButtonPinCharacteristic->setCallbacks(new ButtonPinCallbacks());
+
+            // Button Event Characteristic (NOTIFY — app acts on gestures like "next")
+            pButtonEventCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_BUTTON_EVENT, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY);
+            pButtonEventCharacteristic->setValue((uint8_t*)"", 0);
 
             pService->start();
             updateDeviceInfoCharacteristic();
