@@ -27,6 +27,8 @@
     setLedConfiguration,
     sendBrightnessToDevice,
     setDeviceName,
+    getButtonPin,
+    setButtonPin,
     type LedConfiguration,
     type LedStripConfig,
     LedChipsets,
@@ -62,6 +64,7 @@
     checkingForUpdate: boolean;
     showUpdateConfirmation: boolean;
     latestFirmware: FirmwareRegistryEntry | null;
+    buttonPin: number | null;
   }> = $state({});
 
   // Connected devices from store
@@ -202,7 +205,8 @@
           checkingForUpdate: false,
           otaInProgress: false,
           otaSuccess: false,
-          otaStatus: null
+          otaStatus: null,
+          buttonPin: null
         };
         
         deviceSettings[fakeDeviceId] = fakeSettings;
@@ -241,7 +245,8 @@
         otaSuccess: false,
         checkingForUpdate: false,
         showUpdateConfirmation: false,
-        latestFirmware: null
+        latestFirmware: null,
+        buttonPin: null
       };
     }
     return deviceSettings[deviceId];
@@ -337,6 +342,7 @@
       // can follow. (Sequential, not parallel — concurrent GATT reads can error.)
       await loadLedConfig(deviceId);
       await loadDeviceInfo(deviceId);
+      try { settings.buttonPin = await getButtonPin(deviceId); } catch (e) { console.error('getButtonPin failed', e); }
       await checkForUpdateSilently(deviceId);
       await startOTAStatusNotifications(deviceId, (status) => {
         settings.otaStatus = status;
@@ -381,8 +387,27 @@
     
   }
 
-  // Per-device rename edit buffer (keyed by deviceId).
+  // Per-device rename + button-pin edit buffers (keyed by deviceId).
   let renameValue: Record<string, string> = $state({});
+  let buttonPinValue: Record<string, string> = $state({});
+
+  async function handleSetButtonPin(deviceId: string) {
+    const settings = getDeviceSettings(deviceId);
+    const raw = (buttonPinValue[deviceId] ?? '').trim();
+    const pin = raw === '' ? null : parseInt(raw, 10);
+    if (pin != null && (isNaN(pin) || pin < 0 || pin > 39)) {
+      statusMessage = 'Button pin must be 0–39 (or blank for none)';
+      return;
+    }
+    try {
+      await setButtonPin(deviceId, pin);
+      settings.buttonPin = pin;
+      statusMessage = pin == null ? 'Button disabled' : `Button set to GPIO ${pin}`;
+    } catch (error: any) {
+      statusMessage = `Set button failed: ${error.message ?? error}`;
+      console.error('Set button pin error:', error);
+    }
+  }
 
   async function handleRename(deviceId: string) {
     const settings = getDeviceSettings(deviceId);
@@ -709,6 +734,19 @@
                       />
                       <button class="btn primary small" onclick={() => handleRename(device.deviceId)}>Rename</button>
                     </div>
+                    <div class="rename-row">
+                      <label for={`btnpin-${device.deviceId}`}>Button pin</label>
+                      <input
+                        id={`btnpin-${device.deviceId}`}
+                        type="number"
+                        min="0"
+                        max="39"
+                        placeholder="none"
+                        value={buttonPinValue[device.deviceId] ?? (settings.buttonPin ?? '')}
+                        oninput={(e) => (buttonPinValue[device.deviceId] = e.currentTarget.value)}
+                      />
+                      <button class="btn primary small" onclick={() => handleSetButtonPin(device.deviceId)}>Set</button>
+                    </div>
                     <div class="info-grid">
                       <div><strong>Firmware:</strong> {settings.deviceInfo.fw_ver}</div>
                       <div><strong>Hardware:</strong> {settings.deviceInfo.hw_ver}</div>
@@ -819,6 +857,19 @@
                         oninput={(e) => (renameValue[device.deviceId] = e.currentTarget.value)}
                       />
                       <button class="btn primary small" onclick={() => handleRename(device.deviceId)}>Rename</button>
+                    </div>
+                    <div class="rename-row">
+                      <label for={`btnpin-${device.deviceId}`}>Button pin</label>
+                      <input
+                        id={`btnpin-${device.deviceId}`}
+                        type="number"
+                        min="0"
+                        max="39"
+                        placeholder="none"
+                        value={buttonPinValue[device.deviceId] ?? (settings.buttonPin ?? '')}
+                        oninput={(e) => (buttonPinValue[device.deviceId] = e.currentTarget.value)}
+                      />
+                      <button class="btn primary small" onclick={() => handleSetButtonPin(device.deviceId)}>Set</button>
                     </div>
                     <div class="info-grid">
                       <div><strong>Firmware:</strong> {settings.deviceInfo.fw_ver}</div>
