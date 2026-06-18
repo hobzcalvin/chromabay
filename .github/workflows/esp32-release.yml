@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'esp32/**'
+      - 'native/**'   # shared C++ operators are compiled into the firmware
       - '.github/workflows/esp32-release.yml'
     tags:
       - 'fwv*'
