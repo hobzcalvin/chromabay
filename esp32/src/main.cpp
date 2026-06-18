@@ -58,6 +58,10 @@ PatternRendererBase* patternRenderer = nullptr;
 // Device Name Characteristic - read/write the user-facing BLE device name
 #define CHARACTERISTIC_UUID_DEVICE_NAME "a0be83f2-8dc9-47f0-ab40-b19721d20ed1"
 
+// Button Pin Characteristic - read/write the GPIO for the physical control button
+// (decimal string; "-1" = none). First pass: single click steps brightness.
+#define CHARACTERISTIC_UUID_BUTTON_PIN "a0be83f3-8dc9-47f0-ab40-b19721d20ed1"
+
 // OTA Constants
 #define MAX_BLE_CHUNK_SIZE 500 
 
@@ -91,6 +95,16 @@ NimBLECharacteristic* pBrightnessCharacteristic = nullptr;
 NimBLECharacteristic* pDeviceNameCharacteristic = nullptr;
 static String deviceName;
 static const char* DEVICE_NAME_FILE = "/device_name.txt";
+
+// Button (physical control). First pass: a single, debounced click steps brightness.
+// Polled in loop() (no ISR yet) to stay clear of the BLE host task. -1 = no button.
+NimBLECharacteristic* pButtonPinCharacteristic = nullptr;
+static const char* BUTTON_PIN_FILE = "/button_pin.txt";
+static int buttonPin = -1;
+static int buttonLastReading = HIGH;   // INPUT_PULLUP idle = HIGH
+static int buttonStableState = HIGH;
+static uint32_t buttonDebounceAtMs = 0;
+static const uint32_t BUTTON_DEBOUNCE_MS = 30;
 
 // Pattern Storage
 static uint8_t* patternBuffer = nullptr;
@@ -904,6 +918,83 @@ class DeviceNameCallbacks : public NimBLECharacteristicCallbacks {
     }
 };
 
+// --- Physical button (first pass: single click steps brightness) ---
+
+static void configureButtonPin() {
+    if (buttonPin >= 0) {
+        pinMode(buttonPin, INPUT_PULLUP); // button to GND, pressed = LOW
+        buttonLastReading = HIGH;
+        buttonStableState = HIGH;
+    }
+}
+
+static void loadButtonPin() {
+    buttonPin = -1;
+    if (LittleFS.exists(BUTTON_PIN_FILE)) {
+        File f = LittleFS.open(BUTTON_PIN_FILE, FILE_READ);
+        if (f) {
+            String s = f.readString();
+            f.close();
+            s.trim();
+            if (s.length() > 0) {
+                int p = s.toInt();
+                if (p >= 0 && p <= 39) buttonPin = p;
+            }
+        }
+    }
+    configureButtonPin();
+    Serial.printf("Button pin: %d\n", buttonPin);
+}
+
+static void saveButtonPin(int pin) {
+    File f = LittleFS.open(BUTTON_PIN_FILE, FILE_WRITE);
+    if (!f) { Serial.println("Button pin: failed to open for write"); return; }
+    f.print(pin);
+    f.close();
+    Serial.printf("Button pin saved: %d\n", pin);
+}
+
+// Single click action: step brightness down by 32, clamped at 0. From 0 (off) any
+// press jumps back to full. Applied live; persisted via the existing debounced save.
+static void onButtonSingleClick() {
+    uint8_t b = ledMgr.getGlobalBrightness();
+    uint8_t nb = (b == 0) ? 255 : (b > 32 ? (uint8_t)(b - 32) : 0);
+    ledMgr.setGlobalBrightness(nb);
+    brightnessDirty = true;
+    brightnessChangedAtMs = millis();
+    Serial.printf("Button: brightness %u -> %u\n", b, nb);
+}
+
+// Poll + debounce the button on the loop task. On a clean press (HIGH->LOW), fire.
+static void processButton() {
+    if (buttonPin < 0) return;
+    int reading = digitalRead(buttonPin);
+    if (reading != buttonLastReading) {
+        buttonDebounceAtMs = millis();
+        buttonLastReading = reading;
+    }
+    if ((millis() - buttonDebounceAtMs) > BUTTON_DEBOUNCE_MS && reading != buttonStableState) {
+        buttonStableState = reading;
+        if (buttonStableState == LOW) onButtonSingleClick(); // pressed
+    }
+}
+
+class ButtonPinCallbacks : public NimBLECharacteristicCallbacks {
+    void onRead(NimBLECharacteristic* pCharacteristic) {
+        String s = String(buttonPin);
+        pCharacteristic->setValue((uint8_t*)s.c_str(), s.length());
+    }
+    void onWrite(NimBLECharacteristic* pCharacteristic) {
+        std::string value = pCharacteristic->getValue();
+        String s = String(value.c_str());
+        s.trim();
+        int p = s.length() > 0 ? s.toInt() : -1;
+        buttonPin = (p >= 0 && p <= 39) ? p : -1;
+        saveButtonPin(buttonPin);
+        configureButtonPin();
+    }
+};
+
 // The last-applied pattern is persisted here so it survives a power cycle.
 static const char* PATTERN_FILE = "/current_pattern.mp";
 static const char* PLAYLIST_FILE = "/playlist.bin";
@@ -1422,6 +1513,7 @@ void setup() {
     // Initialize BLE with the saved/default device name (LittleFS is mounted above).
     loadDeviceName();
     Serial.printf("Device name: %s\n", deviceName.c_str());
+    loadButtonPin(); // configure the physical button GPIO (if any)
     NimBLEDevice::init(deviceName.c_str());
     pServer = NimBLEDevice::createServer();
     if (!pServer) {
@@ -1475,6 +1567,14 @@ void setup() {
             pDeviceNameCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_DEVICE_NAME, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE);
             pDeviceNameCharacteristic->setValue((uint8_t*)deviceName.c_str(), deviceName.length());
             pDeviceNameCharacteristic->setCallbacks(new DeviceNameCallbacks());
+
+            // Button Pin Characteristic (read current pin / write to set; -1 = none)
+            pButtonPinCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_BUTTON_PIN, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE);
+            {
+                String bp = String(buttonPin);
+                pButtonPinCharacteristic->setValue((uint8_t*)bp.c_str(), bp.length());
+            }
+            pButtonPinCharacteristic->setCallbacks(new ButtonPinCallbacks());
 
             pService->start();
             updateDeviceInfoCharacteristic();
@@ -1543,6 +1643,7 @@ void loop() {
     processReceivedPlaylist();
     processReceivedLedConfig();
     processReceivedBrightness();
+    processButton();
 
     // Finalize a pending OTA off the BLE host task (verify result, end, reboot)
     finalizeOtaIfReady();
