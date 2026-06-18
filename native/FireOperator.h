@@ -39,6 +39,13 @@ class FireOperator : public BaseOperator {
         if (hi <= lo) return lo;
         return (uint8_t)(lo + (rnd8() % (uint8_t)(hi - lo + 1)));
     }
+    // Random index in [0, n) using the full 32-bit state. rnd8() only spans 0..255, so
+    // `rnd8() % w` would cap spark columns at 256 — leaving wide canvases (e.g. the
+    // 500px fullscreen render) lit only on the left. Use this for any index up to width.
+    inline uint32_t rndIndex(uint32_t n) {
+        rng_ ^= rng_ << 13; rng_ ^= rng_ >> 17; rng_ ^= rng_ << 5;
+        return n ? (rng_ % n) : 0;
+    }
     static inline uint8_t qadd8_(uint8_t a, uint8_t b) { unsigned s = (unsigned)a + b; return s > 255 ? 255 : (uint8_t)s; }
     static inline uint8_t qsub8_(uint8_t a, uint8_t b) { return a > b ? (uint8_t)(a - b) : 0; }
 
@@ -105,7 +112,7 @@ class FireOperator : public BaseOperator {
         int attempts = (int)w / 3; if (attempts < 1) attempts = 1;
         for (int i = 0; i < attempts; i++) {
             if (rnd8() < sparking) {
-                int x = rnd8() % w;
+                int x = (int)rndIndex(w); // full-width (rnd8() would cap at column 255)
                 uint32_t idx = (uint32_t)(h - 1) * w + x;
                 heat[idx] = qadd8_(heat[idx], rndRange(160, 255));
             }
