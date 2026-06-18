@@ -58,7 +58,18 @@ void PatternRendererBase::deallocateBuffers() {
 
 uint16_t PatternRendererBase::getMatrixWidth() const {
     if (!ledManager || ledManager->getNumStrips() == 0) return 8; // Default fallback
-    
+
+    // Multiple strips are concatenated into one logical 1xN row (see render()): the
+    // canvas width is the sum of all strip lengths so the pattern spans every LED.
+    if (ledManager->getNumStrips() > 1) {
+        uint32_t total = 0;
+        for (size_t i = 0; i < ledManager->getNumStrips(); i++) {
+            const LedConfig::LedBus* s = ledManager->getStrip(i);
+            if (s) total += s->getConfig().numLeds;
+        }
+        return (uint16_t)total;
+    }
+
     const LedConfig::LedBus* strip = ledManager->getStrip(0);
     if (!strip) return 8; // Default fallback
     
@@ -77,6 +88,9 @@ uint16_t PatternRendererBase::getMatrixWidth() const {
 
 uint16_t PatternRendererBase::getMatrixHeight() const {
     if (!ledManager || ledManager->getNumStrips() == 0) return 8; // Default fallback
+
+    // Concatenated multi-strip mode is a single logical row (see getMatrixWidth).
+    if (ledManager->getNumStrips() > 1) return 1;
 
     const LedConfig::LedBus* strip = ledManager->getStrip(0);
     if (!strip) return 8; // Default fallback
@@ -240,7 +254,30 @@ void PatternRendererBase::render() {
     
     const CRGB* patternBuffer = getBuffer(currentPattern.outputBuffer);
     if (!patternBuffer || ledManager->getNumStrips() == 0) return;
-    
+
+    // Multiple strips: drive them as one continuous logical strip — global pixel i
+    // maps to the i-th LED walking strip 0, then strip 1, and so on. Every strip's
+    // buffer is written (the old code only ever wrote strip 0, leaving any additional
+    // strips showing uninitialized garbage). Per-strip 2D matrices aren't mapped in
+    // this mode; strips are treated as linear runs (the common multi-strip case).
+    if (ledManager->getNumStrips() > 1) {
+        uint32_t totalPixels = getTotalPixels();
+        uint32_t global = 0;
+        for (size_t s = 0; s < ledManager->getNumStrips(); s++) {
+            LedConfig::LedBus* st = ledManager->getStrip(s);
+            if (!st) continue;
+            uint16_t n = st->getConfig().numLeds;
+            for (uint16_t local = 0; local < n; local++) {
+                if (global < totalPixels) {
+                    st->setPixelColor(local, patternBuffer[global]);
+                }
+                global++;
+            }
+        }
+        ledManager->show();
+        return;
+    }
+
     LedConfig::LedBus* strip = ledManager->getStrip(0);
     if (!strip) return;
     
