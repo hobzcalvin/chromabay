@@ -1,8 +1,19 @@
 #pragma once
 
-// Firmware Version - This will be updated by the release script
-// Format: fwvX.Y.Z
+// Firmware Version - Format: fwvX.Y.Z
+// Local dev builds: scripts/version_stamp.py generates src/firmware_build.h (gitignored)
+// with a git+timestamp version, so each build is uniquely identifiable and you can
+// confirm what's actually flashed. CI release builds rewrite the #define below to the
+// published version (firmware_build.h is not generated in CI), so production is
+// unaffected and never clobbered.
+#if defined(__has_include)
+#  if __has_include("firmware_build.h")
+#    include "firmware_build.h"
+#  endif
+#endif
+#ifndef FIRMWARE_VERSION
 #define FIRMWARE_VERSION "fwv0.0.19"
+#endif
 
 // Hardware Version - Manually update this if hardware changes
 // Format: hwvX.Y.Z
