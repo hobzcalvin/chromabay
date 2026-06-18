@@ -68,12 +68,16 @@ const CHARACTERISTIC_UUID_TIMESTAMP_SYNC = "a0be83ef-8dc9-47f0-ab40-b19721d20ed1
 // Brightness Characteristic - live global brightness (single byte, applied immediately)
 const CHARACTERISTIC_UUID_BRIGHTNESS = "a0be83f1-8dc9-47f0-ab40-b19721d20ed1";
 
+// Device Name Characteristic - read/write the user-facing BLE device name
+const CHARACTERISTIC_UUID_DEVICE_NAME = "a0be83f2-8dc9-47f0-ab40-b19721d20ed1";
+
 const MAX_BLE_CHUNK_SIZE = 500; // Should match ESP32's definition
 
 // --- OTA Interfaces ---
 export interface DeviceInfo {
   fw_ver: string;
   hw_ver: string;
+  name?: string;
   heap?: number;
 }
 
@@ -925,6 +929,18 @@ export async function sendBrightnessToDevice(deviceId: string, brightness: numbe
       throw error;
     }
   });
+}
+
+/**
+ * Rename a device. Writes the new name to the device-name characteristic; the firmware
+ * persists it, updates the GAP + advertised name, and reflects it in device info.
+ */
+export async function setDeviceName(deviceId: string, name: string): Promise<void> {
+  const trimmed = name.trim();
+  if (trimmed.length === 0 || trimmed.length > 31) {
+    throw new Error('Device name must be 1–31 characters');
+  }
+  await writeCharacteristic(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_DEVICE_NAME, trimmed);
 }
 
 /**

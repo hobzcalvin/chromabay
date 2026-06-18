@@ -26,6 +26,7 @@
     getLedConfiguration,
     setLedConfiguration,
     sendBrightnessToDevice,
+    setDeviceName,
     type LedConfiguration,
     type LedStripConfig,
     LedChipsets,
@@ -380,6 +381,30 @@
     
   }
 
+  // Per-device rename edit buffer (keyed by deviceId).
+  let renameValue: Record<string, string> = $state({});
+
+  async function handleRename(deviceId: string) {
+    const settings = getDeviceSettings(deviceId);
+    const name = (renameValue[deviceId] ?? settings.deviceInfo?.name ?? '').trim();
+    if (!name) { statusMessage = 'Enter a name first'; return; }
+    try {
+      await setDeviceName(deviceId, name);
+      // Reflect immediately: device info + the card's displayed name (no reconnect).
+      if (settings.deviceInfo) settings.deviceInfo.name = name;
+      connectedDevices.update(devices => {
+        const next = new Map(devices);
+        const d = next.get(deviceId);
+        if (d) next.set(deviceId, { ...d, name });
+        return next;
+      });
+      statusMessage = `Renamed to "${name}"`;
+    } catch (error: any) {
+      statusMessage = `Rename failed: ${error.message ?? error}`;
+      console.error('Rename error:', error);
+    }
+  }
+
   async function loadDeviceInfo(deviceId: string) {
     const settings = getDeviceSettings(deviceId);
     try {
@@ -672,6 +697,18 @@
                 {#if settings.deviceInfo}
                   <div class="settings-section">
                     <h4>Device Information</h4>
+                    <div class="rename-row">
+                      <label for={`rename-${device.deviceId}`}>Name</label>
+                      <input
+                        id={`rename-${device.deviceId}`}
+                        type="text"
+                        maxlength="31"
+                        placeholder="Device name"
+                        value={renameValue[device.deviceId] ?? settings.deviceInfo.name ?? device.name}
+                        oninput={(e) => (renameValue[device.deviceId] = e.currentTarget.value)}
+                      />
+                      <button class="btn primary small" onclick={() => handleRename(device.deviceId)}>Rename</button>
+                    </div>
                     <div class="info-grid">
                       <div><strong>Firmware:</strong> {settings.deviceInfo.fw_ver}</div>
                       <div><strong>Hardware:</strong> {settings.deviceInfo.hw_ver}</div>
@@ -771,6 +808,18 @@
                 {#if settings.deviceInfo}
                   <div class="settings-section">
                     <h4>Device Information</h4>
+                    <div class="rename-row">
+                      <label for={`rename-${device.deviceId}`}>Name</label>
+                      <input
+                        id={`rename-${device.deviceId}`}
+                        type="text"
+                        maxlength="31"
+                        placeholder="Device name"
+                        value={renameValue[device.deviceId] ?? settings.deviceInfo.name ?? device.name}
+                        oninput={(e) => (renameValue[device.deviceId] = e.currentTarget.value)}
+                      />
+                      <button class="btn primary small" onclick={() => handleRename(device.deviceId)}>Rename</button>
+                    </div>
                     <div class="info-grid">
                       <div><strong>Firmware:</strong> {settings.deviceInfo.fw_ver}</div>
                       <div><strong>Hardware:</strong> {settings.deviceInfo.hw_ver}</div>
@@ -1097,6 +1146,29 @@
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
     gap: 0.5rem;
     margin-bottom: 1rem;
+    font-size: 0.9rem;
+  }
+
+  .rename-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+  }
+
+  .rename-row label {
+    font-size: 0.9rem;
+    opacity: 0.85;
+  }
+
+  .rename-row input {
+    flex: 1;
+    min-width: 0;
+    padding: 0.4rem 0.6rem;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.3);
+    color: white;
     font-size: 0.9rem;
   }
 
