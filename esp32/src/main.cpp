@@ -55,6 +55,9 @@ PatternRendererBase* patternRenderer = nullptr;
 // Brightness Characteristic - live global brightness (single byte, applied immediately)
 #define CHARACTERISTIC_UUID_BRIGHTNESS "a0be83f1-8dc9-47f0-ab40-b19721d20ed1"
 
+// Device Name Characteristic - read/write the user-facing BLE device name
+#define CHARACTERISTIC_UUID_DEVICE_NAME "a0be83f2-8dc9-47f0-ab40-b19721d20ed1"
+
 // OTA Constants
 #define MAX_BLE_CHUNK_SIZE 500 
 
@@ -83,6 +86,11 @@ NimBLECharacteristic* pPlaylistSyncCharacteristic = nullptr;
 
 // Brightness Characteristic (live global brightness)
 NimBLECharacteristic* pBrightnessCharacteristic = nullptr;
+
+// Device Name Characteristic (user-settable BLE name; defaults to a MAC-suffixed name)
+NimBLECharacteristic* pDeviceNameCharacteristic = nullptr;
+static String deviceName;
+static const char* DEVICE_NAME_FILE = "/device_name.txt";
 
 // Pattern Storage
 static uint8_t* patternBuffer = nullptr;
@@ -343,6 +351,7 @@ void updateDeviceInfoCharacteristic() {
     String deviceInfoJson = "{";
     deviceInfoJson += "\"fw_ver\":\"" + String(FIRMWARE_VERSION) + "\",";
     deviceInfoJson += "\"hw_ver\":\"" + String(HARDWARE_VERSION) + "\",";
+    deviceInfoJson += "\"name\":\"" + deviceName + "\",";
     deviceInfoJson += "\"heap\":" + String(ESP.getFreeHeap());
     deviceInfoJson += "}";
     
@@ -839,6 +848,59 @@ class BrightnessCallbacks : public NimBLECharacteristicCallbacks {
             pendingBrightness = (uint8_t)value[0];
             newBrightnessAvailable = true;
         }
+    }
+};
+
+// Load the device name from flash, or build a default that's unique out of the box
+// (ChromaBay_<MAC suffix>). Call after LittleFS is mounted and before NimBLEDevice::init.
+static void loadDeviceName() {
+    if (LittleFS.exists(DEVICE_NAME_FILE)) {
+        File f = LittleFS.open(DEVICE_NAME_FILE, FILE_READ);
+        if (f) {
+            String n = f.readString();
+            f.close();
+            n.trim();
+            if (n.length() > 0) { deviceName = n; return; }
+        }
+    }
+    // Default: append the low 2 bytes of the factory MAC so multiple units differ.
+    uint64_t mac = ESP.getEfuseMac();
+    char suffix[8];
+    snprintf(suffix, sizeof(suffix), "%02X%02X", (uint8_t)(mac >> 8), (uint8_t)mac);
+    deviceName = String("ChromaBay_") + suffix;
+}
+
+static void saveDeviceName(const String& name) {
+    File f = LittleFS.open(DEVICE_NAME_FILE, FILE_WRITE);
+    if (!f) { Serial.println("Device name: failed to open for write"); return; }
+    f.print(name);
+    f.close();
+    Serial.printf("Device name saved: %s\n", name.c_str());
+}
+
+// Read/write the user-facing BLE device name. Write persists it, updates the GAP name
+// and the advertised name (so future scans show it), and refreshes device info.
+class DeviceNameCallbacks : public NimBLECharacteristicCallbacks {
+    void onRead(NimBLECharacteristic* pCharacteristic) {
+        pCharacteristic->setValue((uint8_t*)deviceName.c_str(), deviceName.length());
+    }
+    void onWrite(NimBLECharacteristic* pCharacteristic) {
+        std::string value = pCharacteristic->getValue();
+        String n = String(value.c_str());
+        n.trim();
+        if (n.length() == 0 || n.length() > 31) return; // keep within BLE name limits
+        deviceName = n;
+        saveDeviceName(deviceName);
+        NimBLEDevice::setDeviceName(deviceName.c_str());
+        // Refresh the advertised name so future scans show the new name.
+        NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
+        if (adv) {
+            adv->stop();
+            adv->setName(deviceName.c_str());
+            adv->start();
+        }
+        updateDeviceInfoCharacteristic();
+        Serial.printf("Device renamed to: %s\n", deviceName.c_str());
     }
 };
 
@@ -1357,8 +1419,10 @@ void setup() {
         criticalSystemsOK = false;
     }
     
-    // Initialize BLE
-    NimBLEDevice::init("ChromaBay_ESP32"); 
+    // Initialize BLE with the saved/default device name (LittleFS is mounted above).
+    loadDeviceName();
+    Serial.printf("Device name: %s\n", deviceName.c_str());
+    NimBLEDevice::init(deviceName.c_str());
     pServer = NimBLEDevice::createServer();
     if (!pServer) {
         Serial.println("ERROR: Failed to create BLE server!");
@@ -1406,7 +1470,12 @@ void setup() {
             // Brightness Characteristic (live global brightness, single byte)
             pBrightnessCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_BRIGHTNESS, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR | NIMBLE_PROPERTY::READ);
             pBrightnessCharacteristic->setCallbacks(new BrightnessCallbacks());
-            
+
+            // Device Name Characteristic (read current name / write to rename)
+            pDeviceNameCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_DEVICE_NAME, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE);
+            pDeviceNameCharacteristic->setValue((uint8_t*)deviceName.c_str(), deviceName.length());
+            pDeviceNameCharacteristic->setCallbacks(new DeviceNameCallbacks());
+
             pService->start();
             updateDeviceInfoCharacteristic();
             
