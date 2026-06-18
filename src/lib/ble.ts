@@ -1214,6 +1214,12 @@ export async function sendTimestampSync(deviceId: string): Promise<void> {
 
 // Timestamp sync interval management
 const timestampSyncIntervals = new Map<string, number>();
+// Consecutive periodic-sync failures per device. The sync write doubles as a liveness
+// heartbeat: iOS frequently fails to deliver a disconnect callback for silent drops
+// (out of range, device reboot, power loss), leaving a "zombie" connection that the UI
+// still shows as live. After this many failures in a row we treat the device as gone.
+const syncFailureCounts = new Map<string, number>();
+const SYNC_FAILURE_LIMIT = 2;
 
 /**
  * Starts periodic timestamp synchronization for a device (every 10 seconds)
@@ -1221,20 +1227,35 @@ const timestampSyncIntervals = new Map<string, number>();
 function startTimestampSync(deviceId: string): void {
   // Clear any existing interval
   stopTimestampSync(deviceId);
-  
+  syncFailureCounts.set(deviceId, 0);
+
   // Send initial sync
   sendTimestampSync(deviceId).catch(err => {
     console.error(`Failed to send initial timestamp sync to ${deviceId}:`, err);
   });
-  
+
   // Set up periodic sync every 10 seconds
   const intervalId = window.setInterval(() => {
-    sendTimestampSync(deviceId).catch(err => {
-      console.error(`Failed to send periodic timestamp sync to ${deviceId}:`, err);
-      // Don't stop the interval on error - keep trying
-    });
+    sendTimestampSync(deviceId)
+      .then(() => {
+        syncFailureCounts.set(deviceId, 0); // healthy — reset the failure streak
+      })
+      .catch(err => {
+        const fails = (syncFailureCounts.get(deviceId) ?? 0) + 1;
+        syncFailureCounts.set(deviceId, fails);
+        console.error(`Failed to send periodic timestamp sync to ${deviceId} (failure ${fails}/${SYNC_FAILURE_LIMIT}):`, err);
+        // This heartbeat is also our liveness check. If the device is still in our
+        // connected set but won't accept writes for several rounds, it has silently
+        // dropped (iOS often never fires the disconnect callback). Run the normal
+        // disconnect cleanup so the UI leaves its stale "connected" state instead of
+        // sitting in a zombie connection until the user manually reconnects.
+        if (fails >= SYNC_FAILURE_LIMIT && connectedDevices.has(deviceId)) {
+          console.warn(`Device ${deviceId} unresponsive after ${fails} syncs — treating as disconnected`);
+          handleDeviceDisconnected(deviceId);
+        }
+      });
   }, 10000);
-  
+
   timestampSyncIntervals.set(deviceId, intervalId);
   console.log(`[Timestamp Sync] Started periodic sync for device ${deviceId}`);
 }
@@ -1243,6 +1264,7 @@ function startTimestampSync(deviceId: string): void {
  * Stops periodic timestamp synchronization for a device
  */
 function stopTimestampSync(deviceId: string): void {
+  syncFailureCounts.delete(deviceId);
   const intervalId = timestampSyncIntervals.get(deviceId);
   if (intervalId !== undefined) {
     window.clearInterval(intervalId);
