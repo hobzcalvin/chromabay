@@ -4,6 +4,7 @@
   import '@xyflow/svelte/dist/style.css';
   import { flowNodes, flowEdges, nextNodeId, LANES, NODE_TYPES, createNodeFromType, getNodeDefinition, isValidConnectionWithBuffers, initializeDefaultPattern, loadSerializedPattern, isDirty, forceSyncCurrentPattern } from '$lib/flowStore';
   import PatternNode from '$lib/PatternNode.svelte';
+  import LaneBackground from '$lib/components/LaneBackground.svelte';
   import NodeParameterEditor from '$lib/components/NodeParameterEditor.svelte';
   import PatternActions from '$lib/components/PatternActions.svelte';
   import { loadPatterns, currentPattern } from '$lib/stores/patternsStore';
@@ -469,10 +470,15 @@
       }}
       connectionLineStyle="stroke-width: 3; stroke: {connectionLineColor};"
     >
-      <Background 
-        variant={'dots' as any} 
-        gap={[150, 5]} 
+      <!-- Plain, symmetric dot grid for spatial reference (the old gap=[150,5] drew
+           vertical dotted lines that read as extra swim lanes). -->
+      <Background
+        variant={'dots' as any}
+        gap={18}
+        size={1}
       />
+      <!-- Red/green/blue tints marking the 3 real lanes (output buffers 0/1/2). -->
+      <LaneBackground {viewport} />
       
       <!-- Always-rendered Parameter Editor with CSS visibility -->
       {#if activeNode}
