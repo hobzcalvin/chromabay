@@ -63,15 +63,20 @@ Gestures:
 
 ## 3. Firmware architecture
 
-### 3.1 GPIO + ISR (keep tiny)
-- On config apply / boot: if `buttonPin >= 0`, `pinMode(buttonPin, INPUT_PULLUP)` and
-  `attachInterrupt(buttonPin, isr, CHANGE)`. If it changes or becomes none, detach the
-  old ISR first. Validate against strip data pins (warn/refuse on conflict).
-- ISR is `IRAM_ATTR`, **does nothing but** push `(level, micros())` into a small
-  lock-free ring buffer (or set volatile edge vars). **No Serial, no BLE, no flash, no
-  malloc** in the ISR.
-- All debounce + gesture logic runs on the **loop task** (like the existing
-  `processReceived*` handlers), draining the edge buffer.
+### 3.1 GPIO input — **poll, don't interrupt** (decided)
+- On config apply / boot: if `buttonPin >= 0`, `pinMode(buttonPin, INPUT_PULLUP)`
+  (button to GND, pressed = LOW). Validate against strip data pins (warn on conflict).
+- **Poll the pin in `loop()`** with time-based debounce, reading the *stable* state —
+  this is what's implemented (`processButton()`). Rationale: the loop runs far faster
+  than the press/debounce/gesture timescales and reads the held state, so it can't miss
+  a human press; it avoids ISR discipline (`IRAM_ATTR`, no BLE/Serial/flash/malloc) and
+  any race with the BLE host task. The interrupt's real wins (deep-sleep wake, sub-ms
+  pulses) don't apply to an always-on device with a finger-pressed button.
+- **Caveat / when to switch to an ISR:** polling assumes the loop never blocks longer
+  than a press (~100 ms). Today it doesn't (render + BLE processing are short; the only
+  long block is the one-time boot RGB `delay()`). If a long synchronous loop operation
+  is ever added, move to an `IRAM_ATTR` ISR that only timestamps edges into a lock-free
+  buffer, with all debounce/gesture logic still on the loop task.
 
 ### 3.2 Debounce
 - Ignore edges within ~25 ms of the last accepted edge.
@@ -157,8 +162,9 @@ Timings (tunable): `DEBOUNCE ≈ 25 ms`, `DOUBLE_GAP ≈ 300 ms` (max gap betwee
 ---
 
 ## 6. Risks / watch-list
-- **ISR discipline:** `IRAM_ATTR`, no BLE/Serial/flash/malloc in the ISR — only timestamped
-  edges. All real work on the loop task.
+- **Input method:** polling in `loop()` (see §3.1) — no ISR for now. If switched to an
+  ISR later: `IRAM_ATTR`, no BLE/Serial/flash/malloc, only timestamp edges; real work on
+  the loop task.
 - **BLE stack stability:** we already have a lot on the NimBLE host task + the app's
   `bleSerial` queue; new notifies must not flood or race. Throttle param notifies.
 - **Feedback loops** in farm-out (device→app→devices→…). Add suppression / equality checks.
