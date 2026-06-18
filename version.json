@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.110",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.110.zip",
-  "buildDate": "2026-06-18T21:27:22Z",
-  "commitHash": "24fb489360a1e3004ba69f81c2c90fec986b0a5c",
-  "commitMessage": "BLE: detect silent disconnects via the sync heartbeat to clear zombie state"
+  "version": "0.0.1.112",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.112.zip",
+  "buildDate": "2026-06-18T22:35:36Z",
+  "commitHash": "ffbc3dea892c999080bb7ebb28892956bbff1cf7",
+  "commitMessage": "Patterns: tap selects as current; add ✋ button to open Interact"
 }
