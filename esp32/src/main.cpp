@@ -1700,6 +1700,10 @@ void setup() {
     Serial.printf("Device name: %s\n", deviceName.c_str());
     loadButtonPin(); // configure the physical button GPIO (if any)
     NimBLEDevice::init(deviceName.c_str());
+    // Negotiate a large ATT MTU so OTA chunks (up to MAX_BLE_CHUNK_SIZE = 500B) ride in
+    // a single ATT packet instead of being fragmented — fewer link-layer round-trips.
+    // The central (iOS) still caps the actual negotiated value; this just raises our max.
+    NimBLEDevice::setMTU(517);
     pServer = NimBLEDevice::createServer();
     if (!pServer) {
         Serial.println("ERROR: Failed to create BLE server!");

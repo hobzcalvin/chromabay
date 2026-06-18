@@ -46,7 +46,21 @@ jobs:
       run: |
         pip install platformio
         pio --version
-      
+
+    # Cache the heavy bits: downloaded platforms/toolchains (~/.platformio) and the
+    # incremental build dir (esp32/.pio). This is what turns the ~8 min cold build into
+    # a ~1-2 min warm one. Key is invalidated when platformio.ini changes (e.g. a pinned
+    # dep bump); restore-keys lets an older cache seed a partial restore.
+    - name: Cache PlatformIO
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.platformio
+          esp32/.pio
+        key: pio-${{ runner.os }}-${{ hashFiles('esp32/platformio.ini') }}
+        restore-keys: |
+          pio-${{ runner.os }}-
+
     - name: Create private key file from secret
       run: |
         echo "${{ secrets.ESP32_SIGNING_PRIVATE_KEY }}" > esp32-signing-private.pem

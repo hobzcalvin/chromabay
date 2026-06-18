@@ -619,86 +619,25 @@ let webOTADataCharacteristic: BluetoothRemoteGATTCharacteristic | null = null;
 // Global ACK handler for mobile OTA chunks
 let globalMobileAckHandler: ((value: DataView) => void) | null = null;
 
-async function sendFirmwareChunk(deviceId: string, chunk: ArrayBuffer): Promise<void> {
+// Write one firmware chunk WITHOUT waiting for its ACK. Flow control is handled by the
+// caller's sliding window (see performOTAUpdate), which keeps a bounded number of
+// chunks in flight using the per-chunk ACK notifications the ESP32 already sends. This
+// is what makes the fast path backwards-compatible: the firmware is unchanged and still
+// ACKs every chunk; we just stop idling for a full round-trip between each one.
+async function writeChunkNoWait(deviceId: string, chunk: ArrayBuffer): Promise<void> {
   const dataView = new DataView(chunk);
-  
-  // OTA_DATA uses WriteWithoutResponse for speed, but ESP32 notifies on same char for ACK
   if (isWeb()) {
-    if (!webOTADataCharacteristic) {
-      throw new Error('OTA Data characteristic not initialized');
-    }
-    
-    return new Promise(async (resolve, reject) => {
-      let listenerAdded = false;
-      const timeoutId = setTimeout(() => {
-        if (webOTADataCharacteristic && listenerAdded) {
-          webOTADataCharacteristic.removeEventListener('characteristicvaluechanged', listener);
-        }
-        reject(new Error('Timeout waiting for ACK from ESP32'));
-      }, 5000); // Increased to 5 second timeout
-      
-      const listener = (event: any) => {
-        clearTimeout(timeoutId);
-        if (webOTADataCharacteristic && listenerAdded) {
-          webOTADataCharacteristic.removeEventListener('characteristicvaluechanged', listener);
-        }
-        resolve();
-      };
-      
-      try {
-        // Add listener BEFORE writing to avoid race condition
-        if (webOTADataCharacteristic) {
-          webOTADataCharacteristic.addEventListener('characteristicvaluechanged', listener);
-          listenerAdded = true;
-        }
-        
-        if (!webOTADataCharacteristic) {
-          throw new Error('OTA Data characteristic is null');
-        }
-        await webOTADataCharacteristic.writeValueWithoutResponse(dataView);
-      } catch (error) {
-        clearTimeout(timeoutId);
-        if (webOTADataCharacteristic && listenerAdded) {
-          webOTADataCharacteristic.removeEventListener('characteristicvaluechanged', listener);
-        }
-        reject(error);
-      }
-    });
-
+    if (!webOTADataCharacteristic) throw new Error('OTA Data characteristic not initialized');
+    await webOTADataCharacteristic.writeValueWithoutResponse(dataView);
   } else {
-    // Native: Write and wait for ACK notification via global listener
-    return new Promise(async (resolve, reject) => {
-        let ackReceived = false;
-        
-        const timeoutId = setTimeout(() => {
-            if (!ackReceived) {
-                reject(new Error('Timeout waiting for ACK from ESP32 (mobile)'));
-            }
-        }, 15000); // 5 second timeout
-        
-        // Set up global ACK handler 
-        const originalAckHandler = globalMobileAckHandler;
-        globalMobileAckHandler = (value: DataView) => {
-            if (!ackReceived) {
-                ackReceived = true;
-                clearTimeout(timeoutId);
-                globalMobileAckHandler = originalAckHandler; // Restore previous handler
-                resolve();
-            }
-        };
-        
-        try {
-            // Write the chunk - ACK will be received via global listener
-            await BleClient.writeWithoutResponse(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_OTA_DATA, dataView);
-            
-        } catch (err) {
-            clearTimeout(timeoutId);
-            globalMobileAckHandler = originalAckHandler; // Restore previous handler
-            reject(err);
-        }
-    });
+    await BleClient.writeWithoutResponse(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_OTA_DATA, dataView);
   }
 }
+
+// Number of chunks kept in flight before waiting for ACKs. Conservative so we don't
+// overrun the controller's write-without-response buffer (which would drop chunks — a
+// failed, not bricked, update thanks to signature verification + rollback).
+const OTA_WINDOW = 4;
 
 export async function startOTAStatusNotifications(deviceId: string, callback: (status: OTAUpdateStatus) => void): Promise<void> {
   console.log(`[OTA] Starting status notifications for ${deviceId}`);
@@ -722,7 +661,9 @@ export async function performOTAUpdate(
   console.log(`[OTA] Starting OTA update for ${deviceId} from ${firmwareUrl}`);
   progressCallback({ statusMessage: 'Starting OTA...' });
 
-  let otaDataNotificationsStartedForAck = false; 
+  let otaDataNotificationsStartedForAck = false;
+  // Declared at function scope so the finally block can detach it. Assigned in step 3.
+  let onAck: () => void = () => {};
 
   try {
     // 1. Fetch firmware and signature
@@ -746,42 +687,66 @@ export async function performOTAUpdate(
     //    Our ESP32 code starts OTA on first data chunk.
     // await sendOTAControlCommand(deviceId, 'START_OTA'); // Or send total size
 
-    // 3. Start listening for ACKs on OTA_DATA characteristic for flow control
+    // 3. Listen for the ESP32's per-chunk ACK notifications on OTA_DATA. A single
+    //    persistent handler counts ACKs for the whole transfer; the windowed sender
+    //    below uses that count for flow control.
+    let ackedChunks = 0;
+    let ackWaiter: (() => void) | null = null;
+    onAck = () => {
+      ackedChunks++;
+      if (ackWaiter) { const w = ackWaiter; ackWaiter = null; w(); }
+    };
+    // Resolves on the next ACK, or rejects after a timeout (a stalled transfer).
+    const waitForAck = (timeoutMs: number) => new Promise<void>((resolve, reject) => {
+      const t = setTimeout(() => { ackWaiter = null; reject(new Error('Timeout waiting for OTA ACK')); }, timeoutMs);
+      ackWaiter = () => { clearTimeout(t); resolve(); };
+    });
+
     if (isWeb()) {
-        // For Web Bluetooth, set up the global characteristic and start notifications
         const deviceInfo = connectedDevices.get(deviceId);
         if (!deviceInfo?.gattServer) throw new Error('Device not connected');
         const service = await deviceInfo.gattServer.getPrimaryService(LED_SERVICE_UUID);
         webOTADataCharacteristic = await service.getCharacteristic(CHARACTERISTIC_UUID_OTA_DATA);
         if (webOTADataCharacteristic) {
           await webOTADataCharacteristic.startNotifications();
+          webOTADataCharacteristic.addEventListener('characteristicvaluechanged', onAck);
         }
         otaDataNotificationsStartedForAck = true;
-    } else { 
-        await BleClient.startNotifications(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_OTA_DATA, (ackValue) => {
-            // Call the global ACK handler if it exists (for chunk-by-chunk flow control)
-            if (globalMobileAckHandler) {
-                globalMobileAckHandler(ackValue);
-            }
+    } else {
+        globalMobileAckHandler = () => onAck();
+        await BleClient.startNotifications(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_OTA_DATA, () => {
+            if (globalMobileAckHandler) globalMobileAckHandler(new DataView(new ArrayBuffer(0)));
         });
         otaDataNotificationsStartedForAck = true;
     }
 
-
-    // 4. Send firmware in chunks
+    // 4. Send firmware as a sliding window: keep up to OTA_WINDOW chunks in flight,
+    //    sending the next as each ACK arrives. ~OTA_WINDOW× fewer round-trips than
+    //    stop-and-wait, while the ACK-driven window prevents overrunning the device.
     let offset = 0;
+    let sentChunks = 0;
     const totalSize = firmwareBuffer.byteLength;
+    const totalChunks = Math.ceil(totalSize / MAX_BLE_CHUNK_SIZE);
     progressCallback({ statusMessage: 'Sending firmware data...', progress: 0 });
 
     while (offset < totalSize) {
+      // Wait until the window has room (bounded chunks awaiting ACK).
+      while (sentChunks - ackedChunks >= OTA_WINDOW) {
+        await waitForAck(15000);
+      }
       const chunkEnd = Math.min(offset + MAX_BLE_CHUNK_SIZE, totalSize);
-      const chunk = firmwareBuffer.slice(offset, chunkEnd);
-      
-      await sendFirmwareChunk(deviceId, chunk);
-      
+      await writeChunkNoWait(deviceId, firmwareBuffer.slice(offset, chunkEnd));
       offset = chunkEnd;
+      sentChunks++;
       const progress = Math.round((offset / totalSize) * 100);
       progressCallback({ statusMessage: `Sending firmware: ${progress}%`, progress });
+    }
+
+    // Drain remaining ACKs so we know the device wrote everything. If a tail ACK
+    // notification is lost the wait times out — we proceed anyway, since signature
+    // verification on END_OTA is the real integrity gate (a true drop fails safely).
+    while (ackedChunks < totalChunks) {
+      try { await waitForAck(15000); } catch { break; }
     }
     progressCallback({ statusMessage: 'All firmware chunks sent.', progress: 100 });
 
@@ -816,10 +781,12 @@ export async function performOTAUpdate(
         try {
             if (isWeb()) {
                 if (webOTADataCharacteristic) {
+                    try { webOTADataCharacteristic.removeEventListener('characteristicvaluechanged', onAck); } catch {}
                     await webOTADataCharacteristic.stopNotifications();
                     webOTADataCharacteristic = null;
                 }
             } else {
+                globalMobileAckHandler = null;
                 await BleClient.stopNotifications(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_OTA_DATA);
             }
         } catch (e) {
