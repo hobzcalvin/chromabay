@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.95",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.95.zip",
-  "buildDate": "2026-06-18T00:41:02Z",
-  "commitHash": "81cf7d1277f2481dd141649d7ff33762e60b04fd",
-  "commitMessage": "devices: log the strip count on config save (diagnose strip loss)"
+  "version": "0.0.1.96",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.96.zip",
+  "buildDate": "2026-06-18T00:49:46Z",
+  "commitHash": "a8ac1a8b493a83fd053cac96ceca9a0ddad76d85",
+  "commitMessage": "render: per-strip canvases — each strip renders the effect graph at its own dims"
 }
