@@ -30,6 +30,46 @@
     }
     return `${base}-${prefix}${deviceId}`;
   }
+
+  // --- Dimension hand-holding ---
+  // numLeds / width / height start blank on a new strip. We keep width*height >= numLeds
+  // and as small as possible, auto-filling whichever field the user isn't editing.
+  function parseField(raw: string): number | null {
+    if (raw === '') return null;
+    const n = parseInt(raw, 10);
+    return (isNaN(n) || n < 1) ? null : n;
+  }
+
+  function onNumLeds(strip: any, raw: string) {
+    strip.numLeds = parseField(raw);
+    const n = strip.numLeds;
+    if (n == null) return;
+    const haveWH = strip.width != null && strip.width >= 1 && strip.height != null && strip.height >= 1;
+    if (!haveWH) {
+      // Nothing set yet: square-ish matrix.
+      strip.width = Math.ceil(Math.sqrt(n));
+      strip.height = Math.ceil(n / strip.width);
+    } else {
+      // Keep width, grow/shrink height to just cover numLeds.
+      strip.height = Math.ceil(n / strip.width);
+      // A single row that's wider than needed → tighten the width to numLeds.
+      if (strip.height === 1 && strip.width > n) strip.width = n;
+    }
+  }
+
+  function onWidth(strip: any, raw: string) {
+    strip.width = parseField(raw);
+    if (strip.numLeds != null && strip.width != null) {
+      strip.height = Math.ceil(strip.numLeds / strip.width);
+    }
+  }
+
+  function onHeight(strip: any, raw: string) {
+    strip.height = parseField(raw);
+    if (strip.numLeds != null && strip.height != null) {
+      strip.width = Math.ceil(strip.numLeds / strip.height);
+    }
+  }
 </script>
 
 <div class="settings-section">
@@ -70,16 +110,6 @@
                   </select>
                 </label>
                 <label>
-                  Pin:
-                  <input id={buildId('pin', index)} name="pin" type="number" min="0" max="39" bind:value={strip.pin} />
-                </label>
-                <label>
-                  LEDs:
-                  <input id={buildId('numleds', index)} name="numleds" type="number" min="1" max="1000" bind:value={strip.numLeds} />
-                </label>
-              </div>
-              <div class="control-row">
-                <label>
                   Color Order:
                   <select id={buildId('colororder', index)} name="colororder" bind:value={strip.colorOrder}>
                     <option value={ColorOrders.RGB}>RGB</option>
@@ -90,42 +120,47 @@
                     <option value={ColorOrders.BGR}>BGR</option>
                   </select>
                 </label>
+                <label>
+                  Pin:
+                  <input id={buildId('pin', index)} name="pin" type="number" min="0" max="39" bind:value={strip.pin} />
+                </label>
               </div>
               <div class="control-row">
                 <label>
-                  Width (0 = linear):
-                  <input id={buildId('width', index)} name="width" type="number" min="0" max="500" bind:value={strip.width} />
+                  LEDs:
+                  <input id={buildId('numleds', index)} name="numleds" type="number" min="1" max="1000"
+                    placeholder="count" value={strip.numLeds ?? ''} oninput={(e) => onNumLeds(strip, e.currentTarget.value)} />
                 </label>
                 <label>
-                  Height (0 = linear):
-                  <input id={buildId('height', index)} name="height" type="number" min="0" max="500" bind:value={strip.height} />
+                  Width:
+                  <input id={buildId('width', index)} name="width" type="number" min="1" max="500"
+                    placeholder="auto" value={strip.width ?? ''} oninput={(e) => onWidth(strip, e.currentTarget.value)} />
+                </label>
+                <label>
+                  Height:
+                  <input id={buildId('height', index)} name="height" type="number" min="1" max="500"
+                    placeholder="auto" value={strip.height ?? ''} oninput={(e) => onHeight(strip, e.currentTarget.value)} />
                 </label>
               </div>
-              {#if strip.width > 0 && strip.height > 0}
-                {@const currentRotation = getRotation(strip.orientation).toString()}
-                <div class="matrix-controls">
-                  <h6>Matrix Layout Settings</h6>
-                  <div class="control-row">
-                    <label>
-                      Rotation:
-                      <select id={buildId('rotation', index)} name="rotation" value={currentRotation} onchange={(e) => { strip.orientation = setRotation(strip.orientation, parseInt(e.currentTarget.value)); }}>
-                        <option value="0">0° (No rotation)</option>
-                        <option value="1">90° Clockwise</option>
-                        <option value="2">180°</option>
-                        <option value="3">270° Clockwise</option>
-                      </select>
-                    </label>
-                    <label>
-                      <input id={buildId('flip', index)} name="flip" type="checkbox" checked={getFlipH(strip.orientation)} onchange={(e) => { strip.orientation = setFlipH(strip.orientation, e.currentTarget.checked); }} />
-                      Flip Horizontally
-                    </label>
-                    <label>
-                      <input id={buildId('serpentine', index)} name="serpentine" type="checkbox" checked={getSerpentine(strip.orientation)} onchange={(e) => { strip.orientation = setSerpentine(strip.orientation, e.currentTarget.checked); }} />
-                      Serpentine Layout
-                    </label>
-                  </div>
-                </div>
-              {/if}
+              <div class="control-row">
+                <label>
+                  Rotation:
+                  <select id={buildId('rotation', index)} name="rotation" value={getRotation(strip.orientation).toString()} onchange={(e) => { strip.orientation = setRotation(strip.orientation, parseInt(e.currentTarget.value)); }}>
+                    <option value="0">0° (No rotation)</option>
+                    <option value="1">90° Clockwise</option>
+                    <option value="2">180°</option>
+                    <option value="3">270° Clockwise</option>
+                  </select>
+                </label>
+                <label class="checkbox-label">
+                  <input id={buildId('flip', index)} name="flip" type="checkbox" checked={getFlipH(strip.orientation)} onchange={(e) => { strip.orientation = setFlipH(strip.orientation, e.currentTarget.checked); }} />
+                  Flip Horizontally
+                </label>
+                <label class="checkbox-label">
+                  <input id={buildId('serpentine', index)} name="serpentine" type="checkbox" checked={getSerpentine(strip.orientation)} onchange={(e) => { strip.orientation = setSerpentine(strip.orientation, e.currentTarget.checked); }} />
+                  Serpentine Layout
+                </label>
+              </div>
             </div>
           </div>
         {/each}
@@ -202,6 +237,16 @@
     gap: 0.25rem;
   }
 
+  /* Checkboxes read better as [box] label on one line. */
+  .control-row label.checkbox-label {
+    flex-direction: row;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  .control-row label.checkbox-label input {
+    width: auto;
+  }
+
   .control-row input,
   .control-row select {
     padding: 0.4rem;
@@ -216,21 +261,6 @@
   .control-row select:focus {
     outline: 1px solid var(--accent-color);
     border-color: var(--accent-color);
-  }
-
-  /* Matrix configuration styling */
-  .matrix-controls {
-    margin-top: 1rem;
-    padding: 1rem;
-    background: rgba(255, 255, 255, 0.02);
-    border-radius: 6px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-  }
-
-  .matrix-controls h6 {
-    margin: 0 0 0.75rem 0;
-    color: var(--accent-color);
-    font-size: 0.9rem;
   }
 
   /* Mobile responsiveness */

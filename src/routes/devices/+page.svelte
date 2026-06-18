@@ -408,7 +408,21 @@
   async function saveLedConfig(deviceId: string) {
     const settings = getDeviceSettings(deviceId);
     if (!settings.ledConfig) return;
-    
+
+    // Validate + normalize each strip: every strip needs a LED count, and width/height
+    // are derived to cover it (square-ish) if the user left them blank. Guarantees the
+    // firmware always receives valid integers.
+    for (const strip of settings.ledConfig.strips) {
+      if (!strip.numLeds || strip.numLeds < 1) {
+        statusMessage = 'Each strip needs a LED count before saving.';
+        return;
+      }
+      if (!strip.width || strip.width < 1 || !strip.height || strip.height < 1) {
+        strip.width = Math.ceil(Math.sqrt(strip.numLeds));
+        strip.height = Math.ceil(strip.numLeds / strip.width);
+      }
+    }
+
     settings.ledConfigLoading = true;
     console.log(`[devices] 💾 saveLedConfig → ${deviceId}: SENDING ${settings.ledConfig.strips.length} strip(s)`, JSON.parse(JSON.stringify(settings.ledConfig)));
     try {
@@ -545,11 +559,11 @@
     const newStrip: LedStripConfig = {
       chipset: LedChipsets.WS2812_RGB,
       pin: 13,
-      numLeds: 100,
+      numLeds: null,   // blank until the user enters a count (width/height auto-fill)
       colorOrder: ColorOrders.GRB,
       rmtChannel: 0,
-      width: 0,
-      height: 0,
+      width: null,
+      height: null,
       orientation: 0
     };
     settings.ledConfig.strips = [...settings.ledConfig.strips, newStrip];

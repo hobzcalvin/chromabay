@@ -952,11 +952,13 @@ async function writeCharacteristicBinary(deviceId: string, serviceUuid: string, 
 export interface LedStripConfig {
   chipset: number;
   pin: number;
-  numLeds: number;
+  // numLeds/width/height are null while a new strip is being entered (blank fields);
+  // they're filled/derived before saving. Loaded-from-device configs always have numbers.
+  numLeds: number | null;
   colorOrder: number;
   rmtChannel: number;
-  width: number;
-  height: number;
+  width: number | null;
+  height: number | null;
   orientation: number;
 }
 
@@ -1058,16 +1060,27 @@ export async function getLedConfiguration(deviceId: string): Promise<LedConfigur
     // The set path writes raw values, so || made get/set asymmetric/lossy.
     const config: LedConfiguration = {
       globalBrightness: decodedConfig.gb ?? 255,
-      strips: (decodedConfig.strips || []).map((strip: any) => ({
-        chipset: strip.cs ?? LedChipsets.WS2812_RGB,
-        pin: strip.pin ?? 13,
-        numLeds: strip.num ?? 100,
-        colorOrder: strip.co ?? ColorOrders.GRB,
-        rmtChannel: strip.rmt ?? 0,
-        width: strip.w ?? 0,
-        height: strip.h ?? 0,
-        orientation: strip.ort ?? 0
-      }))
+      strips: (decodedConfig.strips || []).map((strip: any) => {
+        const numLeds = strip.num ?? 100;
+        let width = strip.w ?? 0;
+        let height = strip.h ?? 0;
+        // Migrate old "linear" configs (0x0) to the always-matrix model as a single
+        // row, so the UI never shows a meaningless 0.
+        if (!(width >= 1) || !(height >= 1)) {
+          width = numLeds;
+          height = 1;
+        }
+        return {
+          chipset: strip.cs ?? LedChipsets.WS2812_RGB,
+          pin: strip.pin ?? 13,
+          numLeds,
+          colorOrder: strip.co ?? ColorOrders.GRB,
+          rmtChannel: strip.rmt ?? 0,
+          width,
+          height,
+          orientation: strip.ort ?? 0
+        };
+      })
     };
     
     return config;
@@ -1082,17 +1095,19 @@ export async function setLedConfiguration(deviceId: string, config: LedConfigura
   try {
     console.log(`[LED Config] Setting configuration for ${deviceId}:`, config);
     
-    // Convert to ESP32 format and encode as MessagePack
+    // Convert to ESP32 format and encode as MessagePack. The firmware expects integers
+    // for num/w/h; callers normalize blanks before saving, but coerce defensively so a
+    // stray null can never serialize to nil and break the firmware decode.
     const esp32Config = {
       gb: config.globalBrightness,
       strips: config.strips.map(strip => ({
         cs: strip.chipset,
         pin: strip.pin,
-        num: strip.numLeds,
+        num: strip.numLeds ?? 0,
         co: strip.colorOrder,
         rmt: strip.rmtChannel,
-        w: strip.width,
-        h: strip.height,
+        w: strip.width ?? 0,
+        h: strip.height ?? 0,
         ort: strip.orientation
       }))
     };
