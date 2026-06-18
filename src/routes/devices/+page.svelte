@@ -1213,7 +1213,6 @@
   }
 
   .rename-row input {
-    flex: 1;
     min-width: 0;
     padding: 0.4rem 0.6rem;
     border: 1px solid rgba(255, 255, 255, 0.3);
@@ -1221,6 +1220,17 @@
     background: rgba(0, 0, 0, 0.3);
     color: white;
     font-size: 0.9rem;
+  }
+
+  /* Name: roughly the max allowed length (31), not full width. */
+  .rename-row input[type="text"] {
+    width: 22ch;
+    max-width: 100%;
+  }
+
+  /* Button pin: a small number field like the strip Pin input. */
+  .rename-row input[type="number"] {
+    width: 5em;
   }
 
 
