@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.103",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.103.zip",
-  "buildDate": "2026-06-18T05:36:51Z",
-  "commitHash": "ab934543fec6e9bd2b9b826fe162b89f58fb0b90",
-  "commitMessage": "devices: size the Name/Button-pin inputs (not full width)"
+  "version": "0.0.1.104",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.104.zip",
+  "buildDate": "2026-06-18T05:50:32Z",
+  "commitHash": "c15bd65b2fb6446f2488cc109f5e6390ac617ade",
+  "commitMessage": "devices: act on button "next" event — advance pattern + sync all"
 }
