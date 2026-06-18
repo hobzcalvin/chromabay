@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.102",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.102.zip",
-  "buildDate": "2026-06-18T05:30:25Z",
-  "commitHash": "36634a78141403677e2d8cf6071e0413325d8433",
-  "commitMessage": "docs: button plan — poll the GPIO instead of an interrupt (with rationale)"
+  "version": "0.0.1.103",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.103.zip",
+  "buildDate": "2026-06-18T05:36:51Z",
+  "commitHash": "ab934543fec6e9bd2b9b826fe162b89f58fb0b90",
+  "commitMessage": "devices: size the Name/Button-pin inputs (not full width)"
 }
