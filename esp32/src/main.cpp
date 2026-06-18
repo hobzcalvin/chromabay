@@ -1327,18 +1327,29 @@ void setup() {
     // Power-on test: Red, Green, Blue for 0.5s each before the saved pattern
     // starts (verifies the LEDs work AND that colour order is correct — if these
     // don't show as R/G/B in order, the strip's colorOrder config is wrong).
-    if (ledMgr.getNumStrips() > 0 && ledMgr.getStrip(0)) {
+    if (ledMgr.getNumStrips() > 0) {
         const CRGB testColors[3] = { CRGB::Red, CRGB::Green, CRGB::Blue };
         for (int c = 0; c < 3; c++) {
-            int len = ledMgr.getStrip(0)->getLength();
-            for (int i = 0; i < len; i++) {
-                ledMgr.setPixelColor(0, i, testColors[c]);
+            // Drive EVERY LED on EVERY strip for this color.
+            for (size_t s = 0; s < ledMgr.getNumStrips(); s++) {
+                const LedConfig::LedBus* strip = ledMgr.getStrip(s);
+                if (!strip) continue;
+                int len = strip->getLength();
+                for (int i = 0; i < len; i++) {
+                    ledMgr.setPixelColor(s, i, testColors[c]);
+                }
             }
             ledMgr.show();
             delay(500);
         }
-        for (int i = 0; i < ledMgr.getStrip(0)->getLength(); i++) {
-            ledMgr.setPixelColor(0, i, CRGB::Black);
+        // Clear all strips.
+        for (size_t s = 0; s < ledMgr.getNumStrips(); s++) {
+            const LedConfig::LedBus* strip = ledMgr.getStrip(s);
+            if (!strip) continue;
+            int len = strip->getLength();
+            for (int i = 0; i < len; i++) {
+                ledMgr.setPixelColor(s, i, CRGB::Black);
+            }
         }
         ledMgr.show();
     } else {
