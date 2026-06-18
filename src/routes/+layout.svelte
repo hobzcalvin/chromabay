@@ -2,13 +2,33 @@
   import { page } from '$app/stores';
   import { base } from '$app/paths';
   import { onMount } from 'svelte';
+  import { get } from 'svelte/store';
   import { connectedDevices } from '$lib/stores/deviceStore';
+  import { loadPatterns, currentPattern } from '$lib/stores/patternsStore';
+  import { loadSerializedPattern, initializeDefaultPattern } from '$lib/flowStore';
   import { SvelteFlowProvider } from '@xyflow/svelte';
 
   $: connected = $connectedDevices.size;
-  
+
+  // Load the current pattern into the flow store app-wide on startup. Connecting to a
+  // device syncs whatever's in the flow store (serializeCurrentPattern), and the
+  // Devices page never populated it — so connecting there used to push an empty
+  // pattern until you visited Editor/Patterns. Loading here makes the current pattern
+  // available no matter which page you land on.
+  async function loadCurrentPatternIntoFlow() {
+    try {
+      await loadPatterns();
+      const current = get(currentPattern);
+      if (current) await loadSerializedPattern(current);
+      else initializeDefaultPattern();
+    } catch (e) {
+      console.error('Layout: failed to load current pattern into flow store', e);
+    }
+  }
+
   onMount(() => {
-    
+    loadCurrentPatternIntoFlow();
+
     // iOS Safari viewport height fix
     function setVHProperty() {
       let vh = window.innerHeight * 0.01;
