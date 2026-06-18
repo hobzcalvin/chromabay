@@ -1,13 +1,17 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
+  import { get } from 'svelte/store';
   import { dev } from '$app/environment';
-  import { 
-    initBle, 
-    isBleEnabled, 
-    enableBle, 
-    startScan, 
+  import { patterns, currentPattern, switchToPattern } from '$lib/stores/patternsStore';
+  import { loadSerializedPattern, forceSyncCurrentPattern } from '$lib/flowStore';
+  import {
+    initBle,
+    isBleEnabled,
+    enableBle,
+    startScan,
     stopScan,
     startBleStateNotifications,
+    startButtonEventNotifications,
     connectToDevice,
     disconnectFromDevice,
     isDeviceConnected,
@@ -343,6 +347,11 @@
       await loadLedConfig(deviceId);
       await loadDeviceInfo(deviceId);
       try { settings.buttonPin = await getButtonPin(deviceId); } catch (e) { console.error('getButtonPin failed', e); }
+      try {
+        await startButtonEventNotifications(deviceId, (ev) => {
+          if (ev === 'next') advanceToNextPattern();
+        });
+      } catch (e) { console.error('button event subscribe failed', e); }
       await checkForUpdateSilently(deviceId);
       await startOTAStatusNotifications(deviceId, (status) => {
         settings.otaStatus = status;
@@ -390,6 +399,30 @@
   // Per-device rename + button-pin edit buffers (keyed by deviceId).
   let renameValue: Record<string, string> = $state({});
   let buttonPinValue: Record<string, string> = $state({});
+
+  // Advance to the next pattern in the library and sync it to all connected devices.
+  // Triggered by a device's button "next" event (the device has no pattern library).
+  let advancingPattern = false;
+  async function advanceToNextPattern() {
+    if (advancingPattern) return; // ignore rapid repeats / multiple devices firing
+    advancingPattern = true;
+    try {
+      const list = get(patterns);
+      if (!list || list.length < 2) return;
+      const curName = get(currentPattern)?.meta?.name;
+      const idx = list.findIndex(p => p.meta?.name === curName);
+      const next = list[(idx + 1 + list.length) % list.length];
+      if (!next?.meta?.name) return;
+      await switchToPattern(next.meta.name);
+      await loadSerializedPattern(next);
+      forceSyncCurrentPattern();
+      statusMessage = `Pattern → ${next.meta.name}`;
+    } catch (e) {
+      console.error('advanceToNextPattern failed', e);
+    } finally {
+      advancingPattern = false;
+    }
+  }
 
   async function handleSetButtonPin(deviceId: string) {
     const settings = getDeviceSettings(deviceId);

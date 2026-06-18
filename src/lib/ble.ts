@@ -74,6 +74,9 @@ const CHARACTERISTIC_UUID_DEVICE_NAME = "a0be83f2-8dc9-47f0-ab40-b19721d20ed1";
 // Button Pin Characteristic - read/write the control-button GPIO (decimal string; -1 = none)
 const CHARACTERISTIC_UUID_BUTTON_PIN = "a0be83f3-8dc9-47f0-ab40-b19721d20ed1";
 
+// Button Event Characteristic - NOTIFY a button gesture the app must act on (e.g. "next")
+const CHARACTERISTIC_UUID_BUTTON_EVENT = "a0be83f4-8dc9-47f0-ab40-b19721d20ed1";
+
 const MAX_BLE_CHUNK_SIZE = 500; // Should match ESP32's definition
 
 // --- OTA Interfaces ---
@@ -957,6 +960,18 @@ export async function getButtonPin(deviceId: string): Promise<number | null> {
 export async function setButtonPin(deviceId: string, pin: number | null): Promise<void> {
   const v = (pin == null || pin < 0) ? '-1' : String(pin);
   await writeCharacteristic(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_BUTTON_PIN, v);
+}
+
+/**
+ * Subscribe to button gesture events from a device (e.g. "next" = next pattern). The
+ * device can't switch patterns on its own — the app owns the library — so it notifies
+ * and the app acts + farms the result out to all devices.
+ */
+export async function startButtonEventNotifications(deviceId: string, callback: (event: string) => void): Promise<void> {
+  await startNotifications(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_BUTTON_EVENT, (value) => {
+    const ev = (value || '').trim();
+    if (ev) callback(ev);
+  });
 }
 
 /**
