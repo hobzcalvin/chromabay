@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.113",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.113.zip",
-  "buildDate": "2026-06-18T22:40:44Z",
-  "commitHash": "54df2b54bf28b22cefdcabb29839dbc6a35266b5",
-  "commitMessage": "Fire: spark across the full width (rnd8() capped columns at 256)"
+  "version": "0.0.1.114",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.114.zip",
+  "buildDate": "2026-06-18T22:51:24Z",
+  "commitHash": "0328248ac16194b0e9899fa36603d60d7ca35a20",
+  "commitMessage": "CI: rebuild firmware on native/ changes too"
 }
