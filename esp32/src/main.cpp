@@ -106,6 +106,14 @@ static int buttonStableState = HIGH;
 static uint32_t buttonDebounceAtMs = 0;
 static const uint32_t BUTTON_DEBOUNCE_MS = 30;
 
+// Name / button writes arrive on the BLE host task but touch flash + advertising, so
+// (like patterns/config) they're staged here and applied on the loop task. Doing the
+// LittleFS write on the BLE task races the loop's flash writes and can fail to commit.
+static volatile bool deviceNamePending = false;
+static String pendingDeviceName;
+static volatile bool buttonPinPending = false;
+static volatile int pendingButtonPin = -1;
+
 // Pattern Storage
 static uint8_t* patternBuffer = nullptr;
 static size_t patternBufferSize = 0;
@@ -899,24 +907,34 @@ class DeviceNameCallbacks : public NimBLECharacteristicCallbacks {
         pCharacteristic->setValue((uint8_t*)deviceName.c_str(), deviceName.length());
     }
     void onWrite(NimBLECharacteristic* pCharacteristic) {
+        // Stage only — the flash write + advertising update happen on the loop task
+        // (processDeviceName) so they don't race the loop's other flash writes.
         std::string value = pCharacteristic->getValue();
-        String n = String(value.c_str());
-        n.trim();
-        if (n.length() == 0 || n.length() > 31) return; // keep within BLE name limits
-        deviceName = n;
-        saveDeviceName(deviceName);
-        NimBLEDevice::setDeviceName(deviceName.c_str());
-        // Refresh the advertised name so future scans show the new name.
-        NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
-        if (adv) {
-            adv->stop();
-            adv->setName(deviceName.c_str());
-            adv->start();
-        }
-        updateDeviceInfoCharacteristic();
-        Serial.printf("Device renamed to: %s\n", deviceName.c_str());
+        pendingDeviceName = String(value.c_str());
+        deviceNamePending = true;
     }
 };
+
+// Apply a staged rename from the loop task: persist to flash, update the GAP +
+// advertised name, refresh device info.
+void processDeviceName() {
+    if (!deviceNamePending) return;
+    deviceNamePending = false;
+    String n = pendingDeviceName;
+    n.trim();
+    if (n.length() == 0 || n.length() > 31) return; // keep within BLE name limits
+    deviceName = n;
+    saveDeviceName(deviceName);
+    NimBLEDevice::setDeviceName(deviceName.c_str());
+    NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
+    if (adv) {
+        adv->stop();
+        adv->setName(deviceName.c_str());
+        adv->start();
+    }
+    updateDeviceInfoCharacteristic();
+    Serial.printf("Device renamed to: %s\n", deviceName.c_str());
+}
 
 // --- Physical button (first pass: single click steps brightness) ---
 
@@ -954,11 +972,22 @@ static void saveButtonPin(int pin) {
     Serial.printf("Button pin saved: %d\n", pin);
 }
 
-// Single click action: step brightness down by 32, clamped at 0. From 0 (off) any
-// press jumps back to full. Applied live; persisted via the existing debounced save.
+// Single click action: dim one step down a perceptual (power-of-2) ladder
+// 255 -> 128 -> 64 -> 32 -> 16 -> 8 -> 4 -> 2 -> 1 -> 0, then 0 -> 255. Linear -32
+// steps barely changed the top end and skipped the visible low levels; powers of 2
+// track perceived brightness far better. Off-ladder values snap to the next rung below.
 static void onButtonSingleClick() {
     uint8_t b = ledMgr.getGlobalBrightness();
-    uint8_t nb = (b == 0) ? 255 : (b > 32 ? (uint8_t)(b - 32) : 0);
+    static const uint8_t rungs[] = { 255, 128, 64, 32, 16, 8, 4, 2, 1, 0 };
+    uint8_t nb;
+    if (b == 0) {
+        nb = 255; // any press from off -> full
+    } else {
+        nb = 0;
+        for (uint8_t i = 0; i < sizeof(rungs); i++) {
+            if (rungs[i] < b) { nb = rungs[i]; break; } // largest rung strictly below b
+        }
+    }
     ledMgr.setGlobalBrightness(nb);
     brightnessDirty = true;
     brightnessChangedAtMs = millis();
@@ -985,15 +1014,24 @@ class ButtonPinCallbacks : public NimBLECharacteristicCallbacks {
         pCharacteristic->setValue((uint8_t*)s.c_str(), s.length());
     }
     void onWrite(NimBLECharacteristic* pCharacteristic) {
+        // Stage only; persist + (re)configure the pin on the loop task.
         std::string value = pCharacteristic->getValue();
         String s = String(value.c_str());
         s.trim();
         int p = s.length() > 0 ? s.toInt() : -1;
-        buttonPin = (p >= 0 && p <= 39) ? p : -1;
-        saveButtonPin(buttonPin);
-        configureButtonPin();
+        pendingButtonPin = (p >= 0 && p <= 39) ? p : -1;
+        buttonPinPending = true;
     }
 };
+
+// Apply a staged button-pin change from the loop task (persist + reconfigure GPIO).
+void processButtonPinUpdate() {
+    if (!buttonPinPending) return;
+    buttonPinPending = false;
+    buttonPin = pendingButtonPin;
+    saveButtonPin(buttonPin);
+    configureButtonPin();
+}
 
 // The last-applied pattern is persisted here so it survives a power cycle.
 static const char* PATTERN_FILE = "/current_pattern.mp";
@@ -1644,6 +1682,8 @@ void loop() {
     processReceivedLedConfig();
     processReceivedBrightness();
     processButton();
+    processDeviceName();
+    processButtonPinUpdate();
 
     // Finalize a pending OTA off the BLE host task (verify result, end, reboot)
     finalizeOtaIfReady();
