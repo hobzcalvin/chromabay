@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.96",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.96.zip",
-  "buildDate": "2026-06-18T00:49:46Z",
-  "commitHash": "a8ac1a8b493a83fd053cac96ceca9a0ddad76d85",
-  "commitMessage": "render: per-strip canvases — each strip renders the effect graph at its own dims"
+  "version": "0.0.1.97",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.97.zip",
+  "buildDate": "2026-06-18T00:55:33Z",
+  "commitHash": "7570868090cf77fb22bf4258a97e4c7f3abd4132",
+  "commitMessage": "esp32: debounce pattern flash persist (keep updates instant)"
 }
