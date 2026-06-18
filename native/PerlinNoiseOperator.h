@@ -21,36 +21,49 @@ public:
         float hue_range = getFloat(parameters, 3, 60.0f); // Hue variation range
         float saturation = getFloat(parameters, 4, 255.0f);
         float value = getFloat(parameters, 5, 255.0f);
-        
+        int octaves = getInt(parameters, 6, 1);          // fractal detail (1 = plain Perlin)
+        float warp = getFloat(parameters, 7, 0.0f);      // domain warp: organic swirl/flow
+
         // Time factor for animation (scale for FastLED noise)
         uint16_t time_factor = (uint16_t)(timestampMs * speed * 0.01f);
-        
+
         // Scale factor for noise coordinates
         uint16_t noise_scale = (uint16_t)(scale * 1000.0f);
-        
+        // Domain-warp strength in noise units (sighack-style flow field): a low-frequency
+        // noise vector displaces each sample point, bending the field into flowing curves.
+        float warp_amt = warp * noise_scale * 0.5f;
+
         // Loop through all pixels
         for (uint32_t y = 0; y < height; y++) {
             for (uint32_t x = 0; x < width; x++) {
                 uint32_t index = y * width + x;
-                
+
                 // Get normalized coordinates and scale them for FastLED noise
                 float norm_x = (float)x / (float)width;
                 float norm_y = (float)y / (float)height;
-                uint16_t noise_x = (uint16_t)(norm_x * noise_scale);
-                uint16_t noise_y = (uint16_t)(norm_y * noise_scale);
-                
-                // Generate noise value using FastLED's inoise8
-                uint8_t noise_val = inoise8(noise_x, noise_y, time_factor);
-                
+                float noise_x = norm_x * noise_scale;
+                float noise_y = norm_y * noise_scale;
+
+                if (warp_amt > 0.0f) {
+                    // Displace the sample point by a slow, low-frequency noise vector.
+                    float wx = (int)inoise8((uint16_t)(noise_x * 0.5f), (uint16_t)(noise_y * 0.5f), time_factor / 2) - 128;
+                    float wy = (int)inoise8((uint16_t)(noise_x * 0.5f) + 32768, (uint16_t)(noise_y * 0.5f) + 32768, time_factor / 2) - 128;
+                    noise_x += wx / 128.0f * warp_amt;
+                    noise_y += wy / 128.0f * warp_amt;
+                }
+
+                // Generate noise value (fractal when octaves > 1)
+                uint8_t noise_val = fbm8((uint32_t)noise_x, (uint32_t)noise_y, time_factor, octaves);
+
                 // Map noise to hue
                 float hue = hue_base + ((float)noise_val / 255.0f * hue_range);
                 while (hue > 255.0f) hue -= 255.0f;
                 while (hue < 0.0f) hue += 255.0f;
-                
+
                 // Generate second noise layer for brightness variation
-                uint8_t brightness_noise = inoise8(noise_x / 2, noise_y / 2, time_factor / 2);
+                uint8_t brightness_noise = fbm8((uint32_t)(noise_x / 2), (uint32_t)(noise_y / 2), time_factor / 2, octaves);
                 float brightness = value * (0.3f + 0.7f * (float)brightness_noise / 255.0f);
-                
+
                 // Create HSV color
                 CHSV hsv_color((uint8_t)hue, (uint8_t)saturation, (uint8_t)brightness);
                 outputBuffer[index] = hsv_color;
@@ -73,7 +86,9 @@ public:
             ParameterInfo("hue_base", "Base Hue", ParameterInfo::FLOAT, 0.0f, 0.0f, 255.0f),
             ParameterInfo("hue_range", "Hue Range", ParameterInfo::FLOAT, 60.0f, 0.0f, 255.0f),
             ParameterInfo("saturation", "Saturation", ParameterInfo::FLOAT, 255.0f, 0.0f, 255.0f),
-            ParameterInfo("value", "Value", ParameterInfo::FLOAT, 255.0f, 0.0f, 255.0f)
+            ParameterInfo("value", "Value", ParameterInfo::FLOAT, 255.0f, 0.0f, 255.0f),
+            ParameterInfo("octaves", "Octaves", ParameterInfo::INT, 1, 1, 6),
+            ParameterInfo("warp", "Warp", ParameterInfo::FLOAT, 0.0f, 0.0f, 2.0f)
         };
     }
 };

@@ -140,6 +140,24 @@ public:
         if (param.type == ParameterValue::COLOR) return param.colorVal;
         return defaultVal;
     }
+
+    // Fractal (fBm) noise: sum `octaves` of FastLED's inoise8 at doubling frequency and
+    // halving amplitude. 1 octave == plain Perlin; more octaves add natural fractal
+    // detail (clouds/turbulence). Returns 0..255, centered ~128.
+    static uint8_t fbm8(uint32_t x, uint32_t y, uint32_t z, int octaves) {
+        if (octaves < 1) octaves = 1;
+        if (octaves > 6) octaves = 6;
+        long total = 0, norm = 0, amp = 128;
+        for (int o = 0; o < octaves && amp > 0; o++) {
+            total += ((int)inoise8(x, y, z) - 128) * amp;
+            norm += amp;
+            amp >>= 1;
+            x <<= 1; y <<= 1; z <<= 1;
+        }
+        if (norm == 0) norm = 1;
+        int v = 128 + (int)(total / norm);
+        return (uint8_t)(v < 0 ? 0 : (v > 255 ? 255 : v));
+    }
 };
 
 // Operator factory function type (using unique_ptr)

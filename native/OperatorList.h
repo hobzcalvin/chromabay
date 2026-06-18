@@ -47,6 +47,7 @@
 #include "CometOperator.h"
 #include "StaticOperator.h"
 #include "TwinkleOperator.h"
+#include "FireOperator.h"
 
 // Add your new operators here:
 // #include "RainbowOperator.h"
