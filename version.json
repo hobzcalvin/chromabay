@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.106",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.106.zip",
-  "buildDate": "2026-06-18T06:44:30Z",
-  "commitHash": "61b3fdf5cbed818614886ec8660af2f54c5572fb",
-  "commitMessage": "docs: add phased plan for pattern library sync (not implemented)"
+  "version": "0.0.1.107",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.107.zip",
+  "buildDate": "2026-06-18T06:53:46Z",
+  "commitHash": "c6b4b6cc2301ee80de8a24e6fd6c401d81f3df4f",
+  "commitMessage": "operators: 6 source/generator nodes (draw on a blank canvas)"
 }
