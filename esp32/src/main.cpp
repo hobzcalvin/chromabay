@@ -94,6 +94,16 @@ static bool newPatternAvailable = false;
 // mid-parse on the loop task -> use-after-free -> garbage frame (rainbow artifacts).
 static portMUX_TYPE patternMux = portMUX_INITIALIZER_UNLOCKED;
 
+// Debounced pattern persistence. The pattern is applied to the renderer instantly on
+// every BLE update (live preview is unaffected), but writing to flash on every update
+// would thrash LittleFS during editing. We stage the latest pattern and persist it
+// only once edits settle (see processPatternFlashSave). Loop-task only — no lock.
+static uint8_t* patternSaveBuf = nullptr;
+static size_t patternSaveSize = 0;
+static bool patternSaveDirty = false;
+static uint32_t patternSaveChangedAtMs = 0;
+static const uint32_t PATTERN_SAVE_DEBOUNCE_MS = 2000;
+
 // Live global brightness: the app sends a single byte on each slider tick. We stage
 // it here (BLE task) and apply it from loop() via ledMgr.setGlobalBrightness() — the
 // lightweight path that just rescales output at show(), no strip reallocation. The
@@ -847,7 +857,9 @@ static void savePatternToFlash(const uint8_t* buf, size_t size) {
     size_t written = f.write(buf, size);
     f.close();
     if (written == size) {
-        LittleFS.remove(PLAYLIST_FILE); // single pattern overrides any saved playlist
+        // Single pattern overrides any saved playlist. Guard the remove so we don't
+        // log a vfs error every time the file simply isn't there.
+        if (LittleFS.exists(PLAYLIST_FILE)) LittleFS.remove(PLAYLIST_FILE);
         Serial.printf("Pattern persisted to flash (%u bytes)\n", (unsigned)size);
     } else {
         Serial.printf("Pattern persist: short write (%u/%u) — removing\n", (unsigned)written, (unsigned)size);
@@ -997,13 +1009,32 @@ void processReceivedPattern() {
         // A directly-set pattern stops any active cycling.
         cyclingActive = false;
         lastCycleIndex = -1;
-        // Persist so the pattern survives a power cycle (restored in setup()).
-        savePatternToFlash(buf, size);
+        // The pattern is now LIVE in the renderer. Persisting it for power-on restore
+        // is debounced (processPatternFlashSave) so editing doesn't thrash flash —
+        // hand ownership of this buffer to the pending-save slot instead of writing now.
+        if (patternSaveBuf) free(patternSaveBuf);
+        patternSaveBuf = buf;
+        patternSaveSize = size;
+        patternSaveDirty = true;
+        patternSaveChangedAtMs = millis();
+        buf = nullptr; // ownership transferred; don't free below
     } else {
         Serial.println("Failed to load pattern into renderer");
     }
 
-    free(buf);
+    if (buf) free(buf);
+}
+
+// Persist the most-recently-applied pattern to flash once updates have settled. The
+// pattern is already live in the renderer; this writes only the power-on-restore copy,
+// debounced so rapid edits don't hammer LittleFS.
+void processPatternFlashSave() {
+    if (patternSaveDirty && (millis() - patternSaveChangedAtMs > PATTERN_SAVE_DEBOUNCE_MS)) {
+        patternSaveDirty = false;
+        if (patternSaveBuf && patternSaveSize > 0) {
+            savePatternToFlash(patternSaveBuf, patternSaveSize);
+        }
+    }
 }
 
 // Apply staged live brightness from the loop task, and persist it once the slider
@@ -1428,6 +1459,7 @@ void loop() {
     // Process received patterns and LED configuration changes on the loop task,
     // so they never race with update()/render() above.
     processReceivedPattern();
+    processPatternFlashSave();
     processReceivedPlaylist();
     processReceivedLedConfig();
     processReceivedBrightness();
