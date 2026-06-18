@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.93",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.93.zip",
-  "buildDate": "2026-06-18T00:26:07Z",
-  "commitHash": "091a829fc0e1334b8e4738f24bb43354c04d8ff5",
-  "commitMessage": "render: drive ALL strips, not just the first"
+  "version": "0.0.1.94",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.94.zip",
+  "buildDate": "2026-06-18T00:34:30Z",
+  "commitHash": "fb2e78c30a247b166dd5d8aaf77d20a3f0728c33",
+  "commitMessage": "render: mirror the full pattern on each strip (not a shared canvas)"
 }
