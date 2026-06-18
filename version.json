@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.94",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.94.zip",
-  "buildDate": "2026-06-18T00:34:30Z",
-  "commitHash": "fb2e78c30a247b166dd5d8aaf77d20a3f0728c33",
-  "commitMessage": "render: mirror the full pattern on each strip (not a shared canvas)"
+  "version": "0.0.1.95",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.95.zip",
+  "buildDate": "2026-06-18T00:41:02Z",
+  "commitHash": "81cf7d1277f2481dd141649d7ff33762e60b04fd",
+  "commitMessage": "devices: log the strip count on config save (diagnose strip loss)"
 }
