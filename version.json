@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.114",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.114.zip",
-  "buildDate": "2026-06-18T22:51:24Z",
-  "commitHash": "0328248ac16194b0e9899fa36603d60d7ca35a20",
-  "commitMessage": "CI: rebuild firmware on native/ changes too"
+  "version": "0.0.1.115",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.115.zip",
+  "buildDate": "2026-06-18T23:03:50Z",
+  "commitHash": "2fca146ec9892f684964f395641cc40aca5abdaf",
+  "commitMessage": "Speed up OTA (windowed sends) + bigger MTU; cache the firmware CI build"
 }
