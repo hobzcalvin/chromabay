@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.109",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.109.zip",
-  "buildDate": "2026-06-18T21:10:36Z",
-  "commitHash": "46227aa2f3ca6ca9637c4cb657f8433fb657564a",
-  "commitMessage": "Show black on LEDs when nothing is wired to the Output node"
+  "version": "0.0.1.110",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.110.zip",
+  "buildDate": "2026-06-18T21:27:22Z",
+  "commitHash": "24fb489360a1e3004ba69f81c2c90fec986b0a5c",
+  "commitMessage": "BLE: detect silent disconnects via the sync heartbeat to clear zombie state"
 }
