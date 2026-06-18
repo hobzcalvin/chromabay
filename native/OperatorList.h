@@ -34,6 +34,13 @@
 #include "RaindropsOperator.h"
 #include "TestOperator.h"
 #include "RadialRainbowOperator.h"
+#include "ColorGradeOperator.h"
+#include "LumaToHueOperator.h"
+#include "HueToLumaOperator.h"
+#include "HueRotateOperator.h"
+#include "PosterizeOperator.h"
+#include "MirrorOperator.h"
+#include "InvertOperator.h"
 
 // Add your new operators here:
 // #include "RainbowOperator.h"
