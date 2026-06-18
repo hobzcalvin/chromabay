@@ -230,132 +230,80 @@ void PatternRendererBase::update() {
     unsigned long deltaTime = currentTime - lastFrameTime;
     globalTime = currentTime;
     
-    // Execute all nodes in sequence using native operators
-    // Pre-process timestamps to avoid floating-point precision issues
-    // Large timestamps (3+ billion ms) lose precision when cast to float
-    // Use modulo to keep timestamps in float-friendly range (~16 minutes cycle)
-    uint32_t floatFriendlyTime = globalTime % 1000000; // 1M ms = ~16.67 minutes
-    uint32_t floatFriendlyDelta = deltaTime; // Delta is usually small, no modulo needed
-    
-    uint16_t matrixWidth = getMatrixWidth();
-    uint16_t matrixHeight = getMatrixHeight();
-    
+    // Capture the frame's time ONCE here. render() runs the operator graph per strip,
+    // and every strip must render the same instant. Keep it float-friendly (large ms
+    // lose float precision): 1M ms ≈ 16.67 min cycle.
+    frameFloatTime = globalTime % 1000000;
+    frameFloatDelta = deltaTime;
+
+    lastFrameTime = currentTime;
+}
+
+void PatternRendererBase::renderGraphAt(uint16_t width, uint16_t height) {
+    // Run every operator node into the shared buffers at the given canvas size.
     for (const auto& node : currentPattern.nodes) {
-        if (node.op) {
-            CRGB* inputBuffer1 = (node.inputBuffer >= 0) ? getBufferPtr(node.inputBuffer) : nullptr;
-            CRGB* inputBuffer2 = (node.secondInputBuffer >= 0) ? getBufferPtr(node.secondInputBuffer) : nullptr;
-            CRGB* outputBuffer = getBufferPtr(node.outputBuffer);
-            
-            if (outputBuffer) {
-                node.op->render(
-                    inputBuffer1,
-                    inputBuffer2, 
-                    outputBuffer,
-                    matrixWidth,
-                    matrixHeight,
-                    floatFriendlyTime,  // Use pre-processed timestamp
-                    floatFriendlyDelta,
-                    node.parameters
-                );
-            }
+        if (!node.op) continue;
+        CRGB* inputBuffer1 = (node.inputBuffer >= 0) ? getBufferPtr(node.inputBuffer) : nullptr;
+        CRGB* inputBuffer2 = (node.secondInputBuffer >= 0) ? getBufferPtr(node.secondInputBuffer) : nullptr;
+        CRGB* outputBuffer = getBufferPtr(node.outputBuffer);
+        if (outputBuffer) {
+            node.op->render(inputBuffer1, inputBuffer2, outputBuffer,
+                            width, height, frameFloatTime, frameFloatDelta, node.parameters);
         }
     }
-    
-    lastFrameTime = currentTime;
 }
 
 void PatternRendererBase::render() {
     if (!hasPattern || !ledManager || !buffersAllocated) return;
-    
-    const CRGB* patternBuffer = getBuffer(currentPattern.outputBuffer);
-    if (!patternBuffer || ledManager->getNumStrips() == 0) return;
+    if (ledManager->getNumStrips() == 0) return;
 
-    // Multiple strips MIRROR the full pattern: every strip displays the whole canvas
-    // independently (not a shared coordinate space). A matrix strip maps via its own
-    // xyToIndex; a linear strip resamples the full canvas across its length, so a
-    // shorter strip shows the complete pattern scaled down rather than a slice.
-    if (ledManager->getNumStrips() > 1) {
-        uint16_t cw = getMatrixWidth();
-        uint16_t ch = getMatrixHeight();
-        uint32_t canvasTotal = (uint32_t)cw * (uint32_t)ch;
-        if (canvasTotal == 0) { ledManager->show(); return; }
-        for (size_t s = 0; s < ledManager->getNumStrips(); s++) {
-            LedConfig::LedBus* st = ledManager->getStrip(s);
-            if (!st) continue;
-            const auto& c = st->getConfig();
-            if (c.isMatrix()) {
-                for (uint16_t y = 0; y < c.height; y++) {
-                    for (uint16_t x = 0; x < c.width; x++) {
-                        uint16_t cx = x < cw ? x : (cw - 1);
-                        uint16_t cy = y < ch ? y : (ch - 1);
-                        CRGB color = patternBuffer[(uint32_t)cy * cw + cx];
-                        int ledIndex = c.xyToIndex(x, y);
-                        if (ledIndex >= 0 && ledIndex < c.numLeds) st->setPixelColor(ledIndex, color);
+    // Each strip is its OWN canvas: run the full operator graph at the strip's own
+    // dimensions into its own LED space. A 1xN linear strip renders the effects at
+    // 1xN; a WxH matrix renders at WxH — independent coordinate spaces. The shared
+    // buffers are sized to the largest strip and reused per strip: we output to the
+    // strip immediately after rendering, before the next strip overwrites them.
+    const uint32_t bufferCap = getTotalPixels(); // capacity = largest strip's pixels
+
+    for (size_t s = 0; s < ledManager->getNumStrips(); s++) {
+        LedConfig::LedBus* strip = ledManager->getStrip(s);
+        if (!strip) continue;
+        const auto& config = strip->getConfig();
+
+        uint16_t w = config.width > 0 ? config.width : config.numLeds;
+        uint16_t h = config.height > 0 ? config.height : 1;
+        if (w == 0 || h == 0) continue;
+        // Safety net: never render past the allocated buffers (shouldn't trigger —
+        // buffers are sized to the widest x tallest strip).
+        if ((uint32_t)w * (uint32_t)h > bufferCap) {
+            w = (uint16_t)(bufferCap / h);
+            if (w == 0) continue;
+        }
+
+        renderGraphAt(w, h);
+
+        const CRGB* patternBuffer = getBuffer(currentPattern.outputBuffer);
+        if (!patternBuffer) continue;
+
+        if (config.isMatrix()) {
+            // 2D matrix: xyToIndex owns rotation/flip/serpentine mapping.
+            for (uint16_t y = 0; y < h; y++) {
+                for (uint16_t x = 0; x < w; x++) {
+                    int ledIndex = config.xyToIndex(x, y);
+                    if (ledIndex >= 0 && ledIndex < config.numLeds) {
+                        strip->setPixelColor(ledIndex, patternBuffer[(uint32_t)y * w + x]);
                     }
                 }
-            } else {
-                uint16_t L = c.numLeds;
-                for (uint16_t j = 0; j < L; j++) {
-                    uint32_t idx = (L <= 1) ? 0 : (uint32_t)j * (canvasTotal - 1) / (L - 1);
-                    if (idx >= canvasTotal) idx = canvasTotal - 1;
-                    st->setPixelColor(j, patternBuffer[idx]);
-                }
+            }
+        } else {
+            // Linear strip: direct 1:1 (w == numLeds, h == 1).
+            uint32_t pixelCount = (uint32_t)w * (uint32_t)h;
+            if (pixelCount > (uint32_t)config.numLeds) pixelCount = config.numLeds;
+            for (uint32_t i = 0; i < pixelCount; i++) {
+                strip->setPixelColor((uint16_t)i, patternBuffer[i]);
             }
         }
-        ledManager->show();
-        return;
     }
 
-    LedConfig::LedBus* strip = ledManager->getStrip(0);
-    if (!strip) return;
-    
-    const auto& config = strip->getConfig();
-    uint16_t matrixWidth = getMatrixWidth();
-    uint16_t matrixHeight = getMatrixHeight();
-    uint32_t totalPixels = getTotalPixels();
-    
-    // Check if this is a matrix layout (has width and height)
-    if (matrixWidth > 0 && matrixHeight > 0) {
-        // 2D Matrix layout - map logical coordinates to physical LED indices
-        // The pattern buffer is in logical row-major order: (0,0), (1,0), (2,0)... (0,1), (1,1)...
-        
-        for (uint16_t logicalY = 0; logicalY < matrixHeight; logicalY++) {
-            for (uint16_t logicalX = 0; logicalX < matrixWidth; logicalX++) {
-                // Get color from logical position in pattern buffer
-                int patternIndex = logicalY * matrixWidth + logicalX;
-                if (patternIndex >= totalPixels) continue;
-
-                CRGB color = patternBuffer[patternIndex];
-
-                // Map the logical pixel to a physical LED index. For a real 2D
-                // matrix, defer to LedStripConfig::xyToIndex() — the single source
-                // of truth for rotation/flip/serpentine (also used by
-                // setPixelColorXY). The previous open-coded mapping here used
-                // matrixWidth as the row stride even after a 90deg/270deg
-                // rotation, which scrambles the image on NON-square matrices and
-                // disagreed with xyToIndex.
-                //
-                // A linear strip also reaches this branch (getMatrixWidth/Height
-                // fall back to a sqrt-based square when width/height are unset),
-                // but xyToIndex only handles real matrices, so keep the plain
-                // row-major index in that case to preserve existing behavior.
-                int ledIndex = config.isMatrix()
-                    ? config.xyToIndex(logicalX, logicalY)
-                    : patternIndex;
-
-                if (ledIndex >= 0 && ledIndex < config.numLeds) {
-                    strip->setPixelColor(ledIndex, color);
-                }
-            }
-        }
-    } else {
-        // Linear strip - direct 1:1 mapping
-        uint32_t pixelCount = min(totalPixels, (uint32_t)config.numLeds);
-        for (uint32_t i = 0; i < pixelCount; i++) {
-            strip->setPixelColor(i, patternBuffer[i]);
-        }
-    }
-    
     ledManager->show();
 }
 

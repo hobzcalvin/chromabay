@@ -42,6 +42,10 @@ protected:
     unsigned long lastFrameTime;
     unsigned long frameStartTime;
     unsigned long globalTime;
+    // Frame time captured once per update(), reused by each per-strip graph render
+    // so all strips render the same instant.
+    uint32_t frameFloatTime = 0;
+    uint32_t frameFloatDelta = 0;
     
     // Timestamp synchronization
     unsigned long syncedBaseTime = 0;       // Synchronized base timestamp
@@ -57,6 +61,9 @@ protected:
     void deallocateBuffers();
     void initializeFromLedConfig();
     unsigned long getCurrentTime(); // Get current time (synced or local)
+    // Run the whole operator graph into the shared buffers at the given canvas size.
+    // Called once per strip from render() so each strip gets its own native render.
+    void renderGraphAt(uint16_t width, uint16_t height);
     
     // Get current dimensions from LED config (single source of truth)
     uint16_t getMatrixWidth() const;
