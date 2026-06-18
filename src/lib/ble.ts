@@ -876,33 +876,25 @@ export async function syncPatternToAllDevices(): Promise<void> {
 }
 
 /**
- * Send a pattern-cycling playlist to ONE device. The device cycles through the
- * patterns on its SYNCHRONIZED clock, so all connected devices switch together.
- * Framing (matches firmware PlaylistSyncCallbacks): [u32 intervalMs][u32 count]
- * then count x ([u32 len][pattern MessagePack]), little-endian.
+ * Turn auto-cycling on/off for ONE device. The device steps through its OWN stored
+ * pattern library (sorted by name) on its SYNCHRONIZED clock, so connected devices
+ * with the same patterns switch together. Cycling is independent of the stored set —
+ * toggling it off just stops advancing. Payload (matches firmware
+ * CycleControlCallbacks): [u32 intervalMs][u8 enabled], little-endian.
  */
-export async function sendPlaylistToDevice(deviceId: string, patterns: any[], intervalSeconds: number): Promise<void> {
-  if (!patterns || patterns.length === 0) return;
+export async function setCycleOnDevice(deviceId: string, enabled: boolean, intervalSeconds: number): Promise<void> {
   const intervalMs = Math.max(1, Math.round(intervalSeconds * 1000));
-  const blobs = patterns.map((p) => msgpackEncode(p) as Uint8Array);
-  const total = 8 + blobs.reduce((s, b) => s + 4 + b.byteLength, 0);
-  const out = new Uint8Array(total);
+  const out = new Uint8Array(5);
   const dv = new DataView(out.buffer);
-  let pos = 0;
-  dv.setUint32(pos, intervalMs, true); pos += 4;
-  dv.setUint32(pos, blobs.length, true); pos += 4;
-  for (const b of blobs) {
-    dv.setUint32(pos, b.byteLength, true); pos += 4;
-    out.set(b, pos); pos += b.byteLength;
-  }
-  const dataView = new DataView(out.buffer, 0, total);
-  console.log(`[Playlist] Sending ${blobs.length} patterns, ${intervalMs}ms, ${total} bytes to ${deviceId}`);
-  await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_PLAYLIST_SYNC, dataView);
+  dv.setUint32(0, intervalMs, true);
+  dv.setUint8(4, enabled ? 1 : 0);
+  console.log(`[Cycle] ${enabled ? 'ON' : 'OFF'} @ ${intervalMs}ms -> ${deviceId}`);
+  await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_PLAYLIST_SYNC, dv);
 }
 
 /**
- * Stop cycling on ONE device by sending it a single pattern (the firmware
- * disables cycling whenever a single pattern is applied directly).
+ * Push a single named pattern to ONE device. The device upserts it into its library
+ * by name (meta.name) and shows it. ("Here's your pattern now.")
  */
 export async function sendSinglePatternToDevice(deviceId: string, pattern: any): Promise<void> {
   const msgpackData = msgpackEncode(pattern) as Uint8Array;

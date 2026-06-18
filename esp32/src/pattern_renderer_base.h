@@ -92,4 +92,8 @@ public:
     
     // Buffer access
     const CRGB* getBuffer(int bufferIndex) const;
+
+    // Name of the currently-loaded pattern (meta.name from the last
+    // loadPatternFromMessagePack). Used to key the on-device pattern library.
+    const char* getCurrentPatternName() const { return currentPattern.name.c_str(); }
 };

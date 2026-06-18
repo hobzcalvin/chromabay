@@ -1,6 +1,9 @@
 #include <Arduino.h>
 #include <FastLED.h> // Still needed for CRGB struct and color math
 #include <LittleFS.h>
+#include <algorithm>  // std::sort for the name-sorted pattern library
+#include <cstring>    // strcmp / memcpy
+#include <vector>
 #include <NimBLEDevice.h>
 #include <NimBLEServer.h>
 #include <NimBLEUtils.h>
@@ -140,6 +143,7 @@ static portMUX_TYPE patternMux = portMUX_INITIALIZER_UNLOCKED;
 // only once edits settle (see processPatternFlashSave). Loop-task only — no lock.
 static uint8_t* patternSaveBuf = nullptr;
 static size_t patternSaveSize = 0;
+static String patternSaveName;   // pattern name captured at receive, used to key the library
 static bool patternSaveDirty = false;
 static uint32_t patternSaveChangedAtMs = 0;
 static const uint32_t PATTERN_SAVE_DEBOUNCE_MS = 2000;
@@ -153,16 +157,24 @@ static volatile uint8_t pendingBrightness = 255;
 static bool brightnessDirty = false;
 static uint32_t brightnessChangedAtMs = 0;
 
-// Pattern cycling (playlist): the app sends an ordered set of patterns + an
-// interval; each device picks the active one from its SYNCED clock so all
-// connected devices switch at the same instant.
-static uint8_t* playlistBuffer = nullptr;
-static size_t playlistBufferSize = 0;
-static bool newPlaylistAvailable = false;
-static std::vector<std::vector<uint8_t>> playlistPatterns; // per-pattern MessagePack blobs
-static uint32_t playlistIntervalMs = 0;
+// Pattern library + cycling. The device stores a SET of named patterns (see the
+// /lib library below). Cycling is just an auto-advance through that set in a stable
+// name-sorted order, driven by the SYNCED clock so connected devices step together.
+// Cycling on/off is independent of the stored patterns — turning it off only stops
+// advancing. The control payload is [u32 intervalMs][u8 enabled], staged from the BLE
+// task and applied (with flash persistence) on the loop task.
+static uint32_t cycleIntervalMs = 30000; // default 30s
 static bool cyclingActive = false;
 static int lastCycleIndex = -1;
+static uint32_t pendingCycleIntervalMs = 0;
+static bool pendingCycleEnabled = false;
+static bool newCycleControlAvailable = false;
+
+// Pattern library index — declared here so the button handler (above the storage
+// helpers) can advance through it. The /lib storage helpers are defined further down.
+static std::vector<String> libNames; // file-index i -> pattern name (/lib/<i>.mp)
+static std::vector<int> libOrder;     // file-indices sorted by name (cycle/advance order)
+static bool libSetActiveByOrderPos(int pos); // defined with the library helpers below
 
 // LED Config Storage
 // Like patterns, incoming LED configuration is staged here by the BLE write
@@ -398,10 +410,16 @@ void updateDeviceInfoCharacteristic() {
 }
 
 // NimBLE Server Callbacks
+// Diagnostic: logs how many patterns the device currently has (RAM cycling state +
+// what's persisted in flash). Defined later alongside the flash helpers; declared here
+// so the BLE callbacks can trace pattern count across connect/disconnect.
+static void logPatternState(const char* when);
+
 class ServerCallbacks: public NimBLEServerCallbacks {
     void onConnect(NimBLEServer* pServer) {
         deviceConnected = true;
         Serial.println("BLE Client Connected");
+        logPatternState("connect");
         // Update device info characteristic as heap might have changed or client needs fresh info
         updateDeviceInfoCharacteristic(); 
         // Note: Mobile app will send timestamp sync after connection is established
@@ -410,6 +428,7 @@ class ServerCallbacks: public NimBLEServerCallbacks {
     void onDisconnect(NimBLEServer* pServer) {
         deviceConnected = false;
         Serial.println("BLE Client Disconnected");
+        logPatternState("disconnect");
         // If OTA was in progress and client disconnects, abort it to free resources
         if (ota_in_progress) {
             Serial.println("Client disconnected during OTA. Aborting OTA.");
@@ -823,21 +842,17 @@ class PatternSyncCallbacks : public NimBLECharacteristicCallbacks {
     }
 };
 
-// Playlist Sync Callbacks - receives a pattern-cycling playlist (raw framed blob)
-class PlaylistSyncCallbacks : public NimBLECharacteristicCallbacks {
+// Cycle Control Callbacks - receives the cycling on/off + interval. Payload is
+// [u32 intervalMs LE][u8 enabled]. Staged here; applied/persisted on the loop task.
+class CycleControlCallbacks : public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic* pCharacteristic) {
-        std::string rxValue = pCharacteristic->getValue();
-        if (rxValue.length() == 0) return;
-        if (playlistBuffer != nullptr) { free(playlistBuffer); playlistBuffer = nullptr; playlistBufferSize = 0; }
-        playlistBufferSize = rxValue.length();
-        playlistBuffer = (uint8_t*)malloc(playlistBufferSize);
-        if (playlistBuffer != nullptr) {
-            memcpy(playlistBuffer, rxValue.data(), playlistBufferSize);
-            newPlaylistAvailable = true;
-        } else {
-            playlistBufferSize = 0;
-            Serial.println("Playlist Sync: malloc failed");
-        }
+        std::string v = pCharacteristic->getValue();
+        if (v.length() < 5) return;
+        uint32_t iv = 0;
+        memcpy(&iv, v.data(), 4);
+        pendingCycleIntervalMs = iv;
+        pendingCycleEnabled = ((uint8_t)v[4] != 0);
+        newCycleControlAvailable = true;
     }
 };
 
@@ -1004,10 +1019,25 @@ static void onButtonSingleClick() {
     Serial.printf("Button: brightness %u -> %u\n", b, nb);
 }
 
-// Double click -> next pattern. The device doesn't hold the pattern library, so it
-// notifies the app, which advances the current pattern and syncs all connected devices.
+// Double click -> next pattern. The device holds its own library now, so it advances
+// locally to the next pattern in the name-sorted order (same order cycling uses). Runs
+// on the loop task, so it may read flash directly. Still notifies the app so its UI can
+// follow along.
 static void onButtonDoubleClick() {
     Serial.println("Button: double click -> next pattern");
+    if (!libOrder.empty()) {
+        // Find the current pattern's sorted position by name, then advance past it.
+        String cur = patternRenderer ? String(patternRenderer->getCurrentPatternName()) : String();
+        int pos = 0; // default: if current isn't found, this lands on the first pattern
+        for (size_t p = 0; p < libOrder.size(); p++) {
+            if (libNames[libOrder[p]] == cur) { pos = (int)p + 1; break; }
+        }
+        libSetActiveByOrderPos(pos); // wraps
+        // If cycling, don't let the next tick immediately override this manual advance.
+        if (cyclingActive && cycleIntervalMs > 0) {
+            lastCycleIndex = (int)((getSynchronizedTime() / cycleIntervalMs) % (unsigned long)libOrder.size());
+        }
+    }
     if (pButtonEventCharacteristic) {
         const char* ev = "next";
         pButtonEventCharacteristic->setValue((uint8_t*)ev, 4);
@@ -1069,145 +1099,196 @@ void processButtonPinUpdate() {
     configureButtonPin();
 }
 
-// The last-applied pattern is persisted here so it survives a power cycle.
-static const char* PATTERN_FILE = "/current_pattern.mp";
-static const char* PLAYLIST_FILE = "/playlist.bin";
+// --- On-device pattern library ---
+// Patterns are stored as contiguous /lib/<i>.mp files, each framed:
+//   [u16 nameLen LE][name bytes][raw MessagePack pattern].
+// Patterns are upserted BY NAME (the app sends "here's your pattern now"); cycling and
+// double-click advance through a stable name-sorted view. The active pattern's name is
+// remembered in LIB_CURRENT_FILE so the device resumes it on boot.
+static const char* LIB_DIR = "/lib";
+static const char* LIB_CURRENT_FILE = "/lib_current.txt";
+static const char* CYCLE_FILE = "/cycle.bin"; // [u32 intervalMs][u8 enabled]
+static const size_t LIB_SCAN_MAX = 256;         // upper bound on stored patterns
+static const size_t LIB_MIN_FREE_BYTES = 32768; // headroom so the FS never fills
 
-// Persist the raw MessagePack of the currently-applied pattern to flash.
-static void savePatternToFlash(const uint8_t* buf, size_t size) {
-    if (buf == nullptr || size == 0) return;
-    File f = LittleFS.open(PATTERN_FILE, FILE_WRITE);
-    if (!f) {
-        Serial.println("Pattern persist: failed to open file for write");
-        return;
-    }
-    size_t written = f.write(buf, size);
+static String libPath(int i) { return String(LIB_DIR) + "/" + i + ".mp"; }
+
+// Read just the name header of /lib/<i>.mp.
+static String libReadName(int i) {
+    File f = LittleFS.open(libPath(i), FILE_READ);
+    if (!f) return String();
+    if (f.available() < 2) { f.close(); return String(); }
+    uint8_t lo = (uint8_t)f.read();
+    uint8_t hi = (uint8_t)f.read();
+    uint16_t nameLen = (uint16_t)lo | ((uint16_t)hi << 8);
+    String name;
+    for (uint16_t k = 0; k < nameLen && f.available(); k++) name += (char)f.read();
     f.close();
-    if (written == size) {
-        // Single pattern overrides any saved playlist. Guard the remove so we don't
-        // log a vfs error every time the file simply isn't there.
-        if (LittleFS.exists(PLAYLIST_FILE)) LittleFS.remove(PLAYLIST_FILE);
-        Serial.printf("Pattern persisted to flash (%u bytes)\n", (unsigned)size);
-    } else {
-        Serial.printf("Pattern persist: short write (%u/%u) — removing\n", (unsigned)written, (unsigned)size);
-        LittleFS.remove(PATTERN_FILE); // don't leave a corrupt partial file
-    }
+    return name;
 }
 
-// Restore the last-applied pattern from flash into the renderer (called on boot).
-static void restorePatternFromFlash() {
-    if (patternRenderer == nullptr || !LittleFS.exists(PATTERN_FILE)) {
-        Serial.println("No saved pattern to restore");
-        return;
-    }
-    File f = LittleFS.open(PATTERN_FILE, FILE_READ);
-    if (!f) {
-        Serial.println("Pattern restore: failed to open file");
-        return;
-    }
-    size_t size = f.size();
-    if (size == 0) { f.close(); return; }
-    uint8_t* buf = (uint8_t*)malloc(size);
-    if (buf == nullptr) {
-        Serial.println("Pattern restore: malloc failed");
-        f.close();
-        return;
-    }
-    size_t readBytes = f.read(buf, size);
-    f.close();
-    if (readBytes == size && patternRenderer->loadPatternFromMessagePack(buf, size)) {
-        Serial.printf("Restored saved pattern from flash (%u bytes)\n", (unsigned)size);
-    } else {
-        Serial.println("Pattern restore: failed to load saved pattern");
-    }
-    free(buf);
+// Recompute libOrder: file-indices sorted by name, for a stable cycle/advance order
+// that's identical across devices holding the same set.
+static void libRebuildOrder() {
+    libOrder.clear();
+    for (size_t i = 0; i < libNames.size(); i++) libOrder.push_back((int)i);
+    std::sort(libOrder.begin(), libOrder.end(),
+              [](int a, int b) { return strcmp(libNames[a].c_str(), libNames[b].c_str()) < 0; });
 }
 
-// --- Pattern cycling (playlist) ---
-// Playlist framing: [u32 intervalMs][u32 count] then count x ([u32 len][len bytes]),
-// little-endian. Each pattern blob is the same MessagePack the single-pattern path
-// consumes, so cycling reuses loadPatternFromMessagePack unchanged.
-static bool parsePlaylist(const uint8_t* buf, size_t size) {
-    if (buf == nullptr || size < 8) return false;
-    size_t pos = 0;
-    uint32_t intervalMs = 0, count = 0;
-    memcpy(&intervalMs, buf + pos, 4); pos += 4;
-    memcpy(&count, buf + pos, 4); pos += 4;
-    if (intervalMs == 0 || count == 0 || count > 256) return false;
-    std::vector<std::vector<uint8_t>> pats;
-    for (uint32_t i = 0; i < count; i++) {
-        if (pos + 4 > size) return false;
-        uint32_t len = 0; memcpy(&len, buf + pos, 4); pos += 4;
-        if (len == 0 || pos + len > size) return false;
-        pats.emplace_back(buf + pos, buf + pos + len);
-        pos += len;
+// Boot: rebuild the in-RAM index from the contiguous /lib/<i>.mp files.
+static void libScan() {
+    libNames.clear();
+    if (!LittleFS.exists(LIB_DIR)) { LittleFS.mkdir(LIB_DIR); libRebuildOrder(); return; }
+    for (size_t i = 0; i < LIB_SCAN_MAX; i++) {
+        if (!LittleFS.exists(libPath((int)i))) break; // files are kept contiguous
+        libNames.push_back(libReadName((int)i));
     }
-    playlistPatterns = std::move(pats);
-    playlistIntervalMs = intervalMs;
+    libRebuildOrder();
+    Serial.printf("Library: %u stored pattern(s)\n", (unsigned)libNames.size());
+}
+
+// Store/overwrite a pattern by name (loop task only — does flash I/O). `msgpack`/`size`
+// is the raw pattern payload as received over BLE.
+static bool libUpsert(const String& name, const uint8_t* msgpack, size_t size) {
+    if (name.length() == 0 || msgpack == nullptr || size == 0) return false;
+    int idx = -1;
+    for (size_t i = 0; i < libNames.size(); i++) if (libNames[i] == name) { idx = (int)i; break; }
+    const bool isNew = (idx < 0);
+    if (isNew) {
+        size_t freeBytes = LittleFS.totalBytes() - LittleFS.usedBytes();
+        if (libNames.size() >= LIB_SCAN_MAX || freeBytes < size + LIB_MIN_FREE_BYTES) {
+            Serial.println("Library: full / low on flash — not adding new pattern");
+            return false;
+        }
+        idx = (int)libNames.size();
+    }
+    File f = LittleFS.open(libPath(idx), FILE_WRITE);
+    if (!f) { Serial.println("Library: write open failed"); return false; }
+    uint16_t nameLen = (uint16_t)name.length();
+    f.write((uint8_t)(nameLen & 0xFF));
+    f.write((uint8_t)((nameLen >> 8) & 0xFF));
+    f.write((const uint8_t*)name.c_str(), nameLen);
+    size_t w = f.write(msgpack, size);
+    f.close();
+    if (w != size) { Serial.println("Library: short write"); return false; }
+    if (isNew) { libNames.push_back(name); libRebuildOrder(); }
+    Serial.printf("Library upsert [%d] '%s' (%u bytes) — %u total\n",
+                  idx, name.c_str(), (unsigned)size, (unsigned)libNames.size());
     return true;
 }
 
-static void savePlaylistToFlash(const uint8_t* buf, size_t size) {
-    File f = LittleFS.open(PLAYLIST_FILE, FILE_WRITE);
-    if (!f) { Serial.println("Playlist persist: open failed"); return; }
-    size_t written = f.write(buf, size);
-    f.close();
-    if (written == size) {
-        LittleFS.remove(PATTERN_FILE); // playlist mode overrides any saved single pattern
-        Serial.printf("Playlist persisted to flash (%u bytes)\n", (unsigned)size);
-    } else {
-        LittleFS.remove(PLAYLIST_FILE);
-        Serial.println("Playlist persist: short write — removed");
-    }
-}
-
-static bool restorePlaylistFromFlash() {
-    if (!LittleFS.exists(PLAYLIST_FILE)) return false;
-    File f = LittleFS.open(PLAYLIST_FILE, FILE_READ);
+// Load the pattern at file-index `idx` into the renderer (strips the name header).
+static bool libLoadIndex(int idx) {
+    if (idx < 0 || (size_t)idx >= libNames.size() || patternRenderer == nullptr) return false;
+    File f = LittleFS.open(libPath(idx), FILE_READ);
     if (!f) return false;
-    size_t size = f.size();
-    if (size == 0) { f.close(); return false; }
-    uint8_t* buf = (uint8_t*)malloc(size);
-    if (buf == nullptr) { f.close(); return false; }
-    size_t readBytes = f.read(buf, size);
+    size_t total = f.size();
+    if (total < 2) { f.close(); return false; }
+    uint8_t lo = (uint8_t)f.read();
+    uint8_t hi = (uint8_t)f.read();
+    uint16_t nameLen = (uint16_t)lo | ((uint16_t)hi << 8);
+    for (uint16_t k = 0; k < nameLen && f.available(); k++) f.read(); // skip name
+    if (total < (size_t)2 + nameLen) { f.close(); return false; }
+    size_t mpLen = total - 2 - nameLen;
+    if (mpLen == 0) { f.close(); return false; }
+    uint8_t* buf = (uint8_t*)malloc(mpLen);
+    if (!buf) { f.close(); return false; }
+    size_t r = f.read(buf, mpLen);
     f.close();
-    bool ok = (readBytes == size) && parsePlaylist(buf, size);
+    bool ok = (r == mpLen) && patternRenderer->loadPatternFromMessagePack(buf, mpLen);
     free(buf);
-    if (ok) {
-        cyclingActive = true;
-        lastCycleIndex = -1; // force apply on first updateCycle
-        Serial.printf("Restored playlist from flash: %u patterns, %lu ms\n", (unsigned)playlistPatterns.size(), (unsigned long)playlistIntervalMs);
-    }
     return ok;
 }
 
-// Apply a freshly-received playlist (called from loop()).
-void processReceivedPlaylist() {
-    if (!newPlaylistAvailable || playlistBuffer == nullptr) return;
-    if (parsePlaylist(playlistBuffer, playlistBufferSize)) {
-        cyclingActive = true;
-        lastCycleIndex = -1; // force apply on next updateCycle
-        savePlaylistToFlash(playlistBuffer, playlistBufferSize);
-        Serial.printf("Playlist set: %u patterns, %lu ms interval\n", (unsigned)playlistPatterns.size(), (unsigned long)playlistIntervalMs);
-    } else {
-        Serial.println("Playlist: parse failed");
-    }
-    newPlaylistAvailable = false;
+// Remember / read which pattern is active (by name), so a reboot resumes it.
+static void libSaveCurrentName(const String& name) {
+    File f = LittleFS.open(LIB_CURRENT_FILE, FILE_WRITE);
+    if (!f) return;
+    f.write((const uint8_t*)name.c_str(), name.length());
+    f.close();
+}
+static String libReadCurrentName() {
+    if (!LittleFS.exists(LIB_CURRENT_FILE)) return String();
+    File f = LittleFS.open(LIB_CURRENT_FILE, FILE_READ);
+    if (!f) return String();
+    String s;
+    while (f.available()) s += (char)f.read();
+    f.close();
+    s.trim();
+    return s;
 }
 
-// Switch the active pattern based on the SYNCED clock so every connected device
-// changes at the same wall-clock instant. Called every render tick.
+// Make the pattern at sorted position `pos` (wraps) the live + remembered one.
+static bool libSetActiveByOrderPos(int pos) {
+    size_t count = libOrder.size();
+    if (count == 0) return false;
+    pos = ((pos % (int)count) + (int)count) % (int)count;
+    int fileIdx = libOrder[pos];
+    if (!libLoadIndex(fileIdx)) return false;
+    libSaveCurrentName(libNames[fileIdx]);
+    return true;
+}
+
+// Cycle on/off + interval persistence (so a device resumes cycling after a reboot).
+static void saveCycleState() {
+    File f = LittleFS.open(CYCLE_FILE, FILE_WRITE);
+    if (!f) return;
+    uint32_t iv = cycleIntervalMs;
+    f.write((const uint8_t*)&iv, 4);
+    f.write((uint8_t)(cyclingActive ? 1 : 0));
+    f.close();
+}
+static void restoreCycleState() {
+    if (!LittleFS.exists(CYCLE_FILE)) return;
+    File f = LittleFS.open(CYCLE_FILE, FILE_READ);
+    if (!f) return;
+    if (f.available() >= 5) {
+        uint32_t iv = 0;
+        f.read((uint8_t*)&iv, 4);
+        uint8_t en = (uint8_t)f.read();
+        if (iv >= 1) cycleIntervalMs = iv;
+        cyclingActive = (en != 0);
+        lastCycleIndex = -1;
+    }
+    f.close();
+}
+
+// Diagnostic: report how many patterns the device currently has in its library and
+// whether it's auto-cycling. Handy for tracing the count from the serial monitor.
+static void logPatternState(const char* when) {
+    Serial.printf("[PatternState @ %s] libraryPatterns=%u  cyclingActive=%d  intervalMs=%lu  current='%s'\n",
+                  when, (unsigned)libNames.size(), (int)cyclingActive,
+                  (unsigned long)cycleIntervalMs,
+                  patternRenderer ? patternRenderer->getCurrentPatternName() : "");
+}
+
+// Apply a freshly-received cycle-control command (called from loop()).
+void processReceivedCycleControl() {
+    if (!newCycleControlAvailable) return;
+    newCycleControlAvailable = false;
+    if (pendingCycleIntervalMs >= 1) cycleIntervalMs = pendingCycleIntervalMs;
+    cyclingActive = pendingCycleEnabled;
+    lastCycleIndex = -1; // re-apply on next updateCycle
+    saveCycleState();
+    Serial.printf("Cycle control: %s, %lu ms\n", cyclingActive ? "ON" : "OFF", (unsigned long)cycleIntervalMs);
+}
+
+// When cycling, advance through the name-sorted library on the SYNCED clock so every
+// connected device steps at the same wall-clock instant. Called every render tick.
 void updateCycle() {
     if (!cyclingActive || patternRenderer == nullptr) return;
-    size_t count = playlistPatterns.size();
-    if (count == 0 || playlistIntervalMs == 0) return;
+    size_t count = libOrder.size();
+    if (count == 0 || cycleIntervalMs == 0) return;
     unsigned long t = getSynchronizedTime();
-    int index = (int)((t / playlistIntervalMs) % (unsigned long)count);
+    int index = (int)((t / cycleIntervalMs) % (unsigned long)count);
     if (index != lastCycleIndex) {
         lastCycleIndex = index;
-        const std::vector<uint8_t>& blob = playlistPatterns[index];
-        patternRenderer->loadPatternFromMessagePack(blob.data(), blob.size());
-        Serial.printf("Cycle -> pattern %d/%u @ %lu ms\n", index, (unsigned)count, t);
+        int fileIdx = libOrder[index];
+        if (libLoadIndex(fileIdx)) {
+            libSaveCurrentName(libNames[fileIdx]);
+            Serial.printf("Cycle -> '%s' (%d/%u) @ %lu ms\n", libNames[fileIdx].c_str(), index, (unsigned)count, t);
+        }
     }
 }
 
@@ -1231,17 +1312,20 @@ void processReceivedPattern() {
     if (buf == nullptr) return;
 
     // We own `buf` now — onWrite will only ever touch a newer buffer, never this one.
+    // "Here's your pattern now": show it immediately and stage an upsert-BY-NAME into
+    // the library (debounced so a slider drag doesn't hammer flash). Cycling is left
+    // untouched — it's just an auto-advance, independent of the stored set; this manual
+    // pick simply shows until the next cycle boundary.
     bool success = patternRenderer->loadPatternFromMessagePack(buf, size);
     if (success) {
-        // A directly-set pattern stops any active cycling.
-        cyclingActive = false;
-        lastCycleIndex = -1;
-        // The pattern is now LIVE in the renderer. Persisting it for power-on restore
-        // is debounced (processPatternFlashSave) so editing doesn't thrash flash —
-        // hand ownership of this buffer to the pending-save slot instead of writing now.
+        if (cyclingActive && cycleIntervalMs > 0 && !libOrder.empty()) {
+            // Don't let the next tick instantly override the manual pick.
+            lastCycleIndex = (int)((getSynchronizedTime() / cycleIntervalMs) % (unsigned long)libOrder.size());
+        }
         if (patternSaveBuf) free(patternSaveBuf);
         patternSaveBuf = buf;
         patternSaveSize = size;
+        patternSaveName = patternRenderer->getCurrentPatternName(); // key for the library upsert
         patternSaveDirty = true;
         patternSaveChangedAtMs = millis();
         buf = nullptr; // ownership transferred; don't free below
@@ -1258,8 +1342,11 @@ void processReceivedPattern() {
 void processPatternFlashSave() {
     if (patternSaveDirty && (millis() - patternSaveChangedAtMs > PATTERN_SAVE_DEBOUNCE_MS)) {
         patternSaveDirty = false;
-        if (patternSaveBuf && patternSaveSize > 0) {
-            savePatternToFlash(patternSaveBuf, patternSaveSize);
+        if (patternSaveBuf && patternSaveSize > 0 && patternSaveName.length() > 0) {
+            // Upsert by name into the library, and mark it the active pattern.
+            if (libUpsert(patternSaveName, patternSaveBuf, patternSaveSize)) {
+                libSaveCurrentName(patternSaveName);
+            }
         }
     }
 }
@@ -1494,12 +1581,22 @@ void setup() {
     // --- Critical System Initialization with Rollback on Failure ---
     bool criticalSystemsOK = true;
 
-    // Initialize filesystem
-    if (!LittleFS.begin(true)) { 
-        Serial.println("ERROR: LittleFS Mount Failed!");
-        criticalSystemsOK = false;
-    } else {
+    // Initialize filesystem. Try to mount WITHOUT auto-formatting first so we never
+    // silently wipe saved patterns: a reformat only happens if the existing filesystem
+    // is genuinely unmountable, and we log it loudly when it does (it's the one event
+    // that destroys persisted patterns). With the platform/core pinned in
+    // platformio.ini, a firmware update keeps the same LittleFS format, so a healthy
+    // device mounts cleanly here and its saved pattern survives the update.
+    if (LittleFS.begin(false)) {
         Serial.println("LittleFS mounted");
+    } else {
+        Serial.println("WARNING: LittleFS mount failed — formatting (any saved pattern is lost)");
+        if (!LittleFS.begin(true)) {
+            Serial.println("ERROR: LittleFS Mount Failed!");
+            criticalSystemsOK = false;
+        } else {
+            Serial.println("LittleFS formatted and mounted");
+        }
     }
 
     // Initialize LED configuration
@@ -1544,7 +1641,21 @@ void setup() {
             patternRenderer->updateMatrixConfig();
             // Restore on power-on: prefer a saved cycling playlist, else the last
             // single pattern, so the device resumes instead of starting blank.
-            if (!restorePlaylistFromFlash()) restorePatternFromFlash();
+            // Rebuild the pattern library and resume: the saved active pattern (by
+            // name) if present, else the first in sorted order. Restore cycle state too.
+            libScan();
+            restoreCycleState();
+            {
+                String cur = libReadCurrentName();
+                bool loaded = false;
+                if (cur.length() > 0) {
+                    for (size_t p = 0; p < libOrder.size(); p++) {
+                        if (libNames[libOrder[p]] == cur) { loaded = libSetActiveByOrderPos((int)p); break; }
+                    }
+                }
+                if (!loaded && !libOrder.empty()) libSetActiveByOrderPos(0);
+            }
+            logPatternState("boot");
         } else {
             Serial.println("ERROR: Failed to initialize pattern renderer!");
             criticalSystemsOK = false;
@@ -1631,7 +1742,7 @@ void setup() {
             pTimestampSyncCharacteristic->setCallbacks(new TimestampSyncCallbacks());
 
             pPlaylistSyncCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_PLAYLIST_SYNC, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY);
-            pPlaylistSyncCharacteristic->setCallbacks(new PlaylistSyncCallbacks());
+            pPlaylistSyncCharacteristic->setCallbacks(new CycleControlCallbacks());
 
             // Brightness Characteristic (live global brightness, single byte)
             pBrightnessCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_BRIGHTNESS, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR | NIMBLE_PROPERTY::READ);
@@ -1718,7 +1829,7 @@ void loop() {
     // so they never race with update()/render() above.
     processReceivedPattern();
     processPatternFlashSave();
-    processReceivedPlaylist();
+    processReceivedCycleControl();
     processReceivedLedConfig();
     processReceivedBrightness();
     processButton();

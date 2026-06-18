@@ -5,7 +5,7 @@
   import { patterns, loadPatterns, switchToPattern, currentPatternName, createEmptyPattern, saveAsPattern } from '$lib/stores/patternsStore';
   import PatternPreview from '$lib/components/PatternPreview.svelte';
   import type { SerializedPattern } from '$lib/patternSerializer';
-  import { syncPatternToAllDevices, sendPlaylistToDevice, sendSinglePatternToDevice } from '$lib/ble';
+  import { syncPatternToAllDevices, setCycleOnDevice, sendSinglePatternToDevice } from '$lib/ble';
   import { currentPattern } from '$lib/stores/patternsStore';
   import { connectedDevices, getConnectedDevicesList } from '$lib/stores/deviceStore';
   import { get } from 'svelte/store';
@@ -21,8 +21,10 @@
     currentName = name;
   });
 
-  // --- Pattern cycling: ONE control for all connected devices. Each device
-  // persists the playlist and cycles off its synced clock, so they switch together.
+  // --- Pattern cycling: ONE control for all connected devices. Each device steps
+  // through its OWN stored library off its synced clock, so devices with the same
+  // patterns switch together. This just toggles cycling on/off + sets the interval —
+  // the device's stored patterns are untouched either way.
   $: connectedList = getConnectedDevicesList($connectedDevices);
   let cycleEnabled = false;
   let cycleSeconds = 30;
@@ -31,13 +33,7 @@
     cycleSeconds = Math.max(1, Math.floor(Number(cycleSeconds) || 1));
     for (const device of connectedList) {
       try {
-        if (cycleEnabled) {
-          const pats = get(patterns);
-          if (pats.length > 0) await sendPlaylistToDevice(device.deviceId, pats, cycleSeconds);
-        } else {
-          const cur = get(currentPattern) || get(patterns)[0];
-          if (cur) await sendSinglePatternToDevice(device.deviceId, cur); // stops cycling
-        }
+        await setCycleOnDevice(device.deviceId, cycleEnabled, cycleSeconds);
       } catch (e) {
         console.error('Cycle update failed for', device.deviceId, e);
       }

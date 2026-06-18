@@ -349,7 +349,10 @@
       try { settings.buttonPin = await getButtonPin(deviceId); } catch (e) { console.error('getButtonPin failed', e); }
       try {
         await startButtonEventNotifications(deviceId, (ev) => {
-          if (ev === 'next') advanceToNextPattern();
+          // The device advances through its OWN stored library locally on a
+          // double-click now, so we don't push a pattern back (that would override
+          // each device's local choice). This is just for UI awareness.
+          if (ev === 'next') statusMessage = 'Device → next pattern';
         });
       } catch (e) { console.error('button event subscribe failed', e); }
       await checkForUpdateSilently(deviceId);
@@ -400,29 +403,9 @@
   let renameValue: Record<string, string> = $state({});
   let buttonPinValue: Record<string, string> = $state({});
 
-  // Advance to the next pattern in the library and sync it to all connected devices.
-  // Triggered by a device's button "next" event (the device has no pattern library).
-  let advancingPattern = false;
-  async function advanceToNextPattern() {
-    if (advancingPattern) return; // ignore rapid repeats / multiple devices firing
-    advancingPattern = true;
-    try {
-      const list = get(patterns);
-      if (!list || list.length < 2) return;
-      const curName = get(currentPattern)?.meta?.name;
-      const idx = list.findIndex(p => p.meta?.name === curName);
-      const next = list[(idx + 1 + list.length) % list.length];
-      if (!next?.meta?.name) return;
-      await switchToPattern(next.meta.name);
-      await loadSerializedPattern(next);
-      forceSyncCurrentPattern();
-      statusMessage = `Pattern → ${next.meta.name}`;
-    } catch (e) {
-      console.error('advanceToNextPattern failed', e);
-    } finally {
-      advancingPattern = false;
-    }
-  }
+  // (Pattern advancement on a device's button double-click is handled on the device
+  // itself now — it steps through its own stored library. The app no longer pushes a
+  // pattern back in response, so devices keep their independent local selection.)
 
   async function handleSetButtonPin(deviceId: string) {
     const settings = getDeviceSettings(deviceId);
