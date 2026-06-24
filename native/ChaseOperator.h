@@ -21,7 +21,7 @@ public:
         uint32_t /* deltaTimeMs */,
         const std::vector<ParameterValue>& parameters
     ) override {
-        float speed = getFloat(parameters, 0, 20.0f);
+        float speed = getFloat(parameters, 0, 40.0f);
         float size = getFloat(parameters, 1, 10.0f);
         float hue = getFloat(parameters, 2, 0.0f);
         float saturation = getFloat(parameters, 3, 0.0f); // 0 = white
@@ -77,7 +77,7 @@ public:
 
     std::vector<ParameterInfo> getParameterInfo() const override {
         return {
-            ParameterInfo("speed", "Speed (%/sec)", ParameterInfo::FLOAT, 20.0f, 1.0f, 100.0f),
+            ParameterInfo("speed", "Speed (%/sec)", ParameterInfo::FLOAT, 40.0f, 1.0f, 400.0f),
             ParameterInfo("size", "Size (%)", ParameterInfo::FLOAT, 10.0f, 1.0f, 50.0f),
             ParameterInfo("hue", "Hue", ParameterInfo::FLOAT, 0.0f, 0.0f, 255.0f),
             ParameterInfo("saturation", "Saturation", ParameterInfo::FLOAT, 0.0f, 0.0f, 255.0f),

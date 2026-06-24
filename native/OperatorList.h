@@ -48,6 +48,9 @@
 #include "StaticOperator.h"
 #include "TwinkleOperator.h"
 #include "FireOperator.h"
+#include "ScrollOperator.h"
+#include "TileOperator.h"
+#include "GlitchOperator.h"
 
 // Add your new operators here:
 // #include "RainbowOperator.h"
