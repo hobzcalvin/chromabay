@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.116",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.116.zip",
-  "buildDate": "2026-06-18T23:09:48Z",
-  "commitHash": "346da8f6701873d5e7fc494eb01a9d5985e0f29d",
-  "commitMessage": "OTA: request a fast connection interval during transfer; window 4 -> 8"
+  "version": "0.0.1.117",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.117.zip",
+  "buildDate": "2026-06-24T06:44:08Z",
+  "commitHash": "dda4d44b03ae6bd38eb01773f5b517abe448aee3",
+  "commitMessage": "Test harness: working browser↔ESP32 closed loop + web-connect by name"
 }
