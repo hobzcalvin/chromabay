@@ -1,6 +1,7 @@
 #include "pattern_renderer_base.h"
 #include <Arduino.h>
 #include <new> // std::nothrow
+#include <cstring> // strcmp (operator-type compare for state-preserving pattern updates)
 
 // PatternRendererBase implementation using native operators
 PatternRendererBase::PatternRendererBase(LedConfig::LedManager* ledMgr) 
@@ -182,8 +183,41 @@ const CRGB* PatternRendererBase::getBuffer(int bufferIndex) const {
 }
 
 void PatternRendererBase::setPattern(Pattern&& pattern) {
+    // If the incoming pattern has the SAME structure as the current one (same operator
+    // types + same buffer wiring — only parameters differ), reuse the existing operator
+    // instances so STATEFUL operators don't reset. The app resends the whole pattern on
+    // every parameter change, so without this a Fire/Moving-Blobs slider nudge restarts
+    // the simulation from scratch.
+    bool preserved = false;
+    if (hasPattern && currentPattern.nodes.size() == pattern.nodes.size() && !pattern.nodes.empty()) {
+        bool same = true;
+        for (size_t i = 0; i < pattern.nodes.size(); i++) {
+            const PatternNode& a = currentPattern.nodes[i];
+            const PatternNode& b = pattern.nodes[i];
+            if (!a.op || !b.op ||
+                a.inputBuffer != b.inputBuffer ||
+                a.outputBuffer != b.outputBuffer ||
+                a.secondInputBuffer != b.secondInputBuffer ||
+                strcmp(a.op->getName(), b.op->getName()) != 0) {
+                same = false;
+                break;
+            }
+        }
+        if (same) {
+            // Move the existing (stateful) operators into the new pattern, keeping its
+            // freshly-parsed parameters/wiring. The just-created operators in `pattern`
+            // are discarded.
+            for (size_t i = 0; i < pattern.nodes.size(); i++) {
+                pattern.nodes[i].op = std::move(currentPattern.nodes[i].op);
+            }
+            preserved = true;
+        }
+    }
+
     currentPattern = std::move(pattern);
     hasPattern = true;
+    Serial.printf("Pattern set: %u node(s), operator state %s\n",
+                  (unsigned)currentPattern.nodes.size(), preserved ? "PRESERVED" : "fresh");
 }
 
 void PatternRendererBase::clearPattern() {
