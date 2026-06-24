@@ -73,17 +73,9 @@
         <span class="emoji">🌈</span>
         <span class="label">Patterns</span>
       </a>
-      <a href="{base}/interact" class:active={$page.url.pathname.startsWith(`${base}/interact`)}>
-        <span class="emoji">✋</span>
-        <span class="label">Interact</span>
-      </a>
       <a href="{base}/editor" class:active={$page.url.pathname.startsWith(`${base}/editor`)}>
         <span class="emoji">✏️</span>
         <span class="label">Editor</span>
-      </a>
-      <a href="{base}/settings" class:active={$page.url.pathname.startsWith(`${base}/settings`)}>
-        <span class="emoji">⚙️</span>
-        <span class="label">Settings</span>
       </a>
     </nav>
   </div>
