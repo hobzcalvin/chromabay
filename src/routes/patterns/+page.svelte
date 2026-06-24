@@ -232,7 +232,7 @@
         >
           <div class="pattern-content">
             <div class="preview-container">
-              <PatternPreview {pattern} size={80} />
+              <PatternPreview {pattern} size={64} />
               {#if isCurrentPattern}
                 <div class="current-badge">Current</div>
               {/if}
@@ -412,6 +412,11 @@
   .preview-container {
     position: relative;
     flex-shrink: 0;
+    /* Size to the PatternPreview's box (set by its `size` prop) so it can't overflow
+       and cover the name — the old mobile rule forced this to 60px while the preview
+       was 80px, which is what shoved/covered the text. */
+    width: 64px;
+    height: 64px;
   }
   
   .current-badge {
@@ -543,11 +548,6 @@
     
     .pattern-content {
       padding: 0.75rem;
-    }
-    
-    .preview-container {
-      width: 60px;
-      height: 60px;
     }
   }
 </style>
