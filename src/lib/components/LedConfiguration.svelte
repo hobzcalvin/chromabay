@@ -160,6 +160,11 @@
                   <input id={buildId('serpentine', index)} name="serpentine" type="checkbox" checked={getSerpentine(strip.orientation)} onchange={(e) => { strip.orientation = setSerpentine(strip.orientation, e.currentTarget.checked); }} />
                   Serpentine Layout
                 </label>
+                <label>
+                  Gamma (1.0 = none, ~2.5 max correction)
+                  <input id={buildId('gamma', index)} name="gamma" type="number" min="1.0" max="3.0" step="0.1"
+                    value={strip.gamma ?? 1.0} oninput={(e) => { strip.gamma = parseFloat(e.currentTarget.value) || 1.0; }} />
+                </label>
               </div>
             </div>
           </div>

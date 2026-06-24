@@ -972,6 +972,7 @@ export interface LedStripConfig {
   width: number | null;
   height: number | null;
   orientation: number;
+  gamma?: number; // per-strip gamma correction (1.0 = none; ~2.5 default)
 }
 
 export interface LedConfiguration {
@@ -1090,7 +1091,9 @@ export async function getLedConfiguration(deviceId: string): Promise<LedConfigur
           rmtChannel: strip.rmt ?? 0,
           width,
           height,
-          orientation: strip.ort ?? 0
+          orientation: strip.ort ?? 0,
+          // Firmware stores gamma*100 as an int; default 1.0 (off) if absent.
+          gamma: (strip.gm ?? 100) / 100
         };
       })
     };
@@ -1120,7 +1123,8 @@ export async function setLedConfiguration(deviceId: string, config: LedConfigura
         rmt: strip.rmtChannel,
         w: strip.width ?? 0,
         h: strip.height ?? 0,
-        ort: strip.orientation
+        ort: strip.orientation,
+        gm: Math.round((strip.gamma ?? 1.0) * 100)
       }))
     };
     
