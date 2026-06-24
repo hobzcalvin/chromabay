@@ -282,7 +282,10 @@
       if (!existingDevice) {
         devices = [...devices, result.device];
       }
-      
+
+      // Native: auto-reconnect a remembered device that just (re)appeared.
+      maybeAutoReconnect(result.device);
+
       // Handle auto-connection for web
       if (isWeb && result.autoConnected) {
         statusMessage = `Connected to ${result.device.name}!`;
@@ -318,10 +321,42 @@
     }
   }
 
+  // --- Auto-reconnect (native, while the app is open) ---
+  // Remember devices we've connected to; when a remembered device shows up in the scan
+  // again (e.g. it lost power and came back), reconnect without a tap. Native only —
+  // Web Bluetooth needs a user gesture to connect.
+  const REMEMBERED_KEY = 'chromabay:rememberedDevices';
+  function getRemembered(): Set<string> {
+    try { return new Set(JSON.parse(localStorage.getItem(REMEMBERED_KEY) || '[]')); } catch { return new Set(); }
+  }
+  function rememberDevice(id: string) {
+    if (!id) return;
+    try { const s = getRemembered(); s.add(id); localStorage.setItem(REMEMBERED_KEY, JSON.stringify([...s])); } catch {}
+  }
+  const autoConnecting = new Set<string>();
+  async function maybeAutoReconnect(device: any) {
+    if (isWeb) return;
+    const id = device?.deviceId;
+    if (!id || autoConnecting.has(id)) return;
+    if (get(connectedDevices).has(id)) return;       // already connected
+    if (!getRemembered().has(id)) return;            // not one of ours
+    autoConnecting.add(id);
+    try {
+      statusMessage = `Reconnecting to ${device.name || id}…`;
+      await connectToDevice(device);
+      rememberDevice(id);
+    } catch (e) {
+      console.warn('Auto-reconnect failed for', id, e);
+    } finally {
+      autoConnecting.delete(id);
+    }
+  }
+
   async function handleConnect(device: any) {
     try {
       statusMessage = `Connecting to ${device.name}...`;
       await connectToDevice(device);
+      rememberDevice(device.deviceId);
       statusMessage = `Connected to ${device.name}!`;
       // Data loading happens in initConnectedDevice, triggered reactively once the
       // device lands in the connectedDevices store — same path web auto-connect uses.
