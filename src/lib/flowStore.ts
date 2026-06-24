@@ -12,7 +12,7 @@ export function resetGlobalStartTime(): void {
 }
 
 // Parameter types
-export type ParameterType = 'float' | 'range' | 'integer' | 'hue' | 'color' | 'select';
+export type ParameterType = 'float' | 'range' | 'integer' | 'hue' | 'color' | 'select' | 'boolean';
 
 export interface Parameter {
   label: string;
@@ -321,7 +321,7 @@ class WasmOperatorManager {
     switch (wasmParam.type) {
       case 0: type = 'float'; break;
       case 1: type = 'integer'; break;
-      case 2: type = 'range'; break; // WASM BOOL type - use range for boolean toggle UI
+      case 2: type = 'boolean'; break; // WASM BOOL type -> checkbox
       case 3: type = 'color'; break;
       case 4: type = 'select'; break;
       default: 

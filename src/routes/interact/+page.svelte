@@ -292,37 +292,37 @@ import { get } from 'svelte/store';
   /* Pattern switcher pill, pinned top-center above the renderer + knobs. */
   .pattern-switcher {
     position: fixed;
-    top: max(0.75rem, env(safe-area-inset-top, 0px));
+    top: max(1rem, env(safe-area-inset-top, 0px));
     left: 50%;
     transform: translateX(-50%);
     z-index: 20;
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    max-width: 90vw;
-    padding: 0.25rem 0.5rem;
-    background: rgba(0, 0, 0, 0.45);
-    border: 1px solid rgba(255, 255, 255, 0.15);
+    gap: 0.75rem;
+    max-width: 94vw;
+    padding: 0.5rem 0.75rem;
+    background: rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.18);
     border-radius: 999px;
     backdrop-filter: blur(8px);
   }
   .switch-btn {
     flex-shrink: 0;
-    width: 2rem;
-    height: 2rem;
+    width: 3rem;
+    height: 3rem;
     border: none;
     border-radius: 50%;
-    background: rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.14);
     color: #fff;
-    font-size: 1.3rem;
+    font-size: 2rem;
     line-height: 1;
     cursor: pointer;
   }
-  .switch-btn:active { background: rgba(255, 255, 255, 0.28); }
+  .switch-btn:active { background: rgba(255, 255, 255, 0.3); }
   .switch-name {
     color: #fff;
     font-weight: 600;
-    font-size: 0.9rem;
+    font-size: 1.25rem;
     max-width: 60vw;
     overflow: hidden;
     text-overflow: ellipsis;

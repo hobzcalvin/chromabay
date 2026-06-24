@@ -63,6 +63,11 @@
     updateParameter(param, value);
   }
 
+  function handleBooleanChange(param: Parameter, event: Event) {
+    const input = event.target as HTMLInputElement;
+    updateParameter(param, input.checked ? 1 : 0);
+  }
+
   function handleSelectChange(param: Parameter, event: Event) {
     const select = event.target as HTMLSelectElement;
     updateParameter(param, select.value);
@@ -200,11 +205,21 @@
               />
               <span class="value-display">{getParameterValue(param).toFixed(2)}</span>
             </div>
+          {:else if param.type === 'boolean'}
+            <div class="boolean-control">
+              <input
+                id={inputId}
+                type="checkbox"
+                checked={Number(getParameterValue(param)) !== 0}
+                onchange={(e) => handleBooleanChange(param, e)}
+                ontouchstart={(e) => e.stopPropagation()}
+              />
+            </div>
           {:else if param.type === 'range'}
             <div class="range-control">
-              <input 
+              <input
                 id={inputId}
-                type="range" 
+                type="range"
                 min={param.min || 0} 
                 max={param.max || 100} 
                 step="1"

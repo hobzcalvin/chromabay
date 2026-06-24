@@ -104,6 +104,19 @@ public:
             return;
         }
         
+        // Split screen (mode 7): input1 on the left, input2 on the right; `opacity`
+        // (labelled "Amount") is the split position as a fraction of the width.
+        if (blend_mode == 7) {
+            uint32_t splitX = (uint32_t)(opacity * (float)width + 0.5f);
+            for (uint32_t y = 0; y < height; y++) {
+                for (uint32_t x = 0; x < width; x++) {
+                    uint32_t index = y * width + x;
+                    outputBuffer[index] = (x < splitX) ? inputBuffer1[index] : inputBuffer2[index];
+                }
+            }
+            return;
+        }
+
         // Special handling for Map blend mode (6)
         if (blend_mode == 6) {
             // Map mode: Use first input's brightness for X coord and hue for Y coord to sample second input
@@ -160,9 +173,13 @@ public:
     }
     
     std::vector<ParameterInfo> getParameterInfo() const override {
+        // "amount" doubles as opacity for the blend modes and as the split position for
+        // Split mode. blend_mode is a SELECT so the UI shows mode names, not numbers.
         return {
-            ParameterInfo("opacity", "Opacity", ParameterInfo::FLOAT, 0.5f, 0.0f, 1.0f),
-            ParameterInfo("blend_mode", "Blend Mode", ParameterInfo::INT, 0, 0, 6)
+            ParameterInfo("opacity", "Amount", ParameterInfo::FLOAT, 0.5f, 0.0f, 1.0f),
+            ParameterInfo("blend_mode", "Mode", ParameterInfo::SELECT, 0,
+                std::vector<std::string>{ "Normal", "Add", "Multiply", "Screen",
+                                          "Overlay", "Difference", "Map", "Split" })
         };
     }
 };

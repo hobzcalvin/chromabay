@@ -3,9 +3,11 @@
 #include "BaseOperator.h"
 #include <math.h>
 
-// Scroll - shifts the whole input across the matrix at any angle, wrapping toroidally.
-// Makes an entire pattern "chase" in a direction (note: "moving pixel shift to make
-// entire patterns chase at any angle"). Pure transform of the input; black if no input.
+// Scroll - shifts the whole input horizontally or vertically over time, wrapping
+// toroidally so the entire image is preserved (the edge that goes off one side comes
+// back on the other). Note #16 ("moving pixel shift to make patterns chase"). Arbitrary
+// angles can't shift a rectangular image without tearing the corners, so this is a
+// clean single-axis shift chosen by the `vertical` toggle.
 class ScrollOperator : public BaseOperator {
     static inline int wrap(int v, int n) { v %= n; return v < 0 ? v + n : v; }
 
@@ -25,22 +27,23 @@ public:
             for (uint32_t i = 0; i < total; i++) outputBuffer[i] = CRGB::Black;
             return;
         }
-        float speed = getFloat(parameters, 0, 20.0f);  // pixels/sec along the direction
-        float angle = getFloat(parameters, 1, 0.0f);    // degrees
+        float speed = getFloat(parameters, 0, 20.0f);    // pixels/sec (negative reverses)
+        bool vertical = getBool(parameters, 1, false);
 
-        const float kPi = 3.14159265358979323846f;
-        float rad = angle * kPi / 180.0f;
-        float dist = (timestampMs * 0.001f) * speed;
-        // A 1-row strip has no vertical axis — force horizontal.
-        float dx = dist * cosf(rad);
-        float dy = (height <= 1) ? 0.0f : dist * sinf(rad);
+        int span = vertical ? (int)height : (int)width;
+        if (span < 1) span = 1;
+        int shift = wrap((int)lroundf((timestampMs * 0.001f) * speed), span);
 
         int idx = 0;
         for (uint32_t y = 0; y < height; y++) {
-            int sy = wrap((int)lroundf((float)y - dy), (int)height);
             for (uint32_t x = 0; x < width; x++, idx++) {
-                int sx = wrap((int)lroundf((float)x - dx), (int)width);
-                outputBuffer[idx] = inputBuffer1[(uint32_t)sy * width + (uint32_t)sx];
+                if (vertical) {
+                    int sy = wrap((int)y - shift, (int)height);
+                    outputBuffer[idx] = inputBuffer1[(uint32_t)sy * width + x];
+                } else {
+                    int sx = wrap((int)x - shift, (int)width);
+                    outputBuffer[idx] = inputBuffer1[y * width + (uint32_t)sx];
+                }
             }
         }
     }
@@ -51,7 +54,7 @@ public:
     std::vector<ParameterInfo> getParameterInfo() const override {
         return {
             ParameterInfo("speed", "Speed (px/sec)", ParameterInfo::FLOAT, 20.0f, -200.0f, 200.0f),
-            ParameterInfo("angle", "Angle (deg)", ParameterInfo::FLOAT, 0.0f, 0.0f, 360.0f)
+            ParameterInfo("vertical", "Vertical", ParameterInfo::BOOL, false)
         };
     }
 };

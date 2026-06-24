@@ -124,6 +124,9 @@ public:
         if (index >= params.size()) return defaultVal;
         const ParameterValue& param = params[index];
         if (param.type == ParameterValue::BOOL) return param.boolVal;
+        // The app may send a boolean param as a 0/1 number, so accept numeric too.
+        if (param.type == ParameterValue::INT) return param.intVal != 0;
+        if (param.type == ParameterValue::FLOAT) return param.floatVal != 0.0f;
         return defaultVal;
     }
     

@@ -1,9 +1,12 @@
 #pragma once
 
 #include "BaseOperator.h"
+#include <math.h>
 
-// Tile - repeats the input across the matrix tilesX x tilesY times (each tile is the
-// whole input squeezed down). Pure transform of the input; black if no input.
+// Tile - repeats the input across the matrix in a tilesX x tilesY grid; each tile shows
+// the WHOLE input scaled to the cell. Uses float cell sizes so tiles stay equal even
+// when the matrix size isn't divisible by the tile count (an integer-modulo version
+// drifted into progressively narrower tiles). Pure transform; black if no input.
 class TileOperator : public BaseOperator {
 public:
     void render(
@@ -26,13 +29,19 @@ public:
         if (tilesX < 1) tilesX = 1;
         if (tilesY < 1) tilesY = 1;
 
-        // Sampling the input at tilesX/tilesY frequency repeats it that many times.
+        float cellW = (float)width / (float)tilesX;
+        float cellH = (float)height / (float)tilesY;
+
         int idx = 0;
         for (uint32_t y = 0; y < height; y++) {
-            uint32_t sy = (uint32_t)((y * (uint32_t)tilesY) % height);
+            float ly = fmodf((float)y, cellH);              // position within this row's cell
+            int sy = (int)(ly / cellH * (float)height);
+            if (sy >= (int)height) sy = (int)height - 1;
             for (uint32_t x = 0; x < width; x++, idx++) {
-                uint32_t sx = (uint32_t)((x * (uint32_t)tilesX) % width);
-                outputBuffer[idx] = inputBuffer1[sy * width + sx];
+                float lx = fmodf((float)x, cellW);
+                int sx = (int)(lx / cellW * (float)width);
+                if (sx >= (int)width) sx = (int)width - 1;
+                outputBuffer[idx] = inputBuffer1[(uint32_t)sy * width + (uint32_t)sx];
             }
         }
     }

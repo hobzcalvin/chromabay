@@ -2,13 +2,12 @@
 
 #include "BaseOperator.h"
 
-// Glitch - a datamosh-style glitch filter: random horizontal slices get shoved
-// sideways and their RGB channels split, changing over time. Pure transform of the
-// input; black if no input.
+// Glitch - a datamosh-style filter: the image is broken into a grid of blocks and
+// random blocks get shoved in X AND Y (not just horizontal slices) with RGB channel
+// fringing, churning over time. Pure transform of the input; black if no input.
 class GlitchOperator : public BaseOperator {
-    // Cheap integer hash -> 32 bits, for per-(frame,row) randomness.
-    static inline uint32_t hash2(uint32_t a, uint32_t b) {
-        uint32_t h = a * 374761393u + b * 668265263u;
+    static inline uint32_t hash3(uint32_t a, uint32_t b, uint32_t c) {
+        uint32_t h = a * 374761393u + b * 668265263u + c * 2246822519u;
         h = (h ^ (h >> 13)) * 1274126177u;
         return h ^ (h >> 16);
     }
@@ -31,31 +30,38 @@ public:
             return;
         }
         float intensity = getFloat(parameters, 0, 0.5f);  // 0..1
-        float speed = getFloat(parameters, 1, 1.0f);       // glitch churn rate
+        float speed = getFloat(parameters, 1, 1.0f);
         if (intensity < 0.0f) intensity = 0.0f;
         if (intensity > 1.0f) intensity = 1.0f;
 
-        // Step the seed over time so the glitch pattern keeps changing.
-        uint32_t frame = (uint32_t)(timestampMs * 0.001f * speed * 10.0f);
-        // How far channels split (in px) and how big slice shoves can get, scale w/ intensity.
-        int chanSplit = (int)(intensity * (float)width * 0.06f);
-        int maxShift = (int)(intensity * (float)width * 0.5f);
-        // Probability (0..255) that a given row is a glitched slice.
-        uint32_t sliceProb = (uint32_t)(intensity * 200.0f);
+        // Block grid (~8x6, but at least 1px blocks on tiny matrices).
+        int bw = (int)width / 8;  if (bw < 1) bw = 1;
+        int bh = (int)height / 6; if (bh < 1) bh = 1;
+        int maxOff = (int)(intensity * 0.6f * (float)((width < height) ? width : height));
+        if (maxOff < 1) maxOff = 1;
+        int chan = (int)(intensity * (float)width * 0.05f);
+        uint32_t prob = (uint32_t)(intensity * 255.0f); // chance a block is displaced
+        uint32_t frame = (uint32_t)(timestampMs * 0.001f * speed * 8.0f);
 
         for (uint32_t y = 0; y < height; y++) {
-            uint32_t hr = hash2(frame, y);
-            int shift = ((hr & 0xFF) < sliceProb) ? ((int)((hr >> 8) % (uint32_t)(2 * maxShift + 1)) - maxShift) : 0;
             for (uint32_t x = 0; x < width; x++) {
-                uint32_t base = y * width;
-                CRGB src = inputBuffer1[base + (uint32_t)wrap((int)x - shift, (int)width)];
-                if (chanSplit > 0) {
-                    // Pull R from the left, B from the right -> RGB fringing.
-                    CRGB rs = inputBuffer1[base + (uint32_t)wrap((int)x - shift - chanSplit, (int)width)];
-                    CRGB bs = inputBuffer1[base + (uint32_t)wrap((int)x - shift + chanSplit, (int)width)];
-                    outputBuffer[base + x] = CRGB(rs.r, src.g, bs.b);
+                uint32_t bx = x / (uint32_t)bw, by = y / (uint32_t)bh;
+                uint32_t hh = hash3(frame, bx, by);
+                bool active = (hh & 0xFF) < prob;
+                int ox = 0, oy = 0;
+                if (active) {
+                    ox = (int)((hh >> 8) % (uint32_t)(2 * maxOff + 1)) - maxOff;
+                    oy = (int)((hh >> 20) % (uint32_t)(2 * maxOff + 1)) - maxOff;
+                }
+                int sx = wrap((int)x - ox, (int)width);
+                int sy = wrap((int)y - oy, (int)height);
+                CRGB c = inputBuffer1[(uint32_t)sy * width + (uint32_t)sx];
+                if (active && chan > 0) {
+                    CRGB rs = inputBuffer1[(uint32_t)sy * width + (uint32_t)wrap(sx - chan, (int)width)];
+                    CRGB bs = inputBuffer1[(uint32_t)sy * width + (uint32_t)wrap(sx + chan, (int)width)];
+                    outputBuffer[y * width + x] = CRGB(rs.r, c.g, bs.b);
                 } else {
-                    outputBuffer[base + x] = src;
+                    outputBuffer[y * width + x] = c;
                 }
             }
         }
