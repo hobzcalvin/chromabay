@@ -2,7 +2,7 @@
 import { onMount } from 'svelte';
 import PatternRenderer from '$lib/components/PatternRenderer.svelte';
 import RotaryKnob from '$lib/components/RotaryKnob.svelte';
-import { loadPatterns, currentPattern } from '$lib/stores/patternsStore';
+import { loadPatterns, currentPattern, patterns, switchToPattern } from '$lib/stores/patternsStore';
 import { loadSerializedPattern, initializeDefaultPattern, forceSyncCurrentPattern, 
          flowNodes, nodeParameters, getNodeDefinition, setNodeParameter, type Parameter } from '$lib/flowStore';
 import { interactiveParameters } from '$lib/stores/interactiveStore';
@@ -190,6 +190,31 @@ import { get } from 'svelte/store';
 
   // handleKnobChange function removed - now using reactive binding instead
 
+  // Pattern switcher: cycle the current pattern without leaving Interact. Same effect
+  // as selecting on the Patterns page (loads into the flow store + syncs to devices);
+  // the knobs above regenerate reactively for the new pattern.
+  $: currentPatternName = $currentPattern?.meta?.name ?? '';
+  let switching = false;
+  async function switchPattern(dir: number) {
+    if (switching) return;
+    switching = true;
+    try {
+      const list = get(patterns);
+      if (!list || list.length === 0) return;
+      let idx = list.findIndex(p => p.meta?.name === get(currentPattern)?.meta?.name);
+      if (idx < 0) idx = 0;
+      const next = list[(idx + dir + list.length) % list.length];
+      if (!next?.meta?.name) return;
+      await switchToPattern(next.meta.name);
+      await loadSerializedPattern(next);
+      forceSyncCurrentPattern();
+    } catch (e) {
+      console.error('Interact: switch pattern failed', e);
+    } finally {
+      switching = false;
+    }
+  }
+
   onMount(async () => {
     // Initialize patterns on mount (same as editor page)
     try {
@@ -227,6 +252,15 @@ import { get } from 'svelte/store';
 <!-- Full-screen pattern renderer -->
 <PatternRenderer fullscreen={true} />
 
+<!-- Pattern switcher: prev / name / next -->
+{#if $patterns.length > 1}
+  <div class="pattern-switcher">
+    <button class="switch-btn" onclick={() => switchPattern(-1)} aria-label="Previous pattern">‹</button>
+    <span class="switch-name">{currentPatternName}</span>
+    <button class="switch-btn" onclick={() => switchPattern(1)} aria-label="Next pattern">›</button>
+  </div>
+{/if}
+
 <!-- Dynamic rotary knobs overlay -->
 {#if dynamicKnobs.length > 0}
   <div class="knobs-overlay">
@@ -255,6 +289,46 @@ import { get } from 'svelte/store';
 
 
 <style>
+  /* Pattern switcher pill, pinned top-center above the renderer + knobs. */
+  .pattern-switcher {
+    position: fixed;
+    top: max(0.75rem, env(safe-area-inset-top, 0px));
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    max-width: 90vw;
+    padding: 0.25rem 0.5rem;
+    background: rgba(0, 0, 0, 0.45);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 999px;
+    backdrop-filter: blur(8px);
+  }
+  .switch-btn {
+    flex-shrink: 0;
+    width: 2rem;
+    height: 2rem;
+    border: none;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    font-size: 1.3rem;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .switch-btn:active { background: rgba(255, 255, 255, 0.28); }
+  .switch-name {
+    color: #fff;
+    font-weight: 600;
+    font-size: 0.9rem;
+    max-width: 60vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   /* Full-screen overlay; knobs are positioned absolutely from the layout table.
      The overlay itself ignores pointer events so taps in the gaps reach the
      pattern behind it; each knob re-enables them. */
