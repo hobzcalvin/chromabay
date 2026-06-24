@@ -214,10 +214,16 @@ function startWebBluetoothScan(
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     navigator.bluetooth.requestDevice({
+      // Match by service OR by name prefix. The firmware doesn't always advertise the
+      // 128-bit service UUID in a way Web Bluetooth's service filter catches (iOS finds
+      // it via native scan, but Chrome's chooser came up empty), so a "ChromaBay" name
+      // filter ensures our devices are discoverable. optionalServices still grants
+      // access to the LED service after connecting.
       filters: [
-        { services: [LED_SERVICE_UUID] }
+        { services: [LED_SERVICE_UUID] },
+        { namePrefix: 'ChromaBay' }
       ],
-      optionalServices: [LED_SERVICE_UUID] 
+      optionalServices: [LED_SERVICE_UUID]
     }).then(async (device) => {
       const deviceInfo = {
         deviceId: device.id,

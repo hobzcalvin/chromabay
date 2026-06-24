@@ -31,14 +31,20 @@ import { spawn } from 'node:child_process';
 import { readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // ---------------------------------------------------------------- config
 const APP_URL = process.env.APP_URL || 'http://localhost:5173/devices';
 const PROJECT_DIR = process.env.ESP32_DIR || path.resolve('esp32');
 const PIO = process.env.PIO || `${homedir()}/.platformio/penv/bin/pio`;
+const PYTHON = process.env.PYTHON || `${homedir()}/.platformio/penv/bin/python`;
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEVICE_NAME_RE = /chromabay|esp32|m5/i;
 const SERIAL_BAUD = '115200';
 const NO_FLASH = process.argv.includes('--no-flash');
+// By default we run the flow then EXIT 0/1 (so an automated loop gets a verdict).
+// Pass --keep-open / -k to leave the browser + serial running for interactive poking.
+const KEEP_OPEN = process.argv.includes('--keep-open') || process.argv.includes('-k');
 
 const cyan = (s) => `\x1b[36m${s}\x1b[0m`;
 const magenta = (s) => `\x1b[35m${s}\x1b[0m`;
@@ -65,10 +71,13 @@ function runToCompletion(cmd, args, opts = {}) {
   });
 }
 
-// Streams `pio device monitor`, prints it, and lets us await specific lines.
+// Streams the serial console, prints it, and lets us await specific lines.
+// Reads via pyserial (bundled with PlatformIO) — NOT `pio device monitor` (its miniterm
+// needs an interactive TTY and crashes headlessly), `cat` (block-buffers piped stdout),
+// or Node fs (doesn't reliably emit from a macOS char device). See serial_reader.py.
 function startSerialMonitor(port) {
   log(`opening serial monitor on ${port} @ ${SERIAL_BAUD}`);
-  const proc = spawn(PIO, ['device', 'monitor', '--port', port, '-b', SERIAL_BAUD, '--quiet'], {
+  const proc = spawn(PYTHON, ['-u', path.join(HERE, 'serial_reader.py'), port, SERIAL_BAUD], {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const seen = [];
@@ -91,7 +100,7 @@ function startSerialMonitor(port) {
     }
   };
   proc.stdout.on('data', handle);
-  proc.stderr.on('data', handle);
+  proc.stderr.on('data', (b) => process.stdout.write(`${red('[serial]')} ${b}`));
 
   return {
     proc,
@@ -147,18 +156,36 @@ try {
   page.on('console', (m) => process.stdout.write(`${magenta('[browser]')} ${m.text()}\n`));
   page.on('pageerror', (e) => process.stdout.write(`${red('[browser:error]')} ${e.message}\n`));
 
-  // 4. Auto-accept the Bluetooth device chooser via CDP DeviceAccess.
-  //    The chooser is a browser-level concern, so use a browser CDP session.
-  const cdp = await browser.newBrowserCDPSession();
+  // 4. Auto-accept the Bluetooth device chooser via CDP DeviceAccess. The domain is
+  //    exposed on the PAGE-level CDP session (not the browser-level one — that returns
+  //    "'DeviceAccess.enable' wasn't found").
+  const cdp = await context.newCDPSession(page);
   await cdp.send('DeviceAccess.enable');
+  // The prompt event fires repeatedly as the scan discovers devices — the FIRST fire is
+  // usually empty. So we wait for our device to appear across fires and select it then;
+  // we only give up (cancel) after a timeout. (Cancelling on the first empty fire was
+  // the bug that made connect fail.)
+  let selectedDevice = false;
+  let cancelTimer = null;
   cdp.on('DeviceAccess.deviceRequestPrompted', async (e) => {
-    const match = e.devices.find((d) => DEVICE_NAME_RE.test(d.name || ''));
+    if (selectedDevice) return;
+    if (cancelTimer === null) {
+      cancelTimer = setTimeout(async () => {
+        if (!selectedDevice) {
+          log(red(`no device matched ${DEVICE_NAME_RE} within 25s; cancelling chooser`));
+          try { await cdp.send('DeviceAccess.cancelPrompt', { id: e.id }); } catch {}
+        }
+      }, 25000);
+    }
+    const match = (e.devices || []).find((d) => DEVICE_NAME_RE.test(d.name || ''));
     if (match) {
+      selectedDevice = true;
+      clearTimeout(cancelTimer);
       log(`auto-selecting BLE device "${match.name}"`);
-      await cdp.send('DeviceAccess.selectPrompt', { id: e.id, deviceId: match.id });
+      try { await cdp.send('DeviceAccess.selectPrompt', { id: e.id, deviceId: match.id }); }
+      catch (err) { log(red(`selectPrompt failed: ${err.message}`)); }
     } else {
-      log(red(`no device matched ${DEVICE_NAME_RE} in chooser; cancelling`));
-      await cdp.send('DeviceAccess.cancelPrompt', { id: e.id });
+      log(`chooser: ${(e.devices || []).length} device(s), none matching yet — waiting…`);
     }
   });
 
@@ -183,9 +210,14 @@ try {
   await page.getByRole('button', { name: /Show Settings/i }).first().click().catch(() => {});
   await page.getByRole('button', { name: /Refresh Info/i }).first().click().catch(() => {});
 
-  log(green('flow complete. Browser + serial stay open — Ctrl-C to stop, or edit the DRIVE section.'));
-  // Keep the process alive so you can watch / iterate.
-  await new Promise(() => {});
+  if (KEEP_OPEN) {
+    log(green('flow complete. Browser + serial stay open — Ctrl-C to stop, or edit the DRIVE section.'));
+    await new Promise(() => {}); // keep alive so you can watch / iterate
+  } else {
+    log(green('✓ flow complete — closing (pass --keep-open to stay open).'));
+    await cleanup();
+    process.exit(0);
+  }
   // ========================================================== /DRIVE
 } catch (err) {
   console.error(red('[drive] failed:'), err.message);

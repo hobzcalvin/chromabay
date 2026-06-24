@@ -11,9 +11,15 @@ via CDP → drive the app UI → watch the device react on serial.
 npm run dev
 
 # 2. In another terminal:
-npm run drive                 # reflash + drive
-npm run drive -- --no-flash   # skip reflash, just drive the browser
+npm run drive                  # reflash + drive, run the flow, then EXIT (status 0/1)
+npm run drive -- --no-flash    # skip reflash, just drive the browser
+npm run drive -- --keep-open   # stay open after the flow (browser + serial) to poke
 ```
+
+By default the harness runs the flow then exits with a status code, so it works as
+an automated check (and can be driven by an agent). The serial console is read via
+`stty` + `cat` on the port — NOT `pio device monitor`, whose miniterm needs an
+interactive TTY and crashes when launched headlessly.
 
 Env overrides: `APP_URL` (default `http://localhost:5173/devices`), `ESP32_DIR`
 (default `./esp32`), `PIO` (default `~/.platformio/penv/bin/pio`).
