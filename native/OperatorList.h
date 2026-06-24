@@ -51,6 +51,7 @@
 #include "ScrollOperator.h"
 #include "TileOperator.h"
 #include "GlitchOperator.h"
+#include "SymbolOperator.h"
 
 // Add your new operators here:
 // #include "RainbowOperator.h"
