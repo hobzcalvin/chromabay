@@ -526,8 +526,8 @@ class WasmOperatorManager {
                   this.wasmModule.ccall('setOperatorColorParameter', null, ['number', 'number', 'number', 'number', 'number'], [instanceId, i, r, g, b]);
                 }
                 break;
-              case 4: // SELECT  
-                this.wasmModule.ccall('setOperatorStringParameter', null, ['number', 'number', 'string'], [instanceId, i, String(value)]);
+              case 4: // SELECT — an enum: send the integer option index, not the label.
+                this.wasmModule.ccall('setOperatorIntParameter', null, ['number', 'number', 'number'], [instanceId, i, parseInt(value as any, 10) || 0]);
                 break;
             }
           }

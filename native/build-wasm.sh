@@ -64,5 +64,11 @@ emcc $CFLAGS $DEFINES \
 
 # Deploy into the app's static dir (what src/app.html loads).
 cp "$OUT/fastled.js" "$OUT/fastled.wasm" "$HERE/../static/native/"
-echo "✅ built + deployed to static/native -> fastled.{js,wasm}"
+
+# Stamp a content version. app.html appends this as a ?v= cache-buster on the .js/.wasm
+# loads, so the browser fetches a freshly-built module instead of serving a stale cached
+# fastled.wasm across reloads — but only re-downloads when the content actually changes.
+VER="$(shasum "$HERE/../static/native/fastled.wasm" | cut -c1-12)"
+printf 'window.__WASM_VERSION="%s";\n' "$VER" > "$HERE/../static/native/wasm-version.js"
+echo "✅ built + deployed to static/native -> fastled.{js,wasm} (v$VER)"
 ls -la "$HERE/../static/native/fastled.js" "$HERE/../static/native/fastled.wasm"

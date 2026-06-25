@@ -177,7 +177,7 @@ public:
         // Split mode. blend_mode is a SELECT so the UI shows mode names, not numbers.
         return {
             ParameterInfo("opacity", "Amount", ParameterInfo::FLOAT, 0.5f, 0.0f, 1.0f),
-            ParameterInfo("blend_mode", "Mode", ParameterInfo::SELECT, std::string("Normal"),
+            ParameterInfo("blend_mode", "Mode", ParameterInfo::SELECT, 0,
                 std::vector<std::string>{ "Normal", "Add", "Multiply", "Screen",
                                           "Overlay", "Difference", "Map", "Split" })
         };

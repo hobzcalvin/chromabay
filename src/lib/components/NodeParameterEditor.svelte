@@ -70,7 +70,9 @@
 
   function handleSelectChange(param: Parameter, event: Event) {
     const select = event.target as HTMLSelectElement;
-    updateParameter(param, select.value);
+    // A SELECT is an enum: its option values ARE the integer index (see flowStore
+    // convertWasmParameter). Store a number so it travels over the wire as an int.
+    updateParameter(param, parseInt(select.value, 10));
   }
 
   function handleDeleteNode() {

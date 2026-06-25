@@ -3,12 +3,15 @@
 #include <new> // std::nothrow
 #include <cstring> // strcmp (operator-type compare for state-preserving pattern updates)
 
-// A string parameter value over the wire is the chosen SELECT option's label. Operators
-// read SELECT choices with getInt(), so map the label to its option index and store an int.
-// Genuine (non-SELECT) string params keep the raw string. Mirrors the WASM binding so the
-// preview and the device interpret patterns identically.
+// A SELECT enum's value travels as the integer option index, read with getInt(). New
+// patterns send an int directly; tolerate a string here too — either a numeric index
+// ("2") or a label ("Multiply") — for older patterns. Non-SELECT strings keep the raw
+// string. Mirrors the WASM binding so the preview and the device agree.
 static ParameterValue selectValueFor(const ParameterInfo& info, const char* value) {
     if (info.type == ParameterInfo::SELECT) {
+        bool numeric = value[0] != '\0';
+        for (const char* p = value; *p; ++p) if (*p < '0' || *p > '9') { numeric = false; break; }
+        if (numeric) return ParameterValue((int)atoi(value));
         for (size_t i = 0; i < info.options.size(); i++) {
             if (info.options[i] == value) return ParameterValue((int)i);
         }

@@ -107,7 +107,10 @@ extern "C" {
                     buffer += ",\"default\":";
                     buffer += (param.defaultValue.boolVal ? "true" : "false");
                 } else if (param.type == ParameterInfo::SELECT) {
-                    buffer += std::string(",\"default\":\"") + param.defaultValue.stringVal + "\"";
+                    // A SELECT is an enum: its value travels as the integer option index.
+                    // The default is that index (the label is display-only, in options[]).
+                    int defIdx = (param.defaultValue.type == ParameterValue::INT) ? param.defaultValue.intVal : 0;
+                    buffer += ",\"default\":" + std::to_string(defIdx);
                     buffer += ",\"options\":[";
                     for (size_t i = 0; i < param.options.size(); i++) {
                         if (i > 0) buffer += ",";
@@ -200,16 +203,22 @@ extern "C" {
             if (operatorParameters[operatorId].size() <= (size_t)paramIndex) {
                 operatorParameters[operatorId].resize(paramIndex + 1);
             }
-            // SELECT parameters arrive as the chosen option's LABEL string. Operators read
-            // the choice with getInt(), so resolve the label to its option index and store
-            // an int. (Genuine string params fall through and keep the raw string.)
+            // A SELECT is an enum read with getInt(). Its value normally arrives as an int
+            // (setOperatorIntParameter), but tolerate a string here too: either a numeric
+            // index ("2") or a label ("Multiply"). Genuine string params keep the raw string.
             if (operatorId < (int)activeOperators.size() && activeOperators[operatorId]) {
                 auto info = activeOperators[operatorId]->getParameterInfo();
                 if (paramIndex < (int)info.size() && info[paramIndex].type == ParameterInfo::SELECT) {
                     const auto& opts = info[paramIndex].options;
                     int idx = 0;
-                    for (size_t i = 0; i < opts.size(); i++) {
-                        if (opts[i] == value) { idx = (int)i; break; }
+                    bool numeric = value[0] != '\0';
+                    for (const char* p = value; *p; ++p) if (*p < '0' || *p > '9') { numeric = false; break; }
+                    if (numeric) {
+                        idx = atoi(value);
+                    } else {
+                        for (size_t i = 0; i < opts.size(); i++) {
+                            if (opts[i] == value) { idx = (int)i; break; }
+                        }
                     }
                     operatorParameters[operatorId][paramIndex] = idx;
                     return;

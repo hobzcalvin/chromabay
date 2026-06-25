@@ -16,6 +16,7 @@ native/.fastled-src
 static/native/*
 !static/native/fastled.js
 !static/native/fastled.wasm
+!static/native/wasm-version.js
 
 # Firmware registry + binaries — these live ONLY on gh-pages, published by
 # esp32-release.yml. Committing them here lets a web deploy clobber the live

@@ -19,30 +19,52 @@
 		</script>
 		
 		<!-- FastLED WASM Operator System -->
-		<script src="%sveltekit.assets%/native/fastled.js"></script>
 		<script>
 			// Global WASM module initialization
 			let wasmModule = null;
 			let wasmReady = false;
-			
+			const WASM_ASSETS = '%sveltekit.assets%/native/';
+
+			function loadScript(src) {
+				return new Promise((resolve, reject) => {
+					const s = document.createElement('script');
+					s.src = src;
+					s.onload = resolve;
+					s.onerror = () => reject(new Error('failed to load ' + src));
+					document.head.appendChild(s);
+				});
+			}
+
 			// Initialize WASM when page loads
 			window.addEventListener('load', async () => {
 				console.log('🚀 Starting WASM initialization...');
 				try {
-					// Check if fastled function is available
+					// Content version stamped by native/build-wasm.sh. We fetch this tiny
+					// file fresh every load (Date.now bust) and use it as a ?v= query on the
+					// big .js/.wasm, so a rebuilt module is never served stale from the HTTP
+					// cache — yet only re-downloads when its content actually changed.
+					let q = '';
+					try {
+						await loadScript(WASM_ASSETS + 'wasm-version.js?t=' + Date.now());
+						if (window.__WASM_VERSION) q = '?v=' + window.__WASM_VERSION;
+					} catch (e) {
+						console.warn('wasm-version.js missing; loading without cache-bust', e);
+					}
+
+					await loadScript(WASM_ASSETS + 'fastled.js' + q);
 					if (typeof fastled === 'undefined') {
 						throw new Error('fastled function not found - WASM script may have failed to load');
 					}
-					
+
 					console.log('✅ fastled function found, calling it...');
 					wasmModule = await fastled({
 						// Pin asset resolution to where fastled.js actually lives
 						// (…/native/). Without this, Emscripten guesses the .wasm
 						// path relative to the document, which 404s under a base
-						// path (e.g. GitHub Pages at /chromabay/<route>). Uses the same
-						// SvelteKit assets placeholder as the script tag above.
+						// path (e.g. GitHub Pages at /chromabay/<route>). Carries the
+						// same ?v= cache-buster as the script load.
 						locateFile: function(path) {
-							return '%sveltekit.assets%/native/' + path;
+							return WASM_ASSETS + path + q;
 						},
 						// Capture WASM stdout/stderr
 						print: function(text) {
@@ -53,8 +75,8 @@
 						}
 					});
 					wasmReady = true;
-					console.log('✅ FastLED WASM module loaded successfully');
-					
+					console.log('✅ FastLED WASM module loaded successfully' + (q ? ' (v' + window.__WASM_VERSION + ')' : ''));
+
 					// Test operator count
 					try {
 						const operatorCount = wasmModule.ccall('getOperatorCount', 'number', [], []);
@@ -62,7 +84,7 @@
 					} catch (testError) {
 						console.error('❌ WASM operator count test failed:', testError);
 					}
-					
+
 					// Dispatch custom event to notify app components
 					window.dispatchEvent(new CustomEvent('wasmReady', { detail: { module: wasmModule } }));
 				} catch (error) {
@@ -72,7 +94,7 @@
 					console.error('❌ Base path:', document.getElementsByTagName('base')[0]?.href || 'none');
 				}
 			});
-			
+
 			// Global helper functions for WASM interaction
 			window.getWasmModule = () => wasmModule;
 			window.isWasmReady = () => wasmReady;
