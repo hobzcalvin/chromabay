@@ -258,8 +258,10 @@
   /* Badge styles */
   .badge {
     position: absolute;
-    top: -6px;
-    right: -10px;
+    top: -7px;
+    /* Anchor the badge's LEFT edge at the bulb's right edge so it sits up-and-right
+       with only a small corner overlap — not centered over the glyph. */
+    left: calc(100% - 4px);
     padding: 2px;
     border-radius: 50%;
     font-size: 0.7rem;
