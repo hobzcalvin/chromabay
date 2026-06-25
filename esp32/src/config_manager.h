@@ -319,10 +319,13 @@ public:
             }
         }
 
-        if (!config.strips.empty() || _ledManager.getNumStrips() > 0) { 
-            _ledManager.begin(); 
+        if (!config.strips.empty() || _ledManager.getNumStrips() > 0) {
+            _ledManager.begin();
         }
-        
+
+        // Apply any per-strip arbitrary pixel layouts saved on the device.
+        loadStripLayouts();
+
         // Debug: Print final LED manager state
         Serial.printf("Final LED Manager State:\n");
         Serial.printf("  Total strips: %d\n", _ledManager.getNumStrips());
@@ -432,6 +435,38 @@ public:
         }
 
         return createDefaultConfigContent(defaultStrip, filePath);
+    }
+
+    // Arbitrary pixel layout per strip, stored as /layout_<i>.bin:
+    //   [u16 count][ count × (u16 x, u16 y) ]   (little-endian, positions in any units;
+    //   LedBus::setLayout re-normalizes to the bounding box). Absent file => grid mapping.
+    void loadStripLayouts() {
+        for (size_t i = 0; i < _ledManager.getNumStrips(); i++) {
+            char path[24];
+            snprintf(path, sizeof(path), "/layout_%u.bin", (unsigned)i);
+            if (!LittleFS.exists(path)) { LedBus* st = _ledManager.getStrip(i); if (st) st->clearLayout(); continue; }
+            File f = LittleFS.open(path, FILE_READ);
+            if (!f) continue;
+            size_t sz = f.size();
+            uint8_t hdr[2];
+            if (sz < 2 || f.readBytes((char*)hdr, 2) != 2) { f.close(); continue; }
+            uint16_t count = (uint16_t)(hdr[0] | (hdr[1] << 8));
+            if (count == 0 || sz < (size_t)(2 + (size_t)count * 4)) { f.close(); continue; }
+            std::vector<uint16_t> xs(count), ys(count);
+            for (uint16_t k = 0; k < count; k++) {
+                uint8_t b[4];
+                if (f.readBytes((char*)b, 4) != 4) { count = k; break; }
+                xs[k] = (uint16_t)(b[0] | (b[1] << 8));
+                ys[k] = (uint16_t)(b[2] | (b[3] << 8));
+            }
+            f.close();
+            LedBus* strip = _ledManager.getStrip(i);
+            if (strip && count > 0) {
+                strip->setLayout(xs.data(), ys.data(), count);
+                Serial.printf("[ConfigManager] Strip %u layout: %u px -> %ux%u virtual matrix\n",
+                              (unsigned)i, (unsigned)count, strip->layoutWidth(), strip->layoutHeight());
+            }
+        }
     }
 
 private:
