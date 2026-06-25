@@ -119,37 +119,68 @@ class FireOperator : public BaseOperator {
         }
     }
 
-    void renderField(const HeatField& f, CRGB* out, uint32_t count, int hueShift) {
-        const uint8_t* heat = f.heat.data();
-        if (hueShift == 0) {
-            // Exact classic Fire2012 palette (also the identity case of the rotation below).
-            for (uint32_t i = 0; i < count; i++) out[i] = heatColor(heat[i]);
-            return;
-        }
-        // Rotate hue about the RGB grey axis. This is *exactly* the identity at hueShift=0,
-        // so the effect is continuous from the classic fire (no jump), and it rotates colour
-        // smoothly while leaving achromatic white-hot tips white — unlike a lossy rgb<->hsv
-        // round-trip, which shifts every colour the instant it's enabled.
+    // Hue-rotation matrix about the RGB grey axis. Identity at hueShift==0, so the effect
+    // is continuous from the classic fire and leaves achromatic white-hot tips white.
+    static void buildHueMatrix(int hueShift, float m[9]) {
         const float kTwoPi = 6.28318530718f;
         float a = (float)hueShift / 255.0f * kTwoPi;
         float c = cosf(a), s = sinf(a);
         float t = (1.0f - c) / 3.0f;
         const float sq = 0.57735027f; // 1/sqrt(3)
-        float m00 = c + t,      m01 = t - sq * s, m02 = t + sq * s;
-        float m10 = t + sq * s, m11 = c + t,      m12 = t - sq * s;
-        float m20 = t - sq * s, m21 = t + sq * s, m22 = c + t;
-        for (uint32_t i = 0; i < count; i++) {
-            CRGB col = heatColor(heat[i]);
-            float r = col.r, g = col.g, b = col.b;
-            int nr = (int)(r * m00 + g * m01 + b * m02 + 0.5f);
-            int ng = (int)(r * m10 + g * m11 + b * m12 + 0.5f);
-            int nb = (int)(r * m20 + g * m21 + b * m22 + 0.5f);
-            out[i] = CRGB(
-                (uint8_t)(nr < 0 ? 0 : (nr > 255 ? 255 : nr)),
-                (uint8_t)(ng < 0 ? 0 : (ng > 255 ? 255 : ng)),
-                (uint8_t)(nb < 0 ? 0 : (nb > 255 ? 255 : nb))
-            );
+        m[0] = c + t;      m[1] = t - sq * s; m[2] = t + sq * s;
+        m[3] = t + sq * s; m[4] = c + t;      m[5] = t - sq * s;
+        m[6] = t - sq * s; m[7] = t + sq * s; m[8] = c + t;
+    }
+    static inline CRGB colorFor(uint8_t temp, int hueShift, const float m[9]) {
+        CRGB col = heatColor(temp);
+        if (hueShift == 0) return col;
+        float r = col.r, g = col.g, b = col.b;
+        int nr = (int)(r * m[0] + g * m[1] + b * m[2] + 0.5f);
+        int ng = (int)(r * m[3] + g * m[4] + b * m[5] + 0.5f);
+        int nb = (int)(r * m[6] + g * m[7] + b * m[8] + 0.5f);
+        return CRGB(
+            (uint8_t)(nr < 0 ? 0 : (nr > 255 ? 255 : nr)),
+            (uint8_t)(ng < 0 ? 0 : (ng > 255 ? 255 : ng)),
+            (uint8_t)(nb < 0 ? 0 : (nb > 255 ? 255 : nb)));
+    }
+
+    // Bilinearly sample the heat field down (or up) into the output dimensions, colouring
+    // each sampled temperature. The sim runs at a fixed detail resolution independent of
+    // the strip size, so small/odd displays show a smooth, detailed fire instead of a
+    // coarse one simulated at their own low resolution.
+    void renderFieldSampled(const HeatField& f, CRGB* out, uint32_t outW, uint32_t outH, int hueShift) {
+        const uint8_t* heat = f.heat.data();
+        const int sw = (int)f.w, sh = (int)f.h;
+        float m[9]; if (hueShift != 0) buildHueMatrix(hueShift, m);
+        auto clampi = [](int v, int hi) { return v < 0 ? 0 : (v > hi ? hi : v); };
+        for (uint32_t y = 0; y < outH; y++) {
+            float fy = (outH <= 1) ? 0.0f : (((float)y + 0.5f) * (float)sh / (float)outH - 0.5f);
+            int y0 = (int)floorf(fy); float wy = fy - (float)y0;
+            int y0c = clampi(y0, sh - 1), y1c = clampi(y0 + 1, sh - 1);
+            for (uint32_t x = 0; x < outW; x++) {
+                float fx = (outW <= 1) ? 0.0f : (((float)x + 0.5f) * (float)sw / (float)outW - 0.5f);
+                int x0 = (int)floorf(fx); float wx = fx - (float)x0;
+                int x0c = clampi(x0, sw - 1), x1c = clampi(x0 + 1, sw - 1);
+                float h00 = heat[(uint32_t)y0c * sw + x0c], h10 = heat[(uint32_t)y0c * sw + x1c];
+                float h01 = heat[(uint32_t)y1c * sw + x0c], h11 = heat[(uint32_t)y1c * sw + x1c];
+                float top = h00 + (h10 - h00) * wx, bot = h01 + (h11 - h01) * wx;
+                int hv = (int)(top + (bot - top) * wy + 0.5f);
+                out[(uint32_t)y * outW + x] = colorFor((uint8_t)(hv < 0 ? 0 : (hv > 255 ? 255 : hv)), hueShift, m);
+            }
         }
+    }
+
+    // Pick the simulation resolution for a given output size: a fixed detail level,
+    // aspect-matched, independent of (and usually finer than) the strip's own resolution.
+    static void simDims(uint32_t w, uint32_t h, uint16_t& sw, uint16_t& sh) {
+        if (h <= 1) { // linear strip: simulate along its length with a detailed minimum
+            uint32_t L = w < 64 ? 64 : (w > 192 ? 192 : w);
+            sw = (uint16_t)L; sh = 1; return;
+        }
+        const int DETAIL = 48; // cells along the (tall) flame axis
+        int swi = (int)((float)DETAIL * (float)w / (float)h + 0.5f);
+        if (swi < 4) swi = 4; if (swi > 96) swi = 96;
+        sw = (uint16_t)swi; sh = (uint16_t)DETAIL;
     }
 
 public:
@@ -174,12 +205,17 @@ public:
             if (rng_ == 0) rng_ = 0x1234567u;
         }
 
-        uint32_t key = ((uint32_t)width << 16) | (uint32_t)height;
+        // Simulate at a fixed detail resolution (one sim), then sample it to the strip's
+        // actual size below. Same-aspect strips collapse to the same sim key, so they share
+        // one coherent fire; small displays get a smooth downsample instead of a coarse
+        // native-resolution sim.
+        uint16_t simW, simH; simDims(width, height, simW, simH);
+        uint32_t key = ((uint32_t)simW << 16) | (uint32_t)simH;
         HeatField& f = fields_[key];
-        if (f.w != width || f.h != height) {
-            f.w = (uint16_t)width;
-            f.h = (uint16_t)height;
-            f.heat.assign((size_t)width * height, 0);
+        if (f.w != simW || f.h != simH) {
+            f.w = simW;
+            f.h = simH;
+            f.heat.assign((size_t)simW * simH, 0);
             seedField(f);
             f.accum = 0.0f;
             f.started = false;
@@ -208,7 +244,7 @@ public:
             }
         }
 
-        renderField(f, outputBuffer, (uint32_t)width * height, hueShift);
+        renderFieldSampled(f, outputBuffer, width, height, hueShift);
     }
 
     const char* getName() const override { return "fire"; }
