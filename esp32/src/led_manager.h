@@ -233,9 +233,14 @@ public:
         for (int ch = 0; ch < 3; ch++) {
             float gain = (float)wp[ch] / 255.0f;
             for (int i = 0; i < 256; i++) {
-                float v = powf((float)i / 255.0f, g) * gain * 255.0f + 0.5f;
-                int o = (int)v;
-                _lut[ch][i] = (uint8_t)(o < 0 ? 0 : (o > 255 ? 255 : o));
+                float corrected = powf((float)i / 255.0f, g) * gain; // 0..1
+                int o8 = (int)(corrected * 255.0f + 0.5f);
+                _lut[ch][i] = (uint8_t)(o8 < 0 ? 0 : (o8 > 255 ? 255 : o8));
+                // 16-bit version of the SAME correction, so dithering can carry gamma +
+                // white-point at full precision down to the sigma-delta instead of through
+                // a lossy 8-bit step (where the gamma curve crushes many low inputs to 0/1).
+                int o16 = (int)(corrected * 65535.0f + 0.5f);
+                _lut16[ch][i] = (uint16_t)(o16 < 0 ? 0 : (o16 > 65535 ? 65535 : o16));
             }
         }
     }
@@ -310,6 +315,7 @@ private:
     InternalLedType _internalType;
     uint8_t _brightness;
     uint8_t _lut[3][256];
+    uint16_t _lut16[3][256]; // 16-bit gamma+white-point LUT, used by the dither path
     bool _ditherOn = false;
     uint8_t _ditherBits = 0;
     std::vector<uint16_t> _ditherTarget; // per channel, fixed-point (ditherBits frac bits)
@@ -551,12 +557,15 @@ inline void LedConfig::LedBus::setPixelColor(uint16_t pixelIndex, const CRGB& co
 
 inline void LedConfig::LedBus::setDitherTarget(uint16_t pixelIndex, const CRGB& color) {
     if (pixelIndex >= _config.numLeds) return;
-    const uint8_t lc[3] = { lutR(color.r), lutG(color.g), lutB(color.b) };
+    // Full-precision pipeline: 16-bit gamma+white-point correction × brightness, kept with
+    // N fractional bits below 8-bit. Dithering then time-averages to that target, so gamma
+    // and white point survive at far better than 8-bit before the final quantization.
+    const uint16_t lc16[3] = { _lut16[0][color.r], _lut16[1][color.g], _lut16[2][color.b] };
     const uint16_t L = (uint16_t)1 << _ditherBits;
     size_t base = (size_t)pixelIndex * 3;
     for (int ch = 0; ch < 3; ch++) {
-        // target (continuous 8-bit) = lc * brightness / 255, scaled by L for N frac bits.
-        uint32_t t = ((uint32_t)lc[ch] * _brightness * L + 127) / 255;
+        // target_fixed = (lc16/65535) * (brightness/255) * 255 * L = lc16 * brightness * L / 65535
+        uint32_t t = ((uint32_t)lc16[ch] * _brightness * L + 32767) / 65535;
         _ditherTarget[base + ch] = (uint16_t)t;
     }
 }
