@@ -32,6 +32,9 @@ struct LedStripConfig {
     uint8_t wpR = 255;
     uint8_t wpG = 255;
     uint8_t wpB = 255;
+    // Temporal dithering opt-in for this strip. Even when true it only activates if the
+    // strip is small/fast enough (see LedBus::chooseDitherBits); default on.
+    bool ditherEnable = true;
     
     // Add other strip-specific settings if needed:
     // bool reversed = false;
@@ -190,7 +193,9 @@ public:
 
     void setBrightness(uint8_t brightness) {
         _brightness = brightness;
-        if (_busPtr && _internalType != ITYPE_NONE) {
+        // While dithering we own brightness (baked into the target at full precision), so
+        // leave NeoPixelBus luminance at 255 — otherwise its 8-bit dim re-quantizes the gain.
+        if (_busPtr && _internalType != ITYPE_NONE && !_ditherOn) {
             LedWrapper::setBrightness(_busPtr, _internalType, _brightness);
         }
     }
@@ -238,12 +243,109 @@ public:
     uint8_t lutG(uint8_t c) const { return _lut[1][c]; }
     uint8_t lutB(uint8_t c) const { return _lut[2][c]; }
 
+    // ---- Temporal dithering (Fadecandy-style, opportunistic) -----------------------
+    // Recovers sub-LSB precision (smooth low brightness, no banding) by emitting many
+    // fast sub-frames per animation frame and time-averaging via per-channel sigma-delta.
+    // Only enabled when the strip is small/fast enough that the sub-frame (Show) rate keeps
+    // the slowest dither component above the flicker-fusion threshold; the bit depth N
+    // scales with available headroom. When off, output is byte-for-byte the old path.
+    bool ditherEnabled() const { return _ditherOn; }
+    uint8_t ditherBits() const { return _ditherBits; }
+
+    // Decide N (0=off, else 1..3) from chipset speed + pixel count, (re)alloc buffers, and
+    // route brightness: dithering owns brightness (NeoPixelBus luminance forced to 255 so
+    // its 8-bit dim can't re-quantize away the gain); non-dithering keeps SetLuminance.
+    void configureDither() {
+        uint8_t bits = chooseDitherBits();
+        _ditherBits = bits;
+        _ditherOn = (bits > 0);
+        if (_ditherOn) {
+            size_t n = (size_t)_config.numLeds * 3;
+            _ditherTarget.assign(n, 0);
+            _ditherResid.assign(n, 0);
+            if (_busPtr && _internalType != ITYPE_NONE)
+                LedWrapper::setBrightness(_busPtr, _internalType, 255); // own brightness ourselves
+        } else {
+            _ditherTarget.clear(); _ditherTarget.shrink_to_fit();
+            _ditherResid.clear(); _ditherResid.shrink_to_fit();
+            if (_busPtr && _internalType != ITYPE_NONE)
+                LedWrapper::setBrightness(_busPtr, _internalType, _brightness);
+        }
+    }
+
+    // Emit ONE dither sub-frame: per channel, sigma-delta the fixed-point target down to
+    // 8 bits (carry biases the LSB so the time-average equals the high-precision target),
+    // write it raw (luminance=255 + null gamma => identity passthrough), and Show.
+    void ditherShow() {
+        if (!_ditherOn || !_busPtr || _internalType == ITYPE_NONE) return;
+        const uint16_t L = (uint16_t)1 << _ditherBits;
+        const uint16_t mask = L - 1;
+        const uint16_t n = _config.numLeds;
+        for (uint16_t i = 0; i < n; i++) {
+            uint8_t out[3];
+            for (int ch = 0; ch < 3; ch++) {
+                size_t k = (size_t)i * 3 + ch;
+                uint16_t t = _ditherTarget[k];
+                uint16_t base = t >> _ditherBits;
+                uint16_t acc = (uint16_t)_ditherResid[k] + (t & mask);
+                uint16_t carry = 0;
+                if (acc >= L) { acc -= L; carry = 1; }
+                _ditherResid[k] = (uint8_t)acc;
+                uint16_t v = base + carry;
+                out[ch] = (uint8_t)(v > 255 ? 255 : v);
+            }
+            uint32_t wrgb = ((uint32_t)out[0] << 16) | ((uint32_t)out[1] << 8) | out[2];
+            LedWrapper::setPixelColor(_busPtr, _internalType, i, wrgb, _config.colorOrder);
+        }
+        LedWrapper::show(_busPtr, _internalType, false);
+    }
+
+    // Store a render's pixel as a high-precision dither target (defined below, after the
+    // FastLED.h include, since it reads CRGB channels). Called by setPixelColor.
+    void setDitherTarget(uint16_t pixelIndex, const CRGB& color);
+
 private:
     LedStripConfig _config;
     void* _busPtr;
     InternalLedType _internalType;
     uint8_t _brightness;
     uint8_t _lut[3][256];
+    bool _ditherOn = false;
+    uint8_t _ditherBits = 0;
+    std::vector<uint16_t> _ditherTarget; // per channel, fixed-point (ditherBits frac bits)
+    std::vector<uint8_t> _ditherResid;   // per channel sigma-delta residual (0..2^bits-1)
+
+    // Estimate how fast we can re-Show this strip (Hz): data bits / bitrate + reset, then
+    // cap by the main-loop sub-frame rate (it drives sub-frames once per ~1ms iteration).
+    uint32_t estShowRateHz() const {
+        if (_config.numLeds == 0) return 0;
+        int bpp = 24; int kbps = 800;
+        switch (_config.chipset) {
+            case LedChipset::WS2811_400KHZ: kbps = 400; bpp = 24; break;
+            case LedChipset::SK6812_RGBW:
+            case LedChipset::TM1814_RGBW:
+            case LedChipset::UCS8904_RGBW:  bpp = 32; break;
+            case LedChipset::FW1906_RGBCW:
+            case LedChipset::WS2805_RGBCW:
+            case LedChipset::SM16825_RGBCW: bpp = 40; break;
+            default: bpp = 24; break;
+        }
+        float tShowUs = (float)_config.numLeds * bpp * 1000.0f / (float)kbps + 300.0f; // +reset
+        if (tShowUs < 1.0f) tShowUs = 1.0f;
+        uint32_t hw = (uint32_t)(1000000.0f / tShowUs);
+        const uint32_t loopCap = 900; // in-loop sub-frame cadence (delay(1)-limited)
+        return hw < loopCap ? hw : loopCap;
+    }
+
+    // Largest N in 1..3 keeping the slowest dither component (rate/2^N) above ~70 Hz.
+    uint8_t chooseDitherBits() const {
+        if (!_config.ditherEnable || _internalType == ITYPE_NONE || _config.numLeds == 0) return 0;
+        uint32_t rate = estShowRateHz();
+        for (int n = 3; n >= 1; n--) {
+            if ((rate >> n) > 70u) return (uint8_t)n;
+        }
+        return 0;
+    }
 
     InternalLedType mapChipsetToInternalType(LedChipset chipset) {
         switch (chipset) {
@@ -305,6 +407,25 @@ public:
             strip_ptr->begin();
             strip_ptr->setBrightness(_globalBrightness); // Apply global brightness at init
         }
+        configureDithering(); // decide per-strip dithering once strips exist + brightness set
+    }
+
+    // (Re)evaluate temporal dithering on every strip — call after strips/brightness change.
+    // Each strip opportunistically picks its own bit depth from its config opt-in (or off).
+    void configureDithering() {
+        for (auto& strip_ptr : _strips) {
+            if (strip_ptr) strip_ptr->configureDither();
+        }
+    }
+
+    // Drive temporal-dither sub-frames: each dithering strip that's ready re-Shows the next
+    // sigma-delta sub-frame. Call frequently from the main loop between animation frames.
+    void ditherTick() {
+        for (auto& strip_ptr : _strips) {
+            if (strip_ptr && strip_ptr->ditherEnabled() && strip_ptr->canShow()) {
+                strip_ptr->ditherShow();
+            }
+        }
     }
 
     // Pixel Operations
@@ -339,10 +460,13 @@ public:
         return 0;
     }
 
-    // Update
+    // Update. Dithering strips emit their first sub-frame here (the rest come from
+    // ditherTick between animation frames); others Show normally.
     void show() {
         for (auto& strip_ptr : _strips) {
-            if (strip_ptr) strip_ptr->show(false);
+            if (!strip_ptr) continue;
+            if (strip_ptr->ditherEnabled()) strip_ptr->ditherShow();
+            else strip_ptr->show(false);
         }
     }
 
@@ -412,11 +536,28 @@ private:
 
 inline void LedConfig::LedBus::setPixelColor(uint16_t pixelIndex, const CRGB& color) {
     if (_busPtr && _internalType != ITYPE_NONE && pixelIndex < _config.numLeds) {
+        if (_ditherOn) {
+            // Dithering: stash a high-precision target; ditherShow() emits the sub-frames.
+            setDitherTarget(pixelIndex, color);
+            return;
+        }
         // Gamma-correct each channel on output (per-strip LUT).
         uint32_t wrgbColor = (static_cast<uint32_t>(lutR(color.r)) << 16) |
                              (static_cast<uint32_t>(lutG(color.g)) << 8)  |
                              static_cast<uint32_t>(lutB(color.b));
         LedWrapper::setPixelColor(_busPtr, _internalType, pixelIndex, wrgbColor, _config.colorOrder);
+    }
+}
+
+inline void LedConfig::LedBus::setDitherTarget(uint16_t pixelIndex, const CRGB& color) {
+    if (pixelIndex >= _config.numLeds) return;
+    const uint8_t lc[3] = { lutR(color.r), lutG(color.g), lutB(color.b) };
+    const uint16_t L = (uint16_t)1 << _ditherBits;
+    size_t base = (size_t)pixelIndex * 3;
+    for (int ch = 0; ch < 3; ch++) {
+        // target (continuous 8-bit) = lc * brightness / 255, scaled by L for N frac bits.
+        uint32_t t = ((uint32_t)lc[ch] * _brightness * L + 127) / 255;
+        _ditherTarget[base + ch] = (uint16_t)t;
     }
 }
 
