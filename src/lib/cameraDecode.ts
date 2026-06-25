@@ -12,7 +12,8 @@ import type { Pt } from './autoLayout';
 export type DecodeOpts = {
   bits: number;
   frameMs: number;        // device CALIB_FRAME_MS (220)
-  captureMs?: number;     // total capture window (default ~2 cycles)
+  cycles?: number;        // how many full flash cycles to capture (default 3)
+  captureMs?: number;     // total capture window (default cycles × period + 1 frame)
   procWidth?: number;     // downscale width for processing (default 200)
   threshold?: number;     // ON luminance threshold over background, 0..255 (default 40)
   onLog?: (m: string) => void;
@@ -77,59 +78,81 @@ function sampleAt(f: Frame, cx: number, cy: number, r = 2): number {
   return n ? s / n : 0;
 }
 
-/** Decode the calibration burst into points[ledIndex] = {x,y} in [0,1]. Best-effort. */
-export async function captureAndDecode(video: HTMLVideoElement, opts: DecodeOpts): Promise<Pt[]> {
+/** What a decode produced (or why it didn't). points is empty unless LEDs were confidently seen. */
+export type DecodeResult = { points: Pt[]; ok: boolean; reason: string };
+
+/**
+ * Decode the calibration burst. Captures several cycles, folds frames by cycle PHASE (so
+ * which cycle a frame lands in doesn't matter) and averages per slot — robust to camera/
+ * device framerate mismatch and noise. Gates on real ON-vs-OFF contrast both globally
+ * (did a strip actually flash?) and per-blob (is this a real LED or sensor noise?), so an
+ * empty/no-LED frame returns ok:false instead of fabricating a layout.
+ */
+export async function captureAndDecode(video: HTMLVideoElement, opts: DecodeOpts): Promise<DecodeResult> {
   const bits = opts.bits;
   const frameMs = opts.frameMs;
-  const captureMs = opts.captureMs ?? (2 + bits) * frameMs * 2 + frameMs;
+  const slots = 2 + bits;                       // [OFF][ON][bit0..]
+  const cyclePeriod = slots * frameMs;
+  const cycles = opts.cycles ?? 3;
+  const captureMs = opts.captureMs ?? cyclePeriod * cycles + frameMs;
   const procWidth = opts.procWidth ?? 200;
-  const thr = opts.threshold ?? 40;
+  const thr = opts.threshold ?? 45;
   const log = opts.onLog ?? (() => {});
 
   const frames = await captureBurst(video, captureMs, procWidth);
-  if (frames.length < bits + 2) { log('too few frames captured'); return []; }
-  const w = frames[0].w, h = frames[0].h;
+  if (frames.length < slots) return { points: [], ok: false, reason: 'too few camera frames captured' };
+  const w = frames[0].w, h = frames[0].h, N = w * h;
   log(`captured ${frames.length} frames @ ${w}x${h}`);
 
-  // Find the ALL-ON (brightest) and ALL-OFF (darkest) reference frames.
-  let onIdx = 0, offIdx = 0, onL = -1, offL = Infinity;
+  // Global flash check: a real calibrating strip makes total luminance swing strongly between
+  // its ALL-OFF and ALL-ON frames. A static scene (no LEDs) barely varies → bail early.
   const lums = frames.map(totalLum);
-  for (let i = 0; i < frames.length; i++) { if (lums[i] > onL) { onL = lums[i]; onIdx = i; } if (lums[i] < offL) { offL = lums[i]; offIdx = i; } }
-  const onF = frames[onIdx], offF = frames[offIdx];
+  const maxL = Math.max(...lums), minL = Math.min(...lums), avgL = lums.reduce((a, b) => a + b, 0) / lums.length;
+  if (avgL <= 0 || (maxL - minL) / avgL < 0.06) {
+    return { points: [], ok: false, reason: 'no flashing strip seen (scene barely changed) — is the lit strip filling the frame?' };
+  }
 
-  // LED blobs = pixels much brighter in ON than OFF.
-  const mask = new Uint8Array(w * h);
-  for (let i = 0; i < mask.length; i++) mask[i] = (onF.gray[i] - offF.gray[i]) > thr ? 1 : 0;
-  const cand = blobs(mask, w, h, Math.max(1, Math.round((w * h) / 20000)));
+  // Phase anchor: the darkest frame is an ALL-OFF reference (phase 0).
+  const offAnchorT = frames[lums.indexOf(minL)].t;
+  // Per-slot averaged grayscale image (fold all cycles into one period).
+  const slotSum = Array.from({ length: slots }, () => new Float32Array(N));
+  const slotCnt = new Array(slots).fill(0);
+  for (const f of frames) {
+    let ph = (f.t - offAnchorT) % cyclePeriod; if (ph < 0) ph += cyclePeriod;
+    const slot = Math.min(slots - 1, Math.floor(ph / frameMs));
+    const acc = slotSum[slot];
+    for (let i = 0; i < N; i++) acc[i] += f.gray[i];
+    slotCnt[slot]++;
+  }
+  if (slotCnt.some((c) => c === 0)) return { points: [], ok: false, reason: 'capture too short — some calibration frames were missed' };
+  const slotAvg = slotSum.map((s, k) => { const a = new Uint8Array(N); for (let i = 0; i < N; i++) a[i] = s[i] / slotCnt[k]; return a; });
+  const offA = slotAvg[0], onA = slotAvg[1];
+
+  // LED blobs = pixels clearly brighter in the averaged ON slot than the OFF slot.
+  let maxDelta = 0;
+  const mask = new Uint8Array(N);
+  for (let i = 0; i < N; i++) { const d = onA[i] - offA[i]; if (d > maxDelta) maxDelta = d; mask[i] = d > thr ? 1 : 0; }
+  if (maxDelta < thr) return { points: [], ok: false, reason: 'no LEDs detected (nothing lit up in sync)' };
+  const cand = blobs(mask, w, h, Math.max(1, Math.round(N / 20000)));
   log(`found ${cand.length} candidate LED blobs`);
-  if (!cand.length) return [];
+  if (!cand.length) return { points: [], ok: false, reason: 'no LED-sized bright spots found' };
 
-  // Locate the bit-frames: the device holds each frame ~frameMs, so after the ON frame the
-  // next `bits` held frames are bit0..bit(bits-1). Pick the captured frame nearest each
-  // expected time onF.t + frameMs*(k+1).
-  const bitFrames: Frame[] = [];
-  for (let k = 0; k < bits; k++) {
-    const target = onF.t + frameMs * (k + 1);
-    let best = frames[0], bd = Infinity;
-    for (const f of frames) { const d = Math.abs(f.t - target); if (d < bd) { bd = d; best = f; } }
-    bitFrames.push(best);
-  }
-
-  // Decode each blob's index; keep the brightest blob per index.
-  const mid = (cx: number, cy: number) => (sampleAt(onF, cx, cy) + sampleAt(offF, cx, cy)) / 2;
-  const byIndex = new Map<number, { x: number; y: number; px: number }>();
+  const sampleSlot = (k: number, cx: number, cy: number) => sampleAt({ gray: slotAvg[k], w, h, t: 0 }, cx, cy);
+  const byIndex = new Map<number, { x: number; y: number; px: number; conf: number }>();
   for (const b of cand) {
-    const m = mid(b.x, b.y);
+    const on = sampleSlot(1, b.x, b.y), off = sampleSlot(0, b.x, b.y);
+    if (on - off < thr * 0.6) continue;          // weak/uncertain blob → likely noise, skip
+    const mid = (on + off) / 2;
     let idx = 0;
-    for (let k = 0; k < bits; k++) if (sampleAt(bitFrames[k], b.x, b.y) > m) idx |= (1 << k);
+    for (let k = 0; k < bits; k++) if (sampleSlot(2 + k, b.x, b.y) > mid) idx |= (1 << k);
     const prev = byIndex.get(idx);
-    if (!prev || b.px > prev.px) byIndex.set(idx, b);
+    if (!prev || b.px > prev.px) byIndex.set(idx, { x: b.x, y: b.y, px: b.px, conf: on - off });
   }
+  if (!byIndex.size) return { points: [], ok: false, reason: 'LED blobs found but none decoded confidently' };
   log(`decoded ${byIndex.size} distinct LED indices`);
 
-  // Assemble points[ledIndex] normalized to [0,1].
   const maxIdx = Math.max(...byIndex.keys());
   const pts: Pt[] = new Array(maxIdx + 1).fill(null).map(() => ({ x: 0, y: 0 }));
   for (const [idx, b] of byIndex) pts[idx] = { x: b.x / w, y: b.y / h };
-  return pts;
+  return { points: pts, ok: true, reason: `decoded ${byIndex.size} LEDs` };
 }

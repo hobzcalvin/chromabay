@@ -44,13 +44,18 @@
   async function scan() {
     busy = true; points = [];
     try {
-      status = 'Calibrating + capturing…';
+      status = 'Calibrating + capturing (hold the camera steady)…';
       await startCalibration(deviceId, stripIndex);
       await new Promise((r) => setTimeout(r, FRAME_MS * 2)); // let the device enter the cycle
-      const pts = await captureAndDecode(video, { bits, frameMs: FRAME_MS, onLog: (m) => (status = m) });
+      const res = await captureAndDecode(video, { bits, frameMs: FRAME_MS, onLog: (m) => (status = m) });
       await stopCalibration(deviceId);
-      points = pts;
-      status = `Decoded ${decodedCount}/${numLeds} LEDs. Tune snap/rectify/rotation, then Use this map.`;
+      if (!res.ok) {
+        points = [];
+        status = `Couldn't map: ${res.reason}. Aim so the lit strip fills the frame, hold steady, and retry.`;
+      } else {
+        points = res.points;
+        status = `Decoded ${res.points.filter((p) => p && (p.x || p.y)).length}/${numLeds} LEDs. Tune snap / rectify / rotation, then Use this map.`;
+      }
     } catch (e: any) {
       status = 'Scan failed: ' + (e?.message || e);
       try { await stopCalibration(deviceId); } catch {}
