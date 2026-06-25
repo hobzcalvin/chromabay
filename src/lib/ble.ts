@@ -63,6 +63,7 @@ const CHARACTERISTIC_UUID_LED_CONFIG_GET = "a0be83ed-8dc9-47f0-ab40-b19721d20ed1
 const CHARACTERISTIC_UUID_LED_CONFIG_SET = "a0be83ee-8dc9-47f0-ab40-b19721d20ed1";
 const CHARACTERISTIC_UUID_LAYOUT_SET = "a0be83f5-8dc9-47f0-ab40-b19721d20ed1"; // arbitrary pixel layout (WLED ledmap), per strip
 const CHARACTERISTIC_UUID_LAYOUT_GET = "a0be83f6-8dc9-47f0-ab40-b19721d20ed1"; // read back a strip's layout (notify-chunked)
+const CHARACTERISTIC_UUID_CALIBRATION = "a0be83f7-8dc9-47f0-ab40-b19721d20ed1"; // auto-layout structured-light flash control
 
 // Timestamp Sync Characteristic - for synchronizing time across devices
 const CHARACTERISTIC_UUID_TIMESTAMP_SYNC = "a0be83ef-8dc9-47f0-ab40-b19721d20ed1";
@@ -1198,6 +1199,19 @@ export async function uploadStripLayout(
       new DataView(frame.buffer));
   }
   console.log(`[Layout] strip ${stripIndex}: ${clearing ? 'cleared' : `${W}x${H}, ${count} cells`} sent (${total}B)`);
+}
+
+/**
+ * Start the auto-layout calibration flash on the device: each LED blinks its index as a
+ * structured-light sequence the camera decodes. `stripIndex` 0xFF flashes all strips.
+ */
+export async function startCalibration(deviceId: string, stripIndex = 0xff): Promise<void> {
+  await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_CALIBRATION,
+    new DataView(new Uint8Array([1, stripIndex & 0xff]).buffer));
+}
+export async function stopCalibration(deviceId: string): Promise<void> {
+  await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_CALIBRATION,
+    new DataView(new Uint8Array([0]).buffer));
 }
 
 /**

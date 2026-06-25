@@ -55,6 +55,8 @@ PatternRendererBase* patternRenderer = nullptr;
 #define CHARACTERISTIC_UUID_LAYOUT_SET "a0be83f5-8dc9-47f0-ab40-b19721d20ed1"
 // Layout read-back: write u8 stripIndex to request; device NOTIFYs the layout chunked.
 #define CHARACTERISTIC_UUID_LAYOUT_GET "a0be83f6-8dc9-47f0-ab40-b19721d20ed1"
+// Auto-layout camera calibration: write [u8 cmd(1=start,0=stop)][u8 stripIndex(0xFF=all)].
+#define CHARACTERISTIC_UUID_CALIBRATION "a0be83f7-8dc9-47f0-ab40-b19721d20ed1"
 
 // Timestamp Sync Characteristic - for synchronizing time across devices
 #define CHARACTERISTIC_UUID_TIMESTAMP_SYNC "a0be83ef-8dc9-47f0-ab40-b19721d20ed1"
@@ -97,6 +99,16 @@ NimBLECharacteristic* pLedConfigGetCharacteristic = nullptr;
 NimBLECharacteristic* pLedConfigSetCharacteristic = nullptr;
 NimBLECharacteristic* pLayoutGetCharacteristic = nullptr; // read back a strip's layout (notify-chunked)
 static volatile int layoutGetRequest = -1;                // strip index requested via LAYOUT_GET write, -1 = none
+
+// Auto-layout calibration: when active, strips flash a structured-light sequence so the app
+// camera can decode each LED's index -> position. Cycle of (2 + bits) frames, each held
+// CALIB_FRAME_MS: [ALL-OFF ref][ALL-ON ref][bit0][bit1]...[bit(bits-1)]; LED i is on in
+// frame "bitB" iff bit B of i is set.
+static volatile bool calibrating = false;
+static uint8_t calibStrip = 0xFF;     // which strip flashes (0xFF = all)
+static uint8_t calibBits = 8;         // ceil(log2(maxNumLeds))
+static uint32_t calibStartMs = 0;
+static const uint32_t CALIB_FRAME_MS = 220;
 
 // Timestamp Sync Characteristic
 NimBLECharacteristic* pTimestampSyncCharacteristic = nullptr;
@@ -869,6 +881,30 @@ class LayoutGetCallbacks : public NimBLECharacteristicCallbacks {
     }
 };
 
+// Calibration Callbacks - start/stop the auto-layout structured-light flash sequence.
+class CalibrationCallbacks : public NimBLECharacteristicCallbacks {
+    void onWrite(NimBLECharacteristic* pCharacteristic) {
+        std::string v = pCharacteristic->getValue();
+        if (v.length() < 1) return;
+        uint8_t cmd = (uint8_t)v[0];
+        uint8_t strip = (v.length() >= 2) ? (uint8_t)v[1] : 0xFF;
+        if (cmd == 1) {
+            uint16_t maxN = 1;
+            for (size_t i = 0; i < ledMgr.getNumStrips(); i++) {
+                const LedConfig::LedBus* s = ledMgr.getStrip(i);
+                if (s && s->getLength() > maxN) maxN = s->getLength();
+            }
+            uint8_t bits = 1; while ((1u << bits) < maxN) bits++;
+            calibBits = bits; calibStrip = strip; calibStartMs = millis(); calibrating = true;
+            Serial.printf("[Calib] START strip=%d bits=%d (cycle=%d frames @ %dms)\n",
+                          strip, bits, 2 + bits, (int)CALIB_FRAME_MS);
+        } else {
+            calibrating = false;
+            Serial.println("[Calib] STOP");
+        }
+    }
+};
+
 // Pattern Sync Callbacks - for receiving messagepack-encoded patterns
 class PatternSyncCallbacks : public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic* pCharacteristic) {
@@ -1612,6 +1648,28 @@ void processLayoutGetRequest() {
     Serial.printf("[Layout] Strip %d read-back sent (%u bytes)\n", idx, (unsigned)len);
 }
 
+// Drive one structured-light calibration frame onto the strips (replaces pattern render
+// while calibrating). Frame = (elapsed / CALIB_FRAME_MS) mod (2 + bits).
+void renderCalibrationFrame() {
+    uint32_t cycleLen = 2u + calibBits;
+    uint32_t frame = ((millis() - calibStartMs) / CALIB_FRAME_MS) % cycleLen;
+    for (size_t s = 0; s < ledMgr.getNumStrips(); s++) {
+        LedConfig::LedBus* st = ledMgr.getStrip(s);
+        if (!st) continue;
+        uint16_t n = st->getLength();
+        bool targetStrip = (calibStrip == 0xFF) || (s == calibStrip);
+        for (uint16_t i = 0; i < n; i++) {
+            bool on;
+            if (!targetStrip) on = false;          // non-target strips stay dark
+            else if (frame == 0) on = false;        // all-off reference
+            else if (frame == 1) on = true;         // all-on reference
+            else on = ((i >> (frame - 2)) & 1u) != 0; // bit (frame-2) of the LED index
+            st->setPixelColor(i, on ? CRGB(255, 255, 255) : CRGB(0, 0, 0));
+        }
+    }
+    ledMgr.show();
+}
+
 // Finalize a pending OTA update from the loop task once the signature
 // verification task has produced a result (or timed out). This runs the work
 // that used to block the BLE host-task callback: verify result -> esp_ota_end ->
@@ -1896,6 +1954,8 @@ void setup() {
             pLayoutSetCharacteristic->setCallbacks(new LayoutSetCallbacks());
             pLayoutGetCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_LAYOUT_GET, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY);
             pLayoutGetCharacteristic->setCallbacks(new LayoutGetCallbacks());
+            NimBLECharacteristic* pCalibrationCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_CALIBRATION, NIMBLE_PROPERTY::WRITE);
+            pCalibrationCharacteristic->setCallbacks(new CalibrationCallbacks());
             
             // Timestamp Sync Characteristic
             pTimestampSyncCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_TIMESTAMP_SYNC, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY);
@@ -1978,7 +2038,9 @@ void loop() {
         lastUpdate = currentTime;
         
         // Pause pattern rendering if OTA is in progress to free up resources
-        if (patternRenderer != nullptr && !ota_in_progress) {
+        if (calibrating) {
+            renderCalibrationFrame(); // structured-light flash for camera auto-layout
+        } else if (patternRenderer != nullptr && !ota_in_progress) {
             updateCycle();   // pick the synced playlist pattern before rendering
             patternRenderer->update();
             patternRenderer->render();

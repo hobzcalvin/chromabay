@@ -8,9 +8,13 @@ ledmap automatically. Branch `feat/auto-layout` (off `feat/arbitrary-layouts`).
 | Piece | State |
 |------|-------|
 | Geometry: rectify + snap + rotate (`src/lib/autoLayout.ts`) | **DONE**, host-tested |
-| Firmware calibration flash-mode (Manchester LED IDs) | TODO (concrete, buildable) |
-| App: camera capture → blob detect → track → decode → points | TODO (needs camera to tune) |
-| UI: rectify checkbox, snap slider, rotate buttons, preview, upload | TODO |
+| Firmware calibration flash-mode (structured light) | **DONE**, HW-validated (enters/cycles/stops) |
+| App: camera capture → blob detect → decode → points (`cameraDecode.ts`) | **first pass DONE** — needs real LEDs+camera to tune thresholds/alignment |
+| UI: scan, snap slider, rectify checkbox, rotate, preview, upload (`AutoLayoutModal.svelte`) | **DONE**, chain HW-validated |
+
+Everything but the **CV decode accuracy** is wired and validated on hardware (the Scan→calibrate
+→capture→decode→stop chain runs end-to-end). Point a real strip + camera at it to tune
+`cameraDecode.ts` (threshold, frame alignment, blob size) — that's the remaining step.
 
 ## Geometry core (done, host-validated) — `src/lib/autoLayout.ts`
 

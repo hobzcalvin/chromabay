@@ -3,6 +3,9 @@
   import { LedChipsets, ColorOrders, uploadStripLayout, getStripLayout } from '$lib/ble';
   import { getRotation, getFlipH, getSerpentine, setRotation, setFlipH, setSerpentine } from '$lib/ble';
   import LayoutPreview from './LayoutPreview.svelte';
+  import AutoLayoutModal from './AutoLayoutModal.svelte';
+
+  let autoLayoutStrip: number | null = $state(null);
 
   // Parse a strip's layout JSON for the live preview (null if invalid / empty).
   function parsedLayout(index: number): { width: number; height: number; map: number[] } | null {
@@ -255,6 +258,7 @@
                   <button class="btn primary small" onclick={() => applyLayout(index)}>Apply layout</button>
                   <button class="btn small" onclick={() => loadCurrentLayout(index)}>Load current</button>
                   <button class="btn small" onclick={() => clearLayout(index)}>Clear layout</button>
+                  <button class="btn small" onclick={() => (autoLayoutStrip = index)}>📷 Auto-map (camera)</button>
                   {#if layoutMsg[index]}<span class="layout-msg">{layoutMsg[index]}</span>{/if}
                 </div>
                 {#if pl}
@@ -274,6 +278,15 @@
     <p>Loading LED configuration automatically...</p>
   {/if}
 </div>
+
+{#if autoLayoutStrip !== null}
+  <AutoLayoutModal
+    deviceId={deviceId}
+    stripIndex={autoLayoutStrip}
+    numLeds={settings.ledConfig?.strips?.[autoLayoutStrip]?.numLeds ?? 0}
+    onClose={() => (autoLayoutStrip = null)}
+  />
+{/if}
 
 <style>
   .settings-section {
