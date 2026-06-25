@@ -70,6 +70,13 @@
       strip.width = Math.ceil(strip.numLeds / strip.height);
     }
   }
+
+  // Per-channel gain a white-balance color picks: the channel byte / 255.
+  // `offset` is the hex string index of the channel (R=1, G=3, B=5).
+  function gain(whitePoint: string | undefined, offset: number): string {
+    const hex = whitePoint ?? '#ffffff';
+    return (parseInt(hex.slice(offset, offset + 2), 16) / 255).toFixed(2);
+  }
 </script>
 
 <div class="settings-section">
@@ -164,6 +171,16 @@
                   Gamma (1.0 = none, ~2.5 max correction)
                   <input id={buildId('gamma', index)} name="gamma" type="number" min="1.0" max="3.0" step="0.1"
                     value={strip.gamma ?? 1.0} oninput={(e) => { strip.gamma = parseFloat(e.currentTarget.value) || 1.0; }} />
+                </label>
+                <label class="whitepoint-label">
+                  White balance
+                  <span class="whitepoint-row">
+                    <input id={buildId('whitepoint', index)} name="whitepoint" type="color"
+                      value={strip.whitePoint ?? '#ffffff'} oninput={(e) => { strip.whitePoint = e.currentTarget.value; }} />
+                    <span class="whitepoint-gains">
+                      White → R×{gain(strip.whitePoint, 1)} G×{gain(strip.whitePoint, 3)} B×{gain(strip.whitePoint, 5)}
+                    </span>
+                  </span>
                 </label>
               </div>
             </div>
@@ -266,6 +283,24 @@
   .control-row select:focus {
     outline: 1px solid var(--accent-color);
     border-color: var(--accent-color);
+  }
+
+  /* White-balance: color swatch beside its computed per-channel gains. */
+  .whitepoint-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+  .whitepoint-row input[type='color'] {
+    width: 3rem;
+    height: 2rem;
+    padding: 0.1rem;
+    cursor: pointer;
+  }
+  .whitepoint-gains {
+    font-size: 0.8rem;
+    opacity: 0.8;
+    font-variant-numeric: tabular-nums;
   }
 
   /* Mobile responsiveness */

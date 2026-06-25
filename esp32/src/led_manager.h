@@ -24,12 +24,14 @@ struct LedStripConfig {
     uint16_t width = 0;      // Width in pixels (0 = linear strip)
     uint16_t height = 0;     // Height in pixels (0 = linear strip)
     uint8_t orientation = 0; // Bit 0-1: rotation (0°/90°/180°/270°), Bit 2: flip H, Bit 3: serpentine
-    // Per-strip gamma correction applied to each channel on output. 1.0 = none (default,
-    // so saturated patterns aren't altered). Higher (e.g. fadecandy's 2.5) makes dim
-    // gradients look smoother but, applied per-channel to an 8-bit saturated rainbow,
-    // crushes the weaker channel of mixed hues — narrowing the yellow/cyan/magenta
-    // bands. Opt in per strip from the LED config UI.
+    // Per-strip gamma correction applied to each channel on output. 1.0 = none (default).
     float gamma = 1.0f;
+    // Per-strip white-point correction: the colour the strip should render for "white".
+    // Each channel is scaled by wp/255 on output, so e.g. lowering blue cancels a
+    // cold/blue strip. Default 255/255/255 = neutral (no correction).
+    uint8_t wpR = 255;
+    uint8_t wpG = 255;
+    uint8_t wpB = 255;
     
     // Add other strip-specific settings if needed:
     // bool reversed = false;
@@ -82,7 +84,7 @@ struct LedStripConfig {
 class LedBus {
 public:
     LedBus(const LedStripConfig& config) : _config(config), _busPtr(nullptr), _internalType(ITYPE_NONE), _brightness(255) {
-        buildGammaLut();
+        buildLut();
         _internalType = mapChipsetToInternalType(_config.chipset);
         if (_internalType != ITYPE_NONE && _config.numLeds > 0) {
             // Note: RMT channel is passed to LedWrapper::create
@@ -107,7 +109,7 @@ public:
           _busPtr(other._busPtr),
           _internalType(other._internalType),
           _brightness(other._brightness) {
-        buildGammaLut(); // rebuild from copied _config
+        buildLut(); // rebuild from copied _config
         other._busPtr = nullptr; // Invalidate other
     }
 
@@ -120,7 +122,7 @@ public:
             _busPtr = other._busPtr;
             _internalType = other._internalType;
             _brightness = other._brightness;
-            buildGammaLut(); // rebuild from copied _config
+            buildLut(); // rebuild from copied _config
             other._busPtr = nullptr;
         }
         return *this;
@@ -217,24 +219,31 @@ public:
         return _busPtr != nullptr && _internalType != ITYPE_NONE;
     }
 
-    // Per-strip gamma lookup table, built from _config.gamma. Applied per channel on
-    // output (setPixelColor). Public so callers can rebuild after changing the config.
-    void buildGammaLut() {
+    // Per-channel output LUT folding gamma + white-point gain, built from _config.
+    // lut[ch][in] = round( (in/255)^gamma * (whitePoint[ch]/255) * 255 ). Applied in
+    // setPixelColor. Public so callers can rebuild after changing the config.
+    void buildLut() {
         float g = (_config.gamma > 0.01f) ? _config.gamma : 1.0f;
-        for (int i = 0; i < 256; i++) {
-            float v = powf((float)i / 255.0f, g) * 255.0f + 0.5f;
-            int o = (int)v;
-            _gamma8[i] = (uint8_t)(o < 0 ? 0 : (o > 255 ? 255 : o));
+        const uint8_t wp[3] = { _config.wpR, _config.wpG, _config.wpB };
+        for (int ch = 0; ch < 3; ch++) {
+            float gain = (float)wp[ch] / 255.0f;
+            for (int i = 0; i < 256; i++) {
+                float v = powf((float)i / 255.0f, g) * gain * 255.0f + 0.5f;
+                int o = (int)v;
+                _lut[ch][i] = (uint8_t)(o < 0 ? 0 : (o > 255 ? 255 : o));
+            }
         }
     }
-    uint8_t gammaCh(uint8_t c) const { return _gamma8[c]; }
+    uint8_t lutR(uint8_t c) const { return _lut[0][c]; }
+    uint8_t lutG(uint8_t c) const { return _lut[1][c]; }
+    uint8_t lutB(uint8_t c) const { return _lut[2][c]; }
 
 private:
     LedStripConfig _config;
     void* _busPtr;
     InternalLedType _internalType;
     uint8_t _brightness;
-    uint8_t _gamma8[256];
+    uint8_t _lut[3][256];
 
     InternalLedType mapChipsetToInternalType(LedChipset chipset) {
         switch (chipset) {
@@ -404,9 +413,9 @@ private:
 inline void LedConfig::LedBus::setPixelColor(uint16_t pixelIndex, const CRGB& color) {
     if (_busPtr && _internalType != ITYPE_NONE && pixelIndex < _config.numLeds) {
         // Gamma-correct each channel on output (per-strip LUT).
-        uint32_t wrgbColor = (static_cast<uint32_t>(gammaCh(color.r)) << 16) |
-                             (static_cast<uint32_t>(gammaCh(color.g)) << 8)  |
-                             static_cast<uint32_t>(gammaCh(color.b));
+        uint32_t wrgbColor = (static_cast<uint32_t>(lutR(color.r)) << 16) |
+                             (static_cast<uint32_t>(lutG(color.g)) << 8)  |
+                             static_cast<uint32_t>(lutB(color.b));
         LedWrapper::setPixelColor(_busPtr, _internalType, pixelIndex, wrgbColor, _config.colorOrder);
     }
 }

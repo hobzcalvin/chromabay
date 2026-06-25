@@ -973,6 +973,7 @@ export interface LedStripConfig {
   height: number | null;
   orientation: number;
   gamma?: number; // per-strip gamma correction (1.0 = none; ~2.5 default)
+  whitePoint?: string; // per-strip white-balance hex '#rrggbb' (the color shown for "white"; '#ffffff' = neutral)
 }
 
 export interface LedConfiguration {
@@ -1093,7 +1094,9 @@ export async function getLedConfiguration(deviceId: string): Promise<LedConfigur
           height,
           orientation: strip.ort ?? 0,
           // Firmware stores gamma*100 as an int; default 1.0 (off) if absent.
-          gamma: (strip.gm ?? 100) / 100
+          gamma: (strip.gm ?? 100) / 100,
+          // White point packed as 0xRRGGBB; default 0xFFFFFF (neutral) if absent.
+          whitePoint: '#' + ((strip.wp ?? 0xffffff) & 0xffffff).toString(16).padStart(6, '0')
         };
       })
     };
@@ -1124,7 +1127,8 @@ export async function setLedConfiguration(deviceId: string, config: LedConfigura
         w: strip.width ?? 0,
         h: strip.height ?? 0,
         ort: strip.orientation,
-        gm: Math.round((strip.gamma ?? 1.0) * 100)
+        gm: Math.round((strip.gamma ?? 1.0) * 100),
+        wp: strip.whitePoint ? (parseInt(strip.whitePoint.slice(1), 16) & 0xffffff) : 0xffffff
       }))
     };
     

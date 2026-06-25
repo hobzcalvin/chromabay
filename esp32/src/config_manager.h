@@ -26,7 +26,8 @@ namespace ConfigKeys {
     const char* const WIDTH = "w";
     const char* const HEIGHT = "h";
     const char* const ORIENTATION = "ort";
-    const char* const GAMMA = "gm"; // per-strip gamma (float), optional
+    const char* const GAMMA = "gm"; // per-strip gamma*100 (u16), optional
+    const char* const WHITE_POINT = "wp"; // per-strip white point packed 0xRRGGBB (u32), optional
 } // namespace ConfigKeys
 
 // Structure to hold the complete configuration for serialization/deserialization
@@ -72,8 +73,8 @@ public:
             const LedBus* bus = _ledManager.getStrip(i);
             if (bus) {
                 const LedStripConfig& stripConfig = bus->getConfig();
-                // Each strip is a map: chipset, pin, num_leds, color_order, rmt_channel, width, height, orientation, gamma (9 key-value pairs)
-                mpack_start_map(&writer, 9);
+                // Each strip is a map (10 key-value pairs incl. gamma + white point)
+                mpack_start_map(&writer, 10);
                 mpack_write_cstr(&writer, ConfigKeys::CHIPSET);
                 mpack_write_u8(&writer, static_cast<uint8_t>(stripConfig.chipset));
                 mpack_write_cstr(&writer, ConfigKeys::PIN);
@@ -92,6 +93,8 @@ public:
                 mpack_write_u8(&writer, stripConfig.orientation);
                 mpack_write_cstr(&writer, ConfigKeys::GAMMA);
                 mpack_write_u16(&writer, (uint16_t)(stripConfig.gamma * 100.0f + 0.5f));
+                mpack_write_cstr(&writer, ConfigKeys::WHITE_POINT);
+                mpack_write_u32(&writer, ((uint32_t)stripConfig.wpR << 16) | ((uint32_t)stripConfig.wpG << 8) | (uint32_t)stripConfig.wpB);
                 mpack_finish_map(&writer);
             }
         }
@@ -240,6 +243,11 @@ public:
                         } else if (strcmp(key_buffer, ConfigKeys::GAMMA) == 0) {
                             // Stored as gamma*100 (integer) to avoid float msgpack quirks.
                             stripConfig.gamma = mpack_expect_u16(&reader) / 100.0f;
+                        } else if (strcmp(key_buffer, ConfigKeys::WHITE_POINT) == 0) {
+                            uint32_t wp = mpack_expect_u32(&reader);
+                            stripConfig.wpR = (wp >> 16) & 0xFF;
+                            stripConfig.wpG = (wp >> 8) & 0xFF;
+                            stripConfig.wpB = wp & 0xFF;
                         } else {
                             Serial.print(F("[ConfigManager] Unknown key in strip map: ")); Serial.println(key_buffer);
                             mpack_discard(&reader); 
@@ -450,7 +458,7 @@ private:
         mpack_write_cstr(&writer, ConfigKeys::STRIPS);
         mpack_start_array(&writer, defaultConfigStruct.strips.size());
         for (const auto& stripCfg : defaultConfigStruct.strips) {
-            mpack_start_map(&writer, 9); // + gamma
+            mpack_start_map(&writer, 10); // + gamma + white point
             mpack_write_cstr(&writer, ConfigKeys::CHIPSET);     mpack_write_u8(&writer, static_cast<uint8_t>(stripCfg.chipset));
             mpack_write_cstr(&writer, ConfigKeys::PIN);         mpack_write_u8(&writer, stripCfg.pin);
             mpack_write_cstr(&writer, ConfigKeys::NUM_LEDS);    mpack_write_u16(&writer, stripCfg.numLeds);
@@ -460,6 +468,7 @@ private:
             mpack_write_cstr(&writer, ConfigKeys::HEIGHT);     mpack_write_u16(&writer, stripCfg.height);
             mpack_write_cstr(&writer, ConfigKeys::ORIENTATION); mpack_write_u8(&writer, stripCfg.orientation);
             mpack_write_cstr(&writer, ConfigKeys::GAMMA);       mpack_write_u16(&writer, (uint16_t)(stripCfg.gamma * 100.0f + 0.5f));
+            mpack_write_cstr(&writer, ConfigKeys::WHITE_POINT); mpack_write_u32(&writer, ((uint32_t)stripCfg.wpR << 16) | ((uint32_t)stripCfg.wpG << 8) | (uint32_t)stripCfg.wpB);
             mpack_finish_map(&writer);
         }
         mpack_finish_array(&writer);
