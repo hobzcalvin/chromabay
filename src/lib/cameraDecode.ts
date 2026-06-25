@@ -34,8 +34,13 @@ async function captureBurst(video: HTMLVideoElement, captureMs: number, procWidt
     const grab = () => {
       ctx.drawImage(video, 0, 0, w, h);
       const d = ctx.getImageData(0, 0, w, h).data;
+      // "Brightness" = MAX(R,G,B), not luma — so a coloured LED (e.g. a blue one, which is
+      // ~dark in luma) registers as fully bright. `gray` holds this max-channel value.
       const gray = new Uint8Array(w * h);
-      for (let i = 0, j = 0; i < d.length; i += 4, j++) gray[j] = (d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8;
+      for (let i = 0, j = 0; i < d.length; i += 4, j++) {
+        const m = d[i] > d[i + 1] ? d[i] : d[i + 1];
+        gray[j] = m > d[i + 2] ? m : d[i + 2];
+      }
       frames.push({ t: performance.now() - t0, gray, w, h });
       if (performance.now() - t0 < captureMs) requestAnimationFrame(grab);
       else resolve(frames);
@@ -43,8 +48,6 @@ async function captureBurst(video: HTMLVideoElement, captureMs: number, procWidt
     requestAnimationFrame(grab);
   });
 }
-
-function totalLum(f: Frame): number { let s = 0; for (let i = 0; i < f.gray.length; i++) s += f.gray[i]; return s; }
 
 // Connected-component centroids of a binary mask (4-connectivity, iterative flood fill).
 function blobs(mask: Uint8Array, w: number, h: number, minPx: number): { x: number; y: number; px: number }[] {
@@ -104,16 +107,24 @@ export async function captureAndDecode(video: HTMLVideoElement, opts: DecodeOpts
   const w = frames[0].w, h = frames[0].h, N = w * h;
   log(`captured ${frames.length} frames @ ${w}x${h}`);
 
-  // Global flash check: a real calibrating strip makes total luminance swing strongly between
-  // its ALL-OFF and ALL-ON frames. A static scene (no LEDs) barely varies → bail early.
-  const lums = frames.map(totalLum);
-  const maxL = Math.max(...lums), minL = Math.min(...lums), avgL = lums.reduce((a, b) => a + b, 0) / lums.length;
-  if (avgL <= 0 || (maxL - minL) / avgL < 0.06) {
-    return { points: [], ok: false, reason: 'no flashing strip seen (scene barely changed) — is the lit strip filling the frame?' };
+  // Find the BLINKING region by per-pixel temporal range (max-min over the burst). LEDs
+  // flash → high range; the (possibly bright) static background → ~0. This makes everything
+  // below background-independent, so a dark backdrop isn't required.
+  const pmin = new Uint8Array(N).fill(255), pmax = new Uint8Array(N);
+  for (const f of frames) for (let i = 0; i < N; i++) { const v = f.gray[i]; if (v < pmin[i]) pmin[i] = v; if (v > pmax[i]) pmax[i] = v; }
+  const roi = new Uint8Array(N);
+  let roiCount = 0;
+  for (let i = 0; i < N; i++) if (pmax[i] - pmin[i] > thr) { roi[i] = 1; roiCount++; }
+  if (roiCount < Math.max(2, Math.round(N / 40000))) {
+    return { points: [], ok: false, reason: 'nothing in view is blinking — is the strip calibrating and in frame?' };
   }
+  log(`${roiCount} blinking px (the LED region)`);
 
-  // Phase anchor: the darkest frame is an ALL-OFF reference (phase 0).
-  const offAnchorT = frames[lums.indexOf(minL)].t;
+  // Reference/phase from the blinking region ONLY (ignore the static background): the frame
+  // where the region is brightest is ALL-ON; darkest is ALL-OFF (= phase-0 anchor).
+  const roiSum = (f: Frame) => { let s = 0; for (let i = 0; i < N; i++) if (roi[i]) s += f.gray[i]; return s; };
+  let offAnchorT = 0, minRoi = Infinity;
+  for (const f of frames) { const s = roiSum(f); if (s < minRoi) { minRoi = s; offAnchorT = f.t; } }
   // Per-slot averaged grayscale image (fold all cycles into one period).
   const slotSum = Array.from({ length: slots }, () => new Float32Array(N));
   const slotCnt = new Array(slots).fill(0);
@@ -128,10 +139,11 @@ export async function captureAndDecode(video: HTMLVideoElement, opts: DecodeOpts
   const slotAvg = slotSum.map((s, k) => { const a = new Uint8Array(N); for (let i = 0; i < N; i++) a[i] = s[i] / slotCnt[k]; return a; });
   const offA = slotAvg[0], onA = slotAvg[1];
 
-  // LED blobs = pixels clearly brighter in the averaged ON slot than the OFF slot.
+  // LED blobs = pixels in the blinking region clearly brighter in the averaged ON slot than
+  // the OFF slot. ANDing with the ROI rejects any static-background brightness.
   let maxDelta = 0;
   const mask = new Uint8Array(N);
-  for (let i = 0; i < N; i++) { const d = onA[i] - offA[i]; if (d > maxDelta) maxDelta = d; mask[i] = d > thr ? 1 : 0; }
+  for (let i = 0; i < N; i++) { const d = onA[i] - offA[i]; if (d > maxDelta) maxDelta = d; mask[i] = (roi[i] && d > thr) ? 1 : 0; }
   if (maxDelta < thr) return { points: [], ok: false, reason: 'no LEDs detected (nothing lit up in sync)' };
   const cand = blobs(mask, w, h, Math.max(1, Math.round(N / 20000)));
   log(`found ${cand.length} candidate LED blobs`);
