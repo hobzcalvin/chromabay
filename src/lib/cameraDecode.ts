@@ -79,7 +79,7 @@ function sampleAt(f: Frame, cx: number, cy: number, r = 2): number {
 }
 
 /** What a decode produced (or why it didn't). points is empty unless LEDs were confidently seen. */
-export type DecodeResult = { points: Pt[]; ok: boolean; reason: string };
+export type DecodeResult = { points: (Pt | null)[]; ok: boolean; reason: string };
 
 /**
  * Decode the calibration burst. Captures several cycles, folds frames by cycle PHASE (so
@@ -151,8 +151,10 @@ export async function captureAndDecode(video: HTMLVideoElement, opts: DecodeOpts
   if (!byIndex.size) return { points: [], ok: false, reason: 'LED blobs found but none decoded confidently' };
   log(`decoded ${byIndex.size} distinct LED indices`);
 
+  // Sparse by LED index: UNDECODED LEDs are null (a gap), NOT (0,0) — otherwise every LED we
+  // failed to read would pile into the top-left corner and look like a real cluster.
   const maxIdx = Math.max(...byIndex.keys());
-  const pts: Pt[] = new Array(maxIdx + 1).fill(null).map(() => ({ x: 0, y: 0 }));
+  const pts: (Pt | null)[] = new Array(maxIdx + 1).fill(null);
   for (const [idx, b] of byIndex) pts[idx] = { x: b.x / w, y: b.y / h };
   return { points: pts, ok: true, reason: `decoded ${byIndex.size} LEDs` };
 }

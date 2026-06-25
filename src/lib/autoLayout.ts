@@ -63,11 +63,12 @@ function applyH(h: number[], p: Pt): Pt {
 
 // Warp the cloud so its bounding quad becomes the unit square — removes the oblique-camera
 // perspective. Use only when the real display outline is rectangular.
-export function rectifyPoints(pts: Pt[]): Pt[] {
-  if (pts.length < 4) return pts.slice();
-  const [tl, tr, br, bl] = quadCorners(pts);
+export function rectifyPoints(pts: (Pt | null)[]): (Pt | null)[] {
+  const real = pts.filter((p): p is Pt => !!p);
+  if (real.length < 4) return pts.slice();
+  const [tl, tr, br, bl] = quadCorners(real);
   const h = homography([tl, tr, br, bl], [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }]);
-  return pts.map((p) => applyH(h, p));
+  return pts.map((p) => (p ? applyH(h, p) : null)); // keep index alignment; gaps stay gaps
 }
 
 // ---- grid quantization (snapping) --------------------------------------------------------
@@ -96,13 +97,14 @@ function medianSpacing(pts: Pt[]): number {
  *                0 → fine grid preserving real spacing (gaps between offset pixels).
  * @param maxDim  cap on either grid dimension.
  */
-export function buildLedmap(pts: Pt[], snap = 1, maxDim = 64): Ledmap {
-  const n = pts.length;
-  if (n === 0) return { width: 0, height: 0, map: [] };
+export function buildLedmap(pts: (Pt | null)[], snap = 1, maxDim = 64): Ledmap {
+  // Only place LEDs we actually have a position for; null entries (undecoded) stay gaps.
+  const real = pts.map((p, i) => ({ p, i })).filter((e): e is { p: Pt; i: number } => !!e.p);
+  if (real.length === 0) return { width: 0, height: 0, map: [] };
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const p of pts) { minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y); }
+  for (const { p } of real) { minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y); }
   const spanX = Math.max(maxX - minX, 1e-6), spanY = Math.max(maxY - minY, 1e-6);
-  const spacing = Math.max(medianSpacing(pts), 1e-6);
+  const spacing = Math.max(medianSpacing(real.map((e) => e.p)), 1e-6);
 
   // At snap=1 the cell is the natural spacing → grid ≈ the intended row/col count. As snap
   // drops, cells shrink (finer grid) so genuine position offsets occupy distinct cells.
@@ -115,9 +117,9 @@ export function buildLedmap(pts: Pt[], snap = 1, maxDim = 64): Ledmap {
 
   const map = new Array(W * H).fill(-1);
   const occupied = (c: number) => map[c] >= 0;
-  for (let i = 0; i < n; i++) {
-    let col = W <= 1 ? 0 : Math.round(((pts[i].x - minX) / spanX) * (W - 1));
-    let row = H <= 1 ? 0 : Math.round(((pts[i].y - minY) / spanY) * (H - 1));
+  for (const { p, i } of real) {
+    let col = W <= 1 ? 0 : Math.round(((p.x - minX) / spanX) * (W - 1));
+    let row = H <= 1 ? 0 : Math.round(((p.y - minY) / spanY) * (H - 1));
     let cellIdx = row * W + col;
     // On collision (two LEDs rounded to the same cell — common at high snap), spiral out to
     // the nearest free cell so no LED is dropped.

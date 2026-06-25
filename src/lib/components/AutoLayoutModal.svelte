@@ -16,7 +16,7 @@
 
   let video: HTMLVideoElement;
   let stream: MediaStream | null = null;
-  let points: Pt[] = $state([]);
+  let points: (Pt | null)[] = $state([]);
   let snap = $state(1);
   let rectify = $state(false);
   let turns = $state(0);
@@ -29,7 +29,7 @@
     const src = rectify ? rectifyPoints(points) : points;
     return rotateLedmap(buildLedmap(src, snap), turns);
   });
-  const decodedCount = $derived(points.filter((p) => p && (p.x || p.y)).length);
+  const decodedCount = $derived(points.filter(Boolean).length);
 
   onMount(() => {
     (async () => {
@@ -54,7 +54,7 @@
         status = `Couldn't map: ${res.reason}. Aim so the lit strip fills the frame, hold steady, and retry.`;
       } else {
         points = res.points;
-        status = `Decoded ${res.points.filter((p) => p && (p.x || p.y)).length}/${numLeds} LEDs. Tune snap / rectify / rotation, then Use this map.`;
+        status = `Decoded ${res.points.filter(Boolean).length}/${numLeds} LEDs. Tune snap / rectify / rotation, then Use this map.`;
       }
     } catch (e: any) {
       status = 'Scan failed: ' + (e?.message || e);
