@@ -292,14 +292,27 @@ void PatternRendererBase::update() {
 
 void PatternRendererBase::renderGraphAt(uint16_t width, uint16_t height) {
     // Run every operator node into the shared buffers at the given canvas size.
+    const size_t totalPixels = (size_t)width * (size_t)height;
     for (const auto& node : currentPattern.nodes) {
         if (!node.op) continue;
         CRGB* inputBuffer1 = (node.inputBuffer >= 0) ? getBufferPtr(node.inputBuffer) : nullptr;
         CRGB* inputBuffer2 = (node.secondInputBuffer >= 0) ? getBufferPtr(node.secondInputBuffer) : nullptr;
         CRGB* outputBuffer = getBufferPtr(node.outputBuffer);
-        if (outputBuffer) {
-            node.op->render(inputBuffer1, inputBuffer2, outputBuffer,
-                            width, height, frameFloatTime, frameFloatDelta, node.parameters);
+        if (!outputBuffer) continue;
+
+        // A same-lane chain makes the output buffer alias an input. Spatial operators
+        // (scroll/mirror/tile/glitch) must not render in-place — they'd read pixels they
+        // already overwrote. Render into the scratch buffer, then copy back to the lane.
+        bool aliases = (node.outputBuffer == node.inputBuffer) ||
+                       (node.outputBuffer == node.secondInputBuffer);
+        CRGB* renderOut = aliases ? getBufferPtr(SCRATCH_BUFFER) : outputBuffer;
+        if (!renderOut) renderOut = outputBuffer; // scratch unavailable -> in-place fallback
+
+        node.op->render(inputBuffer1, inputBuffer2, renderOut,
+                        width, height, frameFloatTime, frameFloatDelta, node.parameters);
+
+        if (renderOut != outputBuffer) {
+            memcpy(outputBuffer, renderOut, totalPixels * sizeof(CRGB));
         }
     }
 }

@@ -284,9 +284,9 @@
             </div>
           {:else if param.type === 'select'}
             <div class="select-control">
-              <select 
+              <select
                 id={inputId}
-                value={getParameterValue(param)}
+                value={String(getParameterValue(param))}
                 onchange={(e) => handleSelectChange(param, e)}
               >
                 {#if param.options}

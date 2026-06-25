@@ -209,12 +209,17 @@ class WasmOperatorManager {
     // Calculate buffer size using current config dimensions (RGB = 3 bytes per pixel)
     this.bufferSize = this.currentConfig.width * this.currentConfig.height * 3;
     
-    // Allocate 3 buffers for ESP32-compatible rendering
-    this.buffers[0] = this.wasmModule._malloc(this.bufferSize); // Buffer 0
-    this.buffers[1] = this.wasmModule._malloc(this.bufferSize); // Buffer 1  
-    this.buffers[2] = this.wasmModule._malloc(this.bufferSize); // Buffer 2
-    
-    console.log(`Allocated 3 WASM buffers (${this.currentConfig.width}x${this.currentConfig.height}):`, this.buffers);
+    // Allocate 3 lane buffers (LEFT/CENTER/RIGHT) for ESP32-compatible rendering,
+    // plus a scratch buffer (index 3). A node and its same-lane input share a lane
+    // buffer, so spatial operators (scroll/mirror/tile/glitch) would otherwise render
+    // in-place and read pixels they've already overwritten — corrupting the frame.
+    // We render into the scratch when output would alias an input, then copy back.
+    this.buffers[0] = this.wasmModule._malloc(this.bufferSize); // Buffer 0 (LEFT)
+    this.buffers[1] = this.wasmModule._malloc(this.bufferSize); // Buffer 1 (CENTER)
+    this.buffers[2] = this.wasmModule._malloc(this.bufferSize); // Buffer 2 (RIGHT)
+    this.buffers[3] = this.wasmModule._malloc(this.bufferSize); // Buffer 3 (scratch)
+
+    console.log(`Allocated 3 lane buffers + scratch (${this.currentConfig.width}x${this.currentConfig.height}):`, this.buffers);
   }
   
   private reallocateBuffers() {
@@ -450,13 +455,26 @@ class WasmOperatorManager {
     // Get buffer pointers - use 0 as null pointer for unused inputs
     const inputBuffer1Ptr = inputBuffer1Index !== null ? this.buffers[inputBuffer1Index] : 0;
     const inputBuffer2Ptr = inputBuffer2Index !== null ? this.buffers[inputBuffer2Index] : 0;
-    const outputBufferPtr = this.buffers[outputBufferIndex];
-    
-    this.wasmModule.ccall('renderOperator', null, 
-      ['number', 'number', 'number', 'number', 'number', 'number', 'number', 'number'], 
+
+    // If the output buffer aliases an input (same-lane chain), render into the scratch
+    // buffer so spatial operators don't read pixels they've already overwritten, then
+    // copy the result back into the lane buffer. Operators may assume input != output.
+    const aliasesInput =
+      outputBufferIndex === inputBuffer1Index || outputBufferIndex === inputBuffer2Index;
+    const renderOutIndex = aliasesInput ? 3 : outputBufferIndex;
+    const outputBufferPtr = this.buffers[renderOutIndex];
+
+    this.wasmModule.ccall('renderOperator', null,
+      ['number', 'number', 'number', 'number', 'number', 'number', 'number', 'number'],
       [this.operatorInstances.get(nodeId), inputBuffer1Ptr, inputBuffer2Ptr, outputBufferPtr, width, height, operatorTimestamp, deltaTimeMs]
     );
-    
+
+    if (aliasesInput) {
+      // scratch -> lane buffer
+      const dst = this.buffers[outputBufferIndex];
+      this.wasmModule.HEAPU8.copyWithin(dst, outputBufferPtr, outputBufferPtr + this.bufferSize);
+    }
+
     // Copy the buffer data back to canvas
     this.copyBufferToCanvas(outputBufferIndex, ctx, width, height);
   }

@@ -5,7 +5,8 @@
 #include "led_manager.h"
 #include "mpack.h"
 
-#define NUM_BUFFERS 3 // Three lanes for patterns
+#define NUM_BUFFERS 4 // Three lanes for patterns (0/1/2) + one scratch (3)
+#define SCRATCH_BUFFER 3 // Internal: render here when output aliases an input, then copy back
 
 // Define ESP32 build to disable emscripten includes
 #define ESP32_BUILD
