@@ -193,8 +193,10 @@ static size_t ledConfigBufferSize = 0;
 static volatile bool newLedConfigAvailable = false;
 
 // Staged arbitrary-layout upload (applied from loop(), same reason as LED config above).
+// Reassembled from chunked writes: each frame is [u16 totalLen][u16 offset][bytes].
 static uint8_t* layoutBuffer = nullptr;
-static size_t layoutBufferSize = 0;
+static size_t layoutBufferSize = 0;     // == totalLen once the first chunk arrives
+static size_t layoutAccumLen = 0;       // bytes received so far (in-order)
 static volatile bool newLayoutAvailable = false;
 
 bool deviceConnected = false;
@@ -835,16 +837,23 @@ class LedConfigSetCallbacks : public NimBLECharacteristicCallbacks {
 class LayoutSetCallbacks : public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic* pCharacteristic) {
         std::string value = pCharacteristic->getValue();
-        if (value.length() < 1) return;
-        if (layoutBuffer != nullptr) { free(layoutBuffer); layoutBuffer = nullptr; layoutBufferSize = 0; }
-        layoutBufferSize = value.length();
-        layoutBuffer = (uint8_t*)malloc(layoutBufferSize);
-        if (layoutBuffer != nullptr) {
-            memcpy(layoutBuffer, value.data(), layoutBufferSize);
-            newLayoutAvailable = true;
-        } else {
-            layoutBufferSize = 0;
+        if (value.length() < 4) return; // need [u16 totalLen][u16 offset]
+        const uint8_t* d = (const uint8_t*)value.data();
+        uint16_t totalLen = (uint16_t)(d[0] | (d[1] << 8));
+        uint16_t offset   = (uint16_t)(d[2] | (d[3] << 8));
+        size_t dataLen = value.length() - 4;
+        if (totalLen == 0 || totalLen > 16384) return; // sanity (64x64 map ≈ 8 KB)
+
+        if (offset == 0) { // first chunk: (re)allocate the reassembly buffer
+            if (layoutBuffer) { free(layoutBuffer); layoutBuffer = nullptr; }
+            layoutBuffer = (uint8_t*)malloc(totalLen);
+            layoutBufferSize = layoutBuffer ? totalLen : 0;
+            layoutAccumLen = 0;
         }
+        if (!layoutBuffer || (size_t)offset + dataLen > layoutBufferSize) return; // out of order / overrun
+        memcpy(layoutBuffer + offset, d + 4, dataLen);
+        layoutAccumLen = (size_t)offset + dataLen; // writes are serialized + in order
+        if (layoutAccumLen >= layoutBufferSize) newLayoutAvailable = true;
     }
 };
 
@@ -1510,11 +1519,12 @@ void processReceivedLedConfig() {
 // [u8 stripIndex][u16 W][u16 H][u16 count][count×i16] — the body after stripIndex is exactly
 // the /layout_<i>.bin file format. count==0 (or empty body) clears the strip's layout.
 void processReceivedLayout() {
-    if (!newLayoutAvailable || layoutBuffer == nullptr || layoutBufferSize < 1) {
-        newLayoutAvailable = false;
-        if (layoutBuffer) { free(layoutBuffer); layoutBuffer = nullptr; layoutBufferSize = 0; }
-        return;
-    }
+    // Only act once a full upload has been reassembled. Crucially do NOT touch layoutBuffer
+    // while chunks are still arriving (newLayoutAvailable == false) — freeing it here would
+    // destroy the in-progress reassembly between chunks.
+    if (!newLayoutAvailable) return;
+    newLayoutAvailable = false;
+    if (layoutBuffer == nullptr || layoutBufferSize < 1) { layoutAccumLen = 0; return; }
     uint8_t stripIndex = layoutBuffer[0];
     char path[24];
     snprintf(path, sizeof(path), "/layout_%u.bin", (unsigned)stripIndex);
@@ -1541,6 +1551,7 @@ void processReceivedLayout() {
     free(layoutBuffer);
     layoutBuffer = nullptr;
     layoutBufferSize = 0;
+    layoutAccumLen = 0;
 }
 
 // Finalize a pending OTA update from the loop task once the signature

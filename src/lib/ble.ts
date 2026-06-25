@@ -1168,8 +1168,9 @@ export async function uploadStripLayout(
   const clearing = !layout || W <= 0 || H <= 0 || map.length === 0;
   const count = clearing ? 0 : Math.min(map.length, W * H);
 
-  const buf = new ArrayBuffer(1 + 6 + count * 2);
-  const dv = new DataView(buf);
+  // Logical payload the device reassembles: [u8 stripIndex][u16 W][u16 H][u16 count][count×i16].
+  const payload = new Uint8Array(1 + 6 + count * 2);
+  const dv = new DataView(payload.buffer);
   dv.setUint8(0, stripIndex & 0xff);
   dv.setUint16(1, clearing ? 0 : W, true);
   dv.setUint16(3, clearing ? 0 : H, true);
@@ -1178,11 +1179,24 @@ export async function uploadStripLayout(
     const led = Number.isFinite(map[i]) ? Math.trunc(map[i]) : -1;
     dv.setInt16(7 + i * 2, led, true); // -1 = gap
   }
-  if (buf.byteLength > 512) {
-    console.warn(`[Layout] blob ${buf.byteLength}B exceeds the ~512B single-write limit; may fail (needs chunking).`);
+
+  // Chunk it: each frame is [u16 totalLen][u16 offset][bytes]. Writes are serialized via
+  // bleSerial, so the device reassembles in order. Lifts the single-write size limit.
+  const total = payload.byteLength;
+  // Conservative chunk so each frame is a single ATT write across MTUs (long writes proved
+  // unreliable for ~500B here). 180B data + 4B header fits comfortably under common MTUs.
+  const CHUNK = 180;
+  for (let off = 0; off < total; off += CHUNK) {
+    const slice = payload.subarray(off, Math.min(off + CHUNK, total));
+    const frame = new Uint8Array(4 + slice.length);
+    const fdv = new DataView(frame.buffer);
+    fdv.setUint16(0, total, true);
+    fdv.setUint16(2, off, true);
+    frame.set(slice, 4);
+    await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_LAYOUT_SET,
+      new DataView(frame.buffer));
   }
-  await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_LAYOUT_SET, dv);
-  console.log(`[Layout] strip ${stripIndex}: ${clearing ? 'cleared' : `${W}x${H}, ${count} cells`} sent`);
+  console.log(`[Layout] strip ${stripIndex}: ${clearing ? 'cleared' : `${W}x${H}, ${count} cells`} sent (${total}B)`);
 }
 
 // Timestamp Sync Functions
