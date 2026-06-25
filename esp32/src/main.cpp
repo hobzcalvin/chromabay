@@ -53,6 +53,8 @@ PatternRendererBase* patternRenderer = nullptr;
 #define CHARACTERISTIC_UUID_LED_CONFIG_SET "a0be83ee-8dc9-47f0-ab40-b19721d20ed1"
 // Arbitrary pixel layout (WLED ledmap) upload, per strip.
 #define CHARACTERISTIC_UUID_LAYOUT_SET "a0be83f5-8dc9-47f0-ab40-b19721d20ed1"
+// Layout read-back: write u8 stripIndex to request; device NOTIFYs the layout chunked.
+#define CHARACTERISTIC_UUID_LAYOUT_GET "a0be83f6-8dc9-47f0-ab40-b19721d20ed1"
 
 // Timestamp Sync Characteristic - for synchronizing time across devices
 #define CHARACTERISTIC_UUID_TIMESTAMP_SYNC "a0be83ef-8dc9-47f0-ab40-b19721d20ed1"
@@ -93,6 +95,8 @@ NimBLECharacteristic* pPatternSyncCharacteristic = nullptr;
 // LED Configuration Characteristics
 NimBLECharacteristic* pLedConfigGetCharacteristic = nullptr;
 NimBLECharacteristic* pLedConfigSetCharacteristic = nullptr;
+NimBLECharacteristic* pLayoutGetCharacteristic = nullptr; // read back a strip's layout (notify-chunked)
+static volatile int layoutGetRequest = -1;                // strip index requested via LAYOUT_GET write, -1 = none
 
 // Timestamp Sync Characteristic
 NimBLECharacteristic* pTimestampSyncCharacteristic = nullptr;
@@ -857,6 +861,14 @@ class LayoutSetCallbacks : public NimBLECharacteristicCallbacks {
     }
 };
 
+// Layout Get Callbacks - app writes a u8 strip index; loop() notifies that strip's layout.
+class LayoutGetCallbacks : public NimBLECharacteristicCallbacks {
+    void onWrite(NimBLECharacteristic* pCharacteristic) {
+        std::string value = pCharacteristic->getValue();
+        if (value.length() >= 1) layoutGetRequest = (uint8_t)value[0];
+    }
+};
+
 // Pattern Sync Callbacks - for receiving messagepack-encoded patterns
 class PatternSyncCallbacks : public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic* pCharacteristic) {
@@ -1554,6 +1566,52 @@ void processReceivedLayout() {
     layoutAccumLen = 0;
 }
 
+// Respond to a LAYOUT_GET request: NOTIFY the requested strip's /layout_<i>.bin back to the
+// app, chunked as [u16 totalLen][u16 offset][bytes] (same framing as upload). totalLen==0
+// means "no layout" (grid mapping). Runs from loop() so file IO doesn't block the BLE task.
+void processLayoutGetRequest() {
+    int idx = layoutGetRequest;
+    if (idx < 0 || !pLayoutGetCharacteristic) return;
+    layoutGetRequest = -1;
+
+    char path[24];
+    snprintf(path, sizeof(path), "/layout_%u.bin", (unsigned)idx);
+    uint8_t* data = nullptr;
+    size_t len = 0;
+    if (LittleFS.exists(path)) {
+        File f = LittleFS.open(path, FILE_READ);
+        if (f) {
+            size_t sz = f.size();
+            if (sz > 0 && sz <= 16384) {
+                data = (uint8_t*)malloc(sz);
+                if (data && f.readBytes((char*)data, sz) == sz) len = sz;
+                else { if (data) { free(data); data = nullptr; } }
+            }
+            f.close();
+        }
+    }
+
+    const size_t CH = 180;
+    if (len == 0) {
+        uint8_t hdr[4] = {0, 0, 0, 0}; // totalLen 0
+        pLayoutGetCharacteristic->setValue(hdr, 4);
+        pLayoutGetCharacteristic->notify();
+    } else {
+        for (size_t off = 0; off < len; off += CH) {
+            size_t n = (len - off < CH) ? (len - off) : CH;
+            uint8_t frame[4 + 180];
+            frame[0] = len & 0xFF; frame[1] = (len >> 8) & 0xFF;
+            frame[2] = off & 0xFF; frame[3] = (off >> 8) & 0xFF;
+            memcpy(frame + 4, data + off, n);
+            pLayoutGetCharacteristic->setValue(frame, 4 + n);
+            pLayoutGetCharacteristic->notify();
+            delay(8); // small gap so the stack doesn't drop back-to-back notifications
+        }
+    }
+    if (data) free(data);
+    Serial.printf("[Layout] Strip %d read-back sent (%u bytes)\n", idx, (unsigned)len);
+}
+
 // Finalize a pending OTA update from the loop task once the signature
 // verification task has produced a result (or timed out). This runs the work
 // that used to block the BLE host-task callback: verify result -> esp_ota_end ->
@@ -1836,6 +1894,8 @@ void setup() {
             // Arbitrary pixel layout (WLED ledmap) upload, per strip.
             NimBLECharacteristic* pLayoutSetCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_LAYOUT_SET, NIMBLE_PROPERTY::WRITE);
             pLayoutSetCharacteristic->setCallbacks(new LayoutSetCallbacks());
+            pLayoutGetCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_LAYOUT_GET, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY);
+            pLayoutGetCharacteristic->setCallbacks(new LayoutGetCallbacks());
             
             // Timestamp Sync Characteristic
             pTimestampSyncCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_TIMESTAMP_SYNC, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY);
@@ -1932,6 +1992,7 @@ void loop() {
     processReceivedCycleControl();
     processReceivedLedConfig();
     processReceivedLayout();
+    processLayoutGetRequest();
     processReceivedBrightness();
     processButton();
     processDeviceName();

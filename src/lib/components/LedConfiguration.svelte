@@ -1,7 +1,36 @@
 <script lang="ts">
   import type { LedConfiguration, LedStripConfig } from '$lib/ble';
-  import { LedChipsets, ColorOrders, uploadStripLayout } from '$lib/ble';
+  import { LedChipsets, ColorOrders, uploadStripLayout, getStripLayout } from '$lib/ble';
   import { getRotation, getFlipH, getSerpentine, setRotation, setFlipH, setSerpentine } from '$lib/ble';
+  import LayoutPreview from './LayoutPreview.svelte';
+
+  // Parse a strip's layout JSON for the live preview (null if invalid / empty).
+  function parsedLayout(index: number): { width: number; height: number; map: number[] } | null {
+    try {
+      const p = JSON.parse(layoutJson[index] ?? '');
+      if (!Array.isArray(p.map)) return null;
+      const strip = settings.ledConfig.strips[index];
+      const width = p.width || strip?.width || 0;
+      const height = p.height || strip?.height || 0;
+      if (!width || !height) return null;
+      return { width, height, map: p.map };
+    } catch { return null; }
+  }
+
+  async function loadCurrentLayout(index: number) {
+    layoutMsg[index] = 'Reading…';
+    try {
+      const r = await getStripLayout(deviceId, index);
+      if (r) {
+        layoutJson[index] = JSON.stringify({ width: r.width, height: r.height, map: r.map });
+        layoutMsg[index] = `Loaded ${r.width}×${r.height} (${r.map.length} cells)`;
+      } else {
+        layoutMsg[index] = 'No layout on device (grid mapping)';
+      }
+    } catch (e: any) {
+      layoutMsg[index] = 'Error: ' + (e?.message || e);
+    }
+  }
 
   // Per-strip arbitrary-layout (WLED ledmap) upload state.
   let layoutJson: Record<number, string> = $state({});
@@ -119,6 +148,7 @@
         </div>
 
         {#each settings.ledConfig.strips as strip, index}
+          {@const pl = parsedLayout(index)}
           <div class="strip-card">
             <div class="strip-header">
               <h6>Strip {index + 1}</h6>
@@ -223,9 +253,13 @@
                   bind:value={layoutJson[index]}></textarea>
                 <div class="layout-actions">
                   <button class="btn primary small" onclick={() => applyLayout(index)}>Apply layout</button>
+                  <button class="btn small" onclick={() => loadCurrentLayout(index)}>Load current</button>
                   <button class="btn small" onclick={() => clearLayout(index)}>Clear layout</button>
                   {#if layoutMsg[index]}<span class="layout-msg">{layoutMsg[index]}</span>{/if}
                 </div>
+                {#if pl}
+                  <LayoutPreview width={pl.width} height={pl.height} map={pl.map} />
+                {/if}
               </details>
             </div>
           </div>
