@@ -1,7 +1,34 @@
 <script lang="ts">
   import type { LedConfiguration, LedStripConfig } from '$lib/ble';
-  import { LedChipsets, ColorOrders } from '$lib/ble';
+  import { LedChipsets, ColorOrders, uploadStripLayout } from '$lib/ble';
   import { getRotation, getFlipH, getSerpentine, setRotation, setFlipH, setSerpentine } from '$lib/ble';
+
+  // Per-strip arbitrary-layout (WLED ledmap) upload state.
+  let layoutJson: Record<number, string> = $state({});
+  let layoutMsg: Record<number, string> = $state({});
+
+  async function applyLayout(index: number) {
+    try {
+      const parsed = JSON.parse(layoutJson[index] ?? '');
+      if (!Array.isArray(parsed.map)) throw new Error('JSON needs a "map" array');
+      const strip = settings.ledConfig.strips[index];
+      const width = parsed.width || strip?.width || 0;
+      const height = parsed.height || strip?.height || 0;
+      if (!width || !height) throw new Error('Provide width and height');
+      await uploadStripLayout(deviceId, index, { width, height, map: parsed.map });
+      layoutMsg[index] = `Applied ${width}×${height} (${parsed.map.length} cells)`;
+    } catch (e: any) {
+      layoutMsg[index] = 'Error: ' + (e?.message || e);
+    }
+  }
+  async function clearLayout(index: number) {
+    try {
+      await uploadStripLayout(deviceId, index, null);
+      layoutMsg[index] = 'Layout cleared (grid mapping)';
+    } catch (e: any) {
+      layoutMsg[index] = 'Error: ' + (e?.message || e);
+    }
+  }
 
   // Props. `settings` is the parent's deeply-reactive $state, so binding the strip
   // inputs below mutates it directly and the UI updates in place — no manual refresh
@@ -183,6 +210,23 @@
                   </span>
                 </label>
               </div>
+              <details class="layout-section">
+                <summary>Arbitrary layout (WLED ledmap)</summary>
+                <p class="layout-hint">
+                  Paste a WLED ledmap: <code>{'{ "width": W, "height": H, "map": [ledIndex per cell, -1 = gap] }'}</code>.
+                  (width/height fall back to this strip's matrix size if omitted.) Sent live; max ~250 cells for now.
+                </p>
+                <textarea
+                  class="layout-json"
+                  rows="3"
+                  placeholder={'{ "width": 8, "height": 4, "map": [0,1,2,...] }'}
+                  bind:value={layoutJson[index]}></textarea>
+                <div class="layout-actions">
+                  <button class="btn primary small" onclick={() => applyLayout(index)}>Apply layout</button>
+                  <button class="btn small" onclick={() => clearLayout(index)}>Clear layout</button>
+                  {#if layoutMsg[index]}<span class="layout-msg">{layoutMsg[index]}</span>{/if}
+                </div>
+              </details>
             </div>
           </div>
         {/each}

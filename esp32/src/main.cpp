@@ -51,6 +51,8 @@ PatternRendererBase* patternRenderer = nullptr;
 // LED Configuration Characteristics - for getting/setting strip configuration
 #define CHARACTERISTIC_UUID_LED_CONFIG_GET "a0be83ed-8dc9-47f0-ab40-b19721d20ed1"
 #define CHARACTERISTIC_UUID_LED_CONFIG_SET "a0be83ee-8dc9-47f0-ab40-b19721d20ed1"
+// Arbitrary pixel layout (WLED ledmap) upload, per strip.
+#define CHARACTERISTIC_UUID_LAYOUT_SET "a0be83f5-8dc9-47f0-ab40-b19721d20ed1"
 
 // Timestamp Sync Characteristic - for synchronizing time across devices
 #define CHARACTERISTIC_UUID_TIMESTAMP_SYNC "a0be83ef-8dc9-47f0-ab40-b19721d20ed1"
@@ -189,6 +191,11 @@ static bool libSetActiveByOrderPos(int pos); // defined with the library helpers
 static uint8_t* ledConfigBuffer = nullptr;
 static size_t ledConfigBufferSize = 0;
 static volatile bool newLedConfigAvailable = false;
+
+// Staged arbitrary-layout upload (applied from loop(), same reason as LED config above).
+static uint8_t* layoutBuffer = nullptr;
+static size_t layoutBufferSize = 0;
+static volatile bool newLayoutAvailable = false;
 
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
@@ -819,6 +826,24 @@ class LedConfigSetCallbacks : public NimBLECharacteristicCallbacks {
                 Serial.println("LED Config: Failed to allocate memory for config");
                 ledConfigBufferSize = 0;
             }
+        }
+    }
+};
+
+// Layout Set Callbacks - receive an arbitrary pixel layout (WLED ledmap) for one strip.
+// Payload: [u8 stripIndex][u16 W][u16 H][u16 count][count × i16 ledIndex]. Staged for loop().
+class LayoutSetCallbacks : public NimBLECharacteristicCallbacks {
+    void onWrite(NimBLECharacteristic* pCharacteristic) {
+        std::string value = pCharacteristic->getValue();
+        if (value.length() < 1) return;
+        if (layoutBuffer != nullptr) { free(layoutBuffer); layoutBuffer = nullptr; layoutBufferSize = 0; }
+        layoutBufferSize = value.length();
+        layoutBuffer = (uint8_t*)malloc(layoutBufferSize);
+        if (layoutBuffer != nullptr) {
+            memcpy(layoutBuffer, value.data(), layoutBufferSize);
+            newLayoutAvailable = true;
+        } else {
+            layoutBufferSize = 0;
         }
     }
 };
@@ -1481,6 +1506,43 @@ void processReceivedLedConfig() {
     ledConfigBufferSize = 0;
 }
 
+// Apply a staged arbitrary-layout upload from loop() (safe re: render task). Payload is
+// [u8 stripIndex][u16 W][u16 H][u16 count][count×i16] — the body after stripIndex is exactly
+// the /layout_<i>.bin file format. count==0 (or empty body) clears the strip's layout.
+void processReceivedLayout() {
+    if (!newLayoutAvailable || layoutBuffer == nullptr || layoutBufferSize < 1) {
+        newLayoutAvailable = false;
+        if (layoutBuffer) { free(layoutBuffer); layoutBuffer = nullptr; layoutBufferSize = 0; }
+        return;
+    }
+    uint8_t stripIndex = layoutBuffer[0];
+    char path[24];
+    snprintf(path, sizeof(path), "/layout_%u.bin", (unsigned)stripIndex);
+
+    bool clear = (layoutBufferSize < 7); // need at least W,H,count after the index byte
+    uint16_t count = clear ? 0 : (uint16_t)(layoutBuffer[5] | (layoutBuffer[6] << 8));
+    if (clear || count == 0) {
+        LittleFS.remove(path);
+        Serial.printf("[Layout] Strip %u layout cleared\n", (unsigned)stripIndex);
+    } else {
+        File f = LittleFS.open(path, FILE_WRITE);
+        if (f) {
+            f.write(layoutBuffer + 1, layoutBufferSize - 1);
+            f.close();
+            Serial.printf("[Layout] Strip %u layout saved (%u bytes)\n",
+                          (unsigned)stripIndex, (unsigned)(layoutBufferSize - 1));
+        } else {
+            Serial.println("[Layout] Failed to open layout file for writing");
+        }
+    }
+    configMgr.loadStripLayouts(); // apply live across all strips
+
+    newLayoutAvailable = false;
+    free(layoutBuffer);
+    layoutBuffer = nullptr;
+    layoutBufferSize = 0;
+}
+
 // Finalize a pending OTA update from the loop task once the signature
 // verification task has produced a result (or timed out). This runs the work
 // that used to block the BLE host-task callback: verify result -> esp_ota_end ->
@@ -1759,6 +1821,10 @@ void setup() {
             pLedConfigGetCharacteristic->setCallbacks(new LedConfigGetCallbacks());
             pLedConfigSetCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_LED_CONFIG_SET, NIMBLE_PROPERTY::WRITE);
             pLedConfigSetCharacteristic->setCallbacks(new LedConfigSetCallbacks());
+
+            // Arbitrary pixel layout (WLED ledmap) upload, per strip.
+            NimBLECharacteristic* pLayoutSetCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_LAYOUT_SET, NIMBLE_PROPERTY::WRITE);
+            pLayoutSetCharacteristic->setCallbacks(new LayoutSetCallbacks());
             
             // Timestamp Sync Characteristic
             pTimestampSyncCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_TIMESTAMP_SYNC, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY);
@@ -1854,6 +1920,7 @@ void loop() {
     processPatternFlashSave();
     processReceivedCycleControl();
     processReceivedLedConfig();
+    processReceivedLayout();
     processReceivedBrightness();
     processButton();
     processDeviceName();

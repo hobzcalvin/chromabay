@@ -239,43 +239,34 @@ public:
     uint8_t lutG(uint8_t c) const { return _lut[1][c]; }
     uint8_t lutB(uint8_t c) const { return _lut[2][c]; }
 
-    // ---- Arbitrary pixel layout --------------------------------------------------------
-    // Instead of the regular grid (xyToIndex), a layout gives each LED an explicit (x,y)
-    // position. We derive a virtual matrix sized ~N cells (aspect-matched, capped) so the
-    // operator graph renders at a sensible resolution with little wasted area, then each
-    // LED samples the buffer cell nearest its position. Positions are normalized uint16
-    // (0..65535) in whatever arbitrary units the caller used (we re-normalize to the bbox).
-    static constexpr int kLayoutMaxDim = 64;
+    // ---- Arbitrary pixel layout (WLED ledmap model) ------------------------------------
+    // A layout is a W×H grid plus a `map`: map[cell] = the physical LED index that displays
+    // that grid cell (or <0 for a gap). Same format as WLED's ledmap.json, so existing maps
+    // work. The operator graph renders at W×H and render() walks the cells, lighting each
+    // mapped LED. Multi-strip installs that want a shared coordinate space just give each
+    // strip the same W×H and place their own LEDs in the appropriate cells.
+    static constexpr int kLayoutMaxDim = 256; // cap on either dimension (W*H bounded by buffers)
 
-    void setLayout(const uint16_t* xs, const uint16_t* ys, uint16_t count) {
-        if (count == 0 || !xs || !ys) { clearLayout(); return; }
-        if (count > _config.numLeds) count = _config.numLeds;
-        uint16_t minX = 0xFFFF, minY = 0xFFFF, maxX = 0, maxY = 0;
-        for (uint16_t i = 0; i < count; i++) {
-            if (xs[i] < minX) minX = xs[i]; if (xs[i] > maxX) maxX = xs[i];
-            if (ys[i] < minY) minY = ys[i]; if (ys[i] > maxY) maxY = ys[i];
+    void setLayout(const int16_t* map, uint16_t count, uint16_t W, uint16_t H) {
+        if (!map || W == 0 || H == 0 || count == 0 || W > kLayoutMaxDim || H > kLayoutMaxDim) {
+            clearLayout(); return;
         }
-        float spanX = (maxX > minX) ? (float)(maxX - minX) : 1.0f;
-        float spanY = (maxY > minY) ? (float)(maxY - minY) : 1.0f;
-        float aspect = spanX / spanY;
-        int W = (int)lroundf(sqrtf((float)count) * sqrtf(aspect));
-        int H = (int)lroundf(sqrtf((float)count) / sqrtf(aspect));
-        if (W < 1) W = 1; if (H < 1) H = 1;
-        if (W > kLayoutMaxDim) W = kLayoutMaxDim; if (H > kLayoutMaxDim) H = kLayoutMaxDim;
-        _layoutW = (uint16_t)W; _layoutH = (uint16_t)H;
-        _layoutSample.assign(count, 0);
-        for (uint16_t i = 0; i < count; i++) {
-            int col = (W <= 1) ? 0 : (int)lroundf((float)(xs[i] - minX) / spanX * (float)(W - 1));
-            int row = (H <= 1) ? 0 : (int)lroundf((float)(ys[i] - minY) / spanY * (float)(H - 1));
-            _layoutSample[i] = (uint32_t)row * W + col;
+        uint32_t cells = (uint32_t)W * H;
+        if (count > cells) count = (uint16_t)cells; // trust W*H; ignore extras
+        _layoutW = W; _layoutH = H;
+        _layoutMap.assign(cells, -1);
+        for (uint16_t c = 0; c < count; c++) {
+            int16_t led = map[c];
+            _layoutMap[c] = (led >= 0 && led < (int)_config.numLeds) ? led : -1;
         }
         _hasLayout = true;
     }
-    void clearLayout() { _hasLayout = false; _layoutW = _layoutH = 0; _layoutSample.clear(); _layoutSample.shrink_to_fit(); }
+    void clearLayout() { _hasLayout = false; _layoutW = _layoutH = 0; _layoutMap.clear(); _layoutMap.shrink_to_fit(); }
     bool hasLayout() const { return _hasLayout; }
     uint16_t layoutWidth() const { return _layoutW; }
     uint16_t layoutHeight() const { return _layoutH; }
-    uint32_t layoutSampleIndex(uint16_t i) const { return i < _layoutSample.size() ? _layoutSample[i] : 0; }
+    // LED index displaying grid cell, or -1 for a gap / out of range.
+    int32_t layoutLedAt(uint32_t cell) const { return cell < _layoutMap.size() ? _layoutMap[cell] : -1; }
 
     // Canvas dimensions to render this strip at: the layout's virtual matrix if present,
     // else the configured matrix (or 1 x numLeds for a linear strip).
@@ -290,7 +281,7 @@ private:
     uint8_t _lut[3][256];
     bool _hasLayout = false;
     uint16_t _layoutW = 0, _layoutH = 0;
-    std::vector<uint16_t> _layoutSample; // per-LED virtual-matrix buffer index
+    std::vector<int16_t> _layoutMap; // per-cell physical LED index (-1 = gap), length W*H
 
     InternalLedType mapChipsetToInternalType(LedChipset chipset) {
         switch (chipset) {

@@ -363,12 +363,12 @@ void PatternRendererBase::render() {
         if (!patternBuffer) continue;
 
         if (strip->hasLayout()) {
-            // Arbitrary layout: each LED samples the virtual-matrix cell nearest its
-            // physical position (precomputed map). w*h == layoutWidth*layoutHeight.
-            uint32_t cap = (uint32_t)w * (uint32_t)h;
-            for (uint16_t i = 0; i < config.numLeds; i++) {
-                uint32_t idx = strip->layoutSampleIndex(i);
-                if (idx < cap) strip->setPixelColor(i, patternBuffer[idx]);
+            // Arbitrary layout (WLED ledmap): walk the W×H grid; each cell lights the LED it
+            // maps to (gaps are -1). w*h == layoutWidth*layoutHeight.
+            uint32_t cells = (uint32_t)w * (uint32_t)h;
+            for (uint32_t c = 0; c < cells; c++) {
+                int32_t led = strip->layoutLedAt(c);
+                if (led >= 0) strip->setPixelColor((uint16_t)led, patternBuffer[c]);
             }
         } else if (config.isMatrix()) {
             // 2D matrix: xyToIndex owns rotation/flip/serpentine mapping.

@@ -437,9 +437,9 @@ public:
         return createDefaultConfigContent(defaultStrip, filePath);
     }
 
-    // Arbitrary pixel layout per strip, stored as /layout_<i>.bin:
-    //   [u16 count][ count × (u16 x, u16 y) ]   (little-endian, positions in any units;
-    //   LedBus::setLayout re-normalizes to the bounding box). Absent file => grid mapping.
+    // Arbitrary pixel layout per strip (WLED ledmap), stored as /layout_<i>.bin:
+    //   [u16 W][u16 H][u16 count][ count × i16 ledIndex ]   (little-endian; count == W*H;
+    //   ledIndex = physical LED for that grid cell, or -1 for a gap). Absent file => grid.
     void loadStripLayouts() {
         for (size_t i = 0; i < _ledManager.getNumStrips(); i++) {
             char path[24];
@@ -448,23 +448,24 @@ public:
             File f = LittleFS.open(path, FILE_READ);
             if (!f) continue;
             size_t sz = f.size();
-            uint8_t hdr[2];
-            if (sz < 2 || f.readBytes((char*)hdr, 2) != 2) { f.close(); continue; }
-            uint16_t count = (uint16_t)(hdr[0] | (hdr[1] << 8));
-            if (count == 0 || sz < (size_t)(2 + (size_t)count * 4)) { f.close(); continue; }
-            std::vector<uint16_t> xs(count), ys(count);
+            uint8_t hdr[6];
+            if (sz < 6 || f.readBytes((char*)hdr, 6) != 6) { f.close(); continue; }
+            uint16_t W = (uint16_t)(hdr[0] | (hdr[1] << 8));
+            uint16_t H = (uint16_t)(hdr[2] | (hdr[3] << 8));
+            uint16_t count = (uint16_t)(hdr[4] | (hdr[5] << 8));
+            if (W == 0 || H == 0 || count == 0 || sz < (size_t)(6 + (size_t)count * 2)) { f.close(); continue; }
+            std::vector<int16_t> map(count);
             for (uint16_t k = 0; k < count; k++) {
-                uint8_t b[4];
-                if (f.readBytes((char*)b, 4) != 4) { count = k; break; }
-                xs[k] = (uint16_t)(b[0] | (b[1] << 8));
-                ys[k] = (uint16_t)(b[2] | (b[3] << 8));
+                uint8_t b[2];
+                if (f.readBytes((char*)b, 2) != 2) { count = k; break; }
+                map[k] = (int16_t)(b[0] | (b[1] << 8));
             }
             f.close();
             LedBus* strip = _ledManager.getStrip(i);
             if (strip && count > 0) {
-                strip->setLayout(xs.data(), ys.data(), count);
-                Serial.printf("[ConfigManager] Strip %u layout: %u px -> %ux%u virtual matrix\n",
-                              (unsigned)i, (unsigned)count, strip->layoutWidth(), strip->layoutHeight());
+                strip->setLayout(map.data(), count, W, H);
+                Serial.printf("[ConfigManager] Strip %u layout: %ux%u grid (%u cells)\n",
+                              (unsigned)i, W, H, (unsigned)count);
             }
         }
     }

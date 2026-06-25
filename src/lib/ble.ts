@@ -61,6 +61,7 @@ const CHARACTERISTIC_UUID_PLAYLIST_SYNC = "a0be83f0-8dc9-47f0-ab40-b19721d20ed1"
 // LED Configuration Characteristics - for getting/setting strip configuration
 const CHARACTERISTIC_UUID_LED_CONFIG_GET = "a0be83ed-8dc9-47f0-ab40-b19721d20ed1";
 const CHARACTERISTIC_UUID_LED_CONFIG_SET = "a0be83ee-8dc9-47f0-ab40-b19721d20ed1";
+const CHARACTERISTIC_UUID_LAYOUT_SET = "a0be83f5-8dc9-47f0-ab40-b19721d20ed1"; // arbitrary pixel layout (WLED ledmap), per strip
 
 // Timestamp Sync Characteristic - for synchronizing time across devices
 const CHARACTERISTIC_UUID_TIMESTAMP_SYNC = "a0be83ef-8dc9-47f0-ab40-b19721d20ed1";
@@ -1146,6 +1147,42 @@ export async function setLedConfiguration(deviceId: string, config: LedConfigura
     console.error('Error setting LED configuration:', error);
     throw error;
   }
+}
+
+/**
+ * Upload an arbitrary pixel layout (WLED ledmap) for one strip, or clear it.
+ * `map[cell]` = the physical LED index that lights grid cell `cell` (row-major over
+ * width×height), or -1 for a gap. Pass an empty map (or width/height 0) to clear.
+ * Wire format: [u8 stripIndex][u16 W][u16 H][u16 count][count × i16 ledIndex] (LE).
+ * Sent in one write, so it's limited by the BLE long-write size (~512 B ≈ up to ~250
+ * cells); larger layouts will need a chunked path (see ARBITRARY_LAYOUTS.md).
+ */
+export async function uploadStripLayout(
+  deviceId: string,
+  stripIndex: number,
+  layout: { width: number; height: number; map: number[] } | null
+): Promise<void> {
+  const W = layout?.width ?? 0;
+  const H = layout?.height ?? 0;
+  const map = layout?.map ?? [];
+  const clearing = !layout || W <= 0 || H <= 0 || map.length === 0;
+  const count = clearing ? 0 : Math.min(map.length, W * H);
+
+  const buf = new ArrayBuffer(1 + 6 + count * 2);
+  const dv = new DataView(buf);
+  dv.setUint8(0, stripIndex & 0xff);
+  dv.setUint16(1, clearing ? 0 : W, true);
+  dv.setUint16(3, clearing ? 0 : H, true);
+  dv.setUint16(5, count, true);
+  for (let i = 0; i < count; i++) {
+    const led = Number.isFinite(map[i]) ? Math.trunc(map[i]) : -1;
+    dv.setInt16(7 + i * 2, led, true); // -1 = gap
+  }
+  if (buf.byteLength > 512) {
+    console.warn(`[Layout] blob ${buf.byteLength}B exceeds the ~512B single-write limit; may fail (needs chunking).`);
+  }
+  await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_LAYOUT_SET, dv);
+  console.log(`[Layout] strip ${stripIndex}: ${clearing ? 'cleared' : `${W}x${H}, ${count} cells`} sent`);
 }
 
 // Timestamp Sync Functions
