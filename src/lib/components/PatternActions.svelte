@@ -10,6 +10,7 @@
     createEmptyPattern
   } from '$lib/stores/patternsStore';
   import { syncPatternToAllDevices } from '$lib/ble';
+  import AddNodeModal from './AddNodeModal.svelte';
   
   // Props for Add Node functionality (NODE_TYPES removed - using store instead)
   let { showAddNodeDropdown = $bindable(false), addNodeDropdownRef = $bindable(), handleAddNode } = $props();
@@ -235,15 +236,12 @@
         </svg>
       </button>
       
-      {#if showAddNodeDropdown}
-        <div class="dropdown-menu">
-          {#each nodeTypes.slice(1) as nodeType}
-            <button onclick={() => handleAddNode(nodeType)}>
-              {nodeType.name}
-            </button>
-          {/each}
-        </div>
-      {/if}
+      <AddNodeModal
+        open={showAddNodeDropdown}
+        nodeTypes={nodeTypes}
+        onSelect={handleAddNode}
+        onClose={() => (showAddNodeDropdown = false)}
+      />
     </div>
   </div>
 </div>
