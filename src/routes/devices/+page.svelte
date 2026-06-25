@@ -333,6 +333,13 @@
     if (!id) return;
     try { const s = getRemembered(); s.add(id); localStorage.setItem(REMEMBERED_KEY, JSON.stringify([...s])); } catch {}
   }
+  // A *manual* disconnect is sticky: forget the device so auto-reconnect doesn't
+  // immediately pull it back. Only unexpected drops (power loss / out of range) keep
+  // their remembered entry and auto-reconnect. Tapping Connect again re-arms it.
+  function forgetDevice(id: string) {
+    if (!id) return;
+    try { const s = getRemembered(); s.delete(id); localStorage.setItem(REMEMBERED_KEY, JSON.stringify([...s])); } catch {}
+  }
   const autoConnecting = new Set<string>();
   async function maybeAutoReconnect(device: any) {
     if (isWeb) return;
@@ -412,8 +419,11 @@
         await stopOTAStatusNotifications(deviceId);
       }
       await disconnectFromDevice(deviceId);
+      // Manual disconnect = stop auto-reconnecting to this device until the user
+      // explicitly taps Connect again.
+      forgetDevice(deviceId);
       statusMessage = `Disconnected from ${device.name}`;
-      
+
       // Clear device settings + init marker so a future reconnect re-initializes.
       delete deviceSettings[deviceId];
       initializedDevices.delete(deviceId);

@@ -3,6 +3,20 @@
 #include <new> // std::nothrow
 #include <cstring> // strcmp (operator-type compare for state-preserving pattern updates)
 
+// A string parameter value over the wire is the chosen SELECT option's label. Operators
+// read SELECT choices with getInt(), so map the label to its option index and store an int.
+// Genuine (non-SELECT) string params keep the raw string. Mirrors the WASM binding so the
+// preview and the device interpret patterns identically.
+static ParameterValue selectValueFor(const ParameterInfo& info, const char* value) {
+    if (info.type == ParameterInfo::SELECT) {
+        for (size_t i = 0; i < info.options.size(); i++) {
+            if (info.options[i] == value) return ParameterValue((int)i);
+        }
+        return ParameterValue((int)0);
+    }
+    return ParameterValue(std::string(value));
+}
+
 // PatternRendererBase implementation using native operators
 PatternRendererBase::PatternRendererBase(LedConfig::LedManager* ledMgr) 
     : ledManager(ledMgr), buffers(nullptr), lastFrameTime(0), frameStartTime(0), globalTime(0), hasPattern(false) {
@@ -525,6 +539,12 @@ bool PatternRendererBase::loadPatternFromMessagePack(const uint8_t* data, unsign
                             } else if (paramType == mpack_type_bool) {
                                 bool value = mpack_node_bool(paramNode);
                                 node.parameters[j] = ParameterValue(value);
+                            } else if (paramType == mpack_type_str) {
+                                // SELECT values arrive as the option label; store its index so
+                                // operators can read it with getInt(). Other strings kept as-is.
+                                char vb[32];
+                                mpack_node_copy_cstr(paramNode, vb, sizeof(vb));
+                                node.parameters[j] = selectValueFor(paramInfo[j], vb);
                             }
                             // For nil or unknown types, keep the default value
                         }
@@ -560,6 +580,10 @@ bool PatternRendererBase::loadPatternFromMessagePack(const uint8_t* data, unsign
                                         } else if (valueType == mpack_type_bool) {
                                             bool value = mpack_node_bool(valueNode);
                                             node.parameters[k] = ParameterValue(value);
+                                        } else if (valueType == mpack_type_str) {
+                                            char vb[32];
+                                            mpack_node_copy_cstr(valueNode, vb, sizeof(vb));
+                                            node.parameters[k] = selectValueFor(paramInfo[k], vb);
                                         }
                                         // For nil or unknown types, keep default value
                                         break;

@@ -200,6 +200,21 @@ extern "C" {
             if (operatorParameters[operatorId].size() <= (size_t)paramIndex) {
                 operatorParameters[operatorId].resize(paramIndex + 1);
             }
+            // SELECT parameters arrive as the chosen option's LABEL string. Operators read
+            // the choice with getInt(), so resolve the label to its option index and store
+            // an int. (Genuine string params fall through and keep the raw string.)
+            if (operatorId < (int)activeOperators.size() && activeOperators[operatorId]) {
+                auto info = activeOperators[operatorId]->getParameterInfo();
+                if (paramIndex < (int)info.size() && info[paramIndex].type == ParameterInfo::SELECT) {
+                    const auto& opts = info[paramIndex].options;
+                    int idx = 0;
+                    for (size_t i = 0; i < opts.size(); i++) {
+                        if (opts[i] == value) { idx = (int)i; break; }
+                    }
+                    operatorParameters[operatorId][paramIndex] = idx;
+                    return;
+                }
+            }
             operatorParameters[operatorId][paramIndex] = std::string(value);
         }
     }

@@ -1429,6 +1429,13 @@ void processReceivedLedConfig() {
                             stripConfig.height = mpack_expect_u16(&reader);
                         } else if (strcmp(strip_key, "ort") == 0) {
                             stripConfig.orientation = mpack_expect_u8(&reader);
+                        } else if (strcmp(strip_key, "gm") == 0) {
+                            stripConfig.gamma = mpack_expect_u16(&reader) / 100.0f;
+                        } else if (strcmp(strip_key, "wp") == 0) {
+                            uint32_t wp = mpack_expect_u32(&reader);
+                            stripConfig.wpR = (wp >> 16) & 0xFF;
+                            stripConfig.wpG = (wp >> 8) & 0xFF;
+                            stripConfig.wpB = wp & 0xFF;
                         } else {
                             mpack_discard(&reader);
                         }

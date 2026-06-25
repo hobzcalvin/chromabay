@@ -1,6 +1,7 @@
 #pragma once
 
 #include "BaseOperator.h"
+#include <math.h>
 
 // Symbol - draws a glyph from a small built-in set, scaled to the matrix, and cycles
 // through them over time (note: "symbol node, can cycle thru wingdings"). A generator:
@@ -49,15 +50,38 @@ public:
 
         CRGB on = CHSV((uint8_t)hue, (uint8_t)saturation, (uint8_t)value);
 
+        // Area-average downsample of the 8x8 glyph onto the WxH matrix: each output pixel
+        // covers a rectangle in glyph space, and its brightness is the lit fraction of that
+        // rectangle. Point-sampling (nearest) silently dropped whole columns/rows on small
+        // matrices (e.g. 5x5), so thin features vanished and glyphs looked "cut off"; this
+        // keeps the whole shape, just dimmer at partially-covered edges.
         for (uint32_t y = 0; y < height; y++) {
-            int gy = (height <= 1) ? 0 : (int)((uint32_t)y * 8u / height);
-            if (gy > 7) gy = 7;
-            uint8_t row = glyph[gy];
+            float fy0 = (float)y * 8.0f / (float)height;
+            float fy1 = (float)(y + 1) * 8.0f / (float)height;
             for (uint32_t x = 0; x < width; x++) {
-                int gx = (width <= 1) ? 0 : (int)((uint32_t)x * 8u / width);
-                if (gx > 7) gx = 7;
-                bool lit = (row >> (7 - gx)) & 0x01;
-                outputBuffer[y * width + x] = lit ? on : CRGB::Black;
+                float fx0 = (float)x * 8.0f / (float)width;
+                float fx1 = (float)(x + 1) * 8.0f / (float)width;
+
+                float covered = 0.0f, area = 0.0f;
+                for (int gy = (int)floorf(fy0); gy < (int)ceilf(fy1) && gy < 8; gy++) {
+                    if (gy < 0) continue;
+                    float oy = fminf(fy1, (float)(gy + 1)) - fmaxf(fy0, (float)gy);
+                    if (oy <= 0.0f) continue;
+                    uint8_t row = glyph[gy];
+                    for (int gx = (int)floorf(fx0); gx < (int)ceilf(fx1) && gx < 8; gx++) {
+                        if (gx < 0) continue;
+                        float ox = fminf(fx1, (float)(gx + 1)) - fmaxf(fx0, (float)gx);
+                        if (ox <= 0.0f) continue;
+                        float a = ox * oy;
+                        area += a;
+                        if ((row >> (7 - gx)) & 0x01) covered += a;
+                    }
+                }
+
+                float frac = (area > 0.0f) ? covered / area : 0.0f;
+                int s = (int)(frac * 255.0f + 0.5f);
+                if (s == 0 && frac > 0.0f) s = 1; // keep slivers barely visible, not black
+                outputBuffer[y * width + x] = CRGB((on.r * s) / 255, (on.g * s) / 255, (on.b * s) / 255);
             }
         }
     }

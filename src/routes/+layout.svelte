@@ -60,14 +60,16 @@
     
     <nav class="bottom-nav" class:hidden={$page.url.pathname.startsWith(`${base}/interact`)}>
       <a href="{base}/devices" class:active={$page.url.pathname.startsWith(`${base}/devices`)}>
-        <span class="emoji">💡</span>
+        <span class="emoji-wrap">
+          <span class="emoji">💡</span>
+          <span
+            class="badge"
+            class:green={connected>0}
+            class:red={connected===0}
+            data-single-digit={connected >= 0 && connected <= 9 ? 'true' : 'false'}
+          >{connected}</span>
+        </span>
         <span class="label">Devices</span>
-        <span 
-          class="badge" 
-          class:green={connected>0} 
-          class:red={connected===0}
-          data-single-digit={connected >= 0 && connected <= 9 ? 'true' : 'false'}
-        >{connected}</span>
       </a>
       <a href="{base}/patterns" class:active={$page.url.pathname.startsWith(`${base}/patterns`)}>
         <span class="emoji">🌈</span>
@@ -245,12 +247,19 @@
     }
   }
   
+  /* Emoji+badge wrapper: gives the badge a positioning context tied to the lightbulb,
+     so the count sits just off the emoji's top-right instead of the tab's corner. */
+  .emoji-wrap {
+    position: relative;
+    display: inline-block;
+    line-height: 1;
+  }
+
   /* Badge styles */
   .badge {
     position: absolute;
-    top: 2px;
-    right: 8px;
-    transform: translate(50%,-50%);
+    top: -6px;
+    right: -10px;
     padding: 2px;
     border-radius: 50%;
     font-size: 0.7rem;
