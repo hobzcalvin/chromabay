@@ -1,0 +1,2 @@
+const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["./CgiX_LOM.js","./DPHAah8y.js","./VpR4eQTW.js","./C8lA-hFL.js","./DqzO0I4k.js","./CFL8nm_X.js"])))=>i.map(i=>d[i]);
+import{_ as t}from"./CFL8nm_X.js";import{r}from"./DPHAah8y.js";const p=r("LiveUpdate",{web:()=>t(()=>import("./CgiX_LOM.js"),__vite__mapDeps([0,1,2,3,4,5]),import.meta.url).then(e=>new e.LiveUpdateWeb)});export{p as LiveUpdate};
