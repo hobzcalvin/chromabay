@@ -23,7 +23,6 @@ public:
         float speed = getFloat(parameters, 0, 1.0f);
         float hue = getFloat(parameters, 1, 30.0f); // Default to orange-ish
         float saturation = getFloat(parameters, 2, 255.0f);
-        float value = getFloat(parameters, 3, 255.0f);
         
         // Calculate fade intensity using sine wave
         float timeInSeconds = timestampMs * 0.001f;
@@ -44,7 +43,7 @@ public:
             }
         } else {
             // Apply fade to solid color
-            uint8_t actualValue = (uint8_t)(value * fadeIntensity);
+            uint8_t actualValue = (uint8_t)(255.0f * fadeIntensity);
             CHSV fade_hsv((uint8_t)hue, (uint8_t)saturation, actualValue);
             CRGB fade_color = fade_hsv;
             
@@ -67,8 +66,7 @@ public:
         return {
             ParameterInfo("speed", "Speed", ParameterInfo::FLOAT, 1.0f, 0.1f, 10.0f),
             ParameterInfo("hue", "Hue", ParameterInfo::FLOAT, 30.0f, 0.0f, 255.0f),
-            ParameterInfo("saturation", "Saturation", ParameterInfo::FLOAT, 255.0f, 0.0f, 255.0f),
-            ParameterInfo("value", "Value", ParameterInfo::FLOAT, 255.0f, 0.0f, 255.0f)
+            ParameterInfo("saturation", "Saturation", ParameterInfo::FLOAT, 255.0f, 0.0f, 255.0f)
         };
     }
 };

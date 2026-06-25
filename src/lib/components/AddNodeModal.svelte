@@ -24,8 +24,8 @@
   // (Fire seeds from its instance pointer) differ between probe instances. Keep this in
   // sync when adding operators; unknown ops default to "generator" (previewed on black).
   const MODIFIER_OPS = new Set([
-    'blend', 'colorgrade', 'fade', 'glitch', 'huegray', 'huerotate',
-    'invert', 'lumahue', 'mirror', 'noiseblend', 'posterize', 'scroll', 'tile'
+    'blend', 'fade', 'glitch', 'huegray', 'huerotate',
+    'invert', 'lumahue', 'mirror', 'posterize', 'scroll', 'tile'
   ]);
   const isGeneratorOp = (type: string) => !MODIFIER_OPS.has(type);
 
@@ -80,21 +80,26 @@
   .addnode-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.7);
-    backdrop-filter: blur(4px);
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(3px);
     z-index: 3000;
     display: flex;
-    align-items: stretch;
+    align-items: center;
     justify-content: center;
+    padding: 3.5vh 3vw; /* leave the dimmed editor visible around the panel */
   }
+  /* A floating card, not a full-bleed takeover — so it reads as "on top of" the editor. */
   .addnode-panel {
     width: 100%;
-    max-width: 1100px;
-    margin: 0 auto;
+    max-width: 1000px;
+    max-height: 92vh;
     background: #14161c;
     display: flex;
     flex-direction: column;
-    box-shadow: 0 0 40px rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 14px;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.7);
+    overflow: hidden;
   }
   .addnode-header {
     display: flex;

@@ -27,12 +27,13 @@ public:
             for (uint32_t i = 0; i < total; i++) outputBuffer[i] = CRGB::Black;
             return;
         }
-        float speed = getFloat(parameters, 0, 20.0f);    // pixels/sec (negative reverses)
+        float speed = getFloat(parameters, 0, 30.0f);    // % of span per second (negative reverses)
         bool vertical = getBool(parameters, 1, false);
 
         int span = vertical ? (int)height : (int)width;
         if (span < 1) span = 1;
-        int shift = wrap((int)lroundf((timestampMs * 0.001f) * speed), span);
+        // %/sec is resolution-independent: 100%/sec scrolls the whole image across in 1s.
+        int shift = wrap((int)lroundf((timestampMs * 0.001f) * (speed / 100.0f) * (float)span), span);
 
         int idx = 0;
         for (uint32_t y = 0; y < height; y++) {
@@ -53,7 +54,7 @@ public:
 
     std::vector<ParameterInfo> getParameterInfo() const override {
         return {
-            ParameterInfo("speed", "Speed (px/sec)", ParameterInfo::FLOAT, 20.0f, -200.0f, 200.0f),
+            ParameterInfo("speed", "Speed (%/sec)", ParameterInfo::FLOAT, 30.0f, -200.0f, 200.0f),
             ParameterInfo("vertical", "Vertical", ParameterInfo::BOOL, false)
         };
     }

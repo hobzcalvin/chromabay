@@ -31,13 +31,16 @@ public:
         }
         float intensity = getFloat(parameters, 0, 0.5f);  // 0..1
         float speed = getFloat(parameters, 1, 1.0f);
+        float blockSize = getFloat(parameters, 2, 14.0f); // base block size, % of min dimension
         if (intensity < 0.0f) intensity = 0.0f;
         if (intensity > 1.0f) intensity = 1.0f;
 
-        // Block grid (~8x6, but at least 1px blocks on tiny matrices).
-        int bw = (int)width / 8;  if (bw < 1) bw = 1;
-        int bh = (int)height / 6; if (bh < 1) bh = 1;
-        int maxOff = (int)(intensity * 0.6f * (float)((width < height) ? width : height));
+        int minDim = (int)((width < height) ? width : height);
+        int base = (int)(blockSize / 100.0f * (float)minDim); if (base < 1) base = 1;
+        int superSz = base * 3; // a super-cell spans up to a 3x block; its hash sets the
+                                // local block size (1x/2x/3x) so some blocks are small and
+                                // some large instead of one regular grid.
+        int maxOff = (int)(intensity * 0.6f * (float)minDim);
         if (maxOff < 1) maxOff = 1;
         int chan = (int)(intensity * (float)width * 0.05f);
         uint32_t prob = (uint32_t)(intensity * 255.0f); // chance a block is displaced
@@ -45,8 +48,11 @@ public:
 
         for (uint32_t y = 0; y < height; y++) {
             for (uint32_t x = 0; x < width; x++) {
-                uint32_t bx = x / (uint32_t)bw, by = y / (uint32_t)bh;
-                uint32_t hh = hash3(frame, bx, by);
+                uint32_t scx = x / (uint32_t)superSz, scy = y / (uint32_t)superSz;
+                int mult = 1 + (int)(hash3(777u, scx, scy) % 3u); // 1..3 -> block size varies
+                int bsz = base * mult;
+                uint32_t bx = x / (uint32_t)bsz, by = y / (uint32_t)bsz;
+                uint32_t hh = hash3(frame, bx * 131u + scx, by * 131u + scy);
                 bool active = (hh & 0xFF) < prob;
                 int ox = 0, oy = 0;
                 if (active) {
@@ -73,7 +79,8 @@ public:
     std::vector<ParameterInfo> getParameterInfo() const override {
         return {
             ParameterInfo("intensity", "Intensity", ParameterInfo::FLOAT, 0.5f, 0.0f, 1.0f),
-            ParameterInfo("speed", "Speed", ParameterInfo::FLOAT, 1.0f, 0.1f, 5.0f)
+            ParameterInfo("speed", "Speed", ParameterInfo::FLOAT, 1.0f, 0.1f, 5.0f),
+            ParameterInfo("blockSize", "Block Size (%)", ParameterInfo::FLOAT, 14.0f, 4.0f, 40.0f)
         };
     }
 };

@@ -20,9 +20,8 @@ public:
         float hue_base = getFloat(parameters, 2, 0.0f); // Base hue
         float hue_range = getFloat(parameters, 3, 60.0f); // Hue variation range
         float saturation = getFloat(parameters, 4, 255.0f);
-        float value = getFloat(parameters, 5, 255.0f);
-        int octaves = getInt(parameters, 6, 1);          // fractal detail (1 = plain Perlin)
-        float warp = getFloat(parameters, 7, 0.0f);      // domain warp: organic swirl/flow
+        int octaves = getInt(parameters, 5, 1);          // fractal detail (1 = plain Perlin)
+        float warp = getFloat(parameters, 6, 0.0f);      // domain warp: organic swirl/flow
 
         // Time factor for animation (scale for FastLED noise)
         uint16_t time_factor = (uint16_t)(timestampMs * speed * 0.01f);
@@ -60,12 +59,10 @@ public:
                 while (hue > 255.0f) hue -= 255.0f;
                 while (hue < 0.0f) hue += 255.0f;
 
-                // Generate second noise layer for brightness variation
-                uint8_t brightness_noise = fbm8((uint32_t)(noise_x / 2), (uint32_t)(noise_y / 2), time_factor / 2, octaves);
-                float brightness = value * (0.3f + 0.7f * (float)brightness_noise / 255.0f);
-
-                // Create HSV color
-                CHSV hsv_color((uint8_t)hue, (uint8_t)saturation, (uint8_t)brightness);
+                // Full brightness: the noise drives HUE, not value. (A second noise layer
+                // used to dim each pixel to 0.3..1.0, so it never looked fully lit even at
+                // value=255 — that's why this looked dim vs. a plain noise->hue map.)
+                CHSV hsv_color((uint8_t)hue, (uint8_t)saturation, 255);
                 outputBuffer[index] = hsv_color;
             }
         }
@@ -86,7 +83,6 @@ public:
             ParameterInfo("hue_base", "Base Hue", ParameterInfo::FLOAT, 0.0f, 0.0f, 255.0f),
             ParameterInfo("hue_range", "Hue Range", ParameterInfo::FLOAT, 60.0f, 0.0f, 255.0f),
             ParameterInfo("saturation", "Saturation", ParameterInfo::FLOAT, 255.0f, 0.0f, 255.0f),
-            ParameterInfo("value", "Value", ParameterInfo::FLOAT, 255.0f, 0.0f, 255.0f),
             ParameterInfo("octaves", "Octaves", ParameterInfo::INT, 1, 1, 6),
             ParameterInfo("warp", "Warp", ParameterInfo::FLOAT, 0.0f, 0.0f, 2.0f)
         };

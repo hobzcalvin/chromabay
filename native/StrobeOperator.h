@@ -20,8 +20,7 @@ public:
         float duty_cycle = getFloat(parameters, 1, 0.1f); // 0.0 to 1.0 (fraction of time ON)
         float hue = getFloat(parameters, 2, 0.0f);
         float saturation = getFloat(parameters, 3, 0.0f); // 0 = white strobe
-        float value = getFloat(parameters, 4, 255.0f);
-        
+
         // Calculate strobe timing
         float period_ms = 1000.0f / rate; // Period in milliseconds
         float on_time_ms = period_ms * duty_cycle;
@@ -36,7 +35,7 @@ public:
         
         if (is_on) {
             // Fill buffer with strobe color
-            CHSV strobe_hsv((uint8_t)hue, (uint8_t)saturation, (uint8_t)value);
+            CHSV strobe_hsv((uint8_t)hue, (uint8_t)saturation, 255);
             CRGB strobe_color = strobe_hsv;
             
             for (uint32_t i = 0; i < totalPixels; i++) {
@@ -63,8 +62,7 @@ public:
             ParameterInfo("rate", "Rate (Hz)", ParameterInfo::FLOAT, 2.0f, 0.1f, 20.0f),
             ParameterInfo("duty_cycle", "Duty Cycle", ParameterInfo::FLOAT, 0.1f, 0.01f, 0.9f),
             ParameterInfo("hue", "Hue", ParameterInfo::FLOAT, 0.0f, 0.0f, 255.0f),
-            ParameterInfo("saturation", "Saturation", ParameterInfo::FLOAT, 0.0f, 0.0f, 255.0f),
-            ParameterInfo("value", "Value", ParameterInfo::FLOAT, 255.0f, 0.0f, 255.0f)
+            ParameterInfo("saturation", "Saturation", ParameterInfo::FLOAT, 0.0f, 0.0f, 255.0f)
         };
     }
 };

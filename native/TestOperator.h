@@ -16,24 +16,19 @@ public:
         uint32_t /* deltaTimeMs */,
         const std::vector<ParameterValue>& parameters
     ) override {
-        float x = getFloat(parameters, 0, 0.0f);
-        float y = getFloat(parameters, 1, 0.0f);
-        float rect_width = getFloat(parameters, 2, 0.0f);
-        float rect_height = getFloat(parameters, 3, 0.0f);
-        
+        // Pixel coordinates (not fractions): easy to reason about for a test pattern.
+        int start_x = getInt(parameters, 0, 2);
+        int start_y = getInt(parameters, 1, 4);
+        int pixel_width = std::max(1, getInt(parameters, 2, 3));
+        int pixel_height = std::max(1, getInt(parameters, 3, 5));
+
         uint32_t totalPixels = width * height;
-        
+
         // Clear buffer first (everything black)
         for (uint32_t i = 0; i < totalPixels; i++) {
             outputBuffer[i] = CRGB::Black;
         }
-        
-        // Map parameters (0-1) to buffer coordinates
-        int start_x = (int)(x * width);
-        int start_y = (int)(y * height);
-        int pixel_width = std::max(1, (int)(rect_width * width));
-        int pixel_height = std::max(1, (int)(rect_height * height));
-        
+
         // Clamp to buffer bounds
         start_x = std::max(0, std::min(start_x, (int)width - 1));
         start_y = std::max(0, std::min(start_y, (int)height - 1));
@@ -59,10 +54,10 @@ public:
     
     std::vector<ParameterInfo> getParameterInfo() const override {
         return {
-            ParameterInfo("x", "X Position", ParameterInfo::FLOAT, 0.0f, 0.0f, 1.0f),
-            ParameterInfo("y", "Y Position", ParameterInfo::FLOAT, 0.0f, 0.0f, 1.0f),
-            ParameterInfo("width", "Width", ParameterInfo::FLOAT, 0.0f, 0.0f, 1.0f),
-            ParameterInfo("height", "Height", ParameterInfo::FLOAT, 0.0f, 0.0f, 1.0f)
+            ParameterInfo("x", "X (px)", ParameterInfo::INT, 2, 0, 500),
+            ParameterInfo("y", "Y (px)", ParameterInfo::INT, 4, 0, 500),
+            ParameterInfo("width", "Width (px)", ParameterInfo::INT, 3, 1, 500),
+            ParameterInfo("height", "Height (px)", ParameterInfo::INT, 5, 1, 500)
         };
     }
 };

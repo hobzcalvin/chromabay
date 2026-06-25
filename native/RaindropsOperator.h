@@ -1,122 +1,114 @@
 #pragma once
 
 #include "BaseOperator.h"
-#include <cmath>
+#include <map>
+#include <vector>
 
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
-
-// Raindrops operator - creates animated falling raindrops
+// Raindrops - stochastic falling rain. Drops are emitted at random times and columns and
+// fall by SHIFTING a persistent intensity field downward each step (no per-drop tracking),
+// leaving a short fading streak behind the head. Like Fire, the field is kept per strip
+// size and advanced once per frame so mirrored same-size strips stay in sync.
 class RaindropsOperator : public BaseOperator {
+    struct Field {
+        std::vector<uint8_t> v;   // per-pixel intensity (0..255)
+        uint16_t w = 0, h = 0;
+        uint32_t lastStamp = 0;
+        float accum = 0.0f;       // ms toward the next downward step
+        bool started = false;
+    };
+    std::map<uint32_t, Field> fields_;
+    uint32_t rng_ = 0;
+    inline uint32_t rnd() { rng_ ^= rng_ << 13; rng_ ^= rng_ >> 17; rng_ ^= rng_ << 5; return rng_; }
+
+    // Shift the field down one row, then emit `nDrops` new streaks at random columns.
+    void step(Field& f, int nDrops, int tail) {
+        uint16_t w = f.w, h = f.h;
+        uint8_t* v = f.v.data();
+        for (int y = (int)h - 1; y > 0; y--)
+            for (int x = 0; x < (int)w; x++)
+                v[(uint32_t)y * w + x] = v[(uint32_t)(y - 1) * w + x];
+        for (int x = 0; x < (int)w; x++) v[x] = 0; // clear top row
+
+        for (int d = 0; d < nDrops; d++) {
+            int x = (int)(rnd() % (uint32_t)w);
+            // A streak occupies the top `tail` rows: head (row 0) brightest, fading upward.
+            for (int k = 0; k < tail && k < (int)h; k++) {
+                uint8_t b = (uint8_t)(255 - (k * 200 / (tail > 1 ? tail : 1)));
+                uint32_t idx = (uint32_t)k * w + x;
+                if (b > v[idx]) v[idx] = b;
+            }
+        }
+    }
+
 public:
     void render(
-        CRGB* inputBuffer1,
-        CRGB* /* inputBuffer2 */,
-        CRGB* outputBuffer,
-        uint32_t width,
-        uint32_t height,
-        uint32_t timestampMs,
-        uint32_t /* deltaTimeMs */,
+        CRGB* /* in1 */, CRGB* /* in2 */, CRGB* outputBuffer,
+        uint32_t width, uint32_t height,
+        uint32_t timestampMs, uint32_t /* deltaTimeMs */,
         const std::vector<ParameterValue>& parameters
     ) override {
-        float speed = getFloat(parameters, 0, 50.0f);
-        float count = getFloat(parameters, 1, 8.0f);
-        float size = getFloat(parameters, 2, 0.025f);
-        float hue = getFloat(parameters, 3, 0.0f);
-        float saturation = getFloat(parameters, 4, 0.0f); // 0 = white
-        float value = getFloat(parameters, 5, 255.0f);
-        
-        uint32_t totalPixels = width * height;
-        
-        // Start with input buffer if available, otherwise clear to black
-        if (inputBuffer1) {
-            // Copy input buffer to output as base
-            for (uint32_t i = 0; i < totalPixels; i++) {
-                outputBuffer[i] = inputBuffer1[i];
-            }
-        } else {
-            // Clear the buffer if no input
-            for (uint32_t i = 0; i < totalPixels; i++) {
-                outputBuffer[i] = CRGB::Black;
+        if (width == 0 || height == 0) return;
+        float speed = getFloat(parameters, 0, 60.0f);   // fall speed, % of height per second
+        float rate  = getFloat(parameters, 1, 12.0f);   // drops emitted per second (whole display)
+        int   tail  = (int)((getFloat(parameters, 2, 30.0f) / 100.0f) * (float)height); // streak len
+        if (tail < 1) tail = 1;
+        uint8_t hue = (uint8_t)getInt(parameters, 3, 160);
+        uint8_t sat = (uint8_t)getInt(parameters, 4, 200);
+
+        if (rng_ == 0) {
+            rng_ = (uint32_t)((uintptr_t)this) ^ (timestampMs * 2654435761u) ^ 0x9E3779B9u;
+            if (rng_ == 0) rng_ = 0x1234567u;
+        }
+
+        uint32_t key = ((uint32_t)width << 16) | (uint32_t)height;
+        Field& f = fields_[key];
+        if (f.w != width || f.h != height) {
+            f.w = (uint16_t)width; f.h = (uint16_t)height;
+            f.v.assign((size_t)width * height, 0);
+            f.accum = 0.0f; f.started = false;
+        }
+
+        // One downward step per (speed) rows-per-second. Rows/sec = speed% of height.
+        float rowsPerSec = (speed / 100.0f) * (float)height;
+        if (rowsPerSec < 0.1f) rowsPerSec = 0.1f;
+        float stepMs = 1000.0f / rowsPerSec;
+        // Expected drops per step from the drops/sec rate; spawn the integer part plus a
+        // fractional chance so low rates still emit occasionally.
+        float dropsPerStep = rate * (stepMs / 1000.0f);
+
+        if (!f.started) {
+            f.started = true; f.lastStamp = timestampMs;
+        } else if (timestampMs != f.lastStamp) {
+            int32_t d = (int32_t)(timestampMs - f.lastStamp);
+            f.lastStamp = timestampMs;
+            float dt = (d > 0 && d <= 100) ? (float)d : (d > 100 ? 100.0f : 16.0f);
+            f.accum += dt;
+            int steps = 0;
+            while (f.accum >= stepMs && steps < 8) {
+                int nd = (int)dropsPerStep;
+                if ((rnd() & 0xFFFF) < (uint32_t)((dropsPerStep - (float)nd) * 65535.0f)) nd++;
+                step(f, nd, tail);
+                f.accum -= stepMs; steps++;
             }
         }
-        
-        // Calculate drop count based on width
-        int dropCount = (int)count;
-        if (dropCount < 1) dropCount = 1;
-        
-        // Create raindrops
-        for (int i = 0; i < dropCount; i++) {
-            // Calculate drop position
-            float dropSpacing = (float)width / (float)dropCount;
-            float baseX = i * dropSpacing + dropSpacing * 0.5f;
-            
-            // Animate Y position based on time and speed
-            float timeOffset = timestampMs * speed * 0.001f; // Convert to seconds and scale
-            // Use normalized speed (0-1.2 coordinate system) instead of height-dependent
-            float normalizedSpeed = speed / 100.0f; // Speed parameter now represents % of height per second
-            float normalizedY = fmod(timeOffset * normalizedSpeed + i * 0.1f, 1.2f) - 0.2f;
-            float y = normalizedY * (float)height;
-            
-            // Only draw if raindrop is visible
-            if (y >= 0.0f && y <= (float)height) {
-                // Calculate drop dimensions
-                float dropWidth = fmax(1.0f, width * size);
-                float dropHeight = fmax(1.0f, height * 0.08f); // Fixed aspect ratio with 1-pixel minimum
-                
-                // Create raindrop color
-                CHSV drop_hsv((uint8_t)hue, (uint8_t)saturation, (uint8_t)value);
-                CRGB drop_color = drop_hsv;
-                
-                // Draw elliptical raindrop
-                int centerX = (int)baseX;
-                int centerY = (int)y;
-                int radiusX = (int)fmax(1.0f, dropWidth * 0.5f);
-                int radiusY = (int)fmax(1.0f, dropHeight * 0.5f);
-                
-                // Draw filled ellipse
-                for (int dy = -radiusY; dy <= radiusY; dy++) {
-                    for (int dx = -radiusX; dx <= radiusX; dx++) {
-                        // Check if point is inside ellipse
-                        float ellipseTest = ((float)(dx * dx) / (float)(radiusX * radiusX)) + 
-                                           ((float)(dy * dy) / (float)(radiusY * radiusY));
-                        
-                        if (ellipseTest <= 1.0f) {
-                            int pixelX = centerX + dx;
-                            int pixelY = centerY + dy;
-                            
-                            // Bounds check
-                            if (pixelX >= 0 && pixelX < (int)width && 
-                                pixelY >= 0 && pixelY < (int)height) {
-                                uint32_t index = pixelY * width + pixelX;
-                                outputBuffer[index] = drop_color;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-    const char* getName() const override {
-        return "raindrops";
+
+        const uint8_t* v = f.v.data();
+        for (uint32_t i = 0; i < (uint32_t)width * height; i++)
+            outputBuffer[i] = v[i] ? (CRGB)CHSV(hue, sat, v[i]) : CRGB::Black;
     }
 
-    const char* getDisplayName() const override {
-        return "Raindrops";
-    }
-    
+    const char* getName() const override { return "raindrops"; }
+    const char* getDisplayName() const override { return "Raindrops"; }
+
     std::vector<ParameterInfo> getParameterInfo() const override {
         return {
-            ParameterInfo("speed", "Speed (%/sec)", ParameterInfo::FLOAT, 50.0f, 10.0f, 200.0f),
-            ParameterInfo("count", "Count", ParameterInfo::FLOAT, 8.0f, 2.0f, 32.0f),
-            ParameterInfo("size", "Size (% width)", ParameterInfo::FLOAT, 0.025f, 0.01f, 0.1f),
-            ParameterInfo("hue", "Hue", ParameterInfo::FLOAT, 0.0f, 0.0f, 255.0f),
-            ParameterInfo("saturation", "Saturation", ParameterInfo::FLOAT, 0.0f, 0.0f, 255.0f),
-            ParameterInfo("value", "Value", ParameterInfo::FLOAT, 255.0f, 0.0f, 255.0f)
+            ParameterInfo("speed", "Fall Speed (%/sec)", ParameterInfo::FLOAT, 60.0f, 10.0f, 300.0f),
+            ParameterInfo("rate", "Rate (drops/sec)", ParameterInfo::FLOAT, 12.0f, 1.0f, 60.0f),
+            ParameterInfo("tail", "Tail (%)", ParameterInfo::FLOAT, 30.0f, 0.0f, 100.0f),
+            ParameterInfo("hue", "Hue", ParameterInfo::INT, 160, 0, 255),
+            ParameterInfo("saturation", "Saturation", ParameterInfo::INT, 200, 0, 255)
         };
     }
 };
 
-REGISTER_OPERATOR(RaindropsOperator); 
+REGISTER_OPERATOR(RaindropsOperator);

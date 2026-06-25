@@ -23,7 +23,7 @@ public:
         uint32_t /* deltaTimeMs */,
         const std::vector<ParameterValue>& parameters
     ) override {
-        int levels = getInt(parameters, 0, 4);
+        int levels = getInt(parameters, 0, 3);
         uint32_t total = width * height;
         if (!inputBuffer1) {
             for (uint32_t i = 0; i < total; i++) outputBuffer[i] = CRGB::Black;
@@ -40,7 +40,7 @@ public:
 
     std::vector<ParameterInfo> getParameterInfo() const override {
         return {
-            ParameterInfo("levels", "Levels", ParameterInfo::INT, 4, 2, 16)
+            ParameterInfo("levels", "Levels", ParameterInfo::INT, 3, 2, 16)
         };
     }
 };

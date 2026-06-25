@@ -1,11 +1,11 @@
 <script lang="ts">
   // Live WASM render of a single operator at its DEFAULT settings, for the Add-Node modal.
-  // Generators render with no input (their canonical look); modifiers are fed the duck as
-  // input 1 and the RGB venn as input 2 (single-input ops ignore input 2; Blend uses both).
+  // Generators render with no input (their canonical look); modifiers are fed the RGB venn
+  // as input 1 and a white X as input 2 (single-input ops ignore input 2; Blend uses both).
   // Operators read params via getX(params, i, default), so setting NO params == defaults.
   // Only animates while on-screen (IntersectionObserver) to keep many previews cheap.
   import { onMount } from 'svelte';
-  import { getDuckInput, getRgbVennInput } from '$lib/previewImages';
+  import { getVennInput, getWhiteXInput } from '$lib/previewImages';
 
   let { op, isGenerator }: { op: string; isGenerator: boolean } = $props();
 
@@ -41,8 +41,8 @@
       if (!isGenerator) {
         in1Ptr = m._malloc(N);
         in2Ptr = m._malloc(N);
-        copyImageDataToBuffer(getDuckInput(W, H), in1Ptr);
-        copyImageDataToBuffer(getRgbVennInput(W, H), in2Ptr);
+        copyImageDataToBuffer(getVennInput(W, H), in1Ptr);
+        copyImageDataToBuffer(getWhiteXInput(W, H), in2Ptr);
       }
       return true;
     }

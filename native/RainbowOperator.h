@@ -22,8 +22,7 @@ public:
     ) override {
         float speed = getFloat(parameters, 0, 120.0f);
         float saturation = getFloat(parameters, 1, 255.0f);
-        float value = getFloat(parameters, 2, 255.0f);
-        float angle = getFloat(parameters, 3, 0.0f);
+        float angle = getFloat(parameters, 2, 0.0f);
         
         // Convert angle to radians
         float angle_rad = angle * M_PI / 180.0f;
@@ -55,7 +54,7 @@ public:
                 uint8_t final_hue = base_hue + hue_offset;
                 
                 // Create HSV color and convert to RGB
-                CHSV hsv_color(final_hue, (uint8_t)saturation, (uint8_t)value);
+                CHSV hsv_color(final_hue, (uint8_t)saturation, 255);
                 outputBuffer[index] = hsv_color;
             }
         }
@@ -73,7 +72,6 @@ public:
         return {
             ParameterInfo("speed", "Speed", ParameterInfo::FLOAT, 120.0f, 10.0f, 500.0f),
             ParameterInfo("saturation", "Saturation", ParameterInfo::FLOAT, 255.0f, 0.0f, 255.0f),
-            ParameterInfo("value", "Value", ParameterInfo::FLOAT, 255.0f, 0.0f, 255.0f),
             ParameterInfo("angle", "Angle", ParameterInfo::FLOAT, 0.0f, 0.0f, 360.0f)
         };
     }

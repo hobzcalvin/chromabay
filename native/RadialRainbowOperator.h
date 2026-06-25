@@ -22,10 +22,9 @@ public:
     ) override {
         float speed = getFloat(parameters, 0, 120.0f);
         float saturation = getFloat(parameters, 1, 255.0f);
-        float value = getFloat(parameters, 2, 255.0f);
-        float center_x = getFloat(parameters, 3, 0.5f);
-        float center_y = getFloat(parameters, 4, 0.5f);
-        float frequency = getFloat(parameters, 5, 1.0f);
+        float center_x = getFloat(parameters, 2, 0.5f);
+        float center_y = getFloat(parameters, 3, 0.5f);
+        float frequency = getFloat(parameters, 4, 1.0f);
         
         // Get time-based hue offset with speed scaling
         uint8_t hue_offset = (uint8_t)((timestampMs * speed / 1000.0f)) & 0xFF;
@@ -77,7 +76,7 @@ public:
                 uint8_t final_hue = base_hue + hue_offset;
                 
                 // Create HSV color and convert to RGB
-                CHSV hsv_color(final_hue, (uint8_t)saturation, (uint8_t)value);
+                CHSV hsv_color(final_hue, (uint8_t)saturation, 255);
                 outputBuffer[index] = hsv_color;
             }
         }
@@ -95,7 +94,6 @@ public:
         return {
             ParameterInfo("speed", "Speed", ParameterInfo::FLOAT, 120.0f, 10.0f, 500.0f),
             ParameterInfo("saturation", "Saturation", ParameterInfo::FLOAT, 255.0f, 0.0f, 255.0f),
-            ParameterInfo("value", "Value", ParameterInfo::FLOAT, 255.0f, 0.0f, 255.0f),
             ParameterInfo("center_x", "Center X", ParameterInfo::FLOAT, 0.5f, 0.0f, 1.0f),
             ParameterInfo("center_y", "Center Y", ParameterInfo::FLOAT, 0.5f, 0.0f, 1.0f),
             ParameterInfo("frequency", "Ring Frequency", ParameterInfo::FLOAT, 1.0f, 0.1f, 10.0f)

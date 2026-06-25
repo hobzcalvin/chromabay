@@ -20,7 +20,7 @@ public:
         const std::vector<ParameterValue>& parameters
     ) override {
         float speed = getFloat(parameters, 0, 12.0f);  // reseeds per second
-        int colorMode = getInt(parameters, 1, 0);      // 0 = mono, 1 = color
+        bool colorMode = getBool(parameters, 1, false); // off = mono (grayscale), on = color
         float fill = getFloat(parameters, 2, 1.0f);    // 0..1 fraction lit
         if (fill < 0) fill = 0; if (fill > 1) fill = 1;
 
@@ -33,7 +33,7 @@ public:
                 CRGB c;
                 if ((hsh & 0xFF) > fillThresh) {
                     c = CRGB::Black;
-                } else if (colorMode == 0) {
+                } else if (!colorMode) {
                     uint8_t g = (hsh >> 8) & 0xFF;
                     c = CRGB(g, g, g);
                 } else {
@@ -49,7 +49,7 @@ public:
     std::vector<ParameterInfo> getParameterInfo() const override {
         return {
             ParameterInfo("speed", "Speed", ParameterInfo::FLOAT, 12.0f, 0.0f, 60.0f),
-            ParameterInfo("color", "Color (0=mono)", ParameterInfo::INT, 0, 0, 1),
+            ParameterInfo("color", "Color", ParameterInfo::BOOL, false),
             ParameterInfo("fill", "Fill", ParameterInfo::FLOAT, 1.0f, 0.0f, 1.0f)
         };
     }
