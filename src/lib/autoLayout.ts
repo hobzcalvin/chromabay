@@ -162,20 +162,27 @@ function fitLattice(real: { p: Pt; i: number }[], maxDim: number): { W: number; 
   return { W, H, cells };
 }
 
-// Rotate the (c,r) assignment in 90° steps so the lowest LED index sits nearest the top-left —
-// a sensible default orientation (sequential layouts then need no manual rotation).
-function orientCells(cells: LatticeCell[], W: number, H: number): { W: number; H: number; cells: LatticeCell[] } {
-  const lowest = cells.reduce((m, c) => (c.i < m.i ? c : m), cells[0]);
-  let best = { W, H, cells, score: Infinity };
+// Orient the grid to MATCH THE CAMERA VIEW: rotate the (c,r) assignment in 90° steps so column
+// index increases with image x (rightward) and row index with image y (downward) — i.e. the
+// ledmap looks like what the camera saw. We use the known image positions, not the LED wiring
+// order, so an LED isn't forced to a corner; the user's Rotate buttons handle any residual.
+// `pos[k]` is the image position of `cells[k]`. Only 90° rotations (never a mirror).
+function orientToImage(cells: LatticeCell[], W: number, H: number, pos: Pt[]): { W: number; H: number; cells: LatticeCell[] } {
+  let best: { W: number; H: number; cells: LatticeCell[]; score: number } | null = null;
   let cur = cells, cw = W, ch = H;
+  const nn = cells.length;
   for (let t = 0; t < 4; t++) {
-    const lo = cur.find((c) => c.i === lowest.i)!;
-    const score = lo.r * 1000 + lo.c;
-    if (score < best.score) best = { W: cw, H: ch, cells: cur.map((c) => ({ ...c })), score };
+    let mc = 0, mr = 0, mx = 0, my = 0;
+    for (let k = 0; k < nn; k++) { mc += cur[k].c; mr += cur[k].r; mx += pos[k].x; my += pos[k].y; }
+    mc /= nn; mr /= nn; mx /= nn; my /= nn;
+    let covcx = 0, covry = 0;
+    for (let k = 0; k < nn; k++) { covcx += (cur[k].c - mc) * (pos[k].x - mx); covry += (cur[k].r - mr) * (pos[k].y - my); }
+    const score = covcx + covry; // maximized when c↑ with x and r↑ with y
+    if (!best || score > best.score) best = { W: cw, H: ch, cells: cur.map((c) => ({ ...c })), score };
     cur = cur.map((c) => ({ i: c.i, c: ch - 1 - c.r, r: c.c })); // rotate 90° cw
     [cw, ch] = [ch, cw];
   }
-  return { W: best.W, H: best.H, cells: best.cells };
+  return { W: best!.W, H: best!.H, cells: best!.cells };
 }
 
 /**
@@ -195,7 +202,7 @@ export function buildLedmap(pts: (Pt | null)[], snap = 1, maxDim = 64): Ledmap {
   if (snap >= 0.5) {
     const fit = fitLattice(real, maxDim);
     if (fit) {
-      const { W, H, cells } = orientCells(fit.cells, fit.W, fit.H);
+      const { W, H, cells } = orientToImage(fit.cells, fit.W, fit.H, real.map((e) => e.p));
       const map = new Array(W * H).fill(-1);
       for (const c of cells) {
         let cellIdx = c.r * W + c.c;
