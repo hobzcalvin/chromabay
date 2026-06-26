@@ -81,11 +81,22 @@
         // Expose the native zoom control if the camera supports it (lets the user fill the frame
         // with the strip — far more useful than burning pixels on the room). iOS/Android only.
         videoTrack = stream.getVideoTracks()[0] ?? null;
-        const caps: any = videoTrack?.getCapabilities?.();
-        if (caps && typeof caps.zoom === 'object' && caps.zoom && caps.zoom.max > caps.zoom.min) {
+        const caps: any = videoTrack?.getCapabilities?.() ?? {};
+        if (typeof caps.zoom === 'object' && caps.zoom && caps.zoom.max > caps.zoom.min) {
           zoomCap = { min: caps.zoom.min, max: caps.zoom.max, step: caps.zoom.step || 0.1 };
           zoom = (videoTrack!.getSettings() as any).zoom ?? caps.zoom.min;
         }
+        // Stop the camera from constantly re-focusing / re-exposing on the flashing pattern (the
+        // "jumping"). Lock focus/exposure/white-balance to a fixed mode where supported. Best-
+        // effort: iOS WKWebView ignores most of these (it's not in the web API there) — see note
+        // to the user; the decode's motion registration handles residual drift.
+        const lock: any[] = [];
+        const has = (k: string, v: string) => Array.isArray(caps[k]) && caps[k].includes(v);
+        if (has('focusMode', 'manual')) lock.push({ focusMode: 'manual' });
+        else if (has('focusMode', 'continuous')) lock.push({ focusMode: 'continuous' });
+        if (has('exposureMode', 'manual')) lock.push({ exposureMode: 'manual' });
+        if (has('whiteBalanceMode', 'manual')) lock.push({ whiteBalanceMode: 'manual' });
+        if (lock.length) await videoTrack!.applyConstraints({ advanced: lock as any }).catch(() => {});
       } catch (e: any) { status = 'Camera error: ' + (e?.message || e); }
     })();
     return () => { stream?.getTracks().forEach((t) => t.stop()); };

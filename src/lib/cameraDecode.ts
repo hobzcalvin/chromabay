@@ -356,8 +356,7 @@ export async function autoMap(
     // lands on "distinct dots", not just "doesn't clip". ----
     const exposureDeadline = Math.min(budgetMs * 0.5, 28000);
     const minMask = Math.max(40, numLeds * 2);
-    const BLOOM = 0.16;                                        // fill above this = bloomed
-    const usable: { b: number; fill: number; maxRange: number; maskPx: number }[] = [];
+    const usable: { b: number; fill: number }[] = [];        // detectable levels, ascending brightness
     const levels = [10, 18, 30, 46, 68, 98, 140];
     for (const b of levels) {
       if (hooks.shouldStop?.() || elapsed() > exposureDeadline) break;
@@ -369,33 +368,24 @@ export async function autoMap(
       const ex = analyzeExposure(frames, relThr);
       const detectable = ex.maxRange >= 50 && ex.maskPx >= minMask;
       progress(`Exposure sweep @ ${b}: fill ${(ex.fill * 100) | 0}%, swing ${ex.maxRange | 0}${detectable ? '' : ' (faint)'}`, { attempt, best: 0 });
-      if (detectable) usable.push({ b, fill: ex.fill, maxRange: ex.maxRange, maskPx: ex.maskPx });
-      // Sweet spot is behind us once we have a clean lock and this brighter level clearly blooms.
-      if (usable.some((u) => u.fill <= BLOOM) && detectable && ex.fill > BLOOM + 0.1) break;
-    }
-    // Prefer the BRIGHTEST non-bloomed level (most decode signal, still distinct dots) — not the
-    // dimmest, which is barely visible and marginal. Fall back to the least-bloomed if all bloom.
-    const clean = usable.filter((u) => u.fill <= BLOOM);
-    const pick = clean.length ? clean[clean.length - 1]
-      : usable.length ? usable.reduce((a, b) => (b.fill < a.fill ? b : a)) : null;
-    if (pick) {
-      brightness = pick.b;
-      coaching = pick.fill > BLOOM ? 'LEDs look bloomed even at low brightness — move back or focus.' : '';
-    } else {
-      brightness = base.brightness ?? 40;
-      coaching = 'Hard to see the LEDs — aim at the strip and fill more of the frame.';
+      if (detectable) usable.push({ b, fill: ex.fill });
     }
 
-    // ---- PHASE 2: full sequence → decode + refine. Brightness is owned by the sweep; here we
-    // only adjust sensitivity/resolution and coach (re-running the sweep would just thrash). ----
-    await hooks.startFlash(brightness, 'full');
-    let reflashed = true;
+    // ---- PHASE 2: decode, starting at the BRIGHTEST detectable level (most signal — that's the
+    // one you'd pick by eye) and stepping DOWN only if the decode is actually bloomed. The decode
+    // is the ground truth for bloom, so we don't guess a fill threshold. ----
+    let idx = usable.length - 1;                              // brightest first
+    brightness = idx >= 0 ? usable[idx].b : (base.brightness ?? 40);
+    if (idx < 0) coaching = 'Hard to see the LEDs — aim at the strip and fill more of the frame.';
+    let lastFlashed = -1;
     while (elapsed() < budgetMs) {
       if (hooks.shouldStop?.()) break;
       attempt++;
       const bestFound = best?.diag?.found ?? 0;
-      progress(coaching || 'Decoding…', { attempt, best: bestFound });
-      await sleep(reflashed ? 900 : 300); reflashed = false;
+      progress(coaching || `Decoding @ ${brightness}…`, { attempt, best: bestFound });
+      const reflash = brightness !== lastFlashed;
+      if (reflash) { await hooks.startFlash(brightness, 'full'); lastFlashed = brightness; }
+      await sleep(reflash ? 900 : 300);
       const res = await captureAndDecode(video, {
         bits, frameMs, numLeds, cycles: 2, relThr, procWidth, onLog: (m) => progress(m, { attempt, best: bestFound }),
       });
@@ -404,14 +394,14 @@ export async function autoMap(
       if ((res.diag?.found ?? 0) > (best?.diag?.found ?? -1)) best = res;
       if (res.ok && (res.diag?.found ?? 0) >= numLeds) { best = res; break; }
 
-      // Decode incomplete. If the data is bloomed/faint the sweep already did its best, so coach
-      // rather than thrash brightness; otherwise get more sensitive, then sharper.
       const d = res.diag;
-      if (d && d.fill > 0.2) coaching = 'LEDs bloomed — move back or focus, then it re-scans.';
-      else if (d && d.motionPx > 18) coaching = 'Hold the camera still.';
+      const bloomed = !!d && (d.fill > 0.22 || d.outOfRangePct > 0.1 || d.clippedPct > 0.25);
+      if (bloomed && idx > 0) { idx--; brightness = usable[idx].b; coaching = `Too bright — stepping down to ${brightness}.`; continue; }
+      if (d && d.motionPx > 18) coaching = 'Hold the camera still.';
       else if (d && d.maskPx < 120) coaching = 'Move closer / fill more of the frame.';
       else if (relThr > 0.18) { relThr = Math.max(0.15, relThr - 0.07); coaching = 'Refining…'; }
       else if (procWidth < 360) { procWidth += 60; coaching = 'Refining…'; }
+      else if (idx > 0) { idx--; brightness = usable[idx].b; coaching = `Trying dimmer (${brightness})…`; } // last resort
       else coaching = 'Refining…';
     }
   } finally {
