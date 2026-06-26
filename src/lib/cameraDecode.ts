@@ -32,7 +32,13 @@ export type DecodeDebug = {
   frames: number; roiCount: number; maxRange: number;
 };
 
-type Frame = { t: number; gray: Uint8Array; w: number; h: number };
+export type Frame = { t: number; gray: Uint8Array; w: number; h: number };
+
+// Capture the exact frames the decoder sees (downscaled max-channel grayscale + timestamps),
+// for recording a calibration session to tune the decode offline. Exposed for the recorder.
+export function captureRawFrames(video: HTMLVideoElement, captureMs: number, procWidth = 240): Promise<Frame[]> {
+  return captureBurst(video, captureMs, procWidth);
+}
 
 // Grab frames from a live <video> into downscaled grayscale buffers for `captureMs`.
 async function captureBurst(video: HTMLVideoElement, captureMs: number, procWidth: number): Promise<Frame[]> {

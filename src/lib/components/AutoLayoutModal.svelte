@@ -4,7 +4,7 @@
   // live preview and upload. The CV decode (cameraDecode.ts) is a first pass to tune on HW.
   import { onMount } from 'svelte';
   import { startCalibration, stopCalibration, uploadStripLayout } from '$lib/ble';
-  import { captureAndDecode, type DecodeDebug } from '$lib/cameraDecode';
+  import { captureAndDecode, captureRawFrames, type DecodeDebug } from '$lib/cameraDecode';
   import { buildLedmap, rectifyPoints, rotateLedmap, type Pt, type Ledmap } from '$lib/autoLayout';
   import LayoutPreview from './LayoutPreview.svelte';
 
@@ -90,6 +90,39 @@
     for (const dd of d.decoded) { ctx.fillStyle = '#2ecc71'; ctx.beginPath(); ctx.arc(dd.x, dd.y, 1.6, 0, 6.283); ctx.fill(); }
   });
 
+  // Record a calibration session to a .bin (exact frames the decoder sees + metadata) for
+  // offline decode tuning. Format: 'CBC1', u16 w,h,bits,frameMs,numLeds,frameCount (LE),
+  // then per frame: f32 t (LE) + w*h grayscale bytes.
+  async function record() {
+    busy = true; debug = null;
+    try {
+      status = 'Recording calibration (~6s, hold steady)…';
+      await startCalibration(deviceId, stripIndex);
+      await new Promise((r) => setTimeout(r, FRAME_MS * 2));
+      const recCycles = 4;
+      const ms = (2 + bits) * FRAME_MS * recCycles + FRAME_MS;
+      const frames = await captureRawFrames(video, ms, procWidth);
+      await stopCalibration(deviceId);
+      if (!frames.length) { status = 'No frames captured.'; return; }
+      const w = frames[0].w, h = frames[0].h, n = frames.length;
+      const buf = new ArrayBuffer(16 + n * (4 + w * h));
+      const dv = new DataView(buf), u8 = new Uint8Array(buf);
+      dv.setUint32(0, 0x43424331, false); // 'CBC1'
+      dv.setUint16(4, w, true); dv.setUint16(6, h, true); dv.setUint16(8, bits, true);
+      dv.setUint16(10, FRAME_MS, true); dv.setUint16(12, numLeds, true); dv.setUint16(14, n, true);
+      let off = 16;
+      for (const f of frames) { dv.setFloat32(off, f.t, true); off += 4; u8.set(f.gray, off); off += w * h; }
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([buf], { type: 'application/octet-stream' }));
+      a.download = `chromabay-capture-strip${stripIndex + 1}-${w}x${h}-${n}f.bin`;
+      a.click(); URL.revokeObjectURL(a.href);
+      status = `Recorded ${n} frames (${w}×${h}, ${(buf.byteLength / 1e6).toFixed(1)} MB). Downloaded ${a.download}.`;
+    } catch (e: any) {
+      status = 'Record failed: ' + (e?.message || e);
+      try { await stopCalibration(deviceId); } catch {}
+    } finally { busy = false; }
+  }
+
   async function use() {
     if (!layout) return;
     busy = true;
@@ -110,7 +143,10 @@
       <div class="al-cam">
         <!-- svelte-ignore a11y_media_has_caption -->
         <video bind:this={video} playsinline muted></video>
-        <button class="btn primary" disabled={busy} onclick={scan}>{busy ? 'Scanning…' : 'Scan'}</button>
+        <div class="al-scanrow">
+          <button class="btn primary" disabled={busy} onclick={scan}>{busy ? 'Scanning…' : 'Scan'}</button>
+          <button class="btn" disabled={busy} onclick={record} title="Download the raw capture for offline decode tuning">⏺ Record</button>
+        </div>
         {#if debug}
           <div class="al-debug">
             <canvas bind:this={dbgCanvas} class="al-dbgcanvas"></canvas>
@@ -161,6 +197,8 @@
   .al-body { display: flex; gap: 1rem; padding: 1rem 1.1rem; flex-wrap: wrap; }
   .al-cam { flex: 1 1 280px; display: flex; flex-direction: column; gap: 0.5rem; }
   .al-cam video { width: 100%; border-radius: 8px; background: #000; aspect-ratio: 4/3; object-fit: cover; }
+  .al-scanrow { display: flex; gap: 0.5rem; }
+  .al-scanrow .btn { flex: 1; }
   .al-controls { flex: 1 1 280px; display: flex; flex-direction: column; gap: 0.6rem; }
   .al-controls label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.9rem; }
   .al-controls label.cb { flex-direction: row; align-items: center; gap: 0.45rem; }
