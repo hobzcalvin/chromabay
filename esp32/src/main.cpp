@@ -2058,7 +2058,15 @@ void loop() {
         
         // Pause pattern rendering if OTA is in progress to free up resources
         if (calibrating) {
-            renderCalibrationFrame(); // structured-light flash for camera auto-layout
+            // Watchdog: never stay stuck in calibration (which would leave the strip "dark",
+            // showing the dim flash sequence instead of a pattern) if the app crashed / closed
+            // mid-scan without sending STOP. Auto-exit after 3 minutes.
+            if (currentTime - calibStartMs > 180000) {
+                calibrating = false;
+                Serial.println("[Calib] watchdog timeout -> auto-stop");
+            } else {
+                renderCalibrationFrame(); // structured-light flash for camera auto-layout
+            }
         } else if (patternRenderer != nullptr && !ota_in_progress) {
             updateCycle();   // pick the synced playlist pattern before rendering
             patternRenderer->update();

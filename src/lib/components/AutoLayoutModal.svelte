@@ -24,6 +24,9 @@
 
   let video: HTMLVideoElement;
   let stream: MediaStream | null = null;
+  let videoTrack: MediaStreamTrack | null = null;
+  let zoomCap: { min: number; max: number; step: number } | null = $state(null); // null = camera has no zoom
+  let zoom = $state(1);
   let points: (Pt | null)[] = $state([]);
   let snap = $state(1);
   let rectify = $state(false);
@@ -39,7 +42,20 @@
   let relThr = $state(0.35);    // detection threshold, fraction of swing (lower = more sensitive)
   let procWidth = $state(240);  // capture resolution (higher separates merged dots)
 
-  function closeModal() { cancelled = true; onClose(); }
+  // Always stop the device flashing on the way out — otherwise the strip is stuck rendering the
+  // (dim) calibration sequence instead of its pattern, looking "dark". Belt-and-suspenders: the
+  // scan loop also stops on cancel, but a forced close mid-capture might not unwind that in time.
+  function closeModal() { cancelled = true; stopCalibration(deviceId).catch(() => {}); onClose(); }
+
+  // Cancel an in-progress scan: the autoMap loop checks this between passes and returns its best
+  // effort; we also stop the flash immediately so the LEDs aren't left mid-sequence.
+  function cancelScan() { cancelled = true; status = 'Cancelling…'; stopCalibration(deviceId).catch(() => {}); }
+
+  function applyZoom(z: number) {
+    zoom = z;
+    // `zoom` isn't in the standard MediaTrackConstraintSet type yet, but iOS/Android honor it.
+    videoTrack?.applyConstraints({ advanced: [{ zoom: z } as any] }).catch(() => {});
+  }
 
   // Recompute the ledmap reactively from points + controls.
   const layout = $derived.by((): Ledmap | null => {
@@ -52,8 +68,19 @@
   onMount(() => {
     (async () => {
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        // Ask for a high-res rear camera so the (often small-in-frame) strip has plenty of detail.
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
+        });
         if (video) { video.srcObject = stream; await video.play().catch(() => {}); }
+        // Expose the native zoom control if the camera supports it (lets the user fill the frame
+        // with the strip — far more useful than burning pixels on the room). iOS/Android only.
+        videoTrack = stream.getVideoTracks()[0] ?? null;
+        const caps: any = videoTrack?.getCapabilities?.();
+        if (caps && typeof caps.zoom === 'object' && caps.zoom && caps.zoom.max > caps.zoom.min) {
+          zoomCap = { min: caps.zoom.min, max: caps.zoom.max, step: caps.zoom.step || 0.1 };
+          zoom = (videoTrack!.getSettings() as any).zoom ?? caps.zoom.min;
+        }
       } catch (e: any) { status = 'Camera error: ' + (e?.message || e); }
     })();
     return () => { stream?.getTracks().forEach((t) => t.stop()); };
@@ -82,7 +109,9 @@
       points = res.points;
       if (res.brightness > 0) calBright = res.brightness; // reflect what worked back to the slider
       const got = res.diag?.found ?? points.filter(Boolean).length;
-      status = got >= numLeds
+      status = cancelled
+        ? (got > 0 ? `Cancelled — kept ${got}/${numLeds} found so far.` : 'Scan cancelled.')
+        : got >= numLeds
         ? `Mapped all ${numLeds} LEDs in ${res.attempts} tries. Tune snap / rectify / rotation, then Use this map.`
         : got > 0
           ? `Mapped ${got}/${numLeds} (best effort). ${res.coaching ?? ''} Re-scan or tune, then Use this map.`
@@ -164,9 +193,17 @@
       <div class="al-cam">
         <!-- svelte-ignore a11y_media_has_caption -->
         <video bind:this={video} playsinline muted></video>
+        {#if zoomCap}
+          <label class="al-zoom">🔍 <input type="range" min={zoomCap.min} max={zoomCap.max} step={zoomCap.step}
+            value={zoom} oninput={(e) => applyZoom(parseFloat(e.currentTarget.value))} /></label>
+        {/if}
         <div class="al-scanrow">
-          <button class="btn primary" disabled={busy} onclick={scan}>{busy ? 'Scanning…' : 'Auto-scan'}</button>
-          <button class="btn" disabled={busy} onclick={record} title="Download the raw capture for offline decode tuning">⏺ Record</button>
+          {#if busy}
+            <button class="btn danger" onclick={cancelScan}>Cancel</button>
+          {:else}
+            <button class="btn primary" onclick={scan}>Auto-scan</button>
+            <button class="btn" onclick={record} title="Download the raw capture for offline decode tuning">⏺ Record</button>
+          {/if}
         </div>
         {#if debug}
           <div class="al-debug">
@@ -211,8 +248,20 @@
   .al-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(3px);
     z-index: 3000; display: flex; align-items: flex-start; justify-content: center; box-sizing: border-box;
     padding: calc(env(safe-area-inset-top, 0px) + 0.6rem) 0.6rem calc(env(safe-area-inset-bottom, 0px) + 0.6rem); overflow-y: auto; }
-  .al-panel { width: 100%; max-width: 760px; background: #14161c; box-sizing: border-box;
+  /* Explicit color: the overlay is portaled to <body>, escaping the page's `color: white`, so
+     without this the text falls back to black-on-dark and is unreadable. */
+  .al-panel { width: 100%; max-width: 760px; background: #14161c; color: #e9eaee; box-sizing: border-box;
     border: 1px solid rgba(255,255,255,0.12); border-radius: 14px; box-shadow: 0 24px 70px rgba(0,0,0,0.7); }
+  /* Buttons: also self-styled here since the portal escapes the page's .btn styles. */
+  .al-panel .btn { padding: 0.55rem 0.9rem; border: 1px solid rgba(255,255,255,0.18); border-radius: 8px;
+    background: rgba(255,255,255,0.08); color: #e9eaee; font-size: 0.9rem; font-weight: 600; cursor: pointer; }
+  .al-panel .btn:hover:not(:disabled) { background: rgba(255,255,255,0.14); }
+  .al-panel .btn:disabled { opacity: 0.5; cursor: default; }
+  .al-panel .btn.primary { background: linear-gradient(135deg, #3b82f6, #1d4ed8); border-color: transparent; color: #fff; }
+  .al-panel .btn.danger { background: linear-gradient(135deg, #ef4444, #dc2626); border-color: transparent; color: #fff; }
+  .al-panel .btn.small { padding: 0.3rem 0.6rem; font-size: 0.8rem; }
+  .al-zoom { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; }
+  .al-zoom input[type="range"] { flex: 1; }
   header { display: flex; align-items: center; justify-content: space-between; padding: 0.85rem 1.1rem;
     border-bottom: 1px solid rgba(255,255,255,0.1); }
   header h2 { margin: 0; font-size: 1.1rem; }
