@@ -262,9 +262,11 @@ export async function captureAndDecode(video: HTMLVideoElement, opts: DecodeOpts
     if (!prev || c > prev.contrast) byIdx.set(idx, { x: blobs[k].x, y: blobs[k].y, contrast: c });
   }
   diag.outOfRangePct = decodedN ? oorN / decodedN : 0;
+  // Normalize x and y by the SAME factor (width) so aspect ratio is preserved — otherwise a
+  // square LED grid becomes non-square in point space and the lattice fitter mis-counts rows.
   const pts: (Pt | null)[] = new Array(numLeds).fill(null);
   let found = 0;
-  for (const [idx, b] of byIdx) { pts[idx] = { x: b.x / w, y: b.y / h }; debug.decoded.push({ x: b.x, y: b.y, idx }); found++; }
+  for (const [idx, b] of byIdx) { pts[idx] = { x: b.x / w, y: b.y / w }; debug.decoded.push({ x: b.x, y: b.y, idx }); found++; }
   diag.found = found;
   let last = pts.length - 1; while (last >= 0 && pts[last] === null) last--;
   const out = pts.slice(0, last + 1);
