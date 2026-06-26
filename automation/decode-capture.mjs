@@ -76,12 +76,16 @@ const SUB = bits + 1;
 const offRef = new Float32Array(N), onRef = new Float32Array(N), bitRef = Array.from({ length: bits }, () => new Float32Array(N));
 let offCnt = 0; const subCnt = new Int32Array(SUB);
 for (const [a, b] of offInt) { const span = frames[b].t - frames[a].t || 1; for (let fi = a; fi <= b; fi++) { const fr = (frames[fi].t - frames[a].t) / span; if (fr < 0.25 || fr > 0.85) continue; for (const i of maskIdx) offRef[i] += nv(fi, i); offCnt++; } }
-let cyclesUsed = 0;
+let cyclesUsed = 0; const onCentroids = [];
 for (let k = 0; k < offInt.length - 1; k++) {
   const aS = offInt[k][1] + 1, aE = offInt[k + 1][0] - 1, t0 = frames[aS]?.t ?? 0, dur = (frames[aE]?.t ?? 0) - t0;
   if (aE <= aS || dur < SUB * 40) continue; cyclesUsed++;
-  for (let fi = aS; fi <= aE; fi++) { const f = (frames[fi].t - t0) / dur * SUB, s = Math.min(SUB - 1, Math.floor(f)), fr = f - s; if (fr < 0.2 || fr > 0.8) continue; const tgt = s === 0 ? onRef : bitRef[s - 1]; for (const i of maskIdx) tgt[i] += nv(fi, i); subCnt[s]++; }
+  let cxs = 0, cys = 0, cw = 0;
+  for (let fi = aS; fi <= aE; fi++) { const f = (frames[fi].t - t0) / dur * SUB, s = Math.min(SUB - 1, Math.floor(f)), fr = f - s; if (fr < 0.2 || fr > 0.8) continue; const tgt = s === 0 ? onRef : bitRef[s - 1]; for (const i of maskIdx) { const v = nv(fi, i); tgt[i] += v; if (s === 0 && v > 175) { cxs += (i % w) * v; cys += ((i / w) | 0) * v; cw += v; } } subCnt[s]++; }
+  if (cw > 0) onCentroids.push({ x: cxs / cw, y: cys / cw });
 }
+let motionPx = 0;
+if (onCentroids.length >= 2) { let mx = 0, my = 0; for (const c of onCentroids) { mx += c.x; my += c.y; } mx /= onCentroids.length; my /= onCentroids.length; for (const c of onCentroids) motionPx = Math.max(motionPx, Math.hypot(c.x - mx, c.y - my)); }
 console.log(`cycles=${cyclesUsed} onFrames=${subCnt[0]} bitFrames=[${[...subCnt].slice(1)}] offFrames=${offCnt}`);
 if (!cyclesUsed || [...subCnt].some((c) => c === 0)) { console.error('FAIL: missing sub-slots.'); process.exit(2); }
 for (const i of maskIdx) { offRef[i] /= offCnt || 1; onRef[i] /= subCnt[0]; }
@@ -92,11 +96,14 @@ let maxC = 0; for (const i of maskIdx) { const c = onRef[i] - offRef[i]; if (c >
 const contrastThr = Math.max(12, 0.25 * maxC);
 const codes = 1 << bits;
 const sX = new Float64Array(codes), sY = new Float64Array(codes), sW = new Float64Array(codes), cn = new Int32Array(codes);
-for (const i of maskIdx) { const c = onRef[i] - offRef[i]; if (c < contrastThr) continue; const mid = (onRef[i] + offRef[i]) / 2; let idx = 0; for (let b = 0; b < bits; b++) if (bitRef[b][i] > mid) idx |= (1 << b); const x = i % w, y = (i / w) | 0; sX[idx] += x * c; sY[idx] += y * c; sW[idx] += c; cn[idx]++; }
+let decodedPx = 0, outOfRangePx = 0;
+for (const i of maskIdx) { const c = onRef[i] - offRef[i]; if (c < contrastThr) continue; const mid = (onRef[i] + offRef[i]) / 2; let idx = 0; for (let b = 0; b < bits; b++) if (bitRef[b][i] > mid) idx |= (1 << b); decodedPx++; if (idx >= numLeds) { outOfRangePx++; continue; } const x = i % w, y = (i / w) | 0; sX[idx] += x * c; sY[idx] += y * c; sW[idx] += c; cn[idx]++; }
+const outOfRangePct = decodedPx ? outOfRangePx / decodedPx : 0;
 const minCluster = minClusterArg ?? Math.max(2, Math.round(maskIdx.length / 600));
 const pts = []; let found = 0;
-for (let idx = 0; idx < codes; idx++) { if (cn[idx] >= minCluster && sW[idx] > 0) { pts.push({ idx, x: sX[idx] / sW[idx], y: sY[idx] / sW[idx], px: cn[idx] }); found++; } }
+for (let idx = 0; idx < numLeds; idx++) { if (cn[idx] >= minCluster && sW[idx] > 0) { pts.push({ idx, x: sX[idx] / sW[idx], y: sY[idx] / sW[idx], px: cn[idx] }); found++; } }
 console.log(`LEDs located: ${found}/${numLeds} (minCluster=${minCluster}, contrastThr=${contrastThr.toFixed(0)})`);
+console.log(`diag: clipped=${(satPct).toFixed(0)}% outOfRange=${(outOfRangePct * 100).toFixed(0)}% motion=${motionPx.toFixed(1)}px maskPx=${maskIdx.length} maxRange=${maxRange}`);
 
 const loc = pts.filter((p) => p.x != null);
 if (loc.length) {

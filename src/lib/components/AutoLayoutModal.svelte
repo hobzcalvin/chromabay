@@ -4,7 +4,7 @@
   // live preview and upload. The CV decode (cameraDecode.ts) is a first pass to tune on HW.
   import { onMount } from 'svelte';
   import { startCalibration, stopCalibration, uploadStripLayout } from '$lib/ble';
-  import { captureAndDecode, captureRawFrames, type DecodeDebug } from '$lib/cameraDecode';
+  import { autoMap, captureRawFrames, type DecodeDebug } from '$lib/cameraDecode';
   import { buildLedmap, rectifyPoints, rotateLedmap, type Pt, type Ledmap } from '$lib/autoLayout';
   import LayoutPreview from './LayoutPreview.svelte';
 
@@ -22,15 +22,16 @@
   let turns = $state(0);
   let status = $state('Point the camera at the strip, then Scan.');
   let busy = $state(false);
+  let cancelled = $state(false); // set when the modal closes mid-scan so autoMap bails out
   let debug: DecodeDebug | null = $state(null);
   let dbgCanvas: HTMLCanvasElement | undefined = $state();
 
-  // Tweakable decode knobs (so you can iterate without changing code).
+  // Starting points for the adaptive scan (autoMap tunes from here automatically).
   let calBright = $state(40);   // calibration flash brightness — LOW so LEDs don't saturate/bloom into a blob
   let relThr = $state(0.35);    // detection threshold, fraction of swing (lower = more sensitive)
-  let cycles = $state(4);       // flash cycles to capture (more = robust, slower)
-  let minBlobPx = $state(0);    // min pixels per LED cluster (0 = auto from strip size)
   let procWidth = $state(240);  // capture resolution (higher separates merged dots)
+
+  function closeModal() { cancelled = true; onClose(); }
 
   // Recompute the ledmap reactively from points + controls.
   const layout = $derived.by((): Ledmap | null => {
@@ -50,24 +51,34 @@
     return () => { stream?.getTracks().forEach((t) => t.stop()); };
   });
 
+  // Foolproof scan: autoMap flashes + decodes repeatedly (up to 30s), adapting flash brightness
+  // and sensitivity from each pass's diagnostics and coaching the user, until it locks all LEDs
+  // (or returns the best effort). We just provide the BLE flash hooks + surface progress.
   async function scan() {
-    busy = true; points = []; debug = null;
+    busy = true; cancelled = false; points = []; debug = null;
     try {
-      status = 'Calibrating + capturing (hold steady)…';
-      await startCalibration(deviceId, stripIndex, calBright);
-      await new Promise((r) => setTimeout(r, FRAME_MS * 2)); // let the device enter the cycle
-      const res = await captureAndDecode(video, {
-        bits, frameMs: FRAME_MS, cycles, relThr, minBlobPx: minBlobPx || undefined, procWidth, onLog: (m) => (status = m)
-      });
-      await stopCalibration(deviceId);
-      debug = res.debug ?? null;
-      if (!res.ok) {
-        points = [];
-        status = `Couldn't map: ${res.reason}`;
-      } else {
-        points = res.points;
-        status = `Decoded ${res.points.filter(Boolean).length}/${numLeds} LEDs. Tune snap / rectify / rotation, then Use this map.`;
-      }
+      const res = await autoMap(
+        video,
+        { bits, frameMs: FRAME_MS, numLeds, brightness: calBright, relThr, procWidth },
+        {
+          startFlash: (b) => startCalibration(deviceId, stripIndex, b),
+          stopFlash: () => stopCalibration(deviceId),
+          onProgress: (m, info) => {
+            status = info.best ? `${m} — best ${info.best}/${numLeds} (try ${info.attempt})` : `${m} (try ${info.attempt})`;
+          },
+          onAttempt: (r) => { if (r.debug) debug = r.debug; if (r.points.length) points = r.points; },
+          shouldStop: () => cancelled,
+        },
+      );
+      debug = res.debug ?? debug;
+      points = res.points;
+      if (res.brightness > 0) calBright = res.brightness; // reflect what worked back to the slider
+      const got = res.diag?.found ?? points.filter(Boolean).length;
+      status = got >= numLeds
+        ? `Mapped all ${numLeds} LEDs in ${res.attempts} tries. Tune snap / rectify / rotation, then Use this map.`
+        : got > 0
+          ? `Mapped ${got}/${numLeds} (best effort). ${res.coaching ?? ''} Re-scan or tune, then Use this map.`
+          : `Couldn't map: ${res.reason}. ${res.coaching ?? ''}`;
     } catch (e: any) {
       status = 'Scan failed: ' + (e?.message || e);
       try { await stopCalibration(deviceId); } catch {}
@@ -137,16 +148,16 @@
 </script>
 
 <div class="al-overlay" role="button" tabindex="-1"
-  onclick={(e) => { if (e.target === e.currentTarget) onClose(); }} onkeydown={() => {}}>
+  onclick={(e) => { if (e.target === e.currentTarget) closeModal(); }} onkeydown={() => {}}>
   <div class="al-panel">
     <header><h2>Auto-map strip {stripIndex + 1} ({numLeds} LEDs)</h2>
-      <button class="al-close" aria-label="Close" onclick={onClose}>×</button></header>
+      <button class="al-close" aria-label="Close" onclick={closeModal}>×</button></header>
     <div class="al-body">
       <div class="al-cam">
         <!-- svelte-ignore a11y_media_has_caption -->
         <video bind:this={video} playsinline muted></video>
         <div class="al-scanrow">
-          <button class="btn primary" disabled={busy} onclick={scan}>{busy ? 'Scanning…' : 'Scan'}</button>
+          <button class="btn primary" disabled={busy} onclick={scan}>{busy ? 'Scanning…' : 'Auto-scan'}</button>
           <button class="btn" disabled={busy} onclick={record} title="Download the raw capture for offline decode tuning">⏺ Record</button>
         </div>
         {#if debug}
@@ -160,11 +171,9 @@
           </div>
         {/if}
         <details class="al-settings">
-          <summary>Decode settings</summary>
+          <summary>Advanced (auto-tuned — these are just starting points)</summary>
           <label>Flash brightness <input type="range" min="6" max="160" step="2" bind:value={calBright} /><span>{calBright} (lower = less bloom)</span></label>
           <label>Sensitivity <input type="range" min="0.1" max="0.8" step="0.05" bind:value={relThr} /><span>{relThr.toFixed(2)} (lower = detect more)</span></label>
-          <label>Cycles <input type="range" min="1" max="6" step="1" bind:value={cycles} /><span>{cycles}</span></label>
-          <label>Min cluster px <input type="range" min="0" max="40" step="1" bind:value={minBlobPx} /><span>{minBlobPx || 'auto'}</span></label>
           <label>Resolution <input type="range" min="120" max="480" step="20" bind:value={procWidth} /><span>{procWidth}px</span></label>
         </details>
       </div>

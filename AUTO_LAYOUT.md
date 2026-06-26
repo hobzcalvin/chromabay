@@ -9,7 +9,8 @@ ledmap automatically. Branch `feat/auto-layout` (off `feat/arbitrary-layouts`).
 |------|-------|
 | Geometry: rectify + snap + rotate (`src/lib/autoLayout.ts`) | **DONE**, host-tested |
 | Firmware calibration flash-mode (structured light) | **DONE**, HW-validated; now flashes at a tunable LOW brightness (see below) |
-| App: camera capture → decode → points (`cameraDecode.ts`) | **REDESIGNED** from recorded footage — data-driven timing + per-pixel decode + cluster-by-code. Needs a re-record with dim LEDs to confirm 25/25 |
+| App: camera capture → decode → points (`cameraDecode.ts`) | **DONE** — data-driven timing + per-pixel decode + cluster-by-code. Confirmed **25/25** on a dim recording |
+| Adaptive auto-scan (`autoMap` in `cameraDecode.ts`) | **DONE** — closed loop: each pass reports diagnostics (clipping, out-of-range codes, mask size, motion); the loop adjusts flash brightness/sensitivity + coaches the user, up to ~30s, until all LEDs lock |
 | Record raw capture + offline harness (`automation/decode-capture.mjs`) | **DONE** — `⏺ Record` downloads a `.bin`; harness replays the exact pipeline + ASCII placement |
 | UI: scan, snap slider, rectify checkbox, rotate, preview, upload (`AutoLayoutModal.svelte`) | **DONE**, chain HW-validated |
 
@@ -36,7 +37,24 @@ hard physical limit:
 
 **Calibration BLE write** (`a0be83f7`): `[u8 cmd(1=start,0=stop)][u8 stripIndex(0xFF=all)][u8 brightness(0⇒default 40)]`.
 
-Remaining step: re-record with dim LEDs and confirm a clean 25/25 raster, then the chain is done.
+### Adaptive auto-scan (`autoMap`)
+
+The Scan button runs a closed loop instead of a single shot. Each pass `captureAndDecode` returns
+a `DecodeDiag` (LEDs found, mask px, max swing, **clipping %**, **out-of-range code %**, **motion
+px**, cycles used). `planAdjustment` reads it and picks the next move:
+
+| Symptom | Signal | Action |
+|---|---|---|
+| Bloom / over-exposed | clipped > 30% or out-of-range codes > 12% | flash dimmer (×0.55) |
+| Too dim / not flashing | max swing < 45 or "nothing blinking" | flash brighter (×1.7) |
+| Strip too small | mask px < 120 | coach "move closer", bump resolution |
+| Camera moving | motion > 3.5px between cycles | coach "hold still" |
+| Exposure fine, incomplete | found < numLeds | raise sensitivity, then resolution |
+
+It keeps going (re-flashing only when brightness changes) up to ~30s, returns the best attempt, and
+reflects the converged brightness back to the slider. Verified against recorded footage: the dim
+capture returns solid on pass 1; the over-exposed one is correctly flagged (clipped 51%, out-of-range
+21%) and would be dimmed into range.
 
 ## Geometry core (done, host-validated) — `src/lib/autoLayout.ts`
 
