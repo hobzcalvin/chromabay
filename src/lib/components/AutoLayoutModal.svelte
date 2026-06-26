@@ -70,13 +70,45 @@
   });
   const decodedCount = $derived(points.filter(Boolean).length);
 
+  // iPhone Pro's `facingMode: environment` gives a VIRTUAL multi-camera ("Back Dual/Triple
+  // Camera") that auto-switches physical lenses (ultra-wide ↔ wide ↔ tele) as the scene/zoom
+  // changes — which during a flashing scan looks like the frame jumping to "completely different
+  // shots". Pick a SINGLE fixed lens by deviceId instead. Prefer the plain wide ("Back Camera").
+  function pickFixedLens(cams: MediaDeviceInfo[]): string | null {
+    const back = cams.filter((c) => /back|rear/i.test(c.label));
+    const pool = back.length ? back : cams;
+    const score = (label: string) => {
+      const l = label.toLowerCase();
+      if (/dual|triple/.test(l)) return -10;  // the auto-switching virtual device — avoid
+      if (l === 'back camera') return 5;       // iOS: the main wide single lens
+      if (/wide/.test(l) && !/ultra/.test(l)) return 4;
+      if (/ultra|tele/.test(l)) return 1;      // single lenses, fine if nothing better
+      return 0;
+    };
+    const best = pool.slice().sort((a, b) => score(b.label) - score(a.label))[0];
+    return best && score(best.label) > -10 ? best.deviceId : null;
+  }
+
+  async function openCamera(deviceId?: string): Promise<MediaStream> {
+    const vc: MediaTrackConstraints = { width: { ideal: 1920 }, height: { ideal: 1080 } };
+    if (deviceId) vc.deviceId = { exact: deviceId };
+    else vc.facingMode = 'environment';
+    return navigator.mediaDevices.getUserMedia({ video: vc });
+  }
+
   onMount(() => {
     (async () => {
       try {
-        // Ask for a high-res rear camera so the (often small-in-frame) strip has plenty of detail.
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
-        });
+        // First open (grants permission + populates device labels), then re-open pinned to a
+        // single fixed lens so the camera can't auto-switch lenses mid-scan.
+        stream = await openCamera();
+        const devs = await navigator.mediaDevices.enumerateDevices().catch(() => [] as MediaDeviceInfo[]);
+        const fixedId = pickFixedLens(devs.filter((d) => d.kind === 'videoinput'));
+        const curId = (stream.getVideoTracks()[0]?.getSettings?.() as any)?.deviceId;
+        if (fixedId && fixedId !== curId) {
+          stream.getTracks().forEach((t) => t.stop());
+          stream = await openCamera(fixedId);
+        }
         if (video) { video.srcObject = stream; await video.play().catch(() => {}); }
         // Expose the native zoom control if the camera supports it (lets the user fill the frame
         // with the strip — far more useful than burning pixels on the room). iOS/Android only.
