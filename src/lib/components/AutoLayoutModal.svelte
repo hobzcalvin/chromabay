@@ -40,9 +40,8 @@
   let frameBuf: Uint8Array[] = [];
   let bufW = 0, bufH = 0;
   const BUF = 10;
-  const recent: number[] = [];   // recent detected counts (for lock + auto-brightness)
-  let lastMx = 0;                // most recent peak temporal swing (dim vs bloom hint)
-  let lastBriT = 0, manualBriT = 0;
+  const recent: number[] = [];   // recent detected counts (for the auto-map lock)
+  let briTimer: any = null;
 
   const layout = $derived.by((): Ledmap | null => {
     if (!points.length) return null;
@@ -55,18 +54,8 @@
   function reStrobe() { frameBuf = []; startCalibration(deviceId, stripIndex, calBright, 'strobe').catch(() => {}); }
   function closeModal() { phase = 'result'; mapGen++; stopCalibration(deviceId).catch(() => {}); onClose(); }
 
-  // Auto-brightness: nudge toward exactly N detected. Too many blobs / bright-but-merged → dimmer;
-  // too few AND little swing → brighter. Paused briefly after a manual slider drag.
-  function autoBrightness() {
-    const t = performance.now();
-    if (t - lastBriT < 1300 || t - manualBriT < 2500 || recent.length < 6) return;
-    const med = [...recent].sort((a, b) => a - b)[recent.length >> 1];
-    let nb = calBright;
-    if (med > numLeds + 2) nb = Math.max(8, Math.round(calBright * 0.82));
-    else if (med < numLeds) nb = lastMx < 55 ? Math.min(200, Math.round(calBright * 1.3) + 2) : Math.max(8, Math.round(calBright * 0.85));
-    if (nb !== calBright) { calBright = nb; reStrobe(); }
-    lastBriT = t;
-  }
+  // Manual brightness: re-send the strobe at the new level (throttled so a drag doesn't flood BLE).
+  function onBrightness() { if (phase !== 'detect' || briTimer) return; briTimer = setTimeout(() => { briTimer = null; reStrobe(); }, 90); }
 
   function detectFrame() {
     if (phase !== 'detect') return;
@@ -92,14 +81,12 @@
           for (const g of frameBuf) for (let i = 0; i < N; i++) { if (g[i] < pmin[i]) pmin[i] = g[i]; if (g[i] > pmax[i]) pmax[i] = g[i]; }
           const range = new Uint8Array(N); let mx = 0;
           for (let i = 0; i < N; i++) { const r = pmax[i] - pmin[i]; range[i] = r; if (r > mx) mx = r; }
-          lastMx = mx;
           const blobs = mx >= 25 ? detectBlobs(range, w, h, { thresh: Math.max(18, mx * DET_THR) }) : [];
           detectedCount = blobs.length;
           ctx.lineWidth = Math.max(1, w / 200);
           ctx.strokeStyle = blobs.length === numLeds ? '#2ecc71' : '#ffd23f';
           for (const b of blobs) { ctx.beginPath(); ctx.arc(b.x, b.y, Math.max(3, Math.sqrt(b.n) + 1), 0, 6.283); ctx.stroke(); }
           recent.push(detectedCount); if (recent.length > LOCK_WINDOW) recent.shift();
-          autoBrightness();
           const hits = recent.filter((c) => c === numLeds).length;
           status = !autoFire ? `Seeing ${detectedCount}/${numLeds} — adjust, then tap Map`
             : hits >= LOCK_NEEDED ? 'Locked — mapping…'
@@ -174,16 +161,13 @@
         <!-- svelte-ignore a11y_media_has_caption -->
         <video bind:this={video} playsinline muted style="display:none"></video>
         <canvas bind:this={preview} class="al-preview"></canvas>
-        {#if phase !== 'result'}
+        {#if phase === 'detect'}
           <div class="al-count" class:ok={detectedCount === numLeds}>Detected <strong>{detectedCount}</strong> / {numLeds}{#if detectedCount === numLeds} ✓{/if}</div>
           {#if zoomCap}
             <label class="al-slider">🔍 <input type="range" min={zoomCap.min} max={zoomCap.max} step={zoomCap.step} value={zoom} oninput={(e) => applyZoom(parseFloat(e.currentTarget.value))} /></label>
           {/if}
-          <label class="al-slider">☀️ <input type="range" min="4" max="200" step="2" bind:value={calBright}
-            oninput={() => { manualBriT = performance.now(); if (phase === 'detect') reStrobe(); }} /><span>{calBright}</span></label>
-          {#if phase === 'detect' && !autoFire}
-            <button class="btn primary" onclick={mapNow}>Map now</button>
-          {/if}
+          <label class="al-slider">☀️ <input type="range" min="4" max="200" step="2" bind:value={calBright} oninput={onBrightness} /><span>{calBright}</span></label>
+          {#if !autoFire}<button class="btn primary" onclick={mapNow}>Map now</button>{/if}
         {/if}
       </div>
       <div class="al-controls">
@@ -224,14 +208,15 @@
   header h2 { margin: 0; font-size: 1.1rem; }
   .al-close { background: none; border: none; color: #aaa; font-size: 1.7rem; line-height: 1; cursor: pointer; -webkit-tap-highlight-color: transparent; }
   .al-body { display: flex; gap: 1rem; padding: 1rem 1.1rem; flex-wrap: wrap; }
-  .al-cam { flex: 1 1 280px; display: flex; flex-direction: column; gap: 0.5rem; }
+  .al-cam { flex: 1 1 280px; display: flex; flex-direction: column; gap: 0.85rem; }
   .al-preview { width: 100%; border-radius: 8px; background: #000; image-rendering: pixelated; aspect-ratio: 4/3; object-fit: contain; }
   .al-count { font-size: 0.95rem; text-align: center; opacity: 0.85; }
   .al-count.ok { color: #2ecc71; opacity: 1; font-weight: 600; }
-  .al-slider { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; }
-  .al-slider input[type="range"] { flex: 1; }
+  .al-slider { display: flex; align-items: center; gap: 0.6rem; font-size: 0.95rem; padding: 0.5rem 0; }
+  .al-slider input[type="range"] { flex: 1; height: 1.6rem; }
   .al-slider span { min-width: 2.5em; text-align: right; opacity: 0.8; font-variant-numeric: tabular-nums; }
-  .al-controls { flex: 1 1 280px; display: flex; flex-direction: column; gap: 0.6rem; }
+  .al-controls { flex: 1 1 280px; display: flex; flex-direction: column; gap: 0.85rem; }
+  .al-controls .al-slider { padding: 0.35rem 0; }
   .al-status { font-size: 0.9rem; opacity: 0.9; min-height: 2.4em; }
   .al-rotate { display: flex; align-items: center; gap: 0.4rem; font-size: 0.9rem; }
   .al-result { font-size: 0.85rem; opacity: 0.9; }
