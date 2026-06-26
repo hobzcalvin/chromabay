@@ -37,11 +37,17 @@ hard physical limit:
 
 **Calibration BLE write** (`a0be83f7`): `[u8 cmd(1=start,0=stop)][u8 stripIndex(0xFF=all)][u8 brightness(0⇒default 40)]`.
 
-### Adaptive auto-scan (`autoMap`)
+### Adaptive auto-scan (`autoMap`) — two phases, ~60s budget
 
-The Scan button runs a closed loop instead of a single shot. Each pass `captureAndDecode` returns
-a `DecodeDiag` (LEDs found, mask px, max swing, **clipping %**, **out-of-range code %**, **motion
-px**, cycles used). `planAdjustment` reads it and picks the next move:
+**Phase 1 — exposure lock (fast).** The device STROBES all LEDs on/off (`mode=strobe`, a 2-frame
+cycle). We grab a ~1.3s burst and re-evaluate after each strobe (`analyzeExposure`: swing, clipping,
+mask size) — no decode needed to know if we're over/under-exposed — nudging brightness until the
+LEDs are crisp dots. Converges in a few short iterations instead of full-cycle captures.
+
+**Phase 2 — decode + refine.** With brightness locked, the device runs the full structured-light
+sequence (`mode=full`). Each pass `captureAndDecode` returns a `DecodeDiag` (LEDs found, mask px,
+max swing, **clipping %**, **out-of-range code %**, **motion px**, cycles used). `planAdjustment`
+reads it and picks the next move:
 
 | Symptom | Signal | Action |
 |---|---|---|

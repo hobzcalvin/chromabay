@@ -61,7 +61,7 @@
         video,
         { bits, frameMs: FRAME_MS, numLeds, brightness: calBright, relThr, procWidth },
         {
-          startFlash: (b) => startCalibration(deviceId, stripIndex, b),
+          startFlash: (b, mode) => startCalibration(deviceId, stripIndex, b, mode),
           stopFlash: () => stopCalibration(deviceId),
           onProgress: (m, info) => {
             status = info.best ? `${m} — best ${info.best}/${numLeds} (try ${info.attempt})` : `${m} (try ${info.attempt})`;

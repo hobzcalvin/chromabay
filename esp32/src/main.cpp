@@ -55,7 +55,7 @@ PatternRendererBase* patternRenderer = nullptr;
 #define CHARACTERISTIC_UUID_LAYOUT_SET "a0be83f5-8dc9-47f0-ab40-b19721d20ed1"
 // Layout read-back: write u8 stripIndex to request; device NOTIFYs the layout chunked.
 #define CHARACTERISTIC_UUID_LAYOUT_GET "a0be83f6-8dc9-47f0-ab40-b19721d20ed1"
-// Auto-layout camera calibration: write [u8 cmd(1=start,0=stop)][u8 stripIndex(0xFF=all)][u8 brightness(0=>default 40)].
+// Auto-layout camera calibration: write [u8 cmd(1=start,0=stop)][u8 stripIndex(0xFF=all)][u8 brightness(0=>default 40)][u8 mode(0=strobe,1=full;default 1)].
 #define CHARACTERISTIC_UUID_CALIBRATION "a0be83f7-8dc9-47f0-ab40-b19721d20ed1"
 
 // Timestamp Sync Characteristic - for synchronizing time across devices
@@ -111,6 +111,8 @@ static uint8_t calibBrightness = 40;  // per-channel white level while flashing 
                                       // Kept LOW on purpose: at full 255 the LEDs saturate the
                                       // camera and bloom into one solid blob, so adjacent LEDs
                                       // can't be told apart. Dim => distinct dots => decodable.
+static uint8_t calibMode = 1;         // 0 = strobe (ALL off/on only — for fast exposure tuning),
+                                      // 1 = full structured-light sequence (off/on + bit planes).
 static uint32_t calibStartMs = 0;
 static const uint32_t CALIB_FRAME_MS = 220;
 
@@ -894,6 +896,7 @@ class CalibrationCallbacks : public NimBLECharacteristicCallbacks {
         uint8_t strip = (v.length() >= 2) ? (uint8_t)v[1] : 0xFF;
         if (cmd == 1) {
             calibBrightness = (v.length() >= 3 && v[2]) ? (uint8_t)v[2] : 40;
+            calibMode = (v.length() >= 4) ? (uint8_t)v[3] : 1;
             uint16_t maxN = 1;
             for (size_t i = 0; i < ledMgr.getNumStrips(); i++) {
                 const LedConfig::LedBus* s = ledMgr.getStrip(i);
@@ -901,8 +904,8 @@ class CalibrationCallbacks : public NimBLECharacteristicCallbacks {
             }
             uint8_t bits = 1; while ((1u << bits) < maxN) bits++;
             calibBits = bits; calibStrip = strip; calibStartMs = millis(); calibrating = true;
-            Serial.printf("[Calib] START strip=%d bits=%d bright=%d (cycle=%d frames @ %dms)\n",
-                          strip, bits, calibBrightness, 2 + bits, (int)CALIB_FRAME_MS);
+            Serial.printf("[Calib] START strip=%d bits=%d bright=%d mode=%d (cycle=%d frames @ %dms)\n",
+                          strip, bits, calibBrightness, calibMode, calibMode == 0 ? 2 : 2 + bits, (int)CALIB_FRAME_MS);
         } else {
             calibrating = false;
             Serial.println("[Calib] STOP");
@@ -1656,7 +1659,9 @@ void processLayoutGetRequest() {
 // Drive one structured-light calibration frame onto the strips (replaces pattern render
 // while calibrating). Frame = (elapsed / CALIB_FRAME_MS) mod (2 + bits).
 void renderCalibrationFrame() {
-    uint32_t cycleLen = 2u + calibBits;
+    // Strobe mode caps the cycle to 2 frames (off/on); the frame logic below already maps
+    // frame 0 -> all-off and frame 1 -> all-on, so a 2-frame cycle is a pure strobe.
+    uint32_t cycleLen = (calibMode == 0) ? 2u : (2u + calibBits);
     uint32_t frame = ((millis() - calibStartMs) / CALIB_FRAME_MS) % cycleLen;
     for (size_t s = 0; s < ledMgr.getNumStrips(); s++) {
         LedConfig::LedBus* st = ledMgr.getStrip(s);

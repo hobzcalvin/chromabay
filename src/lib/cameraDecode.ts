@@ -260,12 +260,37 @@ export async function captureAndDecode(video: HTMLVideoElement, opts: DecodeOpts
 // ---- adaptive auto-scan ------------------------------------------------------------------
 
 export type AutoMapHooks = {
-  startFlash: (brightness: number) => Promise<void>; // (re)start the device flashing at this level
+  // (re)start the device flashing. 'strobe' = ALL on/off (fast exposure tuning); 'full' = structured-light.
+  startFlash: (brightness: number, mode: 'strobe' | 'full') => Promise<void>;
   stopFlash: () => Promise<void>;
   onProgress?: (msg: string, info: { attempt: number; best: number }) => void;
   onAttempt?: (res: DecodeResult, brightness: number) => void; // intermediate result (for live debug view)
   shouldStop?: () => boolean;                        // cancel hook (e.g. user closed the modal)
 };
+
+// Cheap exposure readout from a STROBE burst (all-LED on/off) — no decode. Drives the fast
+// brightness-tuning phase: we only need the ON/OFF swing + clipping to know if we're over/under.
+function analyzeExposure(frames: Frame[], relThr: number): { clippedPct: number; maxRange: number; maskPx: number } {
+  if (frames.length < 2) return { clippedPct: 0, maxRange: 0, maskPx: 0 };
+  const w = frames[0].w, h = frames[0].h, N = w * h, F = frames.length;
+  const bg = new Float32Array(F);
+  for (let fi = 0; fi < F; fi++) {
+    const g = frames[fi].gray; const hist = new Int32Array(64);
+    for (let i = 0; i < N; i++) hist[g[i] >> 2]++;
+    let acc = 0, bin = 0; const half = N >> 1;
+    for (; bin < 64; bin++) { acc += hist[bin]; if (acc >= half) break; }
+    bg[fi] = bin * 4 + 2;
+  }
+  const pmin = new Float32Array(N).fill(255), pmax = new Float32Array(N);
+  for (let fi = 0; fi < F; fi++) for (let i = 0; i < N; i++) { let v = frames[fi].gray[i] - bg[fi] + 128; v = v < 0 ? 0 : v > 255 ? 255 : v; if (v < pmin[i]) pmin[i] = v; if (v > pmax[i]) pmax[i] = v; }
+  let maxRange = 0; for (let i = 0; i < N; i++) { const r = pmax[i] - pmin[i]; if (r > maxRange) maxRange = r; }
+  const maskThr = Math.max(12, relThr * maxRange);
+  let maskPx = 0, maxClipped = 0;
+  const mask = new Uint8Array(N);
+  for (let i = 0; i < N; i++) if (pmax[i] - pmin[i] >= maskThr) { mask[i] = 1; maskPx++; }
+  for (let fi = 0; fi < F; fi++) { let clip = 0; for (let i = 0; i < N; i++) if (mask[i] && frames[fi].gray[i] >= 250) clip++; if (clip > maxClipped) maxClipped = clip; }
+  return { clippedPct: maskPx ? maxClipped / maskPx : 0, maxRange, maskPx };
+}
 
 export type AutoMapResult = DecodeResult & { attempts: number; brightness: number; coaching?: string };
 
@@ -299,41 +324,73 @@ function planAdjustment(res: DecodeResult, numLeds: number, p: { brightness: num
   return { solid: false, brightness, relThr, procWidth, coaching };
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 /**
- * Foolproof scan: keep flashing + decoding for up to `budgetMs`, adapting flash brightness and
- * decode sensitivity from each pass's diagnostics (and coaching the user) until it locks a full
- * result or the budget runs out — then returns the best attempt. The device keeps flashing across
- * attempts; we only re-issue startFlash when brightness needs to change.
+ * Foolproof scan, in two phases, up to `budgetMs`:
+ *
+ *  PHASE 1 — exposure lock (fast). The device STROBES all LEDs on/off; we grab a short burst and
+ *  re-evaluate after each strobe (~1.5s, not a full decode), nudging flash brightness until the
+ *  LEDs are crisp dots (strong ON/OFF swing, not clipping). This is the cheapest, strongest signal
+ *  for "are the LEDs over/under-exposed?" — no need to decode bit-planes to find that out.
+ *
+ *  PHASE 2 — decode. With brightness locked, the device runs the full structured-light sequence;
+ *  we decode, and keep refining (sensitivity, motion coaching, exposure drift) until all LEDs lock
+ *  or the budget runs out. Returns the best attempt and reflects the brightness that worked back.
  */
 export async function autoMap(
   video: HTMLVideoElement,
   base: { bits: number; frameMs: number; numLeds: number; brightness?: number; relThr?: number; procWidth?: number },
   hooks: AutoMapHooks,
-  budgetMs = 30000,
+  budgetMs = 60000,
 ): Promise<AutoMapResult> {
   const { bits, frameMs, numLeds } = base;
   let brightness = base.brightness ?? 40, relThr = base.relThr ?? 0.35, procWidth = base.procWidth ?? 240;
   const progress = hooks.onProgress ?? (() => {});
   const t0 = performance.now();
+  const elapsed = () => performance.now() - t0;
   let best: DecodeResult | null = null;
-  let lastBrightness = -1, attempt = 0, coaching = '';
+  let attempt = 0, coaching = '';
 
   try {
-    while (performance.now() - t0 < budgetMs) {
+    // ---- PHASE 1: strobe → lock exposure ----
+    const exposureDeadline = Math.min(budgetMs * 0.45, 25000);
+    let lastB = -1;
+    while (elapsed() < exposureDeadline) {
+      if (hooks.shouldStop?.()) break;
+      attempt++;
+      const reflash = brightness !== lastB;
+      if (reflash) { await hooks.startFlash(brightness, 'strobe'); lastB = brightness; }
+      await sleep(reflash ? 900 : 250);                        // let the camera auto-expose after a change
+      const frames = await captureBurst(video, 1300, procWidth);
+      if (hooks.shouldStop?.()) break;
+      const ex = analyzeExposure(frames, relThr);
+      progress(`Tuning exposure @ ${brightness} — swing ${ex.maxRange | 0}, clip ${(ex.clippedPct * 100) | 0}%`, { attempt, best: 0 });
+
+      if (ex.maskPx < 40 && ex.maxRange < 12) {                // nothing is flashing
+        if (brightness >= 200) { coaching = 'No flashing LEDs in view — aim at the strip and keep it calibrating.'; break; }
+        brightness = Math.min(220, Math.round(brightness * 1.7) + 8); continue;
+      }
+      if (ex.clippedPct > 0.20) { brightness = Math.max(6, Math.round(brightness * 0.6)); coaching = 'Too bright — dimming.'; continue; }
+      if (ex.maxRange < 70) { brightness = Math.min(220, Math.round(brightness * 1.5) + 4); coaching = 'Too dim — brightening.'; continue; }
+      if (ex.maskPx < 120) coaching = 'Move closer / fill more of the frame.';
+      break;                                                   // exposure good enough → decode
+    }
+
+    // ---- PHASE 2: full sequence → decode + refine ----
+    let lastB2 = -1;
+    while (elapsed() < budgetMs) {
       if (hooks.shouldStop?.()) break;
       attempt++;
       const bestFound = best?.diag?.found ?? 0;
-      progress(coaching || (attempt === 1 ? 'Scanning…' : 'Adjusting…'), { attempt, best: bestFound });
-
-      const reflashed = brightness !== lastBrightness;
-      if (reflashed) { await hooks.startFlash(brightness); lastBrightness = brightness; }
-      // Let the device enter the cycle; on a fresh flash give the camera longer to auto-expose.
-      await new Promise((r) => setTimeout(r, reflashed ? 1100 : 450));
-
-      // Short captures (2 cycles) while tuning so we get several tries inside the budget.
+      progress(coaching || 'Decoding…', { attempt, best: bestFound });
+      const reflash = brightness !== lastB2;
+      if (reflash) { await hooks.startFlash(brightness, 'full'); lastB2 = brightness; }
+      await sleep(reflash ? 900 : 350);
       const res = await captureAndDecode(video, {
         bits, frameMs, numLeds, cycles: 2, relThr, procWidth, onLog: (m) => progress(m, { attempt, best: bestFound }),
       });
+      if (hooks.shouldStop?.()) break;
       hooks.onAttempt?.(res, brightness);
       if ((res.diag?.found ?? 0) > (best?.diag?.found ?? -1)) best = res;
 
@@ -352,7 +409,7 @@ export async function autoMap(
     ...r,
     ok: found > 0,
     attempts: attempt,
-    brightness: lastBrightness,
+    brightness,
     coaching,
     reason: found >= numLeds ? `mapped all ${numLeds} LEDs` : found > 0
       ? `mapped ${found}/${numLeds} LEDs (best effort)` : (r.reason || 'no LEDs found'),
