@@ -47,6 +47,9 @@
   let detecting = false;                   // detection loop active (paused during a map)
   let mapGen = 0;                          // cancel/supersede token
   let grab: HTMLCanvasElement | null = null; // offscreen frame-grab canvas (created on first use)
+  let frameBuf: Uint8Array[] = [];         // rolling window of recent gray frames (for blink test)
+  let bufW = 0, bufH = 0;                  // buffer frame size (cleared if procWidth changes)
+  const BUF = 12;
 
   function closeModal() { detecting = false; stopCalibration(deviceId).catch(() => {}); onClose(); }
   function applyZoom(z: number) { zoom = z; videoTrack?.applyConstraints({ advanced: [{ zoom: z } as any] }).catch(() => {}); }
@@ -58,40 +61,48 @@
   });
   const decodedCount = $derived(points.filter(Boolean).length);
 
-  // --- live detection: grab a frame, find bright blobs, draw them over the preview ---
+  // --- live detection: only circle things that actually BLINK with the strobe. We keep a short
+  // rolling window of frames and detect blobs on the per-pixel temporal RANGE (max−min) — a real
+  // LED toggles on/off (high range); static specks, reflections and noise don't (≈0) and vanish. ---
   function detectFrame() {
     if (!detecting) return;
     const cv = preview;
     if (video && video.videoWidth && cv) {
       const vw = video.videoWidth, vh = video.videoHeight;
       const w = Math.min(procWidth, vw), h = Math.round((w / vw) * vh);
+      if (w !== bufW || h !== bufH) { frameBuf = []; bufW = w; bufH = h; } // resolution changed
       if (!grab) grab = document.createElement('canvas');
       grab.width = w; grab.height = h;
       const gctx = grab.getContext('2d', { willReadFrequently: true });
       if (gctx) {
         gctx.drawImage(video, 0, 0, w, h);
         const d = gctx.getImageData(0, 0, w, h).data;
-        const gray = new Uint8Array(w * h);
+        const N = w * h, gray = new Uint8Array(N);
         for (let i = 0, j = 0; i < d.length; i += 4, j++) { const m = d[i] > d[i + 1] ? d[i] : d[i + 1]; gray[j] = m > d[i + 2] ? m : d[i + 2]; }
-        let mx = 0; for (let i = 0; i < gray.length; i++) if (gray[i] > mx) mx = gray[i];
-        const blobs = detectBlobs(gray, w, h, { thresh: Math.max(40, mx * detThr) });
-        detectedCount = blobs.length;
-        cv.width = w; cv.height = h;
+        frameBuf.push(gray); if (frameBuf.length > BUF) frameBuf.shift();
         const ctx = cv.getContext('2d');
-        if (ctx) {
-          ctx.drawImage(grab, 0, 0);
+        cv.width = w; cv.height = h;
+        if (ctx) ctx.drawImage(grab, 0, 0);
+        // Need at least a couple of strobe transitions in the window before the range is meaningful.
+        if (frameBuf.length >= 5 && ctx) {
+          const pmin = new Uint8Array(N).fill(255), pmax = new Uint8Array(N);
+          for (const g of frameBuf) for (let i = 0; i < N; i++) { if (g[i] < pmin[i]) pmin[i] = g[i]; if (g[i] > pmax[i]) pmax[i] = g[i]; }
+          const range = new Uint8Array(N); let mx = 0;
+          for (let i = 0; i < N; i++) { const r = pmax[i] - pmin[i]; range[i] = r; if (r > mx) mx = r; }
+          const blobs = mx >= 25 ? detectBlobs(range, w, h, { thresh: Math.max(18, mx * detThr) }) : [];
+          detectedCount = blobs.length;
           ctx.lineWidth = Math.max(1, w / 240);
           ctx.strokeStyle = blobs.length === numLeds ? '#2ecc71' : '#ffd23f';
           for (const b of blobs) { ctx.beginPath(); ctx.arc(b.x, b.y, Math.max(3, Math.sqrt(b.n) + 1), 0, 6.283); ctx.stroke(); }
         }
       }
     }
-    setTimeout(detectFrame, 110); // ~9 fps is plenty for tuning
+    setTimeout(detectFrame, 90);
   }
 
   function startDetect() {
-    detecting = true;
-    startCalibration(deviceId, stripIndex, calBright, 'detect').catch(() => {});
+    detecting = true; frameBuf = [];
+    startCalibration(deviceId, stripIndex, calBright, 'strobe').catch(() => {}); // blink so we can validate
     detectFrame();
   }
 
@@ -100,7 +111,7 @@
   function onBrightness() {
     if (!detecting) return;
     if (briTimer) return;
-    briTimer = setTimeout(() => { briTimer = null; startCalibration(deviceId, stripIndex, calBright, 'detect').catch(() => {}); }, 80);
+    briTimer = setTimeout(() => { briTimer = null; frameBuf = []; startCalibration(deviceId, stripIndex, calBright, 'strobe').catch(() => {}); }, 80);
   }
 
   onMount(() => {
