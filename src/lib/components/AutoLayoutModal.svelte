@@ -201,7 +201,7 @@
             <button class="btn small" onclick={() => (turns = (turns + 1) % 4)}>⟳</button>
             <span>{turns * 90}°</span>
           </div>
-          <label class="al-slider">Snap <input type="range" min="0" max="1" step="0.05" bind:value={snap} /><span>{snap.toFixed(2)}</span></label>
+          <label class="al-slider">Snap <input type="range" min="0" max="1" step="0.05" bind:value={snap} /></label>
           <label class="cb"><input type="checkbox" bind:checked={rectify} /> Fix camera angle (rectangular)</label>
           <div class="al-result">{layout.width}×{layout.height}, {decodedCount} LEDs</div>
           <LayoutPreview width={layout.width} height={layout.height} map={layout.map} />
@@ -241,8 +241,13 @@
   .al-bar { position: absolute; left: 8px; right: 8px; bottom: 8px; height: 6px; border-radius: 3px; background: rgba(0,0,0,0.55); overflow: hidden; }
   .al-bar-fill { height: 100%; background: linear-gradient(90deg, #3b82f6, #60a5fa); transition: width 0.1s linear; }
   .al-slider { display: flex; align-items: center; gap: 0.6rem; font-size: 0.95rem; padding: 0.5rem 0; }
-  .al-slider input[type="range"] { flex: 1; height: 1.6rem; }
   .al-slider span { min-width: 2.5em; text-align: right; opacity: 0.8; font-variant-numeric: tabular-nums; }
+  /* Big circular knobs + generous touch height so they're easy to grab with a finger. */
+  .al-slider input[type="range"] { flex: 1; -webkit-appearance: none; appearance: none; height: 30px; background: transparent; cursor: pointer; }
+  .al-slider input[type="range"]::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: rgba(255,255,255,0.25); }
+  .al-slider input[type="range"]::-moz-range-track { height: 6px; border-radius: 3px; background: rgba(255,255,255,0.25); }
+  .al-slider input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 30px; height: 30px; margin-top: -12px; border-radius: 50%; background: #3b82f6; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.5); }
+  .al-slider input[type="range"]::-moz-range-thumb { width: 30px; height: 30px; border-radius: 50%; background: #3b82f6; border: 2px solid #fff; }
   .al-controls { flex: 1 1 280px; display: flex; flex-direction: column; gap: 0.85rem; }
   .al-status { font-size: 0.9rem; opacity: 0.9; min-height: 2.4em; }
   .al-rotate { display: flex; align-items: center; gap: 0.4rem; font-size: 0.9rem; }
