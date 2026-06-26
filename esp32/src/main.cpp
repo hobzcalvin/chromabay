@@ -1682,8 +1682,13 @@ void renderCalibrationFrame() {
             else if (calibMode == 0) on = (frame == 1); // strobe: 0=off, 1=on
             else if (frame == 0) on = true;             // full: ALL-ON reference + sync anchor
             else on = ((i >> (frame - 1)) & 1u) != 0;   // full: bit (frame-1) of the LED index
+            // Write RAW (uint32_t overload bypasses the per-strip gamma/white-point LUT) so the
+            // brightness maps ~linearly to light output for the camera — the CRGB path would
+            // gamma-crush low values to near-zero, making the dim end of the sweep produce no light.
             uint8_t b = calibBrightness;
-            st->setPixelColor(i, on ? CRGB(b, b, b) : CRGB(0, 0, 0));
+            uint32_t onColor = ((uint32_t)b << 16) | ((uint32_t)b << 8) | (uint32_t)b;
+            uint32_t col = on ? onColor : (uint32_t)0;
+            st->setPixelColor(i, col);
         }
     }
     ledMgr.show();
@@ -2056,6 +2061,15 @@ void loop() {
     if (currentTime - lastUpdate >= updateInterval) {
         lastUpdate = currentTime;
         
+        // On entering/leaving calibration, force global luminance to max so calibBrightness alone
+        // controls the light the camera sees (otherwise a low user brightness slider scales it
+        // down and it's barely visible); restore the user's brightness on exit.
+        static bool wasCalibrating = false;
+        static uint8_t savedBrightness = 255;
+        if (calibrating && !wasCalibrating) { savedBrightness = ledMgr.getGlobalBrightness(); ledMgr.setGlobalBrightness(255); }
+        else if (!calibrating && wasCalibrating) { ledMgr.setGlobalBrightness(savedBrightness); }
+        wasCalibrating = calibrating;
+
         // Pause pattern rendering if OTA is in progress to free up resources
         if (calibrating) {
             // Watchdog: never stay stuck in calibration (which would leave the strip "dark",

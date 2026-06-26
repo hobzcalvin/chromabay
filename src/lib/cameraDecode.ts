@@ -356,8 +356,9 @@ export async function autoMap(
     // lands on "distinct dots", not just "doesn't clip". ----
     const exposureDeadline = Math.min(budgetMs * 0.5, 28000);
     const minMask = Math.max(40, numLeds * 2);
-    let bestExp: { b: number; fill: number; maxRange: number; maskPx: number } | null = null;
-    const levels = [8, 13, 20, 30, 44, 64, 92, 130];
+    const BLOOM = 0.16;                                        // fill above this = bloomed
+    const usable: { b: number; fill: number; maxRange: number; maskPx: number }[] = [];
+    const levels = [10, 18, 30, 46, 68, 98, 140];
     for (const b of levels) {
       if (hooks.shouldStop?.() || elapsed() > exposureDeadline) break;
       attempt++;
@@ -368,13 +369,18 @@ export async function autoMap(
       const ex = analyzeExposure(frames, relThr);
       const detectable = ex.maxRange >= 50 && ex.maskPx >= minMask;
       progress(`Exposure sweep @ ${b}: fill ${(ex.fill * 100) | 0}%, swing ${ex.maxRange | 0}${detectable ? '' : ' (faint)'}`, { attempt, best: 0 });
-      if (detectable && (!bestExp || ex.fill < bestExp.fill)) bestExp = { b, fill: ex.fill, maxRange: ex.maxRange, maskPx: ex.maskPx };
-      // We've passed the sweet spot once a good low-fill lock starts blooming as we brighten.
-      if (bestExp && bestExp.fill < 0.12 && detectable && ex.fill > bestExp.fill + 0.06) break;
+      if (detectable) usable.push({ b, fill: ex.fill, maxRange: ex.maxRange, maskPx: ex.maskPx });
+      // Sweet spot is behind us once we have a clean lock and this brighter level clearly blooms.
+      if (usable.some((u) => u.fill <= BLOOM) && detectable && ex.fill > BLOOM + 0.1) break;
     }
-    if (bestExp) {
-      brightness = bestExp.b;
-      coaching = bestExp.fill > 0.2 ? 'LEDs look bloomed even at low brightness — move back or focus.' : '';
+    // Prefer the BRIGHTEST non-bloomed level (most decode signal, still distinct dots) — not the
+    // dimmest, which is barely visible and marginal. Fall back to the least-bloomed if all bloom.
+    const clean = usable.filter((u) => u.fill <= BLOOM);
+    const pick = clean.length ? clean[clean.length - 1]
+      : usable.length ? usable.reduce((a, b) => (b.fill < a.fill ? b : a)) : null;
+    if (pick) {
+      brightness = pick.b;
+      coaching = pick.fill > BLOOM ? 'LEDs look bloomed even at low brightness — move back or focus.' : '';
     } else {
       brightness = base.brightness ?? 40;
       coaching = 'Hard to see the LEDs — aim at the strip and fill more of the frame.';
