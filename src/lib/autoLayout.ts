@@ -90,24 +90,137 @@ function medianSpacing(pts: Pt[]): number {
   return d.length ? d[Math.floor(d.length / 2)] : 1;
 }
 
+// Fit a 2D lattice (grid) to a point cloud and assign each point integer (col,row).
+// Robust to rotation, mild shear and perspective: recover the grid's two basis vectors from
+// nearest-neighbour displacements, then refine the whole lattice by least squares and snap each
+// point to its nearest node. Returns null if the points don't look like a grid.
+type LatticeCell = { i: number; c: number; r: number };
+function fitLattice(real: { p: Pt; i: number }[], maxDim: number): { W: number; H: number; cells: LatticeCell[] } | null {
+  const n = real.length;
+  if (n < 4) return null;
+  const P = real.map((e) => e.p);
+  // natural cell size = median nearest-neighbour distance
+  const nn: number[] = [];
+  for (let a = 0; a < n; a++) { let b = Infinity; for (let c = 0; c < n; c++) if (a !== c) { const d = Math.hypot(P[a].x - P[c].x, P[a].y - P[c].y); if (d < b) b = d; } nn.push(b); }
+  const cell = [...nn].sort((x, y) => x - y)[n >> 1] || 1;
+  // short inter-point displacements, angle folded to [0,π)
+  const disps: { dx: number; dy: number; m: number; ang: number }[] = [];
+  for (let a = 0; a < n; a++) for (let c = 0; c < n; c++) {
+    if (a === c) continue;
+    const dx = P[c].x - P[a].x, dy = P[c].y - P[a].y, m = Math.hypot(dx, dy);
+    if (m > 1.7 * cell || m < 0.3 * cell) continue;
+    let ang = Math.atan2(dy, dx); if (ang < 0) ang += Math.PI;
+    disps.push({ dx, dy, m, ang });
+  }
+  if (disps.length < n) return null;
+  // dominant axis from an angle histogram; second axis ⟂ to it
+  const B = 36, hist = new Float64Array(B);
+  for (const d of disps) hist[Math.min(B - 1, Math.floor((d.ang / Math.PI) * B))]++;
+  let a1b = 0; for (let k = 0; k < B; k++) if (hist[k] > hist[a1b]) a1b = k;
+  const a1 = ((a1b + 0.5) / B) * Math.PI, a2 = a1 + Math.PI / 2;
+  const lenAlong = (ang: number) => {
+    const tol = (22 * Math.PI) / 180, ls: number[] = [];
+    for (const d of disps) { const da = Math.abs((((d.ang - ang + Math.PI / 2) % Math.PI) + Math.PI) % Math.PI - Math.PI / 2); if (da < tol) ls.push(d.m); }
+    ls.sort((x, y) => x - y); return ls.length ? ls[ls.length >> 1] : cell;
+  };
+  let v1 = { x: Math.cos(a1) * lenAlong(a1), y: Math.sin(a1) * lenAlong(a1) };
+  let v2 = { x: Math.cos(a2) * lenAlong(((a2 % Math.PI) + Math.PI) % Math.PI), y: Math.sin(a2) * lenAlong(((a2 % Math.PI) + Math.PI) % Math.PI) };
+  if (v1.x * v2.y - v1.y * v2.x < 0) { const t = v1; v1 = v2; v2 = t; } // fix handedness → only rotations, never a mirror
+  let ox = 0, oy = 0; for (const p of P) { ox += p.x; oy += p.y; } ox /= n; oy /= n;
+  const assign = (v1: Pt, v2: Pt, ox: number, oy: number): LatticeCell[] => {
+    const det = v1.x * v2.y - v1.y * v2.x || 1e-9;
+    const ia = v2.y / det, ib = -v2.x / det, ic = -v1.y / det, id = v1.x / det;
+    return real.map((e) => { const rx = e.p.x - ox, ry = e.p.y - oy; return { i: e.i, c: Math.round(ia * rx + ib * ry), r: Math.round(ic * rx + id * ry) }; });
+  };
+  let cells = assign(v1, v2, ox, oy);
+  // least-squares refine: fit x = a·c + b·r + e, y = d·c + f·r + g from the current assignment,
+  // then re-snap. Averages out noise/perspective; converges in a few iterations.
+  const solve3 = (M: number[][], rhs: number[]): number[] => {
+    const A = M.map((row, i) => [...row, rhs[i]]);
+    for (let i = 0; i < 3; i++) {
+      let pv = i; for (let r = i + 1; r < 3; r++) if (Math.abs(A[r][i]) > Math.abs(A[pv][i])) pv = r;
+      [A[i], A[pv]] = [A[pv], A[i]];
+      for (let r = 0; r < 3; r++) { if (r === i) continue; const f = A[r][i] / (A[i][i] || 1e-9); for (let k = i; k < 4; k++) A[r][k] -= f * A[i][k]; }
+    }
+    return [A[0][3] / (A[0][0] || 1e-9), A[1][3] / (A[1][1] || 1e-9), A[2][3] / (A[2][2] || 1e-9)];
+  };
+  for (let it = 0; it < 4; it++) {
+    let Scc = 0, Srr = 0, Scr = 0, Sc = 0, Sr = 0, Sux = 0, Srx = 0, Sx = 0, Suy = 0, Sry = 0, Sy = 0;
+    for (let k = 0; k < n; k++) { const c = cells[k], p = P[k]; Scc += c.c * c.c; Srr += c.r * c.r; Scr += c.c * c.r; Sc += c.c; Sr += c.r; Sux += c.c * p.x; Srx += c.r * p.x; Sx += p.x; Suy += c.c * p.y; Sry += c.r * p.y; Sy += p.y; }
+    const M = [[Scc, Scr, Sc], [Scr, Srr, Sr], [Sc, Sr, n]];
+    const [a, b, e] = solve3(M, [Sux, Srx, Sx]);
+    const [d, f, g] = solve3(M, [Suy, Sry, Sy]);
+    v1 = { x: a, y: d }; v2 = { x: b, y: f }; ox = e; oy = g;
+    cells = assign(v1, v2, ox, oy);
+  }
+  let minc = 1e9, minr = 1e9, maxc = -1e9, maxr = -1e9;
+  for (const c of cells) { minc = Math.min(minc, c.c); minr = Math.min(minr, c.r); maxc = Math.max(maxc, c.c); maxr = Math.max(maxr, c.r); }
+  const W = maxc - minc + 1, H = maxr - minr + 1;
+  for (const c of cells) { c.c -= minc; c.r -= minr; }
+  // sanity: a real grid is reasonably tight (no runaway dimension from a bad fit)
+  if (W < 1 || H < 1 || W > maxDim || H > maxDim || W > n || H > n || W * H > n * 4) return null;
+  return { W, H, cells };
+}
+
+// Rotate the (c,r) assignment in 90° steps so the lowest LED index sits nearest the top-left —
+// a sensible default orientation (sequential layouts then need no manual rotation).
+function orientCells(cells: LatticeCell[], W: number, H: number): { W: number; H: number; cells: LatticeCell[] } {
+  const lowest = cells.reduce((m, c) => (c.i < m.i ? c : m), cells[0]);
+  let best = { W, H, cells, score: Infinity };
+  let cur = cells, cw = W, ch = H;
+  for (let t = 0; t < 4; t++) {
+    const lo = cur.find((c) => c.i === lowest.i)!;
+    const score = lo.r * 1000 + lo.c;
+    if (score < best.score) best = { W: cw, H: ch, cells: cur.map((c) => ({ ...c })), score };
+    cur = cur.map((c) => ({ i: c.i, c: ch - 1 - c.r, r: c.c })); // rotate 90° cw
+    [cw, ch] = [ch, cw];
+  }
+  return { W: best.W, H: best.H, cells: best.cells };
+}
+
 /**
  * Quantize LED positions to a WLED ledmap.
  * @param pts     pts[ledIndex] = position (any units; normalized internally)
- * @param snap    0..1. 1 → coarsest grid (~the intended NxM, off-pixels snapped in);
- *                0 → fine grid preserving real spacing (gaps between offset pixels).
+ * @param snap    0..1. ≥0.5 → fit a grid lattice (recovers the intended N×M even under
+ *                rotation/perspective); <0.5 → fine grid preserving real spacing (gaps appear).
  * @param maxDim  cap on either grid dimension.
  */
 export function buildLedmap(pts: (Pt | null)[], snap = 1, maxDim = 64): Ledmap {
   // Only place LEDs we actually have a position for; null entries (undecoded) stay gaps.
   const real = pts.map((p, i) => ({ p, i })).filter((e): e is { p: Pt; i: number } => !!e.p);
   if (real.length === 0) return { width: 0, height: 0, map: [] };
+  if (real.length === 1) return { width: 1, height: 1, map: [real[0].i] };
+
+  // Force-grid (high snap): fit a lattice. This is the robust path for matrices/curtains.
+  if (snap >= 0.5) {
+    const fit = fitLattice(real, maxDim);
+    if (fit) {
+      const { W, H, cells } = orientCells(fit.cells, fit.W, fit.H);
+      const map = new Array(W * H).fill(-1);
+      for (const c of cells) {
+        let cellIdx = c.r * W + c.c;
+        if (map[cellIdx] >= 0) { // rare collision → nearest free cell
+          for (let rad = 1; rad < Math.max(W, H); rad++) { let done = false;
+            for (let dy = -rad; dy <= rad && !done; dy++) for (let dx = -rad; dx <= rad && !done; dx++) {
+              const nc = c.c + dx, nr = c.r + dy; if (nc < 0 || nr < 0 || nc >= W || nr >= H) continue;
+              if (map[nr * W + nc] < 0) { cellIdx = nr * W + nc; done = true; }
+            }
+            if (done) break;
+          }
+        }
+        map[cellIdx] = c.i;
+      }
+      return { width: W, height: H, map };
+    }
+    // lattice fit failed (not grid-like) → fall through to the fine-grid path
+  }
+
+  // Fine-grid path: quantize to a grid whose cell size scales with snap, preserving real spacing.
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const { p } of real) { minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y); }
   const spanX = Math.max(maxX - minX, 1e-6), spanY = Math.max(maxY - minY, 1e-6);
   const spacing = Math.max(medianSpacing(real.map((e) => e.p)), 1e-6);
 
-  // At snap=1 the cell is the natural spacing → grid ≈ the intended row/col count. As snap
-  // drops, cells shrink (finer grid) so genuine position offsets occupy distinct cells.
   const s = Math.min(1, Math.max(0, snap));
   const cell = spacing * (s + (1 - s) * 0.25); // 1× spacing at snap=1, ¼× at snap=0
   let W = Math.round(spanX / cell) + 1;

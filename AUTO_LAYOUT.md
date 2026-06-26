@@ -71,9 +71,16 @@ Given `pts[ledIndex] = {x,y}` (one position per LED, from the camera), produces 
   perspective *even if you never shot it head-on*. Assumes the display outline is a rectangle
   — so it's opt-in (a genuinely non-rectangular display should leave it off). Verified: a
   perspective-warped 10×10 recovers to a clean grid.
-- **`buildLedmap(pts, snap, maxDim)`** — the **snap slider** (0..1). Quantizes positions to a
-  grid; cell size = natural pixel spacing × (snap + (1−snap)·¼):
-  - **snap = 1** → coarsest grid ≈ the intended N×M; slightly-off pixels snap into place
+- **`buildLedmap(pts, snap, maxDim)`** — the **snap slider** (0..1). At **snap ≥ 0.5** it
+  **fits a lattice**: recovers the grid's two basis vectors from nearest-neighbour displacements,
+  refines the whole lattice by least squares, and snaps each point to its nearest node. This
+  recovers the true N×M even under camera **rotation / perspective / mild shear** (where the old
+  median-spacing rounding produced wrong dims like 5×7 and scrambled cells). Handedness is fixed
+  so it can only ever be off by a rotation (never an un-fixable mirror), and it auto-orients so
+  LED 0 sits top-left. Falls back to the fine-grid path below if the points aren't grid-like.
+  The legacy **cell-size** path (snap < 0.5) preserves arbitrary spacing: cell = natural spacing ×
+  (snap + (1−snap)·¼):
+  - **snap = 1** → lattice fit ≈ the intended N×M; slightly-off pixels snap into place
     (the jittered curtain → ~10×10, every LED placed). Collisions spiral to the nearest free
     cell so no LED is dropped.
   - **snap = 0** → fine grid that **preserves real spacing** — offset pixels land in their own
