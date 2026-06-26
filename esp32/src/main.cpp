@@ -101,9 +101,10 @@ NimBLECharacteristic* pLayoutGetCharacteristic = nullptr; // read back a strip's
 static volatile int layoutGetRequest = -1;                // strip index requested via LAYOUT_GET write, -1 = none
 
 // Auto-layout calibration: when active, strips flash a structured-light sequence so the app
-// camera can decode each LED's index -> position. Cycle of (2 + bits) frames, each held
-// CALIB_FRAME_MS: [ALL-OFF ref][ALL-ON ref][bit0][bit1]...[bit(bits-1)]; LED i is on in
-// frame "bitB" iff bit B of i is set.
+// camera can decode each LED's index -> position. Cycle of (1 + bits) frames, each held
+// CALIB_FRAME_MS: [ALL-ON ref][bit0][bit1]...[bit(bits-1)]; LED i is on in frame "bitB" iff
+// bit B of i is set. (No all-off frame: the decoder gets each pixel's OFF level from the bit
+// frames it's dark in, and dropping it keeps the scene bright so the camera doesn't re-expose.)
 static volatile bool calibrating = false;
 static uint8_t calibStrip = 0xFF;     // which strip flashes (0xFF = all)
 static uint8_t calibBits = 8;         // ceil(log2(maxNumLeds))
@@ -114,7 +115,11 @@ static uint8_t calibBrightness = 40;  // per-channel white level while flashing 
 static uint8_t calibMode = 1;         // 0 = strobe (ALL off/on only — for fast exposure tuning),
                                       // 1 = full structured-light sequence (off/on + bit planes).
 static uint32_t calibStartMs = 0;
-static const uint32_t CALIB_FRAME_MS = 220;
+// Hold each calibration frame this long. Shorter = faster cycle = less camera motion smear per
+// cycle (the decoder recovers the real timing from the data, so this isn't safety-critical), but
+// it must stay well above the camera's frame interval (~33ms @30fps) so a few frames land in each
+// slot. 120ms ≈ 3-4 camera frames/slot and roughly halves the old 220ms cycle.
+static const uint32_t CALIB_FRAME_MS = 120;
 
 // Timestamp Sync Characteristic
 NimBLECharacteristic* pTimestampSyncCharacteristic = nullptr;
@@ -1659,9 +1664,12 @@ void processLayoutGetRequest() {
 // Drive one structured-light calibration frame onto the strips (replaces pattern render
 // while calibrating). Frame = (elapsed / CALIB_FRAME_MS) mod (2 + bits).
 void renderCalibrationFrame() {
-    // Strobe mode caps the cycle to 2 frames (off/on); the frame logic below already maps
-    // frame 0 -> all-off and frame 1 -> all-on, so a 2-frame cycle is a pure strobe.
-    uint32_t cycleLen = (calibMode == 0) ? 2u : (2u + calibBits);
+    // Two sequences, both LED-on-heavy (no long all-off — that only made the camera re-expose
+    // and flash dark, slowing the scan with no decode benefit; the decoder derives each pixel's
+    // OFF level from the bit frames it's dark in):
+    //   strobe (mode 0): [OFF][ON]                  — fast exposure tuning only, cycleLen 2
+    //   full   (mode 1): [ALL-ON][bit0]..[bit(b-1)] — structured light, cycleLen 1+bits
+    uint32_t cycleLen = (calibMode == 0) ? 2u : (1u + calibBits);
     uint32_t frame = ((millis() - calibStartMs) / CALIB_FRAME_MS) % cycleLen;
     for (size_t s = 0; s < ledMgr.getNumStrips(); s++) {
         LedConfig::LedBus* st = ledMgr.getStrip(s);
@@ -1670,10 +1678,10 @@ void renderCalibrationFrame() {
         bool targetStrip = (calibStrip == 0xFF) || (s == calibStrip);
         for (uint16_t i = 0; i < n; i++) {
             bool on;
-            if (!targetStrip) on = false;          // non-target strips stay dark
-            else if (frame == 0) on = false;        // all-off reference
-            else if (frame == 1) on = true;         // all-on reference
-            else on = ((i >> (frame - 2)) & 1u) != 0; // bit (frame-2) of the LED index
+            if (!targetStrip) on = false;              // non-target strips stay dark
+            else if (calibMode == 0) on = (frame == 1); // strobe: 0=off, 1=on
+            else if (frame == 0) on = true;             // full: ALL-ON reference + sync anchor
+            else on = ((i >> (frame - 1)) & 1u) != 0;   // full: bit (frame-1) of the LED index
             uint8_t b = calibBrightness;
             st->setPixelColor(i, on ? CRGB(b, b, b) : CRGB(0, 0, 0));
         }

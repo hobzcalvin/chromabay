@@ -35,7 +35,23 @@ hard physical limit:
    to flash dim**: firmware now drives calibration at a low per-channel level (default 40,
    app-tunable via the "Flash brightness" slider) so LEDs stay distinct dots.
 
-**Calibration BLE write** (`a0be83f7`): `[u8 cmd(1=start,0=stop)][u8 stripIndex(0xFF=all)][u8 brightness(0⇒default 40)]`.
+**Calibration BLE write** (`a0be83f7`): `[u8 cmd(1=start,0=stop)][u8 stripIndex(0xFF=all)][u8 brightness(0⇒default 40)][u8 mode(0=strobe,1=full; default 1)]`.
+
+### Flash sequence & motion handling
+
+- **No all-off frame.** Full sequence is `[ALL-ON][bit0]..[bit(bits-1)]` (cycle = 1+bits). The old
+  `[OFF][ON][bits]` had a long dark frame that only made the camera re-expose (slow + dark flashing)
+  with no decode benefit — the decoder derives each pixel's OFF level from the bit frames it's dark
+  in, and finds LED 0 (dark in every bit) via its swing against ALL-ON. Timing anchors on the
+  ALL-ON frames (lit-count peaks) instead of dark gaps.
+- **Faster blink.** `CALIB_FRAME_MS` 220→120ms: shorter cycle ⇒ less motion smear per cycle (decode
+  is timing-agnostic so it's safe), staying well above the camera frame interval.
+- **Translation registration.** Each ALL-ON frame shows the full constellation, so its bright
+  centroid moves with a handheld camera. We align every frame to the first ON's centroid (linearly
+  interpolated for the bit frames between anchors) before folding — a moving capture then folds like
+  a still one; no-op on a steady one. Verified: synthetic 32px drift + jitter still decodes 25/25.
+  (Pure frame-differencing can't do this — a moving lit pattern differs at every edge; you must
+  register. Rotation/zoom registration is the next step if translation isn't enough.)
 
 ### Adaptive auto-scan (`autoMap`) — two phases, ~60s budget
 

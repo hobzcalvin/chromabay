@@ -107,10 +107,9 @@ export type DecodeResult = { points: (Pt | null)[]; ok: boolean; reason: string;
 export async function captureAndDecode(video: HTMLVideoElement, opts: DecodeOpts): Promise<DecodeResult> {
   const bits = opts.bits;
   const frameMs = opts.frameMs;
-  const slots = 2 + bits;                       // [OFF][ON][bit0..]
+  const slots = 1 + bits;                       // [ALL-ON][bit0..] — no all-off frame
   const cycles = opts.cycles ?? 4;
-  // The device holds OFF longer than other slots, so a cycle runs longer than slots×frameMs.
-  // Capture generously (2× nominal) so we get the requested number of full cycles.
+  // Capture generously (2× nominal) to absorb camera/device timing slack + get the full cycles.
   const captureMs = opts.captureMs ?? slots * frameMs * cycles * 2 + frameMs;
   const procWidth = opts.procWidth ?? 240;
   const relThr = opts.relThr ?? 0.35;
@@ -153,8 +152,8 @@ export async function captureAndDecode(video: HTMLVideoElement, opts: DecodeOpts
   debug.roiCount = maskIdx.length; diag.maskPx = maskIdx.length;
   if (maskIdx.length < (opts.minBlobPx ?? 3)) return fail('blinking region too small — move closer / fill more of the frame');
 
-  // (3) Recover timing: count lit mask-pixels per frame, find the long dark OFF intervals,
-  // and treat the frames between them as one ACTIVE region = [ON][bit0..bit(bits-1)].
+  // (3) Recover timing by finding the ALL-ON frames (every LED lit → the lit-pixel count peaks).
+  // These anchor both the cycle (the bits follow each ON) and the motion registration below.
   // Also track sensor clipping (bloom signal): max fraction of strip px pinned at 255.
   const litC = new Int32Array(F);
   let maxClipped = 0;
@@ -165,58 +164,75 @@ export async function captureAndDecode(video: HTMLVideoElement, opts: DecodeOpts
   }
   diag.clippedPct = maskIdx.length ? maxClipped / maskIdx.length : 0;
   let maxLit = 0; for (let fi = 0; fi < F; fi++) if (litC[fi] > maxLit) maxLit = litC[fi];
-  const offThr = 0.2 * maxLit;
-  const offInt: [number, number][] = [];
+  const onThr = 0.7 * maxLit;                    // ALL-ON ≈ maxLit; bit frames ≈ half → well separated
+  const onInt: [number, number][] = [];
   { let s = -1;
     for (let fi = 0; fi < F; fi++) {
-      if (litC[fi] < offThr) { if (s < 0) s = fi; }
-      else { if (s >= 0) { if (frames[fi - 1].t - frames[s].t > frameMs * 0.6) offInt.push([s, fi - 1]); s = -1; } }
+      if (litC[fi] >= onThr) { if (s < 0) s = fi; }
+      else { if (s >= 0) { if (frames[fi - 1].t - frames[s].t > frameMs * 0.4) onInt.push([s, fi - 1]); s = -1; } }
     }
-    if (s >= 0 && frames[F - 1].t - frames[s].t > frameMs * 0.6) offInt.push([s, F - 1]);
+    if (s >= 0 && frames[F - 1].t - frames[s].t > frameMs * 0.4) onInt.push([s, F - 1]);
   }
-  if (offInt.length < 2) return fail('could not find the OFF reference frames — capture more cycles / hold steadier');
+  if (onInt.length < 2) return fail('could not lock onto the flash cycle — hold steadier / capture longer');
 
-  // Accumulate per-pixel reference images. offRef from the OFF intervals; ON + each bit from the
-  // matching sub-slot of every active region (use the middle of each window to dodge transitions).
-  const SUB = bits + 1;
-  const offRef = new Float32Array(N), onRef = new Float32Array(N);
-  const bitRef = Array.from({ length: bits }, () => new Float32Array(N));
-  let offCnt = 0; const subCnt = new Int32Array(SUB);
-  for (const [a, b] of offInt) {
-    const span = frames[b].t - frames[a].t || 1;
-    for (let fi = a; fi <= b; fi++) { const fr = (frames[fi].t - frames[a].t) / span; if (fr < 0.25 || fr > 0.85) continue; for (const i of maskIdx) offRef[i] += nv(fi, i); offCnt++; }
-  }
-  let cyclesUsed = 0;
-  const onCentroids: { x: number; y: number }[] = []; // ON-slot bright centroid per cycle → motion
-  for (let k = 0; k < offInt.length - 1; k++) {
-    const aS = offInt[k][1] + 1, aE = offInt[k + 1][0] - 1;
-    const t0 = frames[aS]?.t ?? 0, dur = (frames[aE]?.t ?? 0) - t0;
-    if (aE <= aS || dur < SUB * 40) continue;
-    cyclesUsed++;
-    let cxs = 0, cys = 0, cw = 0;
-    for (let fi = aS; fi <= aE; fi++) {
-      const f = ((frames[fi].t - t0) / dur) * SUB;
-      const s = Math.min(SUB - 1, Math.floor(f));
-      const fr = f - s; if (fr < 0.2 || fr > 0.8) continue;   // middle of the sub-slot only
-      const tgt = s === 0 ? onRef : bitRef[s - 1];
-      for (const i of maskIdx) {
-        const v = nv(fi, i); tgt[i] += v;
-        if (s === 0 && v > 175) { cxs += (i % w) * v; cys += ((i / w) | 0) * v; cw += v; } // ON-slot centroid
-      }
-      subCnt[s]++;
+  // Motion registration (handheld): each ALL-ON frame shows the full constellation, so its bright
+  // centroid moves with the device. Align every frame to the first ON's centroid (translation,
+  // interpolated for the bit frames between ON anchors) before folding — so a moving capture folds
+  // like a still one. On a still capture all centroids match → zero shift → no-op.
+  const onCent = onInt.map(([a, b]) => {
+    let sx = 0, sy = 0, sw = 0;
+    for (let fi = a; fi <= b; fi++) for (const i of maskIdx) { const v = nv(fi, i); if (v > 170) { sx += (i % w) * v; sy += ((i / w) | 0) * v; sw += v; } }
+    return { t: (frames[a].t + frames[b].t) / 2, x: sw ? sx / sw : 0, y: sw ? sy / sw : 0 };
+  });
+  const refX = onCent[0].x, refY = onCent[0].y;
+  for (const c of onCent) { const d = Math.hypot(c.x - refX, c.y - refY); if (d > diag.motionPx) diag.motionPx = d; }
+  const shiftAt = (t: number): { dx: number; dy: number } => {
+    let cx = onCent[0].x, cy = onCent[0].y;
+    if (t >= onCent[onCent.length - 1].t) { cx = onCent[onCent.length - 1].x; cy = onCent[onCent.length - 1].y; }
+    else if (t > onCent[0].t) for (let k = 0; k < onCent.length - 1; k++) {
+      if (t >= onCent[k].t && t <= onCent[k + 1].t) { const f = (t - onCent[k].t) / ((onCent[k + 1].t - onCent[k].t) || 1); cx = onCent[k].x + (onCent[k + 1].x - onCent[k].x) * f; cy = onCent[k].y + (onCent[k + 1].y - onCent[k].y) * f; break; }
     }
-    if (cw > 0) onCentroids.push({ x: cxs / cw, y: cys / cw });
+    return { dx: Math.round(cx - refX), dy: Math.round(cy - refY) };
+  };
+  // registered sample: read reference pixel (x,y) from frame fi at its motion-shifted location
+  const nvS = (fi: number, x: number, y: number): number => {
+    const sh = shiftAt(frames[fi].t); const xx = x + sh.dx, yy = y + sh.dy;
+    return xx < 0 || yy < 0 || xx >= w || yy >= h ? 128 : nv(fi, yy * w + xx);
+  };
+
+  // ALL-ON reference (registered).
+  const onRef = new Float32Array(N); let onc = 0;
+  for (const [a, b] of onInt) {
+    const span = frames[b].t - frames[a].t || 1;
+    for (let fi = a; fi <= b; fi++) { const fr = (frames[fi].t - frames[a].t) / span; if (fr < 0.25 || fr > 0.85) continue; for (const i of maskIdx) onRef[i] += nvS(fi, i % w, (i / w) | 0); onc++; }
   }
-  if (!cyclesUsed || subCnt.some((c) => c === 0)) return fail('capture too short — missed calibration frames (raise cycles / hold steadier)');
-  // Motion = how far the lit-region centre drifted between cycles (px). High => camera moved.
-  if (onCentroids.length >= 2) {
-    let mx = 0, my = 0; for (const c of onCentroids) { mx += c.x; my += c.y; } mx /= onCentroids.length; my /= onCentroids.length;
-    for (const c of onCentroids) { const d = Math.hypot(c.x - mx, c.y - my); if (d > diag.motionPx) diag.motionPx = d; }
+  // bit references: the region between consecutive ON anchors holds bit0..bit(bits-1); split into
+  // `bits` equal sub-slots (middle of each), registered, averaged across all cycles.
+  const bitRef = Array.from({ length: bits }, () => new Float32Array(N));
+  const bitCnt = new Int32Array(bits);
+  let cyclesUsed = 0;
+  for (let k = 0; k < onInt.length - 1; k++) {
+    const aS = onInt[k][1] + 1, aE = onInt[k + 1][0] - 1;
+    const t0 = frames[aS]?.t ?? 0, dur = (frames[aE]?.t ?? 0) - t0;
+    if (aE <= aS || dur < bits * 30) continue;
+    cyclesUsed++;
+    for (let fi = aS; fi <= aE; fi++) {
+      const f = ((frames[fi].t - t0) / dur) * bits;
+      const s = Math.min(bits - 1, Math.floor(f));
+      const fr = f - s; if (fr < 0.2 || fr > 0.8) continue;   // middle of the sub-slot only
+      for (const i of maskIdx) bitRef[s][i] += nvS(fi, i % w, (i / w) | 0);
+      bitCnt[s]++;
+    }
   }
+  if (!onc || !cyclesUsed || bitCnt.some((c) => c === 0)) return fail('capture too short — missed calibration frames (raise cycles / hold steadier)');
   diag.cyclesUsed = cyclesUsed;
-  for (const i of maskIdx) { offRef[i] /= offCnt || 1; onRef[i] /= subCnt[0]; }
-  for (let b = 0; b < bits; b++) for (const i of maskIdx) bitRef[b][i] /= subCnt[b + 1];
-  log(`${cyclesUsed} cycles, ${maskIdx.length} strip px, swing ${maxRange}`);
+  for (const i of maskIdx) onRef[i] /= onc;
+  for (let b = 0; b < bits; b++) for (const i of maskIdx) bitRef[b][i] /= bitCnt[b];
+  // OFF level per pixel = the dimmest bit slot (the bit frames where that LED is dark). No all-off
+  // frame needed; LED 0 (dark in every bit frame) is still found via its swing against ALL-ON.
+  const offRef = new Float32Array(N);
+  for (const i of maskIdx) { let mn = Infinity; for (let b = 0; b < bits; b++) if (bitRef[b][i] < mn) mn = bitRef[b][i]; offRef[i] = mn; }
+  log(`${cyclesUsed} cycles, ${maskIdx.length} strip px, swing ${maxRange}, drift ${diag.motionPx | 0}px`);
 
   // (4) Per-pixel decode, then cluster pixels by their decoded index → one centroid per LED.
   let maxContrast = 0; for (const i of maskIdx) { const c = onRef[i] - offRef[i]; if (c > maxContrast) maxContrast = c; }
@@ -307,9 +323,9 @@ function planAdjustment(res: DecodeResult, numLeds: number, p: { brightness: num
   if (solid) return { solid: true, brightness, relThr, procWidth, coaching: '' };
 
   const overExposed = !!d && (d.clippedPct > 0.3 || d.outOfRangePct > 0.12);
-  const underExposed = !d || d.maxRange < 45 || (!res.ok && /blinking|OFF reference/.test(res.reason));
+  const underExposed = !d || d.maxRange < 45 || (!res.ok && /blinking|lock onto/.test(res.reason));
   const tinyRegion = !!d && d.maskPx > 0 && d.maskPx < 120;
-  const moving = !!d && d.motionPx > 3.5;
+  const moving = !!d && d.motionPx > 18; // registration compensates translation up to ~this; beyond it, coach
 
   if (overExposed) { brightness = Math.max(6, Math.round(brightness * 0.55)); coaching = 'Too bright — dimming the LEDs.'; }
   else if (underExposed) { brightness = Math.min(220, Math.round(brightness * 1.7) + 4); coaching = 'Too dim — brightening the LEDs.'; }
