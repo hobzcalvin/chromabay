@@ -185,6 +185,23 @@ function orientToImage(cells: LatticeCell[], W: number, H: number, pos: Pt[]): {
   return { W: best!.W, H: best!.H, cells: best!.cells };
 }
 
+// Drop any row/column that contains no LED at all. An all-blank row or column carries no
+// information — removing it keeps every real LED's relative arrangement and just tightens the
+// grid (no useless spacing between LEDs). Partial rows (some LEDs + some real gaps) are kept.
+function compactLedmap(l: Ledmap): Ledmap {
+  const { width: W, height: H, map } = l;
+  if (W < 1 || H < 1) return l;
+  const rowUsed = new Array(H).fill(false), colUsed = new Array(W).fill(false);
+  for (let r = 0; r < H; r++) for (let c = 0; c < W; c++) if (map[r * W + c] >= 0) { rowUsed[r] = true; colUsed[c] = true; }
+  const rows: number[] = [], cols: number[] = [];
+  for (let r = 0; r < H; r++) if (rowUsed[r]) rows.push(r);
+  for (let c = 0; c < W; c++) if (colUsed[c]) cols.push(c);
+  if (rows.length === H && cols.length === W) return l;
+  const nW = cols.length, nH = rows.length, nm = new Array(nW * nH).fill(-1);
+  for (let nr = 0; nr < nH; nr++) for (let nc = 0; nc < nW; nc++) nm[nr * nW + nc] = map[rows[nr] * W + cols[nc]];
+  return { width: nW, height: nH, map: nm };
+}
+
 /**
  * Quantize LED positions to a WLED ledmap.
  * @param pts     pts[ledIndex] = position (any units; normalized internally)
@@ -217,7 +234,7 @@ export function buildLedmap(pts: (Pt | null)[], snap = 1, maxDim = 64): Ledmap {
         }
         map[cellIdx] = c.i;
       }
-      return { width: W, height: H, map };
+      return compactLedmap({ width: W, height: H, map });
     }
     // lattice fit failed (not grid-like) → fall through to the fine-grid path
   }
@@ -258,7 +275,7 @@ export function buildLedmap(pts: (Pt | null)[], snap = 1, maxDim = 64): Ledmap {
     }
     map[cellIdx] = i;
   }
-  return { width: W, height: H, map };
+  return compactLedmap({ width: W, height: H, map });
 }
 
 // Rotate a finished ledmap by `quarterTurns` × 90° clockwise (1=90°, 2=180°, 3=270°).

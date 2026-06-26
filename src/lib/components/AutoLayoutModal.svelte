@@ -202,10 +202,7 @@
             <span>{turns * 90}°</span>
           </div>
           <label class="al-slider">Snap <input type="range" min="0" max="1" step="0.05" bind:value={snap} /></label>
-          <div class="hint">{snap >= 0.5 ? 'Forces a clean grid (best for matrices/curtains).' : 'Keeps measured spacing — blank cells appear between LEDs (for irregular layouts).'}</div>
-          {#if snap < 0.5}
-            <label class="cb"><input type="checkbox" bind:checked={rectify} /> Force to rectangle (undo camera tilt)</label>
-          {/if}
+          <label class="cb"><input type="checkbox" bind:checked={rectify} /> Force to rectangle</label>
           <div class="al-result">{layout.width}×{layout.height}, {decodedCount} LEDs</div>
           <LayoutPreview width={layout.width} height={layout.height} map={layout.map} />
           <div class="al-actions">
@@ -258,5 +255,4 @@
   .al-actions { display: flex; gap: 0.5rem; }
   .al-actions .btn { flex: 1; }
   .cb { display: flex; align-items: center; gap: 0.45rem; font-size: 0.85rem; }
-  .hint { font-size: 0.78rem; opacity: 0.65; margin-top: -0.4rem; }
 </style>
