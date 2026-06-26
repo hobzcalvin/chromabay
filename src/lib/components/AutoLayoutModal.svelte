@@ -6,7 +6,7 @@
   //      averaged image and read each one's binary code to assign its LED index → position.
   import { onMount } from 'svelte';
   import { startCalibration, stopCalibration, uploadStripLayout } from '$lib/ble';
-  import { captureAndDecode, detectBlobs, type DecodeDebug } from '$lib/cameraDecode';
+  import { captureAndDecode, captureRawFrames, detectBlobs, type DecodeDebug } from '$lib/cameraDecode';
   import { buildLedmap, rectifyPoints, rotateLedmap, type Pt, type Ledmap } from '$lib/autoLayout';
   import LayoutPreview from './LayoutPreview.svelte';
 
@@ -167,6 +167,37 @@
     startDetect();
   }
 
+  // Record the raw structured-light frames to a .bin (CBC1) for offline decode debugging.
+  async function record() {
+    busy = true; const myGen = ++mapGen; detecting = false;
+    try {
+      status = 'Recording (~9s, hold steady)…';
+      await startCalibration(deviceId, stripIndex, calBright, 'full');
+      await new Promise((r) => setTimeout(r, FRAME_MS * 3));
+      const ms = (1 + bits) * FRAME_MS * 5 * 1.5 + FRAME_MS;
+      const frames = await captureRawFrames(video, ms, procWidth);
+      if (myGen !== mapGen) return;
+      if (!frames.length) { status = 'No frames captured.'; return; }
+      const w = frames[0].w, h = frames[0].h, n = frames.length;
+      const buf = new ArrayBuffer(16 + n * (4 + w * h));
+      const dv = new DataView(buf), u8 = new Uint8Array(buf);
+      dv.setUint32(0, 0x43424331, false); // 'CBC1'
+      dv.setUint16(4, w, true); dv.setUint16(6, h, true); dv.setUint16(8, bits, true);
+      dv.setUint16(10, FRAME_MS, true); dv.setUint16(12, numLeds, true); dv.setUint16(14, n, true);
+      let off = 16;
+      for (const f of frames) { dv.setFloat32(off, f.t, true); off += 4; u8.set(f.gray, off); off += w * h; }
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([buf], { type: 'application/octet-stream' }));
+      a.download = `chromabay-capture-strip${stripIndex + 1}-${w}x${h}-${n}f.bin`;
+      a.click(); URL.revokeObjectURL(a.href);
+      status = `Recorded ${n} frames (${w}×${h}). Downloaded ${a.download}.`;
+    } catch (e: any) {
+      if (myGen === mapGen) status = 'Record failed: ' + (e?.message || e);
+    } finally {
+      if (myGen === mapGen) { busy = false; startDetect(); }
+    }
+  }
+
   // After-map diagnostic: the temporal-range image + detected blobs (cyan) + decoded LEDs (green).
   $effect(() => {
     const d = debug; const cv = dbgCanvas;
@@ -217,6 +248,7 @@
             <button class="btn danger" onclick={cancelMap}>Cancel</button>
           {:else}
             <button class="btn primary" onclick={map}>Map LEDs</button>
+            <button class="btn" onclick={record} title="Save the raw capture for offline debugging">⏺</button>
           {/if}
         </div>
         <details class="al-settings">
