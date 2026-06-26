@@ -42,6 +42,8 @@
   const BUF = 10;
   const recent: number[] = [];   // recent detected counts (for the auto-map lock)
   let briTimer: any = null;
+  let lockedBlobs: { x: number; y: number; n: number }[] = []; // blobs at lock (overlaid during map)
+  let mapProgress = $state(0);   // 0..1 capture progress shown during the map phase
 
   const layout = $derived.by((): Ledmap | null => {
     if (!points.length) return null;
@@ -57,50 +59,59 @@
   // Manual brightness: re-send the strobe at the new level (throttled so a drag doesn't flood BLE).
   function onBrightness() { if (phase !== 'detect' || briTimer) return; briTimer = setTimeout(() => { briTimer = null; reStrobe(); }, 90); }
 
-  function detectFrame() {
-    if (phase !== 'detect') return;
+  // One loop that keeps the preview LIVE in both phases: full blink-detection while detecting,
+  // and a light video + locked-blob overlay during the map (so it never freezes).
+  function frameLoop() {
+    if (phase === 'result') return;
     const cv = preview;
     if (video && video.videoWidth && cv) {
       const vw = video.videoWidth, vh = video.videoHeight;
       const w = Math.min(DET_W, vw), h = Math.round((w / vw) * vh);
-      if (w !== bufW || h !== bufH) { frameBuf = []; bufW = w; bufH = h; }
-      if (!grab) grab = document.createElement('canvas');
-      grab.width = w; grab.height = h;
-      const gctx = grab.getContext('2d', { willReadFrequently: true });
-      if (gctx) {
-        gctx.drawImage(video, 0, 0, w, h);
-        const d = gctx.getImageData(0, 0, w, h).data;
-        const N = w * h, gray = new Uint8Array(N);
-        for (let i = 0, j = 0; i < d.length; i += 4, j++) { const m = d[i] > d[i + 1] ? d[i] : d[i + 1]; gray[j] = m > d[i + 2] ? m : d[i + 2]; }
-        frameBuf.push(gray); if (frameBuf.length > BUF) frameBuf.shift();
-        const ctx = cv.getContext('2d');
-        cv.width = w; cv.height = h;
-        if (ctx) ctx.drawImage(grab, 0, 0);
-        if (frameBuf.length >= 5 && ctx) {
-          const pmin = new Uint8Array(N).fill(255), pmax = new Uint8Array(N);
-          for (const g of frameBuf) for (let i = 0; i < N; i++) { if (g[i] < pmin[i]) pmin[i] = g[i]; if (g[i] > pmax[i]) pmax[i] = g[i]; }
-          const range = new Uint8Array(N); let mx = 0;
-          for (let i = 0; i < N; i++) { const r = pmax[i] - pmin[i]; range[i] = r; if (r > mx) mx = r; }
-          const blobs = mx >= 25 ? detectBlobs(range, w, h, { thresh: Math.max(18, mx * DET_THR) }) : [];
-          detectedCount = blobs.length;
-          ctx.lineWidth = Math.max(1, w / 200);
-          ctx.strokeStyle = blobs.length === numLeds ? '#2ecc71' : '#ffd23f';
-          for (const b of blobs) { ctx.beginPath(); ctx.arc(b.x, b.y, Math.max(3, Math.sqrt(b.n) + 1), 0, 6.283); ctx.stroke(); }
-          recent.push(detectedCount); if (recent.length > LOCK_WINDOW) recent.shift();
-          const hits = recent.filter((c) => c === numLeds).length;
-          status = !autoFire ? `Seeing ${detectedCount}/${numLeds} — adjust, then tap Map`
-            : hits >= LOCK_NEEDED ? 'Locked — mapping…'
-            : detectedCount === numLeds ? `Hold steady… locking (${hits}/${LOCK_NEEDED})`
-            : detectedCount > numLeds ? `Seeing ${detectedCount} (extra) — hold steady…`
-            : `Seeing ${detectedCount}/${numLeds} — frame all LEDs, hold steady…`;
-          if (autoFire && recent.length >= LOCK_WINDOW && hits >= LOCK_NEEDED) { runMap(); return; } // auto-fire, don't reschedule
+      const ctx = cv.getContext('2d');
+      cv.width = w; cv.height = h;
+      if (ctx) ctx.drawImage(video, 0, 0, w, h);
+
+      if (phase === 'detect') {
+        if (w !== bufW || h !== bufH) { frameBuf = []; bufW = w; bufH = h; }
+        if (!grab) grab = document.createElement('canvas');
+        grab.width = w; grab.height = h;
+        const gctx = grab.getContext('2d', { willReadFrequently: true });
+        if (gctx && ctx) {
+          gctx.drawImage(video, 0, 0, w, h);
+          const d = gctx.getImageData(0, 0, w, h).data;
+          const N = w * h, gray = new Uint8Array(N);
+          for (let i = 0, j = 0; i < d.length; i += 4, j++) { const m = d[i] > d[i + 1] ? d[i] : d[i + 1]; gray[j] = m > d[i + 2] ? m : d[i + 2]; }
+          frameBuf.push(gray); if (frameBuf.length > BUF) frameBuf.shift();
+          if (frameBuf.length >= 5) {
+            const pmin = new Uint8Array(N).fill(255), pmax = new Uint8Array(N);
+            for (const g of frameBuf) for (let i = 0; i < N; i++) { if (g[i] < pmin[i]) pmin[i] = g[i]; if (g[i] > pmax[i]) pmax[i] = g[i]; }
+            const range = new Uint8Array(N); let mx = 0;
+            for (let i = 0; i < N; i++) { const r = pmax[i] - pmin[i]; range[i] = r; if (r > mx) mx = r; }
+            const blobs = mx >= 25 ? detectBlobs(range, w, h, { thresh: Math.max(18, mx * DET_THR) }) : [];
+            detectedCount = blobs.length; lockedBlobs = blobs;
+            ctx.lineWidth = Math.max(1, w / 200);
+            ctx.strokeStyle = blobs.length === numLeds ? '#2ecc71' : '#ffd23f';
+            for (const b of blobs) { ctx.beginPath(); ctx.arc(b.x, b.y, Math.max(3, Math.sqrt(b.n) + 1), 0, 6.283); ctx.stroke(); }
+            recent.push(detectedCount); if (recent.length > LOCK_WINDOW) recent.shift();
+            const hits = recent.filter((c) => c === numLeds).length;
+            status = !autoFire ? `Seeing ${detectedCount}/${numLeds} — adjust, then tap Map`
+              : hits >= LOCK_NEEDED ? 'Locked — mapping…'
+              : detectedCount === numLeds ? `Hold steady… locking (${hits}/${LOCK_NEEDED})`
+              : detectedCount > numLeds ? `Seeing ${detectedCount} (extra) — hold steady…`
+              : `Seeing ${detectedCount}/${numLeds} — frame all LEDs, hold steady…`;
+            if (autoFire && recent.length >= LOCK_WINDOW && hits >= LOCK_NEEDED) runMap(); // → phase 'map'
+          }
         }
+      } else if (ctx) {
+        // map phase: keep showing the (flashing) strip with the LEDs we locked onto circled
+        ctx.lineWidth = Math.max(1, w / 200); ctx.strokeStyle = '#2ecc71';
+        for (const b of lockedBlobs) { ctx.beginPath(); ctx.arc(b.x, b.y, Math.max(3, Math.sqrt(b.n) + 1), 0, 6.283); ctx.stroke(); }
       }
     }
-    setTimeout(detectFrame, 130);
+    setTimeout(frameLoop, phase === 'detect' ? 130 : 180);
   }
 
-  function startDetect() { phase = 'detect'; recent.length = 0; frameBuf = []; reStrobe(); detectFrame(); }
+  function startDetect() { phase = 'detect'; recent.length = 0; frameBuf = []; reStrobe(); frameLoop(); }
 
   onMount(() => {
     (async () => {
@@ -120,19 +131,24 @@
   });
 
   async function runMap() {
-    phase = 'map'; points = [];
+    phase = 'map'; points = []; mapProgress = 0;
     const myGen = ++mapGen;
+    status = `Reading ${lockedBlobs.length} LEDs… hold steady`;
+    const expMs = FRAME_MS * 3 + (2 + bits) * FRAME_MS * 6 + FRAME_MS + 600; // settle + capture + decode
+    const t0 = performance.now();
+    const pTimer = setInterval(() => { if (myGen !== mapGen) { clearInterval(pTimer); return; } mapProgress = Math.min(0.98, (performance.now() - t0) / expMs); }, 100);
     try {
-      status = 'Mapping… hold steady (~8s)';
       await startCalibration(deviceId, stripIndex, calBright, 'full');
       await new Promise((r) => setTimeout(r, FRAME_MS * 3));
-      const res = await captureAndDecode(video, { bits, frameMs: FRAME_MS, numLeds, cycles: 6, procWidth: MAP_W, onLog: (m) => { if (myGen === mapGen) status = m; } });
+      const res = await captureAndDecode(video, { bits, frameMs: FRAME_MS, numLeds, cycles: 6, procWidth: MAP_W });
+      clearInterval(pTimer); mapProgress = 1;
       if (myGen !== mapGen) return;
       points = res.points;
       const got = res.diag?.found ?? 0;
       if (got >= numLeds) { mapFails = 0; phase = 'result'; status = `Mapped all ${numLeds}! Rotate if needed, then Use this map.`; stopCalibration(deviceId).catch(() => {}); }
       else { mapFails++; if (mapFails >= 2) autoFire = false; status = got > 0 ? `Got ${got}/${numLeds} — re-aiming…` : 'Missed some — re-aiming…'; startDetect(); } // auto-retry, then manual
     } catch (e: any) {
+      clearInterval(pTimer);
       if (myGen === mapGen) { status = 'Map failed: ' + (e?.message || e); startDetect(); }
     }
   }
@@ -168,6 +184,8 @@
           {/if}
           <label class="al-slider">☀️ <input type="range" min="4" max="200" step="2" bind:value={calBright} oninput={onBrightness} /><span>{calBright}</span></label>
           {#if !autoFire}<button class="btn primary" onclick={mapNow}>Map now</button>{/if}
+        {:else if phase === 'map'}
+          <div class="al-progress"><div class="al-progress-fill" style="width:{Math.round(mapProgress * 100)}%"></div></div>
         {/if}
       </div>
       <div class="al-controls">
@@ -178,7 +196,7 @@
             <button class="btn small" onclick={() => (turns = (turns + 1) % 4)}>⟳</button>
             <span>{turns * 90}°</span>
           </div>
-          <label class="al-slider">Snap <input type="range" min="0" max="1" step="0.05" bind:value={snap} /><span>{snap > 0.66 ? 'grid' : snap < 0.34 ? 'free' : '·'}</span></label>
+          <label class="al-slider">Snap <input type="range" min="0" max="1" step="0.05" bind:value={snap} /><span>{snap.toFixed(2)}</span></label>
           <label class="cb"><input type="checkbox" bind:checked={rectify} /> Fix camera angle (rectangular)</label>
           <div class="al-result">{layout.width}×{layout.height}, {decodedCount} LEDs</div>
           <LayoutPreview width={layout.width} height={layout.height} map={layout.map} />
@@ -216,7 +234,8 @@
   .al-slider input[type="range"] { flex: 1; height: 1.6rem; }
   .al-slider span { min-width: 2.5em; text-align: right; opacity: 0.8; font-variant-numeric: tabular-nums; }
   .al-controls { flex: 1 1 280px; display: flex; flex-direction: column; gap: 0.85rem; }
-  .al-controls .al-slider { padding: 0.35rem 0; }
+  .al-progress { height: 8px; border-radius: 4px; background: rgba(255,255,255,0.12); overflow: hidden; }
+  .al-progress-fill { height: 100%; background: linear-gradient(90deg, #3b82f6, #60a5fa); transition: width 0.1s linear; }
   .al-status { font-size: 0.9rem; opacity: 0.9; min-height: 2.4em; }
   .al-rotate { display: flex; align-items: center; gap: 0.4rem; font-size: 0.9rem; }
   .al-result { font-size: 0.85rem; opacity: 0.9; }
