@@ -19,7 +19,7 @@
   let { deviceId, stripIndex, numLeds, onClose }:
     { deviceId: string; stripIndex: number; numLeds: number; onClose: () => void } = $props();
 
-  const FRAME_MS = 120; // must match firmware CALIB_FRAME_MS (only sizes the capture window; decode is timing-agnostic)
+  const FRAME_MS = 220; // must match firmware CALIB_FRAME_MS (only sizes the capture window; decode is timing-agnostic)
   const bits = Math.max(1, Math.ceil(Math.log2(Math.max(2, numLeds))));
 
   let video: HTMLVideoElement;

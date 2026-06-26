@@ -115,11 +115,12 @@ static uint8_t calibBrightness = 40;  // per-channel white level while flashing 
 static uint8_t calibMode = 1;         // 0 = strobe (ALL off/on only — for fast exposure tuning),
                                       // 1 = full structured-light sequence (off/on + bit planes).
 static uint32_t calibStartMs = 0;
-// Hold each calibration frame this long. Shorter = faster cycle = less camera motion smear per
-// cycle (the decoder recovers the real timing from the data, so this isn't safety-critical), but
-// it must stay well above the camera's frame interval (~33ms @30fps) so a few frames land in each
-// slot. 120ms ≈ 3-4 camera frames/slot and roughly halves the old 220ms cycle.
-static const uint32_t CALIB_FRAME_MS = 120;
+// Hold each calibration frame this long. Must stay well above the camera's frame interval so
+// several frames land cleanly in each slot — at 30fps a 120ms slot only gets ~3 frames and, with
+// loop/show() jitter, the bit-planes under-sample and misalign (decode fails even on a perfectly
+// sharp image). 220ms ≈ 6-7 frames/slot, which is the value that decoded reliably. Camera motion
+// is handled by registration in the decoder, not by blinking faster.
+static const uint32_t CALIB_FRAME_MS = 220;
 
 // Timestamp Sync Characteristic
 NimBLECharacteristic* pTimestampSyncCharacteristic = nullptr;

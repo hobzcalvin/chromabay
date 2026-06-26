@@ -110,8 +110,8 @@ export async function captureAndDecode(video: HTMLVideoElement, opts: DecodeOpts
   const frameMs = opts.frameMs;
   const slots = 1 + bits;                       // [ALL-ON][bit0..] — no all-off frame
   const cycles = opts.cycles ?? 4;
-  // Capture generously (2× nominal) to absorb camera/device timing slack + get the full cycles.
-  const captureMs = opts.captureMs ?? slots * frameMs * cycles * 2 + frameMs;
+  // Capture 1.5× the nominal cycle time to absorb device-timing slack and still get the cycles.
+  const captureMs = opts.captureMs ?? slots * frameMs * cycles * 1.5 + frameMs;
   const procWidth = opts.procWidth ?? 240;
   const relThr = opts.relThr ?? 0.35;
   const noiseFloor = opts.noiseFloor ?? 12;
