@@ -11,12 +11,25 @@ import type { Pt } from './autoLayout';
 
 export type DecodeOpts = {
   bits: number;
-  frameMs: number;        // device CALIB_FRAME_MS (220)
+  frameMs: number;        // device CALIB_FRAME_MS (220) — must match firmware
   cycles?: number;        // how many full flash cycles to capture (default 3)
   captureMs?: number;     // total capture window (default cycles × period + 1 frame)
-  procWidth?: number;     // downscale width for processing (default 200)
-  threshold?: number;     // ON luminance threshold over background, 0..255 (default 40)
+  procWidth?: number;     // downscale width for processing (default 200; higher separates merged dots)
+  relThr?: number;        // detection threshold as a FRACTION of the observed swing, 0..1 (default 0.4).
+                          // Lower = more sensitive. This is the differential/adaptive knob — no
+                          // absolute brightness, so a dark background isn't required.
+  noiseFloor?: number;    // absolute min swing to count as "blinking" (reject sensor noise; default 12)
+  minBlobPx?: number;     // min connected pixels for an LED blob (default ~N/20000; lower splits merges)
   onLog?: (m: string) => void;
+};
+
+// Diagnostic data so the UI can show what the decoder actually saw.
+export type DecodeDebug = {
+  w: number; h: number;
+  range: Uint8Array;                 // per-pixel temporal swing (what blinked — phase-independent)
+  blobs: { x: number; y: number }[]; // detected candidate LED centroids
+  decoded: { x: number; y: number; idx: number }[];
+  frames: number; roiCount: number; maxRange: number;
 };
 
 type Frame = { t: number; gray: Uint8Array; w: number; h: number };
@@ -82,7 +95,7 @@ function sampleAt(f: Frame, cx: number, cy: number, r = 2): number {
 }
 
 /** What a decode produced (or why it didn't). points is empty unless LEDs were confidently seen. */
-export type DecodeResult = { points: (Pt | null)[]; ok: boolean; reason: string };
+export type DecodeResult = { points: (Pt | null)[]; ok: boolean; reason: string; debug?: DecodeDebug };
 
 /**
  * Decode the calibration burst. Captures several cycles, folds frames by cycle PHASE (so
@@ -99,33 +112,44 @@ export async function captureAndDecode(video: HTMLVideoElement, opts: DecodeOpts
   const cycles = opts.cycles ?? 3;
   const captureMs = opts.captureMs ?? cyclePeriod * cycles + frameMs;
   const procWidth = opts.procWidth ?? 200;
-  const thr = opts.threshold ?? 45;
+  const relThr = opts.relThr ?? 0.4;
+  const noiseFloor = opts.noiseFloor ?? 12;
   const log = opts.onLog ?? (() => {});
 
   const frames = await captureBurst(video, captureMs, procWidth);
   if (frames.length < slots) return { points: [], ok: false, reason: 'too few camera frames captured' };
   const w = frames[0].w, h = frames[0].h, N = w * h;
+  const minBlobPx = opts.minBlobPx ?? Math.max(1, Math.round(N / 20000));
   log(`captured ${frames.length} frames @ ${w}x${h}`);
 
-  // Find the BLINKING region by per-pixel temporal range (max-min over the burst). LEDs
-  // flash → high range; the (possibly bright) static background → ~0. This makes everything
-  // below background-independent, so a dark backdrop isn't required.
+  // Per-pixel temporal swing (max-min over the burst). LEDs flash → big swing; static
+  // background (however bright) → ~0. Everything below thresholds RELATIVE to this swing —
+  // no absolute brightness, so a dark backdrop isn't needed.
   const pmin = new Uint8Array(N).fill(255), pmax = new Uint8Array(N);
   for (const f of frames) for (let i = 0; i < N; i++) { const v = f.gray[i]; if (v < pmin[i]) pmin[i] = v; if (v > pmax[i]) pmax[i] = v; }
+  const range = new Uint8Array(N);
+  let maxRange = 0;
+  for (let i = 0; i < N; i++) { const r = pmax[i] - pmin[i]; range[i] = r; if (r > maxRange) maxRange = r; }
+  const debug: DecodeDebug = { w, h, range, blobs: [], decoded: [], frames: frames.length, roiCount: 0, maxRange };
+  const fail = (reason: string): DecodeResult => ({ points: [], ok: false, reason, debug });
+
+  if (maxRange < noiseFloor) return fail('nothing in view is blinking — is the strip calibrating and in frame?');
+
+  // ROI = pixels swinging more than a fraction of the strongest swing (adaptive).
+  const roiThr = Math.max(noiseFloor, relThr * maxRange);
   const roi = new Uint8Array(N);
   let roiCount = 0;
-  for (let i = 0; i < N; i++) if (pmax[i] - pmin[i] > thr) { roi[i] = 1; roiCount++; }
-  if (roiCount < Math.max(2, Math.round(N / 40000))) {
-    return { points: [], ok: false, reason: 'nothing in view is blinking — is the strip calibrating and in frame?' };
-  }
-  log(`${roiCount} blinking px (the LED region)`);
+  for (let i = 0; i < N; i++) if (range[i] >= roiThr) { roi[i] = 1; roiCount++; }
+  debug.roiCount = roiCount;
+  if (roiCount < minBlobPx) return fail('blinking region too small — move closer / fill more of the frame');
+  log(`${roiCount} blinking px (region), maxSwing ${maxRange}`);
 
-  // Reference/phase from the blinking region ONLY (ignore the static background): the frame
-  // where the region is brightest is ALL-ON; darkest is ALL-OFF (= phase-0 anchor).
+  // Reference/phase from the blinking region ONLY (ignore the static background): brightest
+  // region frame = ALL-ON; darkest = ALL-OFF (= phase-0 anchor).
   const roiSum = (f: Frame) => { let s = 0; for (let i = 0; i < N; i++) if (roi[i]) s += f.gray[i]; return s; };
   let offAnchorT = 0, minRoi = Infinity;
   for (const f of frames) { const s = roiSum(f); if (s < minRoi) { minRoi = s; offAnchorT = f.t; } }
-  // Per-slot averaged grayscale image (fold all cycles into one period).
+  // Per-slot averaged image (fold all cycles into one period).
   const slotSum = Array.from({ length: slots }, () => new Float32Array(N));
   const slotCnt = new Array(slots).fill(0);
   for (const f of frames) {
@@ -135,32 +159,36 @@ export async function captureAndDecode(video: HTMLVideoElement, opts: DecodeOpts
     for (let i = 0; i < N; i++) acc[i] += f.gray[i];
     slotCnt[slot]++;
   }
-  if (slotCnt.some((c) => c === 0)) return { points: [], ok: false, reason: 'capture too short — some calibration frames were missed' };
+  if (slotCnt.some((c) => c === 0)) return fail('capture too short — some calibration frames were missed (raise cycles)');
   const slotAvg = slotSum.map((s, k) => { const a = new Uint8Array(N); for (let i = 0; i < N; i++) a[i] = s[i] / slotCnt[k]; return a; });
   const offA = slotAvg[0], onA = slotAvg[1];
 
-  // LED blobs = pixels in the blinking region clearly brighter in the averaged ON slot than
-  // the OFF slot. ANDing with the ROI rejects any static-background brightness.
+  // LED blobs = pixels in the blinking region whose ON-slot vs OFF-slot difference clears a
+  // fraction of the strongest such difference (adaptive, background cancels in the diff).
   let maxDelta = 0;
+  for (let i = 0; i < N; i++) { const d = onA[i] - offA[i]; if (roi[i] && d > maxDelta) maxDelta = d; }
+  if (maxDelta < noiseFloor) return fail('no LEDs lit in sync with the flash');
+  const blobThr = Math.max(noiseFloor, relThr * maxDelta);
   const mask = new Uint8Array(N);
-  for (let i = 0; i < N; i++) { const d = onA[i] - offA[i]; if (d > maxDelta) maxDelta = d; mask[i] = (roi[i] && d > thr) ? 1 : 0; }
-  if (maxDelta < thr) return { points: [], ok: false, reason: 'no LEDs detected (nothing lit up in sync)' };
-  const cand = blobs(mask, w, h, Math.max(1, Math.round(N / 20000)));
+  for (let i = 0; i < N; i++) mask[i] = (roi[i] && onA[i] - offA[i] >= blobThr) ? 1 : 0;
+  const cand = blobs(mask, w, h, minBlobPx);
+  debug.blobs = cand.map((b) => ({ x: b.x, y: b.y }));
   log(`found ${cand.length} candidate LED blobs`);
-  if (!cand.length) return { points: [], ok: false, reason: 'no LED-sized bright spots found' };
+  if (!cand.length) return fail('no LED-sized bright spots found (try lower min-blob / higher resolution)');
 
   const sampleSlot = (k: number, cx: number, cy: number) => sampleAt({ gray: slotAvg[k], w, h, t: 0 }, cx, cy);
   const byIndex = new Map<number, { x: number; y: number; px: number; conf: number }>();
   for (const b of cand) {
     const on = sampleSlot(1, b.x, b.y), off = sampleSlot(0, b.x, b.y);
-    if (on - off < thr * 0.6) continue;          // weak/uncertain blob → likely noise, skip
-    const mid = (on + off) / 2;
+    if (on - off < relThr * maxDelta * 0.5) continue; // weak/uncertain blob → likely noise, skip
+    const mid = (on + off) / 2;                        // per-LED midpoint; the background cancels
     let idx = 0;
     for (let k = 0; k < bits; k++) if (sampleSlot(2 + k, b.x, b.y) > mid) idx |= (1 << k);
     const prev = byIndex.get(idx);
     if (!prev || b.px > prev.px) byIndex.set(idx, { x: b.x, y: b.y, px: b.px, conf: on - off });
   }
-  if (!byIndex.size) return { points: [], ok: false, reason: 'LED blobs found but none decoded confidently' };
+  debug.decoded = [...byIndex].map(([idx, b]) => ({ x: b.x, y: b.y, idx }));
+  if (!byIndex.size) return fail('LED blobs found but none decoded confidently');
   log(`decoded ${byIndex.size} distinct LED indices`);
 
   // Sparse by LED index: UNDECODED LEDs are null (a gap), NOT (0,0) — otherwise every LED we
@@ -168,5 +196,5 @@ export async function captureAndDecode(video: HTMLVideoElement, opts: DecodeOpts
   const maxIdx = Math.max(...byIndex.keys());
   const pts: (Pt | null)[] = new Array(maxIdx + 1).fill(null);
   for (const [idx, b] of byIndex) pts[idx] = { x: b.x / w, y: b.y / h };
-  return { points: pts, ok: true, reason: `decoded ${byIndex.size} LEDs` };
+  return { points: pts, ok: true, reason: `decoded ${byIndex.size} LEDs`, debug };
 }

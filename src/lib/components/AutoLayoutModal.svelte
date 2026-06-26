@@ -4,7 +4,7 @@
   // live preview and upload. The CV decode (cameraDecode.ts) is a first pass to tune on HW.
   import { onMount } from 'svelte';
   import { startCalibration, stopCalibration, uploadStripLayout } from '$lib/ble';
-  import { captureAndDecode } from '$lib/cameraDecode';
+  import { captureAndDecode, type DecodeDebug } from '$lib/cameraDecode';
   import { buildLedmap, rectifyPoints, rotateLedmap, type Pt, type Ledmap } from '$lib/autoLayout';
   import LayoutPreview from './LayoutPreview.svelte';
 
@@ -22,6 +22,14 @@
   let turns = $state(0);
   let status = $state('Point the camera at the strip, then Scan.');
   let busy = $state(false);
+  let debug: DecodeDebug | null = $state(null);
+  let dbgCanvas: HTMLCanvasElement | undefined = $state();
+
+  // Tweakable decode knobs (so you can iterate without changing code).
+  let relThr = $state(0.4);     // detection threshold, fraction of swing (lower = more sensitive)
+  let cycles = $state(3);       // flash cycles to capture (more = robust, slower)
+  let minBlobPx = $state(2);    // min pixels per LED blob (lower splits merged dots)
+  let procWidth = $state(240);  // capture resolution (higher separates merged dots)
 
   // Recompute the ledmap reactively from points + controls.
   const layout = $derived.by((): Ledmap | null => {
@@ -42,16 +50,19 @@
   });
 
   async function scan() {
-    busy = true; points = [];
+    busy = true; points = []; debug = null;
     try {
-      status = 'Calibrating + capturing (hold the camera steady)…';
+      status = 'Calibrating + capturing (hold steady)…';
       await startCalibration(deviceId, stripIndex);
       await new Promise((r) => setTimeout(r, FRAME_MS * 2)); // let the device enter the cycle
-      const res = await captureAndDecode(video, { bits, frameMs: FRAME_MS, onLog: (m) => (status = m) });
+      const res = await captureAndDecode(video, {
+        bits, frameMs: FRAME_MS, cycles, relThr, minBlobPx, procWidth, onLog: (m) => (status = m)
+      });
       await stopCalibration(deviceId);
+      debug = res.debug ?? null;
       if (!res.ok) {
         points = [];
-        status = `Couldn't map: ${res.reason}. Aim so the lit strip fills the frame, hold steady, and retry.`;
+        status = `Couldn't map: ${res.reason}`;
       } else {
         points = res.points;
         status = `Decoded ${res.points.filter(Boolean).length}/${numLeds} LEDs. Tune snap / rectify / rotation, then Use this map.`;
@@ -61,6 +72,23 @@
       try { await stopCalibration(deviceId); } catch {}
     } finally { busy = false; }
   }
+
+  // Draw the diagnostic: the temporal-range image (what blinked) + detected blob centroids
+  // (cyan) and decoded LEDs (green, with index). Phase-independent, so it shows the truth
+  // even when the decode is wrong.
+  $effect(() => {
+    const d = debug; const cv = dbgCanvas;
+    if (!cv || !d) return;
+    cv.width = d.w; cv.height = d.h;
+    const ctx = cv.getContext('2d'); if (!ctx) return;
+    const img = ctx.createImageData(d.w, d.h);
+    for (let i = 0, j = 0; i < d.range.length; i++, j += 4) {
+      const v = d.range[i]; img.data[j] = v; img.data[j + 1] = v; img.data[j + 2] = v; img.data[j + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+    for (const b of d.blobs) { ctx.strokeStyle = '#00d0ff'; ctx.lineWidth = 0.7; ctx.beginPath(); ctx.arc(b.x, b.y, 2.5, 0, 6.283); ctx.stroke(); }
+    for (const dd of d.decoded) { ctx.fillStyle = '#2ecc71'; ctx.beginPath(); ctx.arc(dd.x, dd.y, 1.6, 0, 6.283); ctx.fill(); }
+  });
 
   async function use() {
     if (!layout) return;
@@ -83,6 +111,23 @@
         <!-- svelte-ignore a11y_media_has_caption -->
         <video bind:this={video} playsinline muted></video>
         <button class="btn primary" disabled={busy} onclick={scan}>{busy ? 'Scanning…' : 'Scan'}</button>
+        {#if debug}
+          <div class="al-debug">
+            <canvas bind:this={dbgCanvas} class="al-dbgcanvas"></canvas>
+            <div class="al-counts">
+              {debug.frames} frames · {debug.roiCount} blinking px · {debug.blobs.length} blobs · {debug.decoded.length} decoded
+              <br />swing {debug.maxRange}/255
+            </div>
+            <div class="al-legend">debug: gray = what blinked · <span style="color:#00d0ff">○</span> blob · <span style="color:#2ecc71">●</span> decoded</div>
+          </div>
+        {/if}
+        <details class="al-settings">
+          <summary>Decode settings</summary>
+          <label>Sensitivity <input type="range" min="0.1" max="0.8" step="0.05" bind:value={relThr} /><span>{relThr.toFixed(2)} (lower = detect more)</span></label>
+          <label>Cycles <input type="range" min="1" max="6" step="1" bind:value={cycles} /><span>{cycles}</span></label>
+          <label>Min blob px <input type="range" min="1" max="40" step="1" bind:value={minBlobPx} /><span>{minBlobPx}</span></label>
+          <label>Resolution <input type="range" min="120" max="480" step="20" bind:value={procWidth} /><span>{procWidth}px</span></label>
+        </details>
       </div>
       <div class="al-controls">
         <p class="al-status">{status}</p>
@@ -122,4 +167,14 @@
   .al-status { font-size: 0.85rem; opacity: 0.85; min-height: 2.4em; }
   .al-result { font-size: 0.85rem; opacity: 0.9; }
   .al-rotate { display: flex; align-items: center; gap: 0.4rem; font-size: 0.9rem; }
+  .al-debug { display: flex; flex-direction: column; gap: 0.3rem; }
+  .al-dbgcanvas { width: 100%; image-rendering: pixelated; background: #000; border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.15); }
+  .al-counts { font-size: 0.78rem; opacity: 0.85; font-variant-numeric: tabular-nums; }
+  .al-legend { font-size: 0.72rem; opacity: 0.6; }
+  .al-settings { font-size: 0.85rem; }
+  .al-settings summary { cursor: pointer; opacity: 0.8; }
+  .al-settings label { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.4rem; }
+  .al-settings label input[type='range'] { flex: 1; }
+  .al-settings label span { min-width: 6.5em; text-align: right; opacity: 0.8; }
 </style>
