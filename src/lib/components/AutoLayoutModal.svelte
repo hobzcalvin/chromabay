@@ -47,9 +47,14 @@
   // scan loop also stops on cancel, but a forced close mid-capture might not unwind that in time.
   function closeModal() { cancelled = true; stopCalibration(deviceId).catch(() => {}); onClose(); }
 
-  // Cancel an in-progress scan: the autoMap loop checks this between passes and returns its best
-  // effort; we also stop the flash immediately so the LEDs aren't left mid-sequence.
-  function cancelScan() { cancelled = true; status = 'Cancelling…'; stopCalibration(deviceId).catch(() => {}); }
+  // Cancel an in-progress scan. The autoMap loop unwinds at its next checkpoint (it's mid-await on
+  // a capture, so that can take a second) — don't make the user wait on it: free the UI now and
+  // ignore the stale result via a generation token. Also stop the flash immediately.
+  let scanGen = 0;
+  function cancelScan() {
+    cancelled = true; scanGen++; busy = false; status = 'Scan cancelled.';
+    stopCalibration(deviceId).catch(() => {});
+  }
 
   function applyZoom(z: number) {
     zoom = z;
@@ -91,6 +96,7 @@
   // (or returns the best effort). We just provide the BLE flash hooks + surface progress.
   async function scan() {
     busy = true; cancelled = false; points = []; debug = null;
+    const myGen = ++scanGen;
     try {
       const res = await autoMap(
         video,
@@ -99,12 +105,14 @@
           startFlash: (b, mode) => startCalibration(deviceId, stripIndex, b, mode),
           stopFlash: () => stopCalibration(deviceId),
           onProgress: (m, info) => {
+            if (myGen !== scanGen) return; // stale run; don't stomp the live status
             status = info.best ? `${m} — best ${info.best}/${numLeds} (try ${info.attempt})` : `${m} (try ${info.attempt})`;
           },
-          onAttempt: (r) => { if (r.debug) debug = r.debug; if (r.points.length) points = r.points; },
+          onAttempt: (r) => { if (myGen !== scanGen) return; if (r.debug) debug = r.debug; if (r.points.length) points = r.points; },
           shouldStop: () => cancelled,
         },
       );
+      if (myGen !== scanGen) return; // cancelled/superseded — leave the cancelled status as-is
       debug = res.debug ?? debug;
       points = res.points;
       if (res.brightness > 0) calBright = res.brightness; // reflect what worked back to the slider
@@ -117,9 +125,9 @@
           ? `Mapped ${got}/${numLeds} (best effort). ${res.coaching ?? ''} Re-scan or tune, then Use this map.`
           : `Couldn't map: ${res.reason}. ${res.coaching ?? ''}`;
     } catch (e: any) {
-      status = 'Scan failed: ' + (e?.message || e);
+      if (myGen === scanGen) status = 'Scan failed: ' + (e?.message || e);
       try { await stopCalibration(deviceId); } catch {}
-    } finally { busy = false; }
+    } finally { if (myGen === scanGen) busy = false; } // don't clobber a newer scan
   }
 
   // Draw the diagnostic: the temporal-range image (what blinked) + detected blob centroids

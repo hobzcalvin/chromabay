@@ -31,6 +31,7 @@ export type DecodeDiag = {
   maxRange: number;       // strongest temporal swing (0..255) — low => too dim / not flashing
   clippedPct: number;     // fraction of strip px clipped at 255 in the brightest frame — high => bloom
   outOfRangePct: number;  // fraction of decoded px whose code ≥ numLeds — high => bloom/corruption
+  fill: number;           // lit area ÷ bounding box — high (>~0.2) => LEDs bloomed into a solid blob
   motionPx: number;       // camera drift during the capture (px) — high => hold still
   cyclesUsed: number;     // flash cycles successfully folded
 };
@@ -142,14 +143,14 @@ export async function captureAndDecode(video: HTMLVideoElement, opts: DecodeOpts
   let maxRange = 0;
   for (let i = 0; i < N; i++) { const r = pmax[i] - pmin[i]; range[i] = r; if (r > maxRange) maxRange = r; }
   const debug: DecodeDebug = { w, h, range, blobs: [], decoded: [], frames: F, roiCount: 0, maxRange };
-  const diag: DecodeDiag = { found: 0, maskPx: 0, maxRange, clippedPct: 0, outOfRangePct: 0, motionPx: 0, cyclesUsed: 0 };
+  const diag: DecodeDiag = { found: 0, maskPx: 0, maxRange, clippedPct: 0, outOfRangePct: 0, fill: 0, motionPx: 0, cyclesUsed: 0 };
   const fail = (reason: string): DecodeResult => ({ points: [], ok: false, reason, debug, diag });
   if (maxRange < noiseFloor) return fail('nothing in view is blinking — is the strip calibrating and in frame?');
 
   const maskThr = Math.max(noiseFloor, relThr * maxRange);
   const maskIdx: number[] = [];
   for (let i = 0; i < N; i++) if (range[i] >= maskThr) maskIdx.push(i);
-  debug.roiCount = maskIdx.length; diag.maskPx = maskIdx.length;
+  debug.roiCount = maskIdx.length; diag.maskPx = maskIdx.length; diag.fill = maskFill(maskIdx, w, h);
   if (maskIdx.length < (opts.minBlobPx ?? 3)) return fail('blinking region too small — move closer / fill more of the frame');
 
   // (3) Recover timing by finding the ALL-ON frames (every LED lit → the lit-pixel count peaks).
@@ -284,10 +285,21 @@ export type AutoMapHooks = {
   shouldStop?: () => boolean;                        // cancel hook (e.g. user closed the modal)
 };
 
-// Cheap exposure readout from a STROBE burst (all-LED on/off) — no decode. Drives the fast
-// brightness-tuning phase: we only need the ON/OFF swing + clipping to know if we're over/under.
-function analyzeExposure(frames: Frame[], relThr: number): { clippedPct: number; maxRange: number; maskPx: number } {
-  if (frames.length < 2) return { clippedPct: 0, maxRange: 0, maskPx: 0 };
+// Bounding-box fill ratio of a binary mask = litPx / bboxArea. THE bloom metric: well-exposed
+// LEDs are distinct dots with dark gaps (low fill ~0.05-0.15); bloomed LEDs merge into a solid
+// filled blob (high fill ~0.3+). Validated on real captures (good=0.06, bloomed=0.34).
+function maskFill(maskIdx: number[], w: number, h: number): number {
+  if (!maskIdx.length) return 0;
+  let x0 = w, x1 = -1, y0 = h, y1 = -1;
+  for (const i of maskIdx) { const x = i % w, y = (i / w) | 0; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  return maskIdx.length / Math.max(1, (x1 - x0 + 1) * (y1 - y0 + 1));
+}
+
+// Cheap exposure readout from a STROBE burst (all-LED on/off) — no decode. Drives the brightness
+// sweep: swing (detectable?), clipping, and FILL (bloomed?).
+type ExposureReading = { clippedPct: number; maxRange: number; maskPx: number; fill: number };
+function analyzeExposure(frames: Frame[], relThr: number): ExposureReading {
+  if (frames.length < 2) return { clippedPct: 0, maxRange: 0, maskPx: 0, fill: 0 };
   const w = frames[0].w, h = frames[0].h, N = w * h, F = frames.length;
   const bg = new Float32Array(F);
   for (let fi = 0; fi < F; fi++) {
@@ -301,44 +313,14 @@ function analyzeExposure(frames: Frame[], relThr: number): { clippedPct: number;
   for (let fi = 0; fi < F; fi++) for (let i = 0; i < N; i++) { let v = frames[fi].gray[i] - bg[fi] + 128; v = v < 0 ? 0 : v > 255 ? 255 : v; if (v < pmin[i]) pmin[i] = v; if (v > pmax[i]) pmax[i] = v; }
   let maxRange = 0; for (let i = 0; i < N; i++) { const r = pmax[i] - pmin[i]; if (r > maxRange) maxRange = r; }
   const maskThr = Math.max(12, relThr * maxRange);
-  let maskPx = 0, maxClipped = 0;
-  const mask = new Uint8Array(N);
-  for (let i = 0; i < N; i++) if (pmax[i] - pmin[i] >= maskThr) { mask[i] = 1; maskPx++; }
-  for (let fi = 0; fi < F; fi++) { let clip = 0; for (let i = 0; i < N; i++) if (mask[i] && frames[fi].gray[i] >= 250) clip++; if (clip > maxClipped) maxClipped = clip; }
-  return { clippedPct: maskPx ? maxClipped / maskPx : 0, maxRange, maskPx };
+  const maskIdx: number[] = [];
+  for (let i = 0; i < N; i++) if (pmax[i] - pmin[i] >= maskThr) maskIdx.push(i);
+  let maxClipped = 0;
+  for (let fi = 0; fi < F; fi++) { let clip = 0; for (const i of maskIdx) if (frames[fi].gray[i] >= 250) clip++; if (clip > maxClipped) maxClipped = clip; }
+  return { clippedPct: maskIdx.length ? maxClipped / maskIdx.length : 0, maxRange, maskPx: maskIdx.length, fill: maskFill(maskIdx, w, h) };
 }
 
 export type AutoMapResult = DecodeResult & { attempts: number; brightness: number; coaching?: string };
-
-// Decide the next move from a decode's diagnostics. Pure so it's unit-testable.
-//   - over-exposed (clipping / out-of-range codes)  → flash dimmer
-//   - under-exposed (no swing / nothing blinks)      → flash brighter
-//   - region tiny / motion                           → coach the user, retry
-//   - exposure ok but incomplete                     → raise sensitivity, then resolution
-function planAdjustment(res: DecodeResult, numLeds: number, p: { brightness: number; relThr: number; procWidth: number }) {
-  const d = res.diag;
-  let { brightness, relThr, procWidth } = p;
-  let coaching = '';
-  const solid = res.ok && (res.diag?.found ?? 0) >= numLeds;
-  if (solid) return { solid: true, brightness, relThr, procWidth, coaching: '' };
-
-  const overExposed = !!d && (d.clippedPct > 0.3 || d.outOfRangePct > 0.12);
-  const underExposed = !d || d.maxRange < 45 || (!res.ok && /blinking|lock onto/.test(res.reason));
-  const tinyRegion = !!d && d.maskPx > 0 && d.maskPx < 120;
-  const moving = !!d && d.motionPx > 18; // registration compensates translation up to ~this; beyond it, coach
-
-  if (overExposed) { brightness = Math.max(6, Math.round(brightness * 0.55)); coaching = 'Too bright — dimming the LEDs.'; }
-  else if (underExposed) { brightness = Math.min(220, Math.round(brightness * 1.7) + 4); coaching = 'Too dim — brightening the LEDs.'; }
-  else if (tinyRegion) { coaching = 'Move closer / fill more of the frame with the strip.'; if (procWidth < 360) procWidth += 60; }
-  else if (moving) { coaching = 'Hold the camera still.'; }
-  else { // exposure & framing fine, decode just incomplete → get more sensitive, then sharper
-    if (relThr > 0.18) relThr = Math.max(0.15, relThr - 0.07);
-    else if (procWidth < 360) procWidth += 60;
-    else brightness = Math.max(6, Math.round(brightness * 0.8)); // last resort: nudge dimmer
-    coaching = 'Refining…';
-  }
-  return { solid: false, brightness, relThr, procWidth, coaching };
-}
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -369,51 +351,62 @@ export async function autoMap(
   let attempt = 0, coaching = '';
 
   try {
-    // ---- PHASE 1: strobe → lock exposure ----
-    const exposureDeadline = Math.min(budgetMs * 0.45, 25000);
-    let lastB = -1;
-    while (elapsed() < exposureDeadline) {
-      if (hooks.shouldStop?.()) break;
+    // ---- PHASE 1: brightness SWEEP (strobe) → pick the dimmest level that's clearly detectable
+    // with the LOWEST bloom (fill ratio). Sweeps low→high so it genuinely searches both ways and
+    // lands on "distinct dots", not just "doesn't clip". ----
+    const exposureDeadline = Math.min(budgetMs * 0.5, 28000);
+    const minMask = Math.max(40, numLeds * 2);
+    let bestExp: { b: number; fill: number; maxRange: number; maskPx: number } | null = null;
+    const levels = [8, 13, 20, 30, 44, 64, 92, 130];
+    for (const b of levels) {
+      if (hooks.shouldStop?.() || elapsed() > exposureDeadline) break;
       attempt++;
-      const reflash = brightness !== lastB;
-      if (reflash) { await hooks.startFlash(brightness, 'strobe'); lastB = brightness; }
-      await sleep(reflash ? 900 : 250);                        // let the camera auto-expose after a change
-      const frames = await captureBurst(video, 1300, procWidth);
+      await hooks.startFlash(b, 'strobe');
+      await sleep(900);                                        // let the camera auto-expose
+      const frames = await captureBurst(video, 1100, procWidth);
       if (hooks.shouldStop?.()) break;
       const ex = analyzeExposure(frames, relThr);
-      progress(`Tuning exposure @ ${brightness} — swing ${ex.maxRange | 0}, clip ${(ex.clippedPct * 100) | 0}%`, { attempt, best: 0 });
-
-      if (ex.maskPx < 40 && ex.maxRange < 12) {                // nothing is flashing
-        if (brightness >= 200) { coaching = 'No flashing LEDs in view — aim at the strip and keep it calibrating.'; break; }
-        brightness = Math.min(220, Math.round(brightness * 1.7) + 8); continue;
-      }
-      if (ex.clippedPct > 0.20) { brightness = Math.max(6, Math.round(brightness * 0.6)); coaching = 'Too bright — dimming.'; continue; }
-      if (ex.maxRange < 70) { brightness = Math.min(220, Math.round(brightness * 1.5) + 4); coaching = 'Too dim — brightening.'; continue; }
-      if (ex.maskPx < 120) coaching = 'Move closer / fill more of the frame.';
-      break;                                                   // exposure good enough → decode
+      const detectable = ex.maxRange >= 50 && ex.maskPx >= minMask;
+      progress(`Exposure sweep @ ${b}: fill ${(ex.fill * 100) | 0}%, swing ${ex.maxRange | 0}${detectable ? '' : ' (faint)'}`, { attempt, best: 0 });
+      if (detectable && (!bestExp || ex.fill < bestExp.fill)) bestExp = { b, fill: ex.fill, maxRange: ex.maxRange, maskPx: ex.maskPx };
+      // We've passed the sweet spot once a good low-fill lock starts blooming as we brighten.
+      if (bestExp && bestExp.fill < 0.12 && detectable && ex.fill > bestExp.fill + 0.06) break;
+    }
+    if (bestExp) {
+      brightness = bestExp.b;
+      coaching = bestExp.fill > 0.2 ? 'LEDs look bloomed even at low brightness — move back or focus.' : '';
+    } else {
+      brightness = base.brightness ?? 40;
+      coaching = 'Hard to see the LEDs — aim at the strip and fill more of the frame.';
     }
 
-    // ---- PHASE 2: full sequence → decode + refine ----
-    let lastB2 = -1;
+    // ---- PHASE 2: full sequence → decode + refine. Brightness is owned by the sweep; here we
+    // only adjust sensitivity/resolution and coach (re-running the sweep would just thrash). ----
+    await hooks.startFlash(brightness, 'full');
+    let reflashed = true;
     while (elapsed() < budgetMs) {
       if (hooks.shouldStop?.()) break;
       attempt++;
       const bestFound = best?.diag?.found ?? 0;
       progress(coaching || 'Decoding…', { attempt, best: bestFound });
-      const reflash = brightness !== lastB2;
-      if (reflash) { await hooks.startFlash(brightness, 'full'); lastB2 = brightness; }
-      await sleep(reflash ? 900 : 350);
+      await sleep(reflashed ? 900 : 300); reflashed = false;
       const res = await captureAndDecode(video, {
         bits, frameMs, numLeds, cycles: 2, relThr, procWidth, onLog: (m) => progress(m, { attempt, best: bestFound }),
       });
       if (hooks.shouldStop?.()) break;
       hooks.onAttempt?.(res, brightness);
       if ((res.diag?.found ?? 0) > (best?.diag?.found ?? -1)) best = res;
+      if (res.ok && (res.diag?.found ?? 0) >= numLeds) { best = res; break; }
 
-      const plan = planAdjustment(res, numLeds, { brightness, relThr, procWidth });
-      coaching = plan.coaching;
-      if (plan.solid) { best = res; break; }
-      brightness = plan.brightness; relThr = plan.relThr; procWidth = plan.procWidth;
+      // Decode incomplete. If the data is bloomed/faint the sweep already did its best, so coach
+      // rather than thrash brightness; otherwise get more sensitive, then sharper.
+      const d = res.diag;
+      if (d && d.fill > 0.2) coaching = 'LEDs bloomed — move back or focus, then it re-scans.';
+      else if (d && d.motionPx > 18) coaching = 'Hold the camera still.';
+      else if (d && d.maskPx < 120) coaching = 'Move closer / fill more of the frame.';
+      else if (relThr > 0.18) { relThr = Math.max(0.15, relThr - 0.07); coaching = 'Refining…'; }
+      else if (procWidth < 360) { procWidth += 60; coaching = 'Refining…'; }
+      else coaching = 'Refining…';
     }
   } finally {
     await hooks.stopFlash().catch(() => {});

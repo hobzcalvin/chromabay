@@ -55,10 +55,14 @@ hard physical limit:
 
 ### Adaptive auto-scan (`autoMap`) — two phases, ~60s budget
 
-**Phase 1 — exposure lock (fast).** The device STROBES all LEDs on/off (`mode=strobe`, a 2-frame
-cycle). We grab a ~1.3s burst and re-evaluate after each strobe (`analyzeExposure`: swing, clipping,
-mask size) — no decode needed to know if we're over/under-exposed — nudging brightness until the
-LEDs are crisp dots. Converges in a few short iterations instead of full-cycle captures.
+**Phase 1 — exposure sweep (strobe).** The device STROBES all LEDs on/off; we sweep flash
+brightness low→high (`[8,13,20,30,44,64,92,130]`), grab a short burst at each, and pick the
+**dimmest level that's clearly detectable with the lowest bloom**. Bloom is measured by **fill
+ratio** = lit area ÷ bounding box (`analyzeExposure`): well-exposed LEDs are distinct dots with
+dark gaps (fill ~0.05–0.15); bloomed LEDs merge into a solid blob (fill ~0.3+). Validated on real
+captures: the decodable one was 0.06, the bloomed one 0.34. This is a genuine two-directional
+search for the sweet spot — not a one-way nudge — and clipping alone (the old test) misses bloom
+entirely, which is why it used to lock on bloomed data.
 
 **Phase 2 — decode + refine.** With brightness locked, the device runs the full structured-light
 sequence (`mode=full`). Each pass `captureAndDecode` returns a `DecodeDiag` (LEDs found, mask px,
