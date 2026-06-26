@@ -122,11 +122,27 @@ export async function captureAndDecode(video: HTMLVideoElement, opts: DecodeOpts
   const minBlobPx = opts.minBlobPx ?? Math.max(1, Math.round(N / 20000));
   log(`captured ${frames.length} frames @ ${w}x${h}`);
 
-  // Per-pixel temporal swing (max-min over the burst). LEDs flash → big swing; static
-  // background (however bright) → ~0. Everything below thresholds RELATIVE to this swing —
-  // no absolute brightness, so a dark backdrop isn't needed.
-  const pmin = new Uint8Array(N).fill(255), pmax = new Uint8Array(N);
-  for (const f of frames) for (let i = 0; i < N; i++) { const v = f.gray[i]; if (v < pmin[i]) pmin[i] = v; if (v > pmax[i]) pmax[i] = v; }
+  // A bright flashing matrix makes the webcam restop its auto-exposure, so the WHOLE frame
+  // pulses with the calibration. Cancel that: per frame, subtract a robust background level
+  // (its median via a 64-bin histogram) so a global exposure swing → ~0 and only LOCAL
+  // changes (the LEDs) remain. `nv()` = background-normalized brightness (centered at 128).
+  const bg = new Float32Array(frames.length);
+  for (let fi = 0; fi < frames.length; fi++) {
+    const g = frames[fi].gray; const hist = new Int32Array(64);
+    for (let i = 0; i < N; i++) hist[g[i] >> 2]++;
+    let acc = 0; let bin = 0; const half = N >> 1;
+    for (; bin < 64; bin++) { acc += hist[bin]; if (acc >= half) break; }
+    bg[fi] = bin * 4 + 2;
+  }
+  const nv = (fi: number, i: number) => {
+    const v = frames[fi].gray[i] - bg[fi] + 128;
+    return v < 0 ? 0 : v > 255 ? 255 : v;
+  };
+
+  // Per-pixel temporal swing of the NORMALIZED frames. LED pixels swing locally → big range;
+  // background (now exposure-flat) → ~0.
+  const pmin = new Float32Array(N).fill(255), pmax = new Float32Array(N);
+  for (let fi = 0; fi < frames.length; fi++) for (let i = 0; i < N; i++) { const v = nv(fi, i); if (v < pmin[i]) pmin[i] = v; if (v > pmax[i]) pmax[i] = v; }
   const range = new Uint8Array(N);
   let maxRange = 0;
   for (let i = 0; i < N; i++) { const r = pmax[i] - pmin[i]; range[i] = r; if (r > maxRange) maxRange = r; }
@@ -135,52 +151,42 @@ export async function captureAndDecode(video: HTMLVideoElement, opts: DecodeOpts
 
   if (maxRange < noiseFloor) return fail('nothing in view is blinking — is the strip calibrating and in frame?');
 
-  // ROI = pixels swinging more than a fraction of the strongest swing (adaptive).
+  // Detect LEDs straight from the RANGE image (phase-independent — robust): pixels swinging
+  // more than a fraction of the strongest swing. This is the region AND the blob source.
   const roiThr = Math.max(noiseFloor, relThr * maxRange);
-  const roi = new Uint8Array(N);
+  const mask = new Uint8Array(N);
   let roiCount = 0;
-  for (let i = 0; i < N; i++) if (range[i] >= roiThr) { roi[i] = 1; roiCount++; }
+  for (let i = 0; i < N; i++) if (range[i] >= roiThr) { mask[i] = 1; roiCount++; }
   debug.roiCount = roiCount;
   if (roiCount < minBlobPx) return fail('blinking region too small — move closer / fill more of the frame');
-  log(`${roiCount} blinking px (region), maxSwing ${maxRange}`);
+  const cand = blobs(mask, w, h, minBlobPx);
+  debug.blobs = cand.map((b) => ({ x: b.x, y: b.y }));
+  log(`${roiCount} blinking px, ${cand.length} LED blobs, maxSwing ${maxRange}`);
+  if (!cand.length) return fail('no LED-sized spots found (try lower min-blob / higher resolution)');
 
-  // Reference/phase from the blinking region ONLY (ignore the static background): brightest
-  // region frame = ALL-ON; darkest = ALL-OFF (= phase-0 anchor).
-  const roiSum = (f: Frame) => { let s = 0; for (let i = 0; i < N; i++) if (roi[i]) s += f.gray[i]; return s; };
+  // Reference/phase from the blinking pixels only: brightest (normalized) = ALL-ON; darkest
+  // = ALL-OFF (= phase-0 anchor).
+  const roiSum = (fi: number) => { let s = 0; for (let i = 0; i < N; i++) if (mask[i]) s += nv(fi, i); return s; };
   let offAnchorT = 0, minRoi = Infinity;
-  for (const f of frames) { const s = roiSum(f); if (s < minRoi) { minRoi = s; offAnchorT = f.t; } }
-  // Per-slot averaged image (fold all cycles into one period).
+  for (let fi = 0; fi < frames.length; fi++) { const s = roiSum(fi); if (s < minRoi) { minRoi = s; offAnchorT = frames[fi].t; } }
+  // Per-slot averaged NORMALIZED image (fold all cycles into one period) for bit decoding.
   const slotSum = Array.from({ length: slots }, () => new Float32Array(N));
   const slotCnt = new Array(slots).fill(0);
-  for (const f of frames) {
-    let ph = (f.t - offAnchorT) % cyclePeriod; if (ph < 0) ph += cyclePeriod;
+  for (let fi = 0; fi < frames.length; fi++) {
+    let ph = (frames[fi].t - offAnchorT) % cyclePeriod; if (ph < 0) ph += cyclePeriod;
     const slot = Math.min(slots - 1, Math.floor(ph / frameMs));
-    const acc = slotSum[slot];
-    for (let i = 0; i < N; i++) acc[i] += f.gray[i];
+    const a = slotSum[slot];
+    for (let i = 0; i < N; i++) a[i] += nv(fi, i);
     slotCnt[slot]++;
   }
   if (slotCnt.some((c) => c === 0)) return fail('capture too short — some calibration frames were missed (raise cycles)');
   const slotAvg = slotSum.map((s, k) => { const a = new Uint8Array(N); for (let i = 0; i < N; i++) a[i] = s[i] / slotCnt[k]; return a; });
-  const offA = slotAvg[0], onA = slotAvg[1];
-
-  // LED blobs = pixels in the blinking region whose ON-slot vs OFF-slot difference clears a
-  // fraction of the strongest such difference (adaptive, background cancels in the diff).
-  let maxDelta = 0;
-  for (let i = 0; i < N; i++) { const d = onA[i] - offA[i]; if (roi[i] && d > maxDelta) maxDelta = d; }
-  if (maxDelta < noiseFloor) return fail('no LEDs lit in sync with the flash');
-  const blobThr = Math.max(noiseFloor, relThr * maxDelta);
-  const mask = new Uint8Array(N);
-  for (let i = 0; i < N; i++) mask[i] = (roi[i] && onA[i] - offA[i] >= blobThr) ? 1 : 0;
-  const cand = blobs(mask, w, h, minBlobPx);
-  debug.blobs = cand.map((b) => ({ x: b.x, y: b.y }));
-  log(`found ${cand.length} candidate LED blobs`);
-  if (!cand.length) return fail('no LED-sized bright spots found (try lower min-blob / higher resolution)');
 
   const sampleSlot = (k: number, cx: number, cy: number) => sampleAt({ gray: slotAvg[k], w, h, t: 0 }, cx, cy);
   const byIndex = new Map<number, { x: number; y: number; px: number; conf: number }>();
   for (const b of cand) {
     const on = sampleSlot(1, b.x, b.y), off = sampleSlot(0, b.x, b.y);
-    if (on - off < relThr * maxDelta * 0.5) continue; // weak/uncertain blob → likely noise, skip
+    if (on - off < noiseFloor) continue;               // blob shows no clear on/off → skip
     const mid = (on + off) / 2;                        // per-LED midpoint; the background cancels
     let idx = 0;
     for (let k = 0; k < bits; k++) if (sampleSlot(2 + k, b.x, b.y) > mid) idx |= (1 << k);
