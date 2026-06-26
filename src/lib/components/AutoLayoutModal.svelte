@@ -27,7 +27,7 @@
   let phase = $state<'detect' | 'map' | 'result'>('detect');
   let points: (Pt | null)[] = $state([]);
   let snap = $state(1);
-  let rectify = $state(false);
+  let rectify = $state(true);
   let turns = $state(0);
   let status = $state('Aim at the strip and hold steady…');
   let detectedCount = $state(0);
@@ -202,7 +202,7 @@
             <span>{turns * 90}°</span>
           </div>
           <label class="al-slider">Snap <input type="range" min="0" max="1" step="0.05" bind:value={snap} /></label>
-          <label class="cb"><input type="checkbox" bind:checked={rectify} /> Fix camera angle (rectangular)</label>
+          <label class="cb"><input type="checkbox" bind:checked={rectify} /> Force to rectangle</label>
           <div class="al-result">{layout.width}×{layout.height}, {decodedCount} LEDs</div>
           <LayoutPreview width={layout.width} height={layout.height} map={layout.map} />
           <div class="al-actions">
