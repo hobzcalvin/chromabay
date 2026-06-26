@@ -8,13 +8,35 @@ ledmap automatically. Branch `feat/auto-layout` (off `feat/arbitrary-layouts`).
 | Piece | State |
 |------|-------|
 | Geometry: rectify + snap + rotate (`src/lib/autoLayout.ts`) | **DONE**, host-tested |
-| Firmware calibration flash-mode (structured light) | **DONE**, HW-validated (enters/cycles/stops) |
-| App: camera capture → blob detect → decode → points (`cameraDecode.ts`) | **first pass DONE** — needs real LEDs+camera to tune thresholds/alignment |
+| Firmware calibration flash-mode (structured light) | **DONE**, HW-validated; now flashes at a tunable LOW brightness (see below) |
+| App: camera capture → decode → points (`cameraDecode.ts`) | **REDESIGNED** from recorded footage — data-driven timing + per-pixel decode + cluster-by-code. Needs a re-record with dim LEDs to confirm 25/25 |
+| Record raw capture + offline harness (`automation/decode-capture.mjs`) | **DONE** — `⏺ Record` downloads a `.bin`; harness replays the exact pipeline + ASCII placement |
 | UI: scan, snap slider, rectify checkbox, rotate, preview, upload (`AutoLayoutModal.svelte`) | **DONE**, chain HW-validated |
 
-Everything but the **CV decode accuracy** is wired and validated on hardware (the Scan→calibrate
-→capture→decode→stop chain runs end-to-end). Point a real strip + camera at it to tune
-`cameraDecode.ts` (threshold, frame alignment, blob size) — that's the remaining step.
+### CV decode: what the first real recording taught us
+
+Analyzing a recorded 5×5 capture (`automation/decode-capture.mjs`) found three problems and one
+hard physical limit:
+
+1. **Timing was assumed, not measured.** The device's real per-frame cadence differs from the
+   nominal `frameMs` (BLE/loop overhead), and it holds the **ALL-OFF** frame ~4× longer than the
+   others. A fixed-period phase-fold therefore put the dim high-bit planes onto OFF windows → no
+   high-index LEDs decoded. Fix: recover timing from the data — find the long dark OFF intervals,
+   then split each active region between them into `bits+1` equal sub-slots (`[ON][bit0..]`).
+2. **Range-image blob detection can't separate a matrix.** When LEDs are close they read as one
+   bright blob. Fix: decode **per pixel** (each pixel reads its own bit-code), then **cluster
+   pixels by decoded index** — LEDs separate in code space even when merged in image space.
+3. **Background/exposure pulsing** from the bright matrix — handled by per-frame histogram-median
+   subtraction.
+4. **Hard limit — over-exposure.** At full white the LEDs saturated the sensor (≈70% of strip
+   pixels clipped at 255) and bloomed past their spacing, so an "off" LED's centre still read 255
+   from a lit neighbour. The per-LED signal is *clipped away* — no algorithm recovers it. **Fix is
+   to flash dim**: firmware now drives calibration at a low per-channel level (default 40,
+   app-tunable via the "Flash brightness" slider) so LEDs stay distinct dots.
+
+**Calibration BLE write** (`a0be83f7`): `[u8 cmd(1=start,0=stop)][u8 stripIndex(0xFF=all)][u8 brightness(0⇒default 40)]`.
+
+Remaining step: re-record with dim LEDs and confirm a clean 25/25 raster, then the chain is done.
 
 ## Geometry core (done, host-validated) — `src/lib/autoLayout.ts`
 

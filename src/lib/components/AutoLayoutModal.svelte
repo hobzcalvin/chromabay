@@ -26,9 +26,10 @@
   let dbgCanvas: HTMLCanvasElement | undefined = $state();
 
   // Tweakable decode knobs (so you can iterate without changing code).
-  let relThr = $state(0.4);     // detection threshold, fraction of swing (lower = more sensitive)
-  let cycles = $state(3);       // flash cycles to capture (more = robust, slower)
-  let minBlobPx = $state(2);    // min pixels per LED blob (lower splits merged dots)
+  let calBright = $state(40);   // calibration flash brightness — LOW so LEDs don't saturate/bloom into a blob
+  let relThr = $state(0.35);    // detection threshold, fraction of swing (lower = more sensitive)
+  let cycles = $state(4);       // flash cycles to capture (more = robust, slower)
+  let minBlobPx = $state(0);    // min pixels per LED cluster (0 = auto from strip size)
   let procWidth = $state(240);  // capture resolution (higher separates merged dots)
 
   // Recompute the ledmap reactively from points + controls.
@@ -53,10 +54,10 @@
     busy = true; points = []; debug = null;
     try {
       status = 'Calibrating + capturing (hold steady)…';
-      await startCalibration(deviceId, stripIndex);
+      await startCalibration(deviceId, stripIndex, calBright);
       await new Promise((r) => setTimeout(r, FRAME_MS * 2)); // let the device enter the cycle
       const res = await captureAndDecode(video, {
-        bits, frameMs: FRAME_MS, cycles, relThr, minBlobPx, procWidth, onLog: (m) => (status = m)
+        bits, frameMs: FRAME_MS, cycles, relThr, minBlobPx: minBlobPx || undefined, procWidth, onLog: (m) => (status = m)
       });
       await stopCalibration(deviceId);
       debug = res.debug ?? null;
@@ -96,11 +97,12 @@
   async function record() {
     busy = true; debug = null;
     try {
-      status = 'Recording calibration (~6s, hold steady)…';
-      await startCalibration(deviceId, stripIndex);
+      status = 'Recording calibration (~12s, hold steady)…';
+      await startCalibration(deviceId, stripIndex, calBright);
       await new Promise((r) => setTimeout(r, FRAME_MS * 2));
       const recCycles = 4;
-      const ms = (2 + bits) * FRAME_MS * recCycles + FRAME_MS;
+      // The device holds OFF longer than other slots, so a cycle runs longer than nominal — capture 2× to be safe.
+      const ms = (2 + bits) * FRAME_MS * recCycles * 2 + FRAME_MS;
       const frames = await captureRawFrames(video, ms, procWidth);
       await stopCalibration(deviceId);
       if (!frames.length) { status = 'No frames captured.'; return; }
@@ -159,9 +161,10 @@
         {/if}
         <details class="al-settings">
           <summary>Decode settings</summary>
+          <label>Flash brightness <input type="range" min="6" max="160" step="2" bind:value={calBright} /><span>{calBright} (lower = less bloom)</span></label>
           <label>Sensitivity <input type="range" min="0.1" max="0.8" step="0.05" bind:value={relThr} /><span>{relThr.toFixed(2)} (lower = detect more)</span></label>
           <label>Cycles <input type="range" min="1" max="6" step="1" bind:value={cycles} /><span>{cycles}</span></label>
-          <label>Min blob px <input type="range" min="1" max="40" step="1" bind:value={minBlobPx} /><span>{minBlobPx}</span></label>
+          <label>Min cluster px <input type="range" min="0" max="40" step="1" bind:value={minBlobPx} /><span>{minBlobPx || 'auto'}</span></label>
           <label>Resolution <input type="range" min="120" max="480" step="20" bind:value={procWidth} /><span>{procWidth}px</span></label>
         </details>
       </div>

@@ -55,7 +55,7 @@ PatternRendererBase* patternRenderer = nullptr;
 #define CHARACTERISTIC_UUID_LAYOUT_SET "a0be83f5-8dc9-47f0-ab40-b19721d20ed1"
 // Layout read-back: write u8 stripIndex to request; device NOTIFYs the layout chunked.
 #define CHARACTERISTIC_UUID_LAYOUT_GET "a0be83f6-8dc9-47f0-ab40-b19721d20ed1"
-// Auto-layout camera calibration: write [u8 cmd(1=start,0=stop)][u8 stripIndex(0xFF=all)].
+// Auto-layout camera calibration: write [u8 cmd(1=start,0=stop)][u8 stripIndex(0xFF=all)][u8 brightness(0=>default 40)].
 #define CHARACTERISTIC_UUID_CALIBRATION "a0be83f7-8dc9-47f0-ab40-b19721d20ed1"
 
 // Timestamp Sync Characteristic - for synchronizing time across devices
@@ -107,6 +107,10 @@ static volatile int layoutGetRequest = -1;                // strip index request
 static volatile bool calibrating = false;
 static uint8_t calibStrip = 0xFF;     // which strip flashes (0xFF = all)
 static uint8_t calibBits = 8;         // ceil(log2(maxNumLeds))
+static uint8_t calibBrightness = 40;  // per-channel white level while flashing (camera-tunable).
+                                      // Kept LOW on purpose: at full 255 the LEDs saturate the
+                                      // camera and bloom into one solid blob, so adjacent LEDs
+                                      // can't be told apart. Dim => distinct dots => decodable.
 static uint32_t calibStartMs = 0;
 static const uint32_t CALIB_FRAME_MS = 220;
 
@@ -889,6 +893,7 @@ class CalibrationCallbacks : public NimBLECharacteristicCallbacks {
         uint8_t cmd = (uint8_t)v[0];
         uint8_t strip = (v.length() >= 2) ? (uint8_t)v[1] : 0xFF;
         if (cmd == 1) {
+            calibBrightness = (v.length() >= 3 && v[2]) ? (uint8_t)v[2] : 40;
             uint16_t maxN = 1;
             for (size_t i = 0; i < ledMgr.getNumStrips(); i++) {
                 const LedConfig::LedBus* s = ledMgr.getStrip(i);
@@ -896,8 +901,8 @@ class CalibrationCallbacks : public NimBLECharacteristicCallbacks {
             }
             uint8_t bits = 1; while ((1u << bits) < maxN) bits++;
             calibBits = bits; calibStrip = strip; calibStartMs = millis(); calibrating = true;
-            Serial.printf("[Calib] START strip=%d bits=%d (cycle=%d frames @ %dms)\n",
-                          strip, bits, 2 + bits, (int)CALIB_FRAME_MS);
+            Serial.printf("[Calib] START strip=%d bits=%d bright=%d (cycle=%d frames @ %dms)\n",
+                          strip, bits, calibBrightness, 2 + bits, (int)CALIB_FRAME_MS);
         } else {
             calibrating = false;
             Serial.println("[Calib] STOP");
@@ -1664,7 +1669,8 @@ void renderCalibrationFrame() {
             else if (frame == 0) on = false;        // all-off reference
             else if (frame == 1) on = true;         // all-on reference
             else on = ((i >> (frame - 2)) & 1u) != 0; // bit (frame-2) of the LED index
-            st->setPixelColor(i, on ? CRGB(255, 255, 255) : CRGB(0, 0, 0));
+            uint8_t b = calibBrightness;
+            st->setPixelColor(i, on ? CRGB(b, b, b) : CRGB(0, 0, 0));
         }
     }
     ledMgr.show();
