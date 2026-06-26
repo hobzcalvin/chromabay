@@ -1,16 +1,17 @@
 <script lang="ts">
-  // Camera auto-layout. Point the phone at the strip, Scan → the device flashes a coded
-  // sequence, we decode each LED's position, then tune snap / rectify / rotation against a
-  // live preview and upload. The CV decode (cameraDecode.ts) is a first pass to tune on HW.
+  // Camera auto-layout, two phases (à la led_camera_map):
+  //   1. DETECT — the device holds all LEDs steady-on; a live overlay circles every bright blob
+  //      we detect. You tune brightness / distance / zoom until it cleanly finds all N LEDs.
+  //   2. MAP — the device runs a structured-light sequence; we re-find those blobs on the clean
+  //      averaged image and read each one's binary code to assign its LED index → position.
   import { onMount } from 'svelte';
   import { startCalibration, stopCalibration, uploadStripLayout } from '$lib/ble';
-  import { autoMap, captureRawFrames, type DecodeDebug } from '$lib/cameraDecode';
+  import { captureAndDecode, detectBlobs, type DecodeDebug } from '$lib/cameraDecode';
   import { buildLedmap, rectifyPoints, rotateLedmap, type Pt, type Ledmap } from '$lib/autoLayout';
   import LayoutPreview from './LayoutPreview.svelte';
 
-  // Move the overlay to <body> so it covers the whole app. Without this it's a child of a
-  // device card whose backdrop-filter creates a containing block for position:fixed — which
-  // would trap the "fixed" overlay inside that card (dimming only the card, centered in it).
+  // Move the overlay to <body> so it covers the whole app (a device card's backdrop-filter would
+  // otherwise trap this position:fixed overlay inside the card).
   function portal(node: HTMLElement) {
     document.body.appendChild(node);
     return { destroy() { node.remove(); } };
@@ -19,50 +20,37 @@
   let { deviceId, stripIndex, numLeds, onClose }:
     { deviceId: string; stripIndex: number; numLeds: number; onClose: () => void } = $props();
 
-  const FRAME_MS = 220; // must match firmware CALIB_FRAME_MS (only sizes the capture window; decode is timing-agnostic)
+  const FRAME_MS = 220; // must match firmware CALIB_FRAME_MS
   const bits = Math.max(1, Math.ceil(Math.log2(Math.max(2, numLeds))));
 
-  let video: HTMLVideoElement;
+  let video: HTMLVideoElement;             // hidden; just the capture source
+  let preview: HTMLCanvasElement | undefined = $state(); // live detection view (camera + blob circles)
   let stream: MediaStream | null = null;
   let videoTrack: MediaStreamTrack | null = null;
-  let zoomCap: { min: number; max: number; step: number } | null = $state(null); // null = camera has no zoom
+  let zoomCap: { min: number; max: number; step: number } | null = $state(null);
   let zoom = $state(1);
+
   let points: (Pt | null)[] = $state([]);
   let snap = $state(1);
   let rectify = $state(false);
   let turns = $state(0);
-  let status = $state('Point the camera at the strip, then Scan.');
-  let busy = $state(false);
-  let cancelled = $state(false); // set when the modal closes mid-scan so autoMap bails out
+  let status = $state('Aim at the strip. Tune brightness until every LED is circled, then Map.');
+  let busy = $state(false);                // a map() is running
+  let detectedCount = $state(0);
   let debug: DecodeDebug | null = $state(null);
   let dbgCanvas: HTMLCanvasElement | undefined = $state();
 
-  // Starting points for the adaptive scan (autoMap tunes from here automatically).
-  let calBright = $state(40);   // calibration flash brightness — LOW so LEDs don't saturate/bloom into a blob
-  let relThr = $state(0.35);    // detection threshold, fraction of swing (lower = more sensitive)
-  let procWidth = $state(240);  // capture resolution (higher separates merged dots)
+  let calBright = $state(40);              // calibration brightness (PRIMARY control, tuned by eye)
+  let detThr = $state(0.5);                // live blob threshold, fraction of peak brightness
+  let procWidth = $state(320);             // processing/preview resolution
 
-  // Always stop the device flashing on the way out — otherwise the strip is stuck rendering the
-  // (dim) calibration sequence instead of its pattern, looking "dark". Belt-and-suspenders: the
-  // scan loop also stops on cancel, but a forced close mid-capture might not unwind that in time.
-  function closeModal() { cancelled = true; stopCalibration(deviceId).catch(() => {}); onClose(); }
+  let detecting = false;                   // detection loop active (paused during a map)
+  let mapGen = 0;                          // cancel/supersede token
+  let grab: HTMLCanvasElement | null = null; // offscreen frame-grab canvas (created on first use)
 
-  // Cancel an in-progress scan. The autoMap loop unwinds at its next checkpoint (it's mid-await on
-  // a capture, so that can take a second) — don't make the user wait on it: free the UI now and
-  // ignore the stale result via a generation token. Also stop the flash immediately.
-  let scanGen = 0;
-  function cancelScan() {
-    cancelled = true; scanGen++; busy = false; status = 'Scan cancelled.';
-    stopCalibration(deviceId).catch(() => {});
-  }
+  function closeModal() { detecting = false; stopCalibration(deviceId).catch(() => {}); onClose(); }
+  function applyZoom(z: number) { zoom = z; videoTrack?.applyConstraints({ advanced: [{ zoom: z } as any] }).catch(() => {}); }
 
-  function applyZoom(z: number) {
-    zoom = z;
-    // `zoom` isn't in the standard MediaTrackConstraintSet type yet, but iOS/Android honor it.
-    videoTrack?.applyConstraints({ advanced: [{ zoom: z } as any] }).catch(() => {});
-  }
-
-  // Recompute the ledmap reactively from points + controls.
   const layout = $derived.by((): Ledmap | null => {
     if (!points.length) return null;
     const src = rectify ? rectifyPoints(points) : points;
@@ -70,127 +58,116 @@
   });
   const decodedCount = $derived(points.filter(Boolean).length);
 
+  // --- live detection: grab a frame, find bright blobs, draw them over the preview ---
+  function detectFrame() {
+    if (!detecting) return;
+    const cv = preview;
+    if (video && video.videoWidth && cv) {
+      const vw = video.videoWidth, vh = video.videoHeight;
+      const w = Math.min(procWidth, vw), h = Math.round((w / vw) * vh);
+      if (!grab) grab = document.createElement('canvas');
+      grab.width = w; grab.height = h;
+      const gctx = grab.getContext('2d', { willReadFrequently: true });
+      if (gctx) {
+        gctx.drawImage(video, 0, 0, w, h);
+        const d = gctx.getImageData(0, 0, w, h).data;
+        const gray = new Uint8Array(w * h);
+        for (let i = 0, j = 0; i < d.length; i += 4, j++) { const m = d[i] > d[i + 1] ? d[i] : d[i + 1]; gray[j] = m > d[i + 2] ? m : d[i + 2]; }
+        let mx = 0; for (let i = 0; i < gray.length; i++) if (gray[i] > mx) mx = gray[i];
+        const blobs = detectBlobs(gray, w, h, { thresh: Math.max(40, mx * detThr) });
+        detectedCount = blobs.length;
+        cv.width = w; cv.height = h;
+        const ctx = cv.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(grab, 0, 0);
+          ctx.lineWidth = Math.max(1, w / 240);
+          ctx.strokeStyle = blobs.length === numLeds ? '#2ecc71' : '#ffd23f';
+          for (const b of blobs) { ctx.beginPath(); ctx.arc(b.x, b.y, Math.max(3, Math.sqrt(b.n) + 1), 0, 6.283); ctx.stroke(); }
+        }
+      }
+    }
+    setTimeout(detectFrame, 110); // ~9 fps is plenty for tuning
+  }
+
+  function startDetect() {
+    detecting = true;
+    startCalibration(deviceId, stripIndex, calBright, 'detect').catch(() => {});
+    detectFrame();
+  }
+
+  // Re-send the steady-on brightness when the slider moves (throttled), so the overlay updates live.
+  let briTimer: any = null;
+  function onBrightness() {
+    if (!detecting) return;
+    if (briTimer) return;
+    briTimer = setTimeout(() => { briTimer = null; startCalibration(deviceId, stripIndex, calBright, 'detect').catch(() => {}); }, 80);
+  }
+
   onMount(() => {
     (async () => {
       try {
-        // High-res rear camera so the (often small-in-frame) strip has plenty of detail.
         stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
         });
         if (video) { video.srcObject = stream; await video.play().catch(() => {}); }
-        // Expose the native zoom control if the camera supports it (lets the user fill the frame
-        // with the strip — far more useful than burning pixels on the room). iOS/Android only.
         videoTrack = stream.getVideoTracks()[0] ?? null;
         const caps: any = videoTrack?.getCapabilities?.() ?? {};
         if (typeof caps.zoom === 'object' && caps.zoom && caps.zoom.max > caps.zoom.min) {
           zoomCap = { min: caps.zoom.min, max: caps.zoom.max, step: caps.zoom.step || 0.1 };
           zoom = (videoTrack!.getSettings() as any).zoom ?? caps.zoom.min;
         }
-        // Stop the camera from constantly re-focusing / re-exposing on the flashing pattern (the
-        // "jumping"). Lock focus/exposure/white-balance to a fixed mode where supported. Best-
-        // effort: iOS WKWebView ignores most of these (it's not in the web API there) — see note
-        // to the user; the decode's motion registration handles residual drift.
-        const lock: any[] = [];
-        const has = (k: string, v: string) => Array.isArray(caps[k]) && caps[k].includes(v);
-        if (has('focusMode', 'manual')) lock.push({ focusMode: 'manual' });
-        else if (has('focusMode', 'continuous')) lock.push({ focusMode: 'continuous' });
-        if (has('exposureMode', 'manual')) lock.push({ exposureMode: 'manual' });
-        if (has('whiteBalanceMode', 'manual')) lock.push({ whiteBalanceMode: 'manual' });
-        if (lock.length) await videoTrack!.applyConstraints({ advanced: lock as any }).catch(() => {});
+        startDetect();
       } catch (e: any) { status = 'Camera error: ' + (e?.message || e); }
     })();
-    return () => { stream?.getTracks().forEach((t) => t.stop()); };
+    return () => { detecting = false; stream?.getTracks().forEach((t) => t.stop()); };
   });
 
-  // Foolproof scan: autoMap flashes + decodes repeatedly (up to 30s), adapting flash brightness
-  // and sensitivity from each pass's diagnostics and coaching the user, until it locks all LEDs
-  // (or returns the best effort). We just provide the BLE flash hooks + surface progress.
-  async function scan() {
-    busy = true; cancelled = false; points = []; debug = null;
-    const myGen = ++scanGen;
+  // MAP: switch to structured light, decode (detect blobs + read each one's code), then resume detect.
+  async function map() {
+    busy = true; points = []; debug = null;
+    const myGen = ++mapGen;
+    detecting = false;
     try {
-      const res = await autoMap(
-        video,
-        { bits, frameMs: FRAME_MS, numLeds, brightness: calBright, relThr, procWidth },
-        {
-          startFlash: (b, mode) => startCalibration(deviceId, stripIndex, b, mode),
-          stopFlash: () => stopCalibration(deviceId),
-          onProgress: (m, info) => {
-            if (myGen !== scanGen) return; // stale run; don't stomp the live status
-            status = info.best ? `${m} — best ${info.best}/${numLeds} (try ${info.attempt})` : `${m} (try ${info.attempt})`;
-          },
-          onAttempt: (r) => { if (myGen !== scanGen) return; if (r.debug) debug = r.debug; if (r.points.length) points = r.points; },
-          shouldStop: () => cancelled,
-        },
-      );
-      if (myGen !== scanGen) return; // cancelled/superseded — leave the cancelled status as-is
-      debug = res.debug ?? debug;
+      status = 'Mapping… hold steady';
+      await startCalibration(deviceId, stripIndex, calBright, 'full');
+      await new Promise((r) => setTimeout(r, FRAME_MS * 3)); // let the device enter the cycle
+      const res = await captureAndDecode(video, {
+        bits, frameMs: FRAME_MS, numLeds, cycles: 4, procWidth, onLog: (m) => { if (myGen === mapGen) status = m; },
+      });
+      if (myGen !== mapGen) return; // cancelled / superseded
+      debug = res.debug ?? null;
       points = res.points;
-      if (res.brightness > 0) calBright = res.brightness; // reflect what worked back to the slider
-      const got = res.diag?.found ?? points.filter(Boolean).length;
-      status = cancelled
-        ? (got > 0 ? `Cancelled — kept ${got}/${numLeds} found so far.` : 'Scan cancelled.')
-        : got >= numLeds
-        ? `Mapped all ${numLeds} LEDs in ${res.attempts} tries. Tune snap / rectify / rotation, then Use this map.`
+      const got = res.diag?.found ?? 0;
+      status = got >= numLeds
+        ? `Mapped all ${numLeds}! Tune snap / rotation, then Use this map.`
         : got > 0
-          ? `Mapped ${got}/${numLeds} (best effort). ${res.coaching ?? ''} Re-scan or tune, then Use this map.`
-          : `Couldn't map: ${res.reason}. ${res.coaching ?? ''}`;
+          ? `Mapped ${got}/${numLeds}. Re-aim/tune brightness and Map again, or use what's here.`
+          : `No LEDs decoded (${res.reason}). Tune brightness so every LED is circled, then Map.`;
     } catch (e: any) {
-      if (myGen === scanGen) status = 'Scan failed: ' + (e?.message || e);
-      try { await stopCalibration(deviceId); } catch {}
-    } finally { if (myGen === scanGen) busy = false; } // don't clobber a newer scan
+      if (myGen === mapGen) status = 'Map failed: ' + (e?.message || e);
+    } finally {
+      if (myGen === mapGen) { busy = false; startDetect(); } // back to live detection
+    }
   }
 
-  // Draw the diagnostic: the temporal-range image (what blinked) + detected blob centroids
-  // (cyan) and decoded LEDs (green, with index). Phase-independent, so it shows the truth
-  // even when the decode is wrong.
+  function cancelMap() {
+    mapGen++; busy = false; status = 'Map cancelled.';
+    stopCalibration(deviceId).catch(() => {});
+    startDetect();
+  }
+
+  // After-map diagnostic: the temporal-range image + detected blobs (cyan) + decoded LEDs (green).
   $effect(() => {
     const d = debug; const cv = dbgCanvas;
     if (!cv || !d) return;
     cv.width = d.w; cv.height = d.h;
     const ctx = cv.getContext('2d'); if (!ctx) return;
     const img = ctx.createImageData(d.w, d.h);
-    for (let i = 0, j = 0; i < d.range.length; i++, j += 4) {
-      const v = d.range[i]; img.data[j] = v; img.data[j + 1] = v; img.data[j + 2] = v; img.data[j + 3] = 255;
-    }
+    for (let i = 0, j = 0; i < d.range.length; i++, j += 4) { const v = d.range[i]; img.data[j] = v; img.data[j + 1] = v; img.data[j + 2] = v; img.data[j + 3] = 255; }
     ctx.putImageData(img, 0, 0);
     for (const b of d.blobs) { ctx.strokeStyle = '#00d0ff'; ctx.lineWidth = 0.7; ctx.beginPath(); ctx.arc(b.x, b.y, 2.5, 0, 6.283); ctx.stroke(); }
     for (const dd of d.decoded) { ctx.fillStyle = '#2ecc71'; ctx.beginPath(); ctx.arc(dd.x, dd.y, 1.6, 0, 6.283); ctx.fill(); }
   });
-
-  // Record a calibration session to a .bin (exact frames the decoder sees + metadata) for
-  // offline decode tuning. Format: 'CBC1', u16 w,h,bits,frameMs,numLeds,frameCount (LE),
-  // then per frame: f32 t (LE) + w*h grayscale bytes.
-  async function record() {
-    busy = true; debug = null;
-    try {
-      status = 'Recording calibration (~12s, hold steady)…';
-      await startCalibration(deviceId, stripIndex, calBright);
-      await new Promise((r) => setTimeout(r, FRAME_MS * 2));
-      const recCycles = 4;
-      // The device holds OFF longer than other slots, so a cycle runs longer than nominal — capture 2× to be safe.
-      const ms = (2 + bits) * FRAME_MS * recCycles * 2 + FRAME_MS;
-      const frames = await captureRawFrames(video, ms, procWidth);
-      await stopCalibration(deviceId);
-      if (!frames.length) { status = 'No frames captured.'; return; }
-      const w = frames[0].w, h = frames[0].h, n = frames.length;
-      const buf = new ArrayBuffer(16 + n * (4 + w * h));
-      const dv = new DataView(buf), u8 = new Uint8Array(buf);
-      dv.setUint32(0, 0x43424331, false); // 'CBC1'
-      dv.setUint16(4, w, true); dv.setUint16(6, h, true); dv.setUint16(8, bits, true);
-      dv.setUint16(10, FRAME_MS, true); dv.setUint16(12, numLeds, true); dv.setUint16(14, n, true);
-      let off = 16;
-      for (const f of frames) { dv.setFloat32(off, f.t, true); off += 4; u8.set(f.gray, off); off += w * h; }
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(new Blob([buf], { type: 'application/octet-stream' }));
-      a.download = `chromabay-capture-strip${stripIndex + 1}-${w}x${h}-${n}f.bin`;
-      a.click(); URL.revokeObjectURL(a.href);
-      status = `Recorded ${n} frames (${w}×${h}, ${(buf.byteLength / 1e6).toFixed(1)} MB). Downloaded ${a.download}.`;
-    } catch (e: any) {
-      status = 'Record failed: ' + (e?.message || e);
-      try { await stopCalibration(deviceId); } catch {}
-    } finally { busy = false; }
-  }
 
   async function use() {
     if (!layout) return;
@@ -211,35 +188,37 @@
     <div class="al-body">
       <div class="al-cam">
         <!-- svelte-ignore a11y_media_has_caption -->
-        <video bind:this={video} playsinline muted></video>
+        <video bind:this={video} playsinline muted style="display:none"></video>
+        <canvas bind:this={preview} class="al-preview"></canvas>
+        <div class="al-count" class:ok={detectedCount === numLeds}>
+          Detected <strong>{detectedCount}</strong> / {numLeds} LEDs
+          {#if detectedCount === numLeds}✓{/if}
+        </div>
         {#if zoomCap}
           <label class="al-zoom">🔍 <input type="range" min={zoomCap.min} max={zoomCap.max} step={zoomCap.step}
             value={zoom} oninput={(e) => applyZoom(parseFloat(e.currentTarget.value))} /></label>
         {/if}
+        <label class="al-bri">Brightness
+          <input type="range" min="4" max="200" step="2" bind:value={calBright} oninput={onBrightness} />
+          <span>{calBright}</span></label>
         <div class="al-scanrow">
           {#if busy}
-            <button class="btn danger" onclick={cancelScan}>Cancel</button>
+            <button class="btn danger" onclick={cancelMap}>Cancel</button>
           {:else}
-            <button class="btn primary" onclick={scan}>Auto-scan</button>
-            <button class="btn" onclick={record} title="Download the raw capture for offline decode tuning">⏺ Record</button>
+            <button class="btn primary" onclick={map}>Map LEDs</button>
           {/if}
         </div>
+        <details class="al-settings">
+          <summary>Advanced</summary>
+          <label>Detection sensitivity <input type="range" min="0.2" max="0.85" step="0.05" bind:value={detThr} /><span>{detThr.toFixed(2)}</span></label>
+          <label>Resolution <input type="range" min="160" max="480" step="20" bind:value={procWidth} /><span>{procWidth}px</span></label>
+        </details>
         {#if debug}
           <div class="al-debug">
             <canvas bind:this={dbgCanvas} class="al-dbgcanvas"></canvas>
-            <div class="al-counts">
-              {debug.frames} frames · {debug.roiCount} blinking px · {debug.blobs.length} blobs · {debug.decoded.length} decoded
-              <br />swing {debug.maxRange}/255
-            </div>
-            <div class="al-legend">debug: gray = what blinked · <span style="color:#00d0ff">○</span> blob · <span style="color:#2ecc71">●</span> decoded</div>
+            <div class="al-counts">{debug.frames} frames · {debug.blobs.length} blobs · {debug.decoded.length} decoded · swing {debug.maxRange}/255</div>
           </div>
         {/if}
-        <details class="al-settings">
-          <summary>Advanced (auto-tuned — these are just starting points)</summary>
-          <label>Flash brightness <input type="range" min="6" max="160" step="2" bind:value={calBright} /><span>{calBright} (lower = less bloom)</span></label>
-          <label>Sensitivity <input type="range" min="0.1" max="0.8" step="0.05" bind:value={relThr} /><span>{relThr.toFixed(2)} (lower = detect more)</span></label>
-          <label>Resolution <input type="range" min="120" max="480" step="20" bind:value={procWidth} /><span>{procWidth}px</span></label>
-        </details>
       </div>
       <div class="al-controls">
         <p class="al-status">{status}</p>
@@ -262,16 +241,11 @@
 </div>
 
 <style>
-  /* Full-app overlay, pinned to the top (so it opens at the top of the screen, not centered in
-     a card). Respects the iOS notch via safe-area insets. */
   .al-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(3px);
     z-index: 3000; display: flex; align-items: flex-start; justify-content: center; box-sizing: border-box;
     padding: calc(env(safe-area-inset-top, 0px) + 0.6rem) 0.6rem calc(env(safe-area-inset-bottom, 0px) + 0.6rem); overflow-y: auto; }
-  /* Explicit color: the overlay is portaled to <body>, escaping the page's `color: white`, so
-     without this the text falls back to black-on-dark and is unreadable. */
   .al-panel { width: 100%; max-width: 760px; background: #14161c; color: #e9eaee; box-sizing: border-box;
     border: 1px solid rgba(255,255,255,0.12); border-radius: 14px; box-shadow: 0 24px 70px rgba(0,0,0,0.7); }
-  /* Buttons: also self-styled here since the portal escapes the page's .btn styles. */
   .al-panel .btn { padding: 0.55rem 0.9rem; border: 1px solid rgba(255,255,255,0.18); border-radius: 8px;
     background: rgba(255,255,255,0.08); color: #e9eaee; font-size: 0.9rem; font-weight: 600; cursor: pointer; }
   .al-panel .btn:hover:not(:disabled) { background: rgba(255,255,255,0.14); }
@@ -279,15 +253,18 @@
   .al-panel .btn.primary { background: linear-gradient(135deg, #3b82f6, #1d4ed8); border-color: transparent; color: #fff; }
   .al-panel .btn.danger { background: linear-gradient(135deg, #ef4444, #dc2626); border-color: transparent; color: #fff; }
   .al-panel .btn.small { padding: 0.3rem 0.6rem; font-size: 0.8rem; }
-  .al-zoom { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; }
-  .al-zoom input[type="range"] { flex: 1; }
+  .al-zoom, .al-bri { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; }
+  .al-zoom input[type="range"], .al-bri input[type="range"] { flex: 1; }
+  .al-bri span { min-width: 2.5em; text-align: right; font-variant-numeric: tabular-nums; }
   header { display: flex; align-items: center; justify-content: space-between; padding: 0.85rem 1.1rem;
     border-bottom: 1px solid rgba(255,255,255,0.1); }
   header h2 { margin: 0; font-size: 1.1rem; }
   .al-close { background: none; border: none; color: #aaa; font-size: 1.7rem; line-height: 1; cursor: pointer; }
   .al-body { display: flex; gap: 1rem; padding: 1rem 1.1rem; flex-wrap: wrap; }
   .al-cam { flex: 1 1 280px; display: flex; flex-direction: column; gap: 0.5rem; }
-  .al-cam video { width: 100%; border-radius: 8px; background: #000; aspect-ratio: 4/3; object-fit: cover; }
+  .al-preview { width: 100%; border-radius: 8px; background: #000; image-rendering: pixelated; aspect-ratio: 4/3; object-fit: contain; }
+  .al-count { font-size: 0.95rem; text-align: center; opacity: 0.85; }
+  .al-count.ok { color: #2ecc71; opacity: 1; font-weight: 600; }
   .al-scanrow { display: flex; gap: 0.5rem; }
   .al-scanrow .btn { flex: 1; }
   .al-controls { flex: 1 1 280px; display: flex; flex-direction: column; gap: 0.6rem; }
@@ -297,13 +274,11 @@
   .al-result { font-size: 0.85rem; opacity: 0.9; }
   .al-rotate { display: flex; align-items: center; gap: 0.4rem; font-size: 0.9rem; }
   .al-debug { display: flex; flex-direction: column; gap: 0.3rem; }
-  .al-dbgcanvas { width: 100%; image-rendering: pixelated; background: #000; border-radius: 6px;
-    border: 1px solid rgba(255,255,255,0.15); }
+  .al-dbgcanvas { width: 100%; image-rendering: pixelated; background: #000; border-radius: 6px; border: 1px solid rgba(255,255,255,0.15); }
   .al-counts { font-size: 0.78rem; opacity: 0.85; font-variant-numeric: tabular-nums; }
-  .al-legend { font-size: 0.72rem; opacity: 0.6; }
   .al-settings { font-size: 0.85rem; }
   .al-settings summary { cursor: pointer; opacity: 0.8; }
   .al-settings label { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.4rem; }
   .al-settings label input[type='range'] { flex: 1; }
-  .al-settings label span { min-width: 6.5em; text-align: right; opacity: 0.8; }
+  .al-settings label span { min-width: 4em; text-align: right; opacity: 0.8; }
 </style>

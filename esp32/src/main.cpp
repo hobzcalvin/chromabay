@@ -1680,6 +1680,7 @@ void renderCalibrationFrame() {
         for (uint16_t i = 0; i < n; i++) {
             bool on;
             if (!targetStrip) on = false;              // non-target strips stay dark
+            else if (calibMode == 2) on = true;         // steady ALL-ON (detection: tune exposure)
             else if (calibMode == 0) on = (frame == 1); // strobe: 0=off, 1=on
             else if (frame == 0) on = true;             // full: ALL-ON reference + sync anchor
             else on = ((i >> (frame - 1)) & 1u) != 0;   // full: bit (frame-1) of the LED index

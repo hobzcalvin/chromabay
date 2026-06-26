@@ -66,16 +66,28 @@ for (const i of maskIdx) onRef[i] /= onc;
 for (let b = 0; b < bits; b++) for (const i of maskIdx) bitRef[b][i] /= bc[b];
 const offRef = new Float32Array(N); for (const i of maskIdx) { let mn = Infinity; for (let b = 0; b < bits; b++) mn = Math.min(mn, bitRef[b][i]); offRef[i] = mn; }
 
-// (4) per-pixel decode + cluster
+// (4) DETECT LED blobs on the clean ALL-ON contrast image, then READ each blob's bit-code
 let maxC = 0; for (const i of maskIdx) maxC = Math.max(maxC, onRef[i] - offRef[i]);
-const contrastThr = Math.max(12, 0.25 * maxC), codes = 1 << bits;
-const sX = new Float64Array(codes), sY = new Float64Array(codes), sW = new Float64Array(codes), cn = new Int32Array(codes);
-let decodedPx = 0, oorPx = 0;
-for (const i of maskIdx) { const c = onRef[i] - offRef[i]; if (c < contrastThr) continue; const mid = (onRef[i] + offRef[i]) / 2; let idx = 0; for (let b = 0; b < bits; b++) if (bitRef[b][i] > mid) idx |= (1 << b); decodedPx++; if (idx >= numLeds) { oorPx++; continue; } sX[idx] += (i % w) * c; sY[idx] += ((i / w) | 0) * c; sW[idx] += c; cn[idx]++; }
-const minCluster = minClusterArg ?? Math.max(2, Math.round(maskIdx.length / 600));
+const contrastThr = Math.max(12, 0.25 * maxC);
+const cimg = new Uint8Array(N); for (const i of maskIdx) { const c = onRef[i] - offRef[i]; cimg[i] = c <= 0 ? 0 : c > 255 ? 255 : c; }
+function detectBlobs(gray, thresh, minPx, maxPx) {
+  const seen = new Uint8Array(N), out = [], st = [];
+  for (let p0 = 0; p0 < N; p0++) { if (gray[p0] < thresh || seen[p0]) continue; st.length = 0; st.push(p0); seen[p0] = 1; let sx = 0, sy = 0, c = 0;
+    while (st.length) { const p = st.pop(), x = p % w, y = (p / w) | 0; sx += x; sy += y; c++;
+      if (x > 0 && gray[p - 1] >= thresh && !seen[p - 1]) { seen[p - 1] = 1; st.push(p - 1); }
+      if (x < w - 1 && gray[p + 1] >= thresh && !seen[p + 1]) { seen[p + 1] = 1; st.push(p + 1); }
+      if (y > 0 && gray[p - w] >= thresh && !seen[p - w]) { seen[p - w] = 1; st.push(p - w); }
+      if (y < h - 1 && gray[p + w] >= thresh && !seen[p + w]) { seen[p + w] = 1; st.push(p + w); } }
+    if (c >= minPx && c <= maxPx) out.push({ x: sx / c, y: sy / c, n: c }); }
+  return out;
+}
+const blobs = detectBlobs(cimg, Math.max(12, 0.4 * maxC), minClusterArg ?? Math.max(2, Math.round(N / 30000)), Math.round(N / 12));
+const samp = (img, cx, cy, r = 2) => { let s = 0, c = 0, x0 = Math.round(cx), y0 = Math.round(cy); for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) { const x = x0 + dx, y = y0 + dy; if (x >= 0 && y >= 0 && x < w && y < h) { s += img[y * w + x]; c++; } } return c ? s / c : 0; };
+const byIdx = new Map(); let decodedN = 0, oorN = 0;
+for (const b of blobs) { const on = samp(onRef, b.x, b.y), off = samp(offRef, b.x, b.y); const c = on - off; if (c < contrastThr) continue; const mid = (on + off) / 2; let idx = 0; for (let bb = 0; bb < bits; bb++) if (samp(bitRef[bb], b.x, b.y) > mid) idx |= (1 << bb); decodedN++; if (idx >= numLeds) { oorN++; continue; } const p = byIdx.get(idx); if (!p || c > p.c) byIdx.set(idx, { x: b.x, y: b.y, c }); }
 const pts = []; let found = 0;
-for (let idx = 0; idx < numLeds; idx++) if (cn[idx] >= minCluster && sW[idx] > 0) { pts.push({ idx, x: sX[idx] / sW[idx], y: sY[idx] / sW[idx] }); found++; }
-console.log(`LEDs located: ${found}/${numLeds} (outOfRange=${decodedPx ? (oorPx / decodedPx * 100).toFixed(0) : 0}%, minCluster=${minCluster})`);
+for (const [idx, b] of byIdx) { pts.push({ idx, x: b.x, y: b.y }); found++; }
+console.log(`blobs=${blobs.length} -> LEDs located: ${found}/${numLeds} (outOfRange=${decodedN ? (oorN / decodedN * 100).toFixed(0) : 0}%)`);
 
 if (pts.length) {
   const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);

@@ -1205,12 +1205,14 @@ export async function uploadStripLayout(
  * Start the auto-layout calibration flash on the device: each LED blinks its index as a
  * structured-light sequence the camera decodes. `stripIndex` 0xFF flashes all strips.
  */
-export async function startCalibration(deviceId: string, stripIndex = 0xff, brightness = 40, mode: 'strobe' | 'full' = 'full'): Promise<void> {
+export async function startCalibration(deviceId: string, stripIndex = 0xff, brightness = 40, mode: 'strobe' | 'full' | 'detect' = 'full'): Promise<void> {
   // brightness: per-channel white level (1..255) the strips flash at. Keep low — full brightness
   // saturates the camera and blooms LEDs into one blob; ~40 keeps them as distinct dots. 0 => firmware default.
-  // mode: 'strobe' = ALL on/off only (fast exposure tuning), 'full' = structured-light (off/on + bit planes).
+  // mode: 'detect' = steady ALL-ON (tune exposure + detect blobs), 'strobe' = ALL on/off,
+  //       'full' = structured-light (ON + bit planes).
+  const m = mode === 'strobe' ? 0 : mode === 'detect' ? 2 : 1;
   await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_CALIBRATION,
-    new DataView(new Uint8Array([1, stripIndex & 0xff, brightness & 0xff, mode === 'strobe' ? 0 : 1]).buffer));
+    new DataView(new Uint8Array([1, stripIndex & 0xff, brightness & 0xff, m]).buffer));
 }
 export async function stopCalibration(deviceId: string): Promise<void> {
   await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_CALIBRATION,

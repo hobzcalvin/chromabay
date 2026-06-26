@@ -84,6 +84,35 @@ async function captureBurst(video: HTMLVideoElement, captureMs: number, procWidt
 /** What a decode produced (or why it didn't). points is empty unless LEDs were confidently seen. */
 export type DecodeResult = { points: (Pt | null)[]; ok: boolean; reason: string; debug?: DecodeDebug; diag?: DecodeDiag };
 
+export type Blob = { x: number; y: number; n: number };
+
+// Find bright blobs (LED dots) in a grayscale image via thresholded connected components.
+// Robust + cheap; used both for the live detection overlay and to locate LEDs before reading
+// their codes. `thresh` defaults to half the peak; size filters reject sensor noise and
+// background/bloom mega-blobs.
+export function detectBlobs(gray: Uint8Array, w: number, h: number,
+  opts?: { thresh?: number; minPx?: number; maxPx?: number }): Blob[] {
+  const N = w * h;
+  let mx = 0; for (let i = 0; i < N; i++) if (gray[i] > mx) mx = gray[i];
+  const thresh = opts?.thresh ?? Math.max(60, mx * 0.5);
+  const minPx = opts?.minPx ?? Math.max(2, Math.round(N / 40000));
+  const maxPx = opts?.maxPx ?? Math.round(N / 12);          // a single LED shouldn't fill the frame
+  const seen = new Uint8Array(N), out: Blob[] = [], st: number[] = [];
+  for (let p0 = 0; p0 < N; p0++) {
+    if (gray[p0] < thresh || seen[p0]) continue;
+    st.length = 0; st.push(p0); seen[p0] = 1; let sx = 0, sy = 0, n = 0;
+    while (st.length) {
+      const p = st.pop()!; const x = p % w, y = (p / w) | 0; sx += x; sy += y; n++;
+      if (x > 0 && gray[p - 1] >= thresh && !seen[p - 1]) { seen[p - 1] = 1; st.push(p - 1); }
+      if (x < w - 1 && gray[p + 1] >= thresh && !seen[p + 1]) { seen[p + 1] = 1; st.push(p + 1); }
+      if (y > 0 && gray[p - w] >= thresh && !seen[p - w]) { seen[p - w] = 1; st.push(p - w); }
+      if (y < h - 1 && gray[p + w] >= thresh && !seen[p + w]) { seen[p + w] = 1; st.push(p + w); }
+    }
+    if (n >= minPx && n <= maxPx) out.push({ x: sx / n, y: sy / n, n });
+  }
+  return out;
+}
+
 /**
  * Decode the calibration burst into points[ledIndex] = {x,y} (normalized 0..1), null = gap.
  *
@@ -235,36 +264,44 @@ export async function captureAndDecode(video: HTMLVideoElement, opts: DecodeOpts
   for (const i of maskIdx) { let mn = Infinity; for (let b = 0; b < bits; b++) if (bitRef[b][i] < mn) mn = bitRef[b][i]; offRef[i] = mn; }
   log(`${cyclesUsed} cycles, ${maskIdx.length} strip px, swing ${maxRange}, drift ${diag.motionPx | 0}px`);
 
-  // (4) Per-pixel decode, then cluster pixels by their decoded index → one centroid per LED.
-  let maxContrast = 0; for (const i of maskIdx) { const c = onRef[i] - offRef[i]; if (c > maxContrast) maxContrast = c; }
-  const contrastThr = Math.max(noiseFloor, 0.25 * maxContrast);
+  // (4) DETECT each LED as a blob on the clean ALL-ON contrast image (onRef−offRef), then READ
+  // each blob's bit-code by sampling its centre across the bit slots. This is far more robust than
+  // per-pixel decode + clustering: bright distinct dots are trivial to find, and we only have to
+  // read ~numLeds well-separated centres rather than disambiguate every noisy pixel.
   const codes = 1 << bits;
   const numLeds = opts.numLeds ?? codes;
-  const sumX = new Float64Array(codes), sumY = new Float64Array(codes), sumW = new Float64Array(codes), cnt = new Int32Array(codes);
-  let decodedPx = 0, outOfRangePx = 0;
-  for (const i of maskIdx) {
-    const c = onRef[i] - offRef[i];
-    if (c < contrastThr) continue;                       // not on a lit LED
-    const mid = (onRef[i] + offRef[i]) / 2;
+  let maxContrast = 0; for (const i of maskIdx) { const c = onRef[i] - offRef[i]; if (c > maxContrast) maxContrast = c; }
+  const contrastThr = Math.max(noiseFloor, 0.25 * maxContrast);
+  const contrastImg = new Uint8Array(N);                 // LED cores bright, gaps dark → blobs = LEDs
+  for (const i of maskIdx) { const c = onRef[i] - offRef[i]; contrastImg[i] = c <= 0 ? 0 : c > 255 ? 255 : c; }
+  const ledBlobs = detectBlobs(contrastImg, w, h, {
+    thresh: Math.max(noiseFloor, 0.4 * maxContrast),
+    minPx: opts.minBlobPx ?? Math.max(2, Math.round(N / 30000)),
+  });
+  debug.blobs = ledBlobs.map((b) => ({ x: b.x, y: b.y }));
+  const sampleDisc = (img: Float32Array, cx: number, cy: number, r = 2) => {
+    let s = 0, c = 0; const x0 = Math.round(cx), y0 = Math.round(cy);
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) { const x = x0 + dx, y = y0 + dy; if (x >= 0 && y >= 0 && x < w && y < h) { s += img[y * w + x]; c++; } }
+    return c ? s / c : 0;
+  };
+  // Read each blob's code; keep the strongest blob per LED index (collisions are rare).
+  const byIdx = new Map<number, { x: number; y: number; contrast: number }>();
+  let decodedN = 0, oorN = 0;
+  for (const b of ledBlobs) {
+    const on = sampleDisc(onRef, b.x, b.y), off = sampleDisc(offRef, b.x, b.y);
+    const c = on - off; if (c < contrastThr) continue;
+    const mid = (on + off) / 2;
     let idx = 0;
-    for (let b = 0; b < bits; b++) if (bitRef[b][i] > mid) idx |= (1 << b);
-    decodedPx++;
-    if (idx >= numLeds) { outOfRangePx++; continue; }     // impossible code → bloom/corruption, not an LED
-    const x = i % w, y = (i / w) | 0;
-    sumX[idx] += x * c; sumY[idx] += y * c; sumW[idx] += c; cnt[idx]++;
+    for (let bb = 0; bb < bits; bb++) if (sampleDisc(bitRef[bb], b.x, b.y) > mid) idx |= (1 << bb);
+    decodedN++;
+    if (idx >= numLeds) { oorN++; continue; }
+    const prev = byIdx.get(idx);
+    if (!prev || c > prev.contrast) byIdx.set(idx, { x: b.x, y: b.y, contrast: c });
   }
-  diag.outOfRangePct = decodedPx ? outOfRangePx / decodedPx : 0;
-  const minCluster = opts.minBlobPx ?? Math.max(2, Math.round(maskIdx.length / 600));
+  diag.outOfRangePct = decodedN ? oorN / decodedN : 0;
   const pts: (Pt | null)[] = new Array(numLeds).fill(null);
   let found = 0;
-  for (let idx = 0; idx < numLeds; idx++) {
-    if (cnt[idx] >= minCluster && sumW[idx] > 0) {
-      const cx = sumX[idx] / sumW[idx], cy = sumY[idx] / sumW[idx];
-      pts[idx] = { x: cx / w, y: cy / h };
-      debug.decoded.push({ x: cx, y: cy, idx });
-      found++;
-    }
-  }
+  for (const [idx, b] of byIdx) { pts[idx] = { x: b.x / w, y: b.y / h }; debug.decoded.push({ x: b.x, y: b.y, idx }); found++; }
   diag.found = found;
   // Trim trailing gaps (indices beyond the highest decoded LED carry no information).
   let last = pts.length - 1; while (last >= 0 && pts[last] === null) last--;
