@@ -159,7 +159,7 @@
             </div>
             <div class="strip-controls">
               <div class="control-row">
-                <label>
+                <label class="full">
                   Chipset:
                   <select id={buildId('chipset', index)} name="chipset" bind:value={strip.chipset}>
                     <option value={LedChipsets.WS2812_RGB}>WS2812 RGB</option>
@@ -176,6 +176,8 @@
                     <option value={LedChipsets.SM16825_RGBCW}>SM16825 RGBCW</option>
                   </select>
                 </label>
+              </div>
+              <div class="control-row">
                 <label>
                   Color Order:
                   <select id={buildId('colororder', index)} name="colororder" bind:value={strip.colorOrder}>
@@ -199,6 +201,17 @@
                     placeholder="count" value={strip.numLeds ?? ''} oninput={(e) => onNumLeds(strip, e.currentTarget.value)} />
                 </label>
                 <label>
+                  Rotation:
+                  <select id={buildId('rotation', index)} name="rotation" value={getRotation(strip.orientation).toString()} onchange={(e) => { strip.orientation = setRotation(strip.orientation, parseInt(e.currentTarget.value)); }}>
+                    <option value="0">0° (No rotation)</option>
+                    <option value="1">90° Clockwise</option>
+                    <option value="2">180°</option>
+                    <option value="3">270° Clockwise</option>
+                  </select>
+                </label>
+              </div>
+              <div class="control-row">
+                <label>
                   Width:
                   <input id={buildId('width', index)} name="width" type="number" min="1" max="500"
                     placeholder="auto" value={strip.width ?? ''} oninput={(e) => onWidth(strip, e.currentTarget.value)} />
@@ -210,15 +223,6 @@
                 </label>
               </div>
               <div class="control-row">
-                <label>
-                  Rotation:
-                  <select id={buildId('rotation', index)} name="rotation" value={getRotation(strip.orientation).toString()} onchange={(e) => { strip.orientation = setRotation(strip.orientation, parseInt(e.currentTarget.value)); }}>
-                    <option value="0">0° (No rotation)</option>
-                    <option value="1">90° Clockwise</option>
-                    <option value="2">180°</option>
-                    <option value="3">270° Clockwise</option>
-                  </select>
-                </label>
                 <label class="checkbox-label">
                   <input id={buildId('flip', index)} name="flip" type="checkbox" checked={getFlipH(strip.orientation)} onchange={(e) => { strip.orientation = setFlipH(strip.orientation, e.currentTarget.checked); }} />
                   Flip Horizontally
@@ -227,26 +231,31 @@
                   <input id={buildId('serpentine', index)} name="serpentine" type="checkbox" checked={getSerpentine(strip.orientation)} onchange={(e) => { strip.orientation = setSerpentine(strip.orientation, e.currentTarget.checked); }} />
                   Serpentine Layout
                 </label>
-                <label>
-                  Gamma (1.0 = none, ~2.5 max correction)
-                  <input id={buildId('gamma', index)} name="gamma" type="number" min="1.0" max="3.0" step="0.1"
-                    value={strip.gamma ?? 1.0} oninput={(e) => { strip.gamma = parseFloat(e.currentTarget.value) || 1.0; }} />
-                </label>
-                <label class="whitepoint-label">
-                  White balance
-                  <span class="whitepoint-row">
-                    <input id={buildId('whitepoint', index)} name="whitepoint" type="color"
-                      value={strip.whitePoint ?? '#ffffff'} oninput={(e) => { strip.whitePoint = e.currentTarget.value; }} />
-                    <span class="whitepoint-gains">
-                      White → R×{gain(strip.whitePoint, 1)} G×{gain(strip.whitePoint, 3)} B×{gain(strip.whitePoint, 5)}
-                    </span>
-                  </span>
-                </label>
               </div>
-              <details class="layout-section">
-                <summary>Arbitrary layout (WLED ledmap)</summary>
+              <details class="sub-section">
+                <summary>Color correction</summary>
+                <div class="control-row">
+                  <label>
+                    Gamma (1.0 = none, ~2.5 max)
+                    <input id={buildId('gamma', index)} name="gamma" type="number" min="1.0" max="3.0" step="0.1"
+                      value={strip.gamma ?? 1.0} oninput={(e) => { strip.gamma = parseFloat(e.currentTarget.value) || 1.0; }} />
+                  </label>
+                  <label class="whitepoint-label">
+                    White balance
+                    <span class="whitepoint-row">
+                      <input id={buildId('whitepoint', index)} name="whitepoint" type="color"
+                        value={strip.whitePoint ?? '#ffffff'} oninput={(e) => { strip.whitePoint = e.currentTarget.value; }} />
+                      <span class="whitepoint-gains">
+                        R×{gain(strip.whitePoint, 1)} G×{gain(strip.whitePoint, 3)} B×{gain(strip.whitePoint, 5)}
+                      </span>
+                    </span>
+                  </label>
+                </div>
+              </details>
+              <details class="sub-section">
+                <summary>Custom Layout</summary>
                 <p class="layout-hint">
-                  Paste a WLED ledmap: <code>{'{ "width": W, "height": H, "map": [ledIndex per cell, -1 = gap] }'}</code>.
+                  Paste a layout map: <code>{'{ "width": W, "height": H, "map": [ledIndex per cell, -1 = gap] }'}</code>.
                   (width/height fall back to this strip's matrix size if omitted.) Sent live; max ~250 cells for now.
                 </p>
                 <textarea
@@ -289,16 +298,17 @@
 {/if}
 
 <style>
+  /* A section of the device blob — a header + content, not a nested card. */
   .settings-section {
-    margin-bottom: 2rem;
-    padding: 1rem;
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 8px;
+    margin: 0;
+    padding: 1.25rem 0 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
   }
 
   .settings-section h4 {
     margin: 0 0 1rem 0;
-    font-size: 1.1rem;
+    font-size: 1.05rem;
+    opacity: 0.95;
   }
 
   .led-config label {
@@ -338,16 +348,26 @@
     margin: 0;
   }
 
+  /* Two compact fields per row so they fit a narrow phone screen without overflowing. */
   .control-row {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: 1rem;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem 1rem;
+    margin-bottom: 0.75rem;
+    align-items: end;
+  }
+
+  /* A field that should take the whole row (e.g. the long Chipset dropdown). */
+  .control-row label.full {
+    grid-column: 1 / -1;
   }
 
   .control-row label {
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
+    min-width: 0;
+    font-size: 0.85rem;
   }
 
   /* Checkboxes read better as [box] label on one line. */
@@ -362,12 +382,36 @@
 
   .control-row input,
   .control-row select {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
     padding: 0.4rem;
     border: 1px solid rgba(255, 255, 255, 0.3);
     border-radius: 4px;
     background: rgba(0, 0, 0, 0.3);
     color: white;
     font-size: 0.9rem;
+  }
+
+  /* Checkboxes are auto-width, sitting inline with their label text. */
+  .control-row label.checkbox-label input {
+    width: auto;
+  }
+
+  /* Collapsible sub-sections (Color correction, Custom Layout). */
+  .sub-section {
+    margin-top: 0.75rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    padding-top: 0.5rem;
+  }
+  .sub-section summary {
+    cursor: pointer;
+    font-size: 0.9rem;
+    opacity: 0.85;
+    padding: 0.25rem 0;
+  }
+  .sub-section[open] summary {
+    margin-bottom: 0.5rem;
   }
 
   .control-row input:focus,
@@ -394,10 +438,11 @@
     font-variant-numeric: tabular-nums;
   }
 
-  /* Mobile responsiveness */
+  /* Keep two columns on phones too (the whole point — fields shouldn't each get
+     their own line); just tighten the gaps. */
   @media (max-width: 768px) {
     .control-row {
-      grid-template-columns: 1fr;
+      gap: 0.6rem 0.6rem;
     }
   }
 </style> 

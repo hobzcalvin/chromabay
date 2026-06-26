@@ -8,6 +8,14 @@
   import { buildLedmap, rectifyPoints, rotateLedmap, type Pt, type Ledmap } from '$lib/autoLayout';
   import LayoutPreview from './LayoutPreview.svelte';
 
+  // Move the overlay to <body> so it covers the whole app. Without this it's a child of a
+  // device card whose backdrop-filter creates a containing block for position:fixed — which
+  // would trap the "fixed" overlay inside that card (dimming only the card, centered in it).
+  function portal(node: HTMLElement) {
+    document.body.appendChild(node);
+    return { destroy() { node.remove(); } };
+  }
+
   let { deviceId, stripIndex, numLeds, onClose }:
     { deviceId: string; stripIndex: number; numLeds: number; onClose: () => void } = $props();
 
@@ -147,7 +155,7 @@
   }
 </script>
 
-<div class="al-overlay" role="button" tabindex="-1"
+<div class="al-overlay" use:portal role="button" tabindex="-1"
   onclick={(e) => { if (e.target === e.currentTarget) closeModal(); }} onkeydown={() => {}}>
   <div class="al-panel">
     <header><h2>Auto-map strip {stripIndex + 1} ({numLeds} LEDs)</h2>
@@ -198,9 +206,12 @@
 </div>
 
 <style>
-  .al-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(3px);
-    z-index: 3000; display: flex; align-items: center; justify-content: center; padding: 3vh 3vw; }
-  .al-panel { width: 100%; max-width: 760px; max-height: 92vh; overflow-y: auto; background: #14161c;
+  /* Full-app overlay, pinned to the top (so it opens at the top of the screen, not centered in
+     a card). Respects the iOS notch via safe-area insets. */
+  .al-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(3px);
+    z-index: 3000; display: flex; align-items: flex-start; justify-content: center; box-sizing: border-box;
+    padding: calc(env(safe-area-inset-top, 0px) + 0.6rem) 0.6rem calc(env(safe-area-inset-bottom, 0px) + 0.6rem); overflow-y: auto; }
+  .al-panel { width: 100%; max-width: 760px; background: #14161c; box-sizing: border-box;
     border: 1px solid rgba(255,255,255,0.12); border-radius: 14px; box-shadow: 0 24px 70px rgba(0,0,0,0.7); }
   header { display: flex; align-items: center; justify-content: space-between; padding: 0.85rem 1.1rem;
     border-bottom: 1px solid rgba(255,255,255,0.1); }
