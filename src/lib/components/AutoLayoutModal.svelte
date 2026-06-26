@@ -42,7 +42,7 @@
   const BUF = 10;
   const recent: number[] = [];   // recent detected counts (for the auto-map lock)
   let briTimer: any = null;
-  let lockedBlobs: { x: number; y: number; n: number }[] = []; // blobs at lock (overlaid during map)
+  let lockedBlobs: { x: number; y: number; n: number }[] = $state([]); // blobs at lock (overlaid during map)
   let mapProgress = $state(0);   // 0..1 capture progress shown during the map phase
 
   const layout = $derived.by((): Ledmap | null => {
@@ -176,16 +176,21 @@
       <div class="al-cam">
         <!-- svelte-ignore a11y_media_has_caption -->
         <video bind:this={video} playsinline muted style="display:none"></video>
-        <canvas bind:this={preview} class="al-preview"></canvas>
+        <div class="al-camwrap">
+          <canvas bind:this={preview} class="al-preview"></canvas>
+          {#if phase === 'detect'}
+            <div class="al-badge" class:ok={detectedCount === numLeds}>{detectedCount} / {numLeds}{#if detectedCount === numLeds} ✓{/if}</div>
+          {:else if phase === 'map'}
+            <div class="al-badge">Reading {lockedBlobs.length} LEDs · {Math.round(mapProgress * 100)}%</div>
+            <div class="al-bar"><div class="al-bar-fill" style="width:{Math.round(mapProgress * 100)}%"></div></div>
+          {/if}
+        </div>
         {#if phase === 'detect'}
-          <div class="al-count" class:ok={detectedCount === numLeds}>Detected <strong>{detectedCount}</strong> / {numLeds}{#if detectedCount === numLeds} ✓{/if}</div>
           {#if zoomCap}
             <label class="al-slider">🔍 <input type="range" min={zoomCap.min} max={zoomCap.max} step={zoomCap.step} value={zoom} oninput={(e) => applyZoom(parseFloat(e.currentTarget.value))} /></label>
           {/if}
           <label class="al-slider">☀️ <input type="range" min="4" max="200" step="2" bind:value={calBright} oninput={onBrightness} /><span>{calBright}</span></label>
           {#if !autoFire}<button class="btn primary" onclick={mapNow}>Map now</button>{/if}
-        {:else if phase === 'map'}
-          <div class="al-progress"><div class="al-progress-fill" style="width:{Math.round(mapProgress * 100)}%"></div></div>
         {/if}
       </div>
       <div class="al-controls">
@@ -227,15 +232,18 @@
   .al-close { background: none; border: none; color: #aaa; font-size: 1.7rem; line-height: 1; cursor: pointer; -webkit-tap-highlight-color: transparent; }
   .al-body { display: flex; gap: 1rem; padding: 1rem 1.1rem; flex-wrap: wrap; }
   .al-cam { flex: 1 1 280px; display: flex; flex-direction: column; gap: 0.85rem; }
+  .al-camwrap { position: relative; line-height: 0; }
   .al-preview { width: 100%; border-radius: 8px; background: #000; image-rendering: pixelated; aspect-ratio: 4/3; object-fit: contain; }
-  .al-count { font-size: 0.95rem; text-align: center; opacity: 0.85; }
-  .al-count.ok { color: #2ecc71; opacity: 1; font-weight: 600; }
+  /* Info drawn ON the camera view */
+  .al-badge { position: absolute; top: 8px; left: 8px; padding: 3px 9px; border-radius: 9px;
+    background: rgba(0,0,0,0.6); color: #fff; font-size: 0.9rem; font-weight: 700; line-height: 1.2; font-variant-numeric: tabular-nums; }
+  .al-badge.ok { color: #2ecc71; }
+  .al-bar { position: absolute; left: 8px; right: 8px; bottom: 8px; height: 6px; border-radius: 3px; background: rgba(0,0,0,0.55); overflow: hidden; }
+  .al-bar-fill { height: 100%; background: linear-gradient(90deg, #3b82f6, #60a5fa); transition: width 0.1s linear; }
   .al-slider { display: flex; align-items: center; gap: 0.6rem; font-size: 0.95rem; padding: 0.5rem 0; }
   .al-slider input[type="range"] { flex: 1; height: 1.6rem; }
   .al-slider span { min-width: 2.5em; text-align: right; opacity: 0.8; font-variant-numeric: tabular-nums; }
   .al-controls { flex: 1 1 280px; display: flex; flex-direction: column; gap: 0.85rem; }
-  .al-progress { height: 8px; border-radius: 4px; background: rgba(255,255,255,0.12); overflow: hidden; }
-  .al-progress-fill { height: 100%; background: linear-gradient(90deg, #3b82f6, #60a5fa); transition: width 0.1s linear; }
   .al-status { font-size: 0.9rem; opacity: 0.9; min-height: 2.4em; }
   .al-rotate { display: flex; align-items: center; gap: 0.4rem; font-size: 0.9rem; }
   .al-result { font-size: 0.85rem; opacity: 0.9; }
