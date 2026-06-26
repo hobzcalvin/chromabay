@@ -143,7 +143,7 @@
       await startCalibration(deviceId, stripIndex, calBright, 'full');
       await new Promise((r) => setTimeout(r, FRAME_MS * 3)); // let the device enter the cycle
       const res = await captureAndDecode(video, {
-        bits, frameMs: FRAME_MS, numLeds, cycles: 4, procWidth, onLog: (m) => { if (myGen === mapGen) status = m; },
+        bits, frameMs: FRAME_MS, numLeds, cycles: 6, procWidth, onLog: (m) => { if (myGen === mapGen) status = m; },
       });
       if (myGen !== mapGen) return; // cancelled / superseded
       debug = res.debug ?? null;

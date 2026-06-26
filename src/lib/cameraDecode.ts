@@ -116,199 +116,161 @@ export function detectBlobs(gray: Uint8Array, w: number, h: number,
 /**
  * Decode the calibration burst into points[ledIndex] = {x,y} (normalized 0..1), null = gap.
  *
- * Approach (validated against recorded hardware footage, see automation/decode-capture.mjs):
- *  1. Per-frame background subtraction (histogram median) cancels the camera's auto-exposure
- *     pulsing, so only the LEDs move.
- *  2. An LED MASK from the per-pixel temporal swing isolates the strip from the background.
- *  3. TIMING IS RECOVERED FROM THE DATA, not assumed: the device's real frame timing differs
- *     from the nominal frameMs (BLE/loop overhead) and the ALL-OFF frame is held much longer
- *     than the others, so a fixed-period fold misaligns the bit slots. Instead we find the long
- *     dark OFF intervals (unambiguous), then split each ACTIVE region between them into
- *     (bits+1) equal sub-slots = [ON][bit0..]. Works regardless of the device's actual cadence.
- *  4. PER-PIXEL structured-light decode: each pixel reads its own bit-code from the slot images
- *     (bit set iff that slot is brighter than the pixel's ON/OFF midpoint). Pixels are then
- *     CLUSTERED by decoded index → centroid per LED. This separates LEDs even when they bloom
- *     together (a saturated matrix is one blob in the range image, but distinct in code space).
+ * Two passes (validated on real hardware captures, see automation/decode-capture.mjs):
+ *  PASS 1 — LOCATE: per-frame background subtraction cancels the camera's exposure pulsing; the
+ *    per-pixel temporal swing gives a LED mask; a clean ALL-ON-minus-OFF contrast image is built
+ *    from rough anchors and `detectBlobs` finds each LED as a bright dot. (Bright distinct dots are
+ *    trivial to find; per-pixel decode + clustering was not robust on real data.)
+ *  PASS 2 — READ: for each blob we take its own brightness time-series and threshold it against its
+ *    own min/max, so exposure swings don't matter. The device cycles [ALL-OFF][ALL-ON][bit0..]; we
+ *    anchor on the long, unmistakable ALL-OFF intervals (counting LIT BLOBS, not pixels — robust to
+ *    the iOS camera's wild exposure hunting), split each active region between them into 1+bits
+ *    sub-slots = [ON][bit0..], and read each blob's bit-code from its own per-slot brightness.
  *
- * NOTE: the LEDs must not be over-exposed. At full brightness they saturate the sensor and
- * bloom past their spacing, clipping the per-LED signal — decode then collapses. Flash dim
- * (firmware calibration brightness ~40) so they read as distinct dots.
+ * NOTE: keep the LEDs dim enough that they read as distinct dots (not one bloomed blob), and hold
+ * reasonably steady so a fixed blob position stays on its LED across the capture.
  */
 export async function captureAndDecode(video: HTMLVideoElement, opts: DecodeOpts): Promise<DecodeResult> {
-  const bits = opts.bits;
-  const frameMs = opts.frameMs;
-  const slots = 1 + bits;                       // [ALL-ON][bit0..] — no all-off frame
-  const cycles = opts.cycles ?? 4;
-  // Capture 1.5× the nominal cycle time to absorb device-timing slack and still get the cycles.
-  const captureMs = opts.captureMs ?? slots * frameMs * cycles * 1.5 + frameMs;
-  const procWidth = opts.procWidth ?? 240;
-  const relThr = opts.relThr ?? 0.35;
+  const bits = opts.bits, frameMs = opts.frameMs;
+  const cycles = opts.cycles ?? 5;
+  const captureMs = opts.captureMs ?? (2 + bits) * frameMs * cycles + frameMs; // device emits OFF + ON + bits
+  const procWidth = opts.procWidth ?? 320;
   const noiseFloor = opts.noiseFloor ?? 12;
   const log = opts.onLog ?? (() => {});
 
   const frames = await captureBurst(video, captureMs, procWidth);
-  if (frames.length < slots * 2) return { points: [], ok: false, reason: 'too few camera frames captured' };
+  if (frames.length < 12) return { points: [], ok: false, reason: 'too few camera frames captured' };
   const w = frames[0].w, h = frames[0].h, N = w * h, F = frames.length;
   log(`captured ${F} frames @ ${w}x${h}`);
 
-  // (1) Per-frame background level (histogram median) → exposure-flat normalized value nv().
+  // Per-frame background (histogram median) → exposure-flat normalized value nv().
   const bg = new Float32Array(F);
   for (let fi = 0; fi < F; fi++) {
     const g = frames[fi].gray; const hist = new Int32Array(64);
     for (let i = 0; i < N; i++) hist[g[i] >> 2]++;
-    let acc = 0; let bin = 0; const half = N >> 1;
+    let acc = 0, bin = 0; const half = N >> 1;
     for (; bin < 64; bin++) { acc += hist[bin]; if (acc >= half) break; }
     bg[fi] = bin * 4 + 2;
   }
-  const nv = (fi: number, i: number) => {
-    const v = frames[fi].gray[i] - bg[fi] + 128;
-    return v < 0 ? 0 : v > 255 ? 255 : v;
-  };
+  const nv = (fi: number, i: number) => { const v = frames[fi].gray[i] - bg[fi] + 128; return v < 0 ? 0 : v > 255 ? 255 : v; };
 
-  // (2) Per-pixel temporal swing → LED mask (the strip vs the static background).
+  // Per-pixel temporal swing → LED mask + per-pixel min (the dark/off level).
   const pmin = new Float32Array(N).fill(255), pmax = new Float32Array(N);
   for (let fi = 0; fi < F; fi++) for (let i = 0; i < N; i++) { const v = nv(fi, i); if (v < pmin[i]) pmin[i] = v; if (v > pmax[i]) pmax[i] = v; }
-  const range = new Uint8Array(N);
-  let maxRange = 0;
+  const range = new Uint8Array(N); let maxRange = 0;
   for (let i = 0; i < N; i++) { const r = pmax[i] - pmin[i]; range[i] = r; if (r > maxRange) maxRange = r; }
-  const debug: DecodeDebug = { w, h, range, blobs: [], decoded: [], frames: F, roiCount: 0, maxRange };
-  const diag: DecodeDiag = { found: 0, maskPx: 0, maxRange, clippedPct: 0, outOfRangePct: 0, fill: 0, motionPx: 0, cyclesUsed: 0 };
+  const maskIdx: number[] = []; for (let i = 0; i < N; i++) if (range[i] >= Math.max(noiseFloor, 0.35 * maxRange)) maskIdx.push(i);
+
+  const debug: DecodeDebug = { w, h, range, blobs: [], decoded: [], frames: F, roiCount: maskIdx.length, maxRange };
+  const diag: DecodeDiag = { found: 0, maskPx: maskIdx.length, maxRange, clippedPct: 0, outOfRangePct: 0, fill: maskFill(maskIdx, w, h), motionPx: 0, cyclesUsed: 0 };
   const fail = (reason: string): DecodeResult => ({ points: [], ok: false, reason, debug, diag });
   if (maxRange < noiseFloor) return fail('nothing in view is blinking — is the strip calibrating and in frame?');
+  if (maskIdx.length < 8) return fail('blinking region too small — move closer / fill more of the frame');
+  { let mc = 0; for (let fi = 0; fi < F; fi++) { let c = 0; for (const i of maskIdx) if (frames[fi].gray[i] >= 250) c++; if (c > mc) mc = c; } diag.clippedPct = mc / maskIdx.length; }
 
-  const maskThr = Math.max(noiseFloor, relThr * maxRange);
-  const maskIdx: number[] = [];
-  for (let i = 0; i < N; i++) if (range[i] >= maskThr) maskIdx.push(i);
-  debug.roiCount = maskIdx.length; diag.maskPx = maskIdx.length; diag.fill = maskFill(maskIdx, w, h);
-  if (maskIdx.length < (opts.minBlobPx ?? 3)) return fail('blinking region too small — move closer / fill more of the frame');
-
-  // (3) Recover timing by finding the ALL-ON frames (every LED lit → the lit-pixel count peaks).
-  // These anchor both the cycle (the bits follow each ON) and the motion registration below.
-  // Also track sensor clipping (bloom signal): max fraction of strip px pinned at 255.
-  const litC = new Int32Array(F);
-  let maxClipped = 0;
-  for (let fi = 0; fi < F; fi++) {
-    let c = 0, clip = 0;
-    for (const i of maskIdx) { const g = frames[fi].gray[i]; if (g - bg[fi] + 128 > 175) c++; if (g >= 250) clip++; }
-    litC[fi] = c; if (clip > maxClipped) maxClipped = clip;
-  }
-  diag.clippedPct = maskIdx.length ? maxClipped / maskIdx.length : 0;
-  let maxLit = 0; for (let fi = 0; fi < F; fi++) if (litC[fi] > maxLit) maxLit = litC[fi];
-  const onThr = 0.7 * maxLit;                    // ALL-ON ≈ maxLit; bit frames ≈ half → well separated
-  const onInt: [number, number][] = [];
+  // ---- PASS 1: locate the LED blobs on a clean contrast image ----
+  // Rough ON anchors (lit-pixel peaks) → onRef (avg ALL-ON); split active regions into bit refs;
+  // offRef = min over bit refs. The bloom HALO between LEDs is lit in some bit frames, so its
+  // min(bitRef) ≈ onRef → it cancels in onRef−offRef and only the LED cores remain as blobs.
+  const litPx = new Int32Array(F);
+  for (let fi = 0; fi < F; fi++) { let c = 0; for (const i of maskIdx) if (nv(fi, i) > 175) c++; litPx[fi] = c; }
+  let maxLitPx = 0; for (let fi = 0; fi < F; fi++) if (litPx[fi] > maxLitPx) maxLitPx = litPx[fi];
+  const onI1: [number, number][] = [];
   { let s = -1;
-    for (let fi = 0; fi < F; fi++) {
-      if (litC[fi] >= onThr) { if (s < 0) s = fi; }
-      else { if (s >= 0) { if (frames[fi - 1].t - frames[s].t > frameMs * 0.4) onInt.push([s, fi - 1]); s = -1; } }
-    }
-    if (s >= 0 && frames[F - 1].t - frames[s].t > frameMs * 0.4) onInt.push([s, F - 1]);
+    for (let fi = 0; fi < F; fi++) { if (litPx[fi] >= 0.7 * maxLitPx) { if (s < 0) s = fi; } else { if (s >= 0) { if (frames[fi - 1].t - frames[s].t > frameMs * 0.4) onI1.push([s, fi - 1]); s = -1; } } }
   }
-  if (onInt.length < 2) return fail('could not lock onto the flash cycle — hold steadier / capture longer');
-
-  // Motion registration (handheld): each ALL-ON frame shows the full constellation, so its bright
-  // centroid moves with the device. Align every frame to the first ON's centroid (translation,
-  // interpolated for the bit frames between ON anchors) before folding — so a moving capture folds
-  // like a still one. On a still capture all centroids match → zero shift → no-op.
-  const onCent = onInt.map(([a, b]) => {
-    let sx = 0, sy = 0, sw = 0;
-    for (let fi = a; fi <= b; fi++) for (const i of maskIdx) { const v = nv(fi, i); if (v > 170) { sx += (i % w) * v; sy += ((i / w) | 0) * v; sw += v; } }
-    return { t: (frames[a].t + frames[b].t) / 2, x: sw ? sx / sw : 0, y: sw ? sy / sw : 0 };
-  });
-  const refX = onCent[0].x, refY = onCent[0].y;
-  for (const c of onCent) { const d = Math.hypot(c.x - refX, c.y - refY); if (d > diag.motionPx) diag.motionPx = d; }
-  const shiftAt = (t: number): { dx: number; dy: number } => {
-    let cx = onCent[0].x, cy = onCent[0].y;
-    if (t >= onCent[onCent.length - 1].t) { cx = onCent[onCent.length - 1].x; cy = onCent[onCent.length - 1].y; }
-    else if (t > onCent[0].t) for (let k = 0; k < onCent.length - 1; k++) {
-      if (t >= onCent[k].t && t <= onCent[k + 1].t) { const f = (t - onCent[k].t) / ((onCent[k + 1].t - onCent[k].t) || 1); cx = onCent[k].x + (onCent[k + 1].x - onCent[k].x) * f; cy = onCent[k].y + (onCent[k + 1].y - onCent[k].y) * f; break; }
-    }
-    return { dx: Math.round(cx - refX), dy: Math.round(cy - refY) };
-  };
-  // registered sample: read reference pixel (x,y) from frame fi at its motion-shifted location
-  const nvS = (fi: number, x: number, y: number): number => {
-    const sh = shiftAt(frames[fi].t); const xx = x + sh.dx, yy = y + sh.dy;
-    return xx < 0 || yy < 0 || xx >= w || yy >= h ? 128 : nv(fi, yy * w + xx);
-  };
-
-  // ALL-ON reference (registered).
-  const onRef = new Float32Array(N); let onc = 0;
-  for (const [a, b] of onInt) {
-    const span = frames[b].t - frames[a].t || 1;
-    for (let fi = a; fi <= b; fi++) { const fr = (frames[fi].t - frames[a].t) / span; if (fr < 0.25 || fr > 0.85) continue; for (const i of maskIdx) onRef[i] += nvS(fi, i % w, (i / w) | 0); onc++; }
+  const onRef = new Float32Array(N); let onPxCnt = 0;
+  for (const [a, b] of onI1) { const sp = frames[b].t - frames[a].t || 1; for (let fi = a; fi <= b; fi++) { const fr = (frames[fi].t - frames[a].t) / sp; if (fr < 0.25 || fr > 0.85) continue; for (const i of maskIdx) onRef[i] += nv(fi, i); onPxCnt++; } }
+  if (onPxCnt) for (const i of maskIdx) onRef[i] /= onPxCnt;
+  const bitRef0 = Array.from({ length: bits }, () => new Float32Array(N)); const bc0 = new Int32Array(bits);
+  for (let q = 0; q < onI1.length - 1; q++) {
+    const aS = onI1[q][1] + 1, aE = onI1[q + 1][0] - 1, t0 = frames[aS]?.t ?? 0, dur = (frames[aE]?.t ?? 0) - t0;
+    if (aE <= aS || dur < bits * 40) continue;
+    for (let fi = aS; fi <= aE; fi++) { const f = ((frames[fi].t - t0) / dur) * bits, sl = Math.min(bits - 1, Math.floor(f)), fr = f - sl; if (fr < 0.2 || fr > 0.8) continue; for (const i of maskIdx) bitRef0[sl][i] += nv(fi, i); bc0[sl]++; }
   }
-  // bit references: the region between consecutive ON anchors holds bit0..bit(bits-1); split into
-  // `bits` equal sub-slots (middle of each), registered, averaged across all cycles.
-  const bitRef = Array.from({ length: bits }, () => new Float32Array(N));
-  const bitCnt = new Int32Array(bits);
-  let cyclesUsed = 0;
-  for (let k = 0; k < onInt.length - 1; k++) {
-    const aS = onInt[k][1] + 1, aE = onInt[k + 1][0] - 1;
-    const t0 = frames[aS]?.t ?? 0, dur = (frames[aE]?.t ?? 0) - t0;
-    if (aE <= aS || dur < bits * 30) continue;
-    cyclesUsed++;
-    for (let fi = aS; fi <= aE; fi++) {
-      const f = ((frames[fi].t - t0) / dur) * bits;
-      const s = Math.min(bits - 1, Math.floor(f));
-      const fr = f - s; if (fr < 0.2 || fr > 0.8) continue;   // middle of the sub-slot only
-      for (const i of maskIdx) bitRef[s][i] += nvS(fi, i % w, (i / w) | 0);
-      bitCnt[s]++;
-    }
-  }
-  if (!onc || !cyclesUsed || bitCnt.some((c) => c === 0)) return fail('capture too short — missed calibration frames (raise cycles / hold steadier)');
-  diag.cyclesUsed = cyclesUsed;
-  for (const i of maskIdx) onRef[i] /= onc;
-  for (let b = 0; b < bits; b++) for (const i of maskIdx) bitRef[b][i] /= bitCnt[b];
-  // OFF level per pixel = the dimmest bit slot (the bit frames where that LED is dark). No all-off
-  // frame needed; LED 0 (dark in every bit frame) is still found via its swing against ALL-ON.
-  const offRef = new Float32Array(N);
-  for (const i of maskIdx) { let mn = Infinity; for (let b = 0; b < bits; b++) if (bitRef[b][i] < mn) mn = bitRef[b][i]; offRef[i] = mn; }
-  log(`${cyclesUsed} cycles, ${maskIdx.length} strip px, swing ${maxRange}, drift ${diag.motionPx | 0}px`);
-
-  // (4) DETECT each LED as a blob on the clean ALL-ON contrast image (onRef−offRef), then READ
-  // each blob's bit-code by sampling its centre across the bit slots. This is far more robust than
-  // per-pixel decode + clustering: bright distinct dots are trivial to find, and we only have to
-  // read ~numLeds well-separated centres rather than disambiguate every noisy pixel.
-  const codes = 1 << bits;
-  const numLeds = opts.numLeds ?? codes;
-  let maxContrast = 0; for (const i of maskIdx) { const c = onRef[i] - offRef[i]; if (c > maxContrast) maxContrast = c; }
-  const contrastThr = Math.max(noiseFloor, 0.25 * maxContrast);
-  const contrastImg = new Uint8Array(N);                 // LED cores bright, gaps dark → blobs = LEDs
-  for (const i of maskIdx) { const c = onRef[i] - offRef[i]; contrastImg[i] = c <= 0 ? 0 : c > 255 ? 255 : c; }
-  const ledBlobs = detectBlobs(contrastImg, w, h, {
+  for (let b = 0; b < bits; b++) for (const i of maskIdx) bitRef0[b][i] /= bc0[b] || 1;
+  const offRef0 = new Float32Array(N); for (const i of maskIdx) { let mn = Infinity; for (let b = 0; b < bits; b++) if (bitRef0[b][i] < mn) mn = bitRef0[b][i]; offRef0[i] = onPxCnt ? mn : pmin[i]; }
+  let maxContrast = 0; const cimg = new Uint8Array(N);
+  for (const i of maskIdx) { const c = onRef[i] - offRef0[i]; cimg[i] = c <= 0 ? 0 : c > 255 ? 255 : c; if (c > maxContrast) maxContrast = c; }
+  const blobs = detectBlobs(cimg, w, h, {
     thresh: Math.max(noiseFloor, 0.4 * maxContrast),
     minPx: opts.minBlobPx ?? Math.max(2, Math.round(N / 30000)),
   });
-  debug.blobs = ledBlobs.map((b) => ({ x: b.x, y: b.y }));
-  const sampleDisc = (img: Float32Array, cx: number, cy: number, r = 2) => {
+  debug.blobs = blobs.map((b) => ({ x: b.x, y: b.y }));
+  if (blobs.length < 2) return fail('no LED dots found — adjust brightness so the LEDs are distinct dots');
+  const M = blobs.length;
+  log(`located ${M} candidate LEDs`);
+
+  // ---- PASS 2: per-blob, OFF-anchored bit-code read ----
+  const discNv = (fi: number, cx: number, cy: number, r = 2) => {
     let s = 0, c = 0; const x0 = Math.round(cx), y0 = Math.round(cy);
-    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) { const x = x0 + dx, y = y0 + dy; if (x >= 0 && y >= 0 && x < w && y < h) { s += img[y * w + x]; c++; } }
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) { const x = x0 + dx, y = y0 + dy; if (x >= 0 && y >= 0 && x < w && y < h) { s += nv(fi, y * w + x); c++; } }
     return c ? s / c : 0;
   };
-  // Read each blob's code; keep the strongest blob per LED index (collisions are rare).
+  // Each blob's brightness over time + its own lit threshold (midway between its min and max).
+  const series: Float32Array[] = blobs.map((b) => { const a = new Float32Array(F); for (let fi = 0; fi < F; fi++) a[fi] = discNv(fi, b.x, b.y); return a; });
+  const bMid = blobs.map((_, k) => { let mn = 255, mx = 0; for (let fi = 0; fi < F; fi++) { const v = series[k][fi]; if (v < mn) mn = v; if (v > mx) mx = v; } return (mn + mx) / 2; });
+  const litBlob = new Int32Array(F);
+  for (let fi = 0; fi < F; fi++) { let c = 0; for (let k = 0; k < M; k++) if (series[k][fi] > bMid[k]) c++; litBlob[fi] = c; }
+
+  // ALL-OFF intervals: almost no blobs lit, held a while. The clean cycle anchor.
+  const offInt: [number, number][] = [];
+  { let s = -1;
+    for (let fi = 0; fi < F; fi++) {
+      if (litBlob[fi] < 0.12 * M) { if (s < 0) s = fi; }
+      else { if (s >= 0) { if (frames[fi - 1].t - frames[s].t > frameMs * 0.6) offInt.push([s, fi - 1]); s = -1; } }
+    }
+    if (s >= 0 && frames[F - 1].t - frames[s].t > frameMs * 0.6) offInt.push([s, F - 1]);
+  }
+  if (offInt.length < 2) return fail('could not find the OFF reference frames — hold steadier / capture more cycles');
+
+  // Each active region between OFF intervals is [ON][bit0..bit(bits-1)] → split into 1+bits sub-slots.
+  const SUB = 1 + bits;
+  const onSum = new Float64Array(M); let onCnt = 0;
+  const bitSum = Array.from({ length: bits }, () => new Float64Array(M)); const bitCnt = new Int32Array(bits);
+  let cyclesUsed = 0;
+  for (let q = 0; q < offInt.length - 1; q++) {
+    const aS = offInt[q][1] + 1, aE = offInt[q + 1][0] - 1;
+    const t0 = frames[aS]?.t ?? 0, dur = (frames[aE]?.t ?? 0) - t0;
+    if (aE <= aS || dur < SUB * 50) continue;
+    cyclesUsed++;
+    for (let fi = aS; fi <= aE; fi++) {
+      const f = ((frames[fi].t - t0) / dur) * SUB;
+      const sl = Math.min(SUB - 1, Math.floor(f)); const fr = f - sl;
+      if (fr < 0.2 || fr > 0.8) continue;               // middle of the sub-slot only
+      if (sl === 0) { for (let k = 0; k < M; k++) onSum[k] += series[k][fi]; onCnt++; }
+      else { for (let k = 0; k < M; k++) bitSum[sl - 1][k] += series[k][fi]; bitCnt[sl - 1]++; }
+    }
+  }
+  diag.cyclesUsed = cyclesUsed;
+  if (!cyclesUsed || !onCnt || bitCnt.some((c) => c === 0)) return fail('capture too short — missed calibration frames (hold steadier)');
+  const onAvg = onSum.map((v) => v / onCnt);
+  const bitAvg = bitSum.map((bs, b) => bs.map((v) => v / bitCnt[b]));
+
+  const numLeds = opts.numLeds ?? (1 << bits);
+  const contrastThr = Math.max(noiseFloor, 0.2 * maxContrast);
   const byIdx = new Map<number, { x: number; y: number; contrast: number }>();
   let decodedN = 0, oorN = 0;
-  for (const b of ledBlobs) {
-    const on = sampleDisc(onRef, b.x, b.y), off = sampleDisc(offRef, b.x, b.y);
+  for (let k = 0; k < M; k++) {
+    const on = onAvg[k]; let off = Infinity; for (let b = 0; b < bits; b++) if (bitAvg[b][k] < off) off = bitAvg[b][k];
     const c = on - off; if (c < contrastThr) continue;
-    const mid = (on + off) / 2;
-    let idx = 0;
-    for (let bb = 0; bb < bits; bb++) if (sampleDisc(bitRef[bb], b.x, b.y) > mid) idx |= (1 << bb);
+    const mid = (on + off) / 2; let idx = 0;
+    for (let b = 0; b < bits; b++) if (bitAvg[b][k] > mid) idx |= (1 << b);
     decodedN++;
     if (idx >= numLeds) { oorN++; continue; }
     const prev = byIdx.get(idx);
-    if (!prev || c > prev.contrast) byIdx.set(idx, { x: b.x, y: b.y, contrast: c });
+    if (!prev || c > prev.contrast) byIdx.set(idx, { x: blobs[k].x, y: blobs[k].y, contrast: c });
   }
   diag.outOfRangePct = decodedN ? oorN / decodedN : 0;
   const pts: (Pt | null)[] = new Array(numLeds).fill(null);
   let found = 0;
   for (const [idx, b] of byIdx) { pts[idx] = { x: b.x / w, y: b.y / h }; debug.decoded.push({ x: b.x, y: b.y, idx }); found++; }
   diag.found = found;
-  // Trim trailing gaps (indices beyond the highest decoded LED carry no information).
   let last = pts.length - 1; while (last >= 0 && pts[last] === null) last--;
   const out = pts.slice(0, last + 1);
-  if (!found) return fail('strip found but no LEDs decoded — try dimmer calibration brightness / lower sensitivity');
-  log(`decoded ${found} LEDs`);
-  return { points: out, ok: true, reason: `decoded ${found} LEDs`, debug, diag };
+  if (!found) return fail('LED dots found but none decoded — try adjusting brightness, then Map again');
+  log(`decoded ${found}/${numLeds} LEDs`);
+  return { points: out, ok: true, reason: `decoded ${found}/${numLeds} LEDs`, debug, diag };
 }
 
 // ---- adaptive auto-scan ------------------------------------------------------------------
