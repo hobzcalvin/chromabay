@@ -6,7 +6,7 @@
 	"scripts": {
 		"dev": "vite dev --host 0.0.0.0",
 		"build": "vite build",
-		"build:dev": "NODE_ENV=development vite build",
+		"build:dev": "NODE_ENV=development VITE_LOCAL=1 vite build",
 		"preview": "vite preview",
 		"prepare": "husky",
 		"test": "vitest run",

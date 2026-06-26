@@ -17,8 +17,13 @@ if (browser && Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'ios'
   });
 }
 
-// Initialize live updates when app loads (only for native platforms and NOT in development)
-if (browser && Capacitor.isNativePlatform() && !dev) {
+// Initialize live updates when app loads (only for native platforms and NOT in development).
+// VITE_LOCAL is set by `build:dev` (the `ios:phone`/`ios`/`ios:sim` local-test builds), so a
+// locally side-loaded build runs its OWN bundled assets instead of pulling the deployed GitHub
+// Pages bundle over them — essential when testing an unpushed branch. Release/deploy builds use
+// `build` (no VITE_LOCAL) so live updates stay on in production.
+const isLocalBuild = import.meta.env.VITE_LOCAL === '1';
+if (browser && Capacitor.isNativePlatform() && !dev && !isLocalBuild) {
   import('@capawesome/capacitor-live-update').then(({ LiveUpdate }) => {
     // Import App plugin for foreground detection
     import('@capacitor/app').then(({ App }) => {
