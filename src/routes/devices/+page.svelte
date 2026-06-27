@@ -47,6 +47,7 @@
   import { Capacitor } from '@capacitor/core';
   import { connectedDevices, getConnectedDevicesList, type ConnectedDevice } from '$lib/stores/deviceStore';
   import LedConfigurationComponent from '$lib/components/LedConfiguration.svelte';
+  import UsbFlash from '$lib/components/UsbFlash.svelte';
 
   let bleSupported = $state(false);
   let bleEnabled = $state(false);
@@ -725,6 +726,7 @@
         {/if}
       {/if}
     </div>
+    <UsbFlash />
   </section>
 
   <!-- Devices List -->
