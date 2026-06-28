@@ -37,11 +37,13 @@ public:
             for (uint32_t x = 0; x < width; x++) {
                 uint32_t index = y * width + x;
 
-                // Get normalized coordinates and scale them for FastLED noise
-                float norm_x = (float)x / (float)width;
-                float norm_y = (float)y / (float)height;
-                float noise_x = norm_x * noise_scale;
-                float noise_y = norm_y * noise_scale;
+                // Scale around the display CENTER (not the top-left corner), so changing Scale
+                // zooms in/out about the middle. The center pixel always samples the same fixed
+                // noise coordinate (32768); pixels fan out from there by ±0.5·noise_scale.
+                float cx = (float)x - (float)width * 0.5f;
+                float cy = (float)y - (float)height * 0.5f;
+                float noise_x = 32768.0f + (cx / (float)width) * noise_scale;
+                float noise_y = 32768.0f + (cy / (float)height) * noise_scale;
 
                 if (warp_amt > 0.0f) {
                     // Displace the sample point by a slow, low-frequency noise vector.

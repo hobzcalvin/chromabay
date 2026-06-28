@@ -47,6 +47,7 @@
   import { Capacitor } from '@capacitor/core';
   import { connectedDevices, getConnectedDevicesList, type ConnectedDevice } from '$lib/stores/deviceStore';
   import LedConfigurationComponent from '$lib/components/LedConfiguration.svelte';
+  import UsbFlash from '$lib/components/UsbFlash.svelte';
 
   let bleSupported = $state(false);
   let bleEnabled = $state(false);
@@ -749,33 +750,25 @@
           {#if settings}
             <div class="device-card connected">
               <div class="device-header">
-              <div class="device-info">
-                <h3>{device.name}</h3>
-                <p class="device-id">{device.deviceId}</p>
-                {#if settings.deviceInfo}
-                  <p class="fw-version">FW: {settings.deviceInfo.fw_ver}</p>
+                <h3 class="device-name">{device.name}</h3>
+                {#if settings.ledConfig}
+                  <div class="brightness-bar">
+                    <span class="bri-label">Brightness</span>
+                    <input type="range" min="0" max="255"
+                      value={liveBrightness[device.deviceId] ?? settings.ledConfig.globalBrightness}
+                      oninput={(e) => handleBrightnessInput(device.deviceId, parseInt(e.currentTarget.value))} />
+                    <span class="bri-value">{liveBrightness[device.deviceId] ?? settings.ledConfig.globalBrightness}</span>
+                  </div>
                 {/if}
-                <span class="status-badge connected">Connected</span>
+                <div class="device-actions">
+                  <button class="btn danger small" onclick={() => handleDisconnect(device.deviceId)} disabled={settings.otaInProgress}>
+                    Disconnect
+                  </button>
+                  <button class="btn secondary small" onclick={() => toggleSettings(device.deviceId)}>
+                    {settings.showSettings ? 'Hide Settings' : 'Show Settings'}
+                  </button>
+                </div>
               </div>
-              <div class="device-actions">
-                <button class="btn danger small" onclick={() => handleDisconnect(device.deviceId)} disabled={settings.otaInProgress}>
-                  Disconnect
-                </button>
-                <button class="btn secondary small" onclick={() => toggleSettings(device.deviceId)}>
-                  {settings.showSettings ? 'Hide Settings' : 'Show Settings'}
-                </button>
-              </div>
-            </div>
-
-            {#if settings.ledConfig}
-              <div class="brightness-bar">
-                <span class="bri-label">Brightness</span>
-                <input type="range" min="0" max="255"
-                  value={liveBrightness[device.deviceId] ?? settings.ledConfig.globalBrightness}
-                  oninput={(e) => handleBrightnessInput(device.deviceId, parseInt(e.currentTarget.value))} />
-                <span class="bri-value">{liveBrightness[device.deviceId] ?? settings.ledConfig.globalBrightness}</span>
-              </div>
-            {/if}
 
             {#if settings.showSettings}
               <div class="device-settings">
@@ -810,10 +803,6 @@
                     </div>
                     <div class="info-grid">
                       <div><strong>Firmware:</strong> {settings.deviceInfo.fw_ver}</div>
-                      <div><strong>Hardware:</strong> {settings.deviceInfo.hw_ver}</div>
-                      {#if settings.deviceInfo.heap !== undefined}
-                        <div><strong>Free Heap:</strong> {settings.deviceInfo.heap} bytes</div>
-                      {/if}
                     </div>
                     <button class="btn secondary small" onclick={() => loadDeviceInfo(device.deviceId)}>
                       Refresh Info
@@ -873,14 +862,16 @@
           {#if settings}
             <div class="device-card connected">
               <div class="device-header">
-                <div class="device-info">
-                  <h3>{device.name}</h3>
-                  <p class="device-id">{device.deviceId}</p>
-                  {#if settings.deviceInfo}
-                    <p class="fw-version">FW: {settings.deviceInfo.fw_ver}</p>
-                  {/if}
-                  <span class="status-badge connected">Connected</span>
-                </div>
+                <h3 class="device-name">{device.name}</h3>
+                {#if settings.ledConfig}
+                  <div class="brightness-bar">
+                    <span class="bri-label">Brightness</span>
+                    <input type="range" min="0" max="255"
+                      value={liveBrightness[device.deviceId] ?? settings.ledConfig.globalBrightness}
+                      oninput={(e) => handleBrightnessInput(device.deviceId, parseInt(e.currentTarget.value))} />
+                    <span class="bri-value">{liveBrightness[device.deviceId] ?? settings.ledConfig.globalBrightness}</span>
+                  </div>
+                {/if}
                 <div class="device-actions">
                   <button class="btn danger small" onclick={() => handleDisconnect(device.deviceId)} disabled={settings.otaInProgress}>
                     Disconnect
@@ -890,16 +881,6 @@
                   </button>
                 </div>
               </div>
-
-            {#if settings.ledConfig}
-              <div class="brightness-bar">
-                <span class="bri-label">Brightness</span>
-                <input type="range" min="0" max="255"
-                  value={liveBrightness[device.deviceId] ?? settings.ledConfig.globalBrightness}
-                  oninput={(e) => handleBrightnessInput(device.deviceId, parseInt(e.currentTarget.value))} />
-                <span class="bri-value">{liveBrightness[device.deviceId] ?? settings.ledConfig.globalBrightness}</span>
-              </div>
-            {/if}
 
             {#if settings.showSettings}
               <div class="device-settings">
@@ -934,10 +915,6 @@
                     </div>
                     <div class="info-grid">
                       <div><strong>Firmware:</strong> {settings.deviceInfo.fw_ver}</div>
-                      <div><strong>Hardware:</strong> {settings.deviceInfo.hw_ver}</div>
-                      {#if settings.deviceInfo.heap !== undefined}
-                        <div><strong>Free Heap:</strong> {settings.deviceInfo.heap} bytes</div>
-                      {/if}
                     </div>
                     <button class="btn secondary small" onclick={() => loadDeviceInfo(device.deviceId)}>
                       Refresh Info
@@ -1011,6 +988,9 @@
         {/each}
       {/if}
     </div>
+
+    <!-- Web-only USB flasher, below the device list -->
+    <UsbFlash />
   </section>
 
   <!-- Status section moved to bottom and made smaller -->
@@ -1129,9 +1109,16 @@
 
   .device-header {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 1.5rem;
+    flex-direction: column;
+    gap: 0.85rem;
+    padding: 1.25rem 1.5rem;
+  }
+
+  /* Connected card: name → brightness → actions, stacked. */
+  .device-name {
+    margin: 0;
+    font-size: 1.3rem;
+    color: white;
   }
 
   /* Always-visible live brightness slider (applies immediately, no Save). */
@@ -1139,7 +1126,7 @@
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    padding: 0 1.5rem 1.25rem;
+    padding: 0;
   }
 
   .brightness-bar .bri-label {
@@ -1200,12 +1187,6 @@
     font-family: monospace;
   }
 
-  .fw-version {
-    margin: 0.25rem 0;
-    font-size: 0.8rem;
-    opacity: 0.8;
-  }
-
   .status-badge {
     padding: 0.25rem 0.5rem;
     border-radius: 12px;
@@ -1215,12 +1196,6 @@
     letter-spacing: 0.5px;
     margin-top: 0.5rem;
     display: inline-block;
-  }
-
-  .status-badge.connected {
-    background: rgba(34, 197, 94, 0.2);
-    color: #10b981;
-    border: 1px solid rgba(34, 197, 94, 0.5);
   }
 
   .status-badge.available {
@@ -1241,16 +1216,22 @@
     background: rgba(255, 255, 255, 0.05);
   }
 
+  /* Sections of one device blob: a header + content divided by a rule, not nested cards. */
   .settings-section {
-    margin-bottom: 2rem;
-    padding: 1rem;
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 8px;
+    margin: 0;
+    padding: 1.25rem 0 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+  }
+
+  .settings-section:first-child {
+    padding-top: 0;
+    border-top: none;
   }
 
   .settings-section h4 {
     margin: 0 0 1rem 0;
-    font-size: 1.1rem;
+    font-size: 1.05rem;
+    opacity: 0.95;
   }
 
   .info-grid {

@@ -14,14 +14,19 @@ public:
         const std::vector<ParameterValue>& parameters
     ) override {
         float speed = getFloat(parameters, 0, 1.0f);
-        float scale = getFloat(parameters, 1, 0.25f); // spatial frequency (per pixel)
+        float scale = getFloat(parameters, 1, 0.25f); // spatial frequency, in cycles relative to a 32px display
         int hueShift = getInt(parameters, 2, 0);
         uint8_t sat = (uint8_t)getInt(parameters, 3, 255);
 
+        // Resolution-independent: normalize coordinates to the display (x by width, y by height,
+        // matching Rainbow/Gradient/Perlin) and multiply by a reference dimension, so a tiny display
+        // and a large one show the SAME pattern at the same Scale. Centered so Scale zooms about the middle.
+        const float REF = 32.0f;
         float t = timestampMs * 0.001f * speed;
         for (uint32_t y = 0; y < height; y++) {
             for (uint32_t x = 0; x < width; x++) {
-                float fx = x * scale, fy = y * scale;
+                float fx = ((float)x - width * 0.5f) / (float)width * REF * scale;
+                float fy = ((float)y - height * 0.5f) / (float)height * REF * scale;
                 float v = sinf(fx + t)
                         + sinf(fy + t * 1.3f)
                         + sinf((fx + fy) * 0.5f + t * 0.7f)

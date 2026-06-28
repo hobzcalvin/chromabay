@@ -26,6 +26,10 @@
 	<true/>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>This app uses Bluetooth to connect to and control Bluetooth Low Energy devices for monitoring and configuration purposes.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>ChromaBay uses the camera to auto-map your LED layout by watching the LEDs flash a calibration pattern.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Not used directly; required by the system when the in-app camera view requests media capture.</string>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>

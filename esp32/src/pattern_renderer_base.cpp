@@ -86,8 +86,7 @@ uint16_t PatternRendererBase::getMatrixWidth() const {
         for (size_t i = 0; i < ledManager->getNumStrips(); i++) {
             const LedConfig::LedBus* s = ledManager->getStrip(i);
             if (!s) continue;
-            const auto& c = s->getConfig();
-            uint16_t w = c.width > 0 ? c.width : c.numLeds;
+            uint16_t w = s->effectiveWidth(); // layout's virtual matrix, else configured/linear
             if (w > maxW) maxW = w;
         }
         return maxW > 0 ? maxW : 8;
@@ -95,7 +94,8 @@ uint16_t PatternRendererBase::getMatrixWidth() const {
 
     const LedConfig::LedBus* strip = ledManager->getStrip(0);
     if (!strip) return 8; // Default fallback
-    
+    if (strip->hasLayout()) return strip->layoutWidth();
+
     const auto& config = strip->getConfig();
     if (config.width > 0) {
         return config.width;
@@ -118,8 +118,7 @@ uint16_t PatternRendererBase::getMatrixHeight() const {
         for (size_t i = 0; i < ledManager->getNumStrips(); i++) {
             const LedConfig::LedBus* s = ledManager->getStrip(i);
             if (!s) continue;
-            const auto& c = s->getConfig();
-            uint16_t h = c.height > 0 ? c.height : 1;
+            uint16_t h = s->effectiveHeight();
             if (h > maxH) maxH = h;
         }
         return maxH > 0 ? maxH : 1;
@@ -127,6 +126,7 @@ uint16_t PatternRendererBase::getMatrixHeight() const {
 
     const LedConfig::LedBus* strip = ledManager->getStrip(0);
     if (!strip) return 8; // Default fallback
+    if (strip->hasLayout()) return strip->layoutHeight();
 
     const auto& config = strip->getConfig();
     if (config.height > 0) {
@@ -347,8 +347,8 @@ void PatternRendererBase::render() {
         if (!strip) continue;
         const auto& config = strip->getConfig();
 
-        uint16_t w = config.width > 0 ? config.width : config.numLeds;
-        uint16_t h = config.height > 0 ? config.height : 1;
+        uint16_t w = strip->effectiveWidth();   // layout virtual matrix, else configured/linear
+        uint16_t h = strip->effectiveHeight();
         if (w == 0 || h == 0) continue;
         // Safety net: never render past the allocated buffers (shouldn't trigger —
         // buffers are sized to the widest x tallest strip).
@@ -362,7 +362,15 @@ void PatternRendererBase::render() {
         const CRGB* patternBuffer = getBuffer(currentPattern.outputBuffer);
         if (!patternBuffer) continue;
 
-        if (config.isMatrix()) {
+        if (strip->hasLayout()) {
+            // Arbitrary layout (WLED ledmap): walk the W×H grid; each cell lights the LED it
+            // maps to (gaps are -1). w*h == layoutWidth*layoutHeight.
+            uint32_t cells = (uint32_t)w * (uint32_t)h;
+            for (uint32_t c = 0; c < cells; c++) {
+                int32_t led = strip->layoutLedAt(c);
+                if (led >= 0) strip->setPixelColor((uint16_t)led, patternBuffer[c]);
+            }
+        } else if (config.isMatrix()) {
             // 2D matrix: xyToIndex owns rotation/flip/serpentine mapping.
             for (uint16_t y = 0; y < h; y++) {
                 for (uint16_t x = 0; x < w; x++) {

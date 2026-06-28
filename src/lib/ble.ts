@@ -61,6 +61,9 @@ const CHARACTERISTIC_UUID_PLAYLIST_SYNC = "a0be83f0-8dc9-47f0-ab40-b19721d20ed1"
 // LED Configuration Characteristics - for getting/setting strip configuration
 const CHARACTERISTIC_UUID_LED_CONFIG_GET = "a0be83ed-8dc9-47f0-ab40-b19721d20ed1";
 const CHARACTERISTIC_UUID_LED_CONFIG_SET = "a0be83ee-8dc9-47f0-ab40-b19721d20ed1";
+const CHARACTERISTIC_UUID_LAYOUT_SET = "a0be83f5-8dc9-47f0-ab40-b19721d20ed1"; // arbitrary pixel layout (WLED ledmap), per strip
+const CHARACTERISTIC_UUID_LAYOUT_GET = "a0be83f6-8dc9-47f0-ab40-b19721d20ed1"; // read back a strip's layout (notify-chunked)
+const CHARACTERISTIC_UUID_CALIBRATION = "a0be83f7-8dc9-47f0-ab40-b19721d20ed1"; // auto-layout structured-light flash control
 
 // Timestamp Sync Characteristic - for synchronizing time across devices
 const CHARACTERISTIC_UUID_TIMESTAMP_SYNC = "a0be83ef-8dc9-47f0-ab40-b19721d20ed1";
@@ -1146,6 +1149,149 @@ export async function setLedConfiguration(deviceId: string, config: LedConfigura
     console.error('Error setting LED configuration:', error);
     throw error;
   }
+}
+
+/**
+ * Upload an arbitrary pixel layout (WLED ledmap) for one strip, or clear it.
+ * `map[cell]` = the physical LED index that lights grid cell `cell` (row-major over
+ * width×height), or -1 for a gap. Pass an empty map (or width/height 0) to clear.
+ * Wire format: [u8 stripIndex][u16 W][u16 H][u16 count][count × i16 ledIndex] (LE).
+ * Sent in one write, so it's limited by the BLE long-write size (~512 B ≈ up to ~250
+ * cells); larger layouts will need a chunked path (see ARBITRARY_LAYOUTS.md).
+ */
+export async function uploadStripLayout(
+  deviceId: string,
+  stripIndex: number,
+  layout: { width: number; height: number; map: number[] } | null
+): Promise<void> {
+  const W = layout?.width ?? 0;
+  const H = layout?.height ?? 0;
+  const map = layout?.map ?? [];
+  const clearing = !layout || W <= 0 || H <= 0 || map.length === 0;
+  const count = clearing ? 0 : Math.min(map.length, W * H);
+
+  // Logical payload the device reassembles: [u8 stripIndex][u16 W][u16 H][u16 count][count×i16].
+  const payload = new Uint8Array(1 + 6 + count * 2);
+  const dv = new DataView(payload.buffer);
+  dv.setUint8(0, stripIndex & 0xff);
+  dv.setUint16(1, clearing ? 0 : W, true);
+  dv.setUint16(3, clearing ? 0 : H, true);
+  dv.setUint16(5, count, true);
+  for (let i = 0; i < count; i++) {
+    const led = Number.isFinite(map[i]) ? Math.trunc(map[i]) : -1;
+    dv.setInt16(7 + i * 2, led, true); // -1 = gap
+  }
+
+  // Chunk it: each frame is [u16 totalLen][u16 offset][bytes]. Writes are serialized via
+  // bleSerial, so the device reassembles in order. Lifts the single-write size limit.
+  const total = payload.byteLength;
+  // Conservative chunk so each frame is a single ATT write across MTUs (long writes proved
+  // unreliable for ~500B here). 180B data + 4B header fits comfortably under common MTUs.
+  const CHUNK = 180;
+  for (let off = 0; off < total; off += CHUNK) {
+    const slice = payload.subarray(off, Math.min(off + CHUNK, total));
+    const frame = new Uint8Array(4 + slice.length);
+    const fdv = new DataView(frame.buffer);
+    fdv.setUint16(0, total, true);
+    fdv.setUint16(2, off, true);
+    frame.set(slice, 4);
+    await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_LAYOUT_SET,
+      new DataView(frame.buffer));
+  }
+  console.log(`[Layout] strip ${stripIndex}: ${clearing ? 'cleared' : `${W}x${H}, ${count} cells`} sent (${total}B)`);
+}
+
+/**
+ * Start the auto-layout calibration flash on the device: each LED blinks its index as a
+ * structured-light sequence the camera decodes. `stripIndex` 0xFF flashes all strips.
+ */
+export async function startCalibration(deviceId: string, stripIndex = 0xff, brightness = 40, mode: 'strobe' | 'full' | 'detect' = 'full'): Promise<void> {
+  // brightness: per-channel white level (1..255) the strips flash at. Keep low — full brightness
+  // saturates the camera and blooms LEDs into one blob; ~40 keeps them as distinct dots. 0 => firmware default.
+  // mode: 'detect' = steady ALL-ON (tune exposure + detect blobs), 'strobe' = ALL on/off,
+  //       'full' = structured-light (ON + bit planes).
+  const m = mode === 'strobe' ? 0 : mode === 'detect' ? 2 : 1;
+  await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_CALIBRATION,
+    new DataView(new Uint8Array([1, stripIndex & 0xff, brightness & 0xff, m]).buffer));
+}
+export async function stopCalibration(deviceId: string): Promise<void> {
+  await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_CALIBRATION,
+    new DataView(new Uint8Array([0]).buffer));
+}
+
+/**
+ * Read back a strip's current layout (so the user can see/copy/tweak it). Writes the strip
+ * index to LAYOUT_GET; the device NOTIFYs the layout chunked ([u16 totalLen][u16 offset][bytes],
+ * the bytes being the [u16 W][u16 H][u16 count][count×i16] file). Returns null if the strip
+ * has no layout (grid mapping) or on timeout.
+ */
+export async function getStripLayout(
+  deviceId: string,
+  stripIndex: number
+): Promise<{ width: number; height: number; map: number[] } | null> {
+  let total = -1, received = 0;
+  let buf: Uint8Array | null = null;
+  let settle: ((v: any) => void) | null = null;
+  let cleanedUp = false;
+
+  const cleanup = async () => {
+    if (cleanedUp) return; cleanedUp = true;
+    try {
+      if (isWeb()) {
+        const svc = await connectedDevices.get(deviceId)?.gattServer?.getPrimaryService(LED_SERVICE_UUID);
+        const ch = await svc?.getCharacteristic(CHARACTERISTIC_UUID_LAYOUT_GET);
+        if (ch) { ch.removeEventListener('characteristicvaluechanged', onWebEvt); await ch.stopNotifications().catch(() => {}); }
+      } else {
+        await BleClient.stopNotifications(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_LAYOUT_GET).catch(() => {});
+      }
+    } catch { /* ignore */ }
+  };
+
+  const onFrame = (dv: DataView) => {
+    if (!settle || dv.byteLength < 4) return;
+    const totalLen = dv.getUint16(0, true);
+    const offset = dv.getUint16(2, true);
+    if (totalLen === 0) { const s = settle; settle = null; s(null); return; } // no layout
+    if (total < 0) { total = totalLen; buf = new Uint8Array(total); received = 0; }
+    const dataLen = dv.byteLength - 4;
+    for (let i = 0; i < dataLen && offset + i < total; i++) buf![offset + i] = dv.getUint8(4 + i);
+    received = Math.max(received, offset + dataLen);
+    if (received >= total && buf) {
+      const p = new DataView(buf.buffer);
+      const W = p.getUint16(0, true), H = p.getUint16(2, true), count = p.getUint16(4, true);
+      const map: number[] = [];
+      for (let k = 0; k < count && 6 + k * 2 + 1 < buf.length; k++) map.push(p.getInt16(6 + k * 2, true));
+      const s = settle; settle = null; s({ width: W, height: H, map });
+    }
+  };
+  const onWebEvt = (e: any) => onFrame(e.target.value as DataView);
+
+  const result = await new Promise<any>(async (resolve, reject) => {
+    settle = resolve;
+    const timer = setTimeout(() => { if (settle) { const s = settle; settle = null; s(null); } }, 8000);
+    const origSettle = settle;
+    settle = (v: any) => { clearTimeout(timer); origSettle(v); };
+    try {
+      if (isWeb()) {
+        const deviceInfo = connectedDevices.get(deviceId);
+        if (!deviceInfo?.gattServer) throw new Error('Device not connected');
+        const service = await deviceInfo.gattServer.getPrimaryService(LED_SERVICE_UUID);
+        const ch = await service.getCharacteristic(CHARACTERISTIC_UUID_LAYOUT_GET);
+        await ch.startNotifications();
+        ch.addEventListener('characteristicvaluechanged', onWebEvt);
+      } else {
+        await BleClient.startNotifications(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_LAYOUT_GET, (dv) => onFrame(dv));
+      }
+      // Request the strip's layout (1-byte write).
+      await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_LAYOUT_GET,
+        new DataView(new Uint8Array([stripIndex & 0xff]).buffer));
+    } catch (err) {
+      if (settle) { const s = settle; settle = null; s(null); }
+      console.error('[Layout] read-back failed:', err);
+    }
+  });
+  await cleanup();
+  return result;
 }
 
 // Timestamp Sync Functions

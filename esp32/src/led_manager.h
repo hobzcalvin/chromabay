@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <cstdint>
+#include <cmath> // sqrtf/lroundf for layout sizing
 #include <memory> // Required for std::unique_ptr
 #include "led_types.h"
 #include "led_wrapper.h" // For LedWrapper and NeoPixelBus types if needed directly
@@ -238,12 +239,49 @@ public:
     uint8_t lutG(uint8_t c) const { return _lut[1][c]; }
     uint8_t lutB(uint8_t c) const { return _lut[2][c]; }
 
+    // ---- Arbitrary pixel layout (WLED ledmap model) ------------------------------------
+    // A layout is a W×H grid plus a `map`: map[cell] = the physical LED index that displays
+    // that grid cell (or <0 for a gap). Same format as WLED's ledmap.json, so existing maps
+    // work. The operator graph renders at W×H and render() walks the cells, lighting each
+    // mapped LED. Multi-strip installs that want a shared coordinate space just give each
+    // strip the same W×H and place their own LEDs in the appropriate cells.
+    static constexpr int kLayoutMaxDim = 256; // cap on either dimension (W*H bounded by buffers)
+
+    void setLayout(const int16_t* map, uint16_t count, uint16_t W, uint16_t H) {
+        if (!map || W == 0 || H == 0 || count == 0 || W > kLayoutMaxDim || H > kLayoutMaxDim) {
+            clearLayout(); return;
+        }
+        uint32_t cells = (uint32_t)W * H;
+        if (count > cells) count = (uint16_t)cells; // trust W*H; ignore extras
+        _layoutW = W; _layoutH = H;
+        _layoutMap.assign(cells, -1);
+        for (uint16_t c = 0; c < count; c++) {
+            int16_t led = map[c];
+            _layoutMap[c] = (led >= 0 && led < (int)_config.numLeds) ? led : -1;
+        }
+        _hasLayout = true;
+    }
+    void clearLayout() { _hasLayout = false; _layoutW = _layoutH = 0; _layoutMap.clear(); _layoutMap.shrink_to_fit(); }
+    bool hasLayout() const { return _hasLayout; }
+    uint16_t layoutWidth() const { return _layoutW; }
+    uint16_t layoutHeight() const { return _layoutH; }
+    // LED index displaying grid cell, or -1 for a gap / out of range.
+    int32_t layoutLedAt(uint32_t cell) const { return cell < _layoutMap.size() ? _layoutMap[cell] : -1; }
+
+    // Canvas dimensions to render this strip at: the layout's virtual matrix if present,
+    // else the configured matrix (or 1 x numLeds for a linear strip).
+    uint16_t effectiveWidth() const { return _hasLayout ? _layoutW : (_config.width > 0 ? _config.width : _config.numLeds); }
+    uint16_t effectiveHeight() const { return _hasLayout ? _layoutH : (_config.height > 0 ? _config.height : 1); }
+
 private:
     LedStripConfig _config;
     void* _busPtr;
     InternalLedType _internalType;
     uint8_t _brightness;
     uint8_t _lut[3][256];
+    bool _hasLayout = false;
+    uint16_t _layoutW = 0, _layoutH = 0;
+    std::vector<int16_t> _layoutMap; // per-cell physical LED index (-1 = gap), length W*H
 
     InternalLedType mapChipsetToInternalType(LedChipset chipset) {
         switch (chipset) {
