@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.118",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.118.zip",
-  "buildDate": "2026-06-25T05:50:14Z",
-  "commitHash": "2781f136e568741a2768042f0b8bfed80c38b67b",
-  "commitMessage": "Operator cleanup pass: consolidate, restyle, fix params; venn previews"
+  "version": "0.0.1.119",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.119.zip",
+  "buildDate": "2026-06-28T20:32:43Z",
+  "commitHash": "68cadcaa501b7ab18dd98e2ec52c9a6dc6aa8797",
+  "commitMessage": "Fix vitest harness: hand emscripten the wasm bytes; update stale serialization test"
 }
