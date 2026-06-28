@@ -1,10 +1,14 @@
 <script lang="ts">
-  // Automatic camera auto-layout. You just frame the strip; the app tunes brightness from the live
-  // blink-detection, waits until it confidently sees all N LEDs, then runs the structured-light
-  // map on its own. Phases: 'detect' (live, auto-tuning) → 'map' (auto-fired) → 'result'.
+  // Camera auto-layout in three explicit steps:
+  //   1. FRAME   — device held steady ALL-ON; the user frames the whole array, holds still, taps Capture.
+  //   2. TUNE    — (auto) ramp brightness from low until the blinking LEDs are clearly visible, landing on
+  //                the dimmest level that reads (dim = no bloom = LEDs stay distinct dots).
+  //   3. CAPTURE — (auto) record the structured-light sequence at high res, decode, show the result.
+  // The result shows the ALL-ON photo with every found LED overlaid + the logical grid preview, so the
+  // user can judge how well it went. No realtime per-frame analysis (it only ever undercounted + janked).
   import { onMount } from 'svelte';
   import { startCalibration, stopCalibration, uploadStripLayout } from '$lib/ble';
-  import { captureAndDecode, detectBlobs } from '$lib/cameraDecode';
+  import { captureAndDecode, captureRawFrames, measureSwing } from '$lib/cameraDecode';
   import { buildLedmap, rectifyPoints, rotateLedmap, type Pt, type Ledmap } from '$lib/autoLayout';
   import LayoutPreview from './LayoutPreview.svelte';
 
@@ -13,37 +17,37 @@
   let { deviceId, stripIndex, numLeds, onClose }:
     { deviceId: string; stripIndex: number; numLeds: number; onClose: () => void } = $props();
 
-  const FRAME_MS = 220, DET_W = 200, MAP_W = 320, DET_THR = 0.5;
+  const FRAME_MS = 220;
   const bits = Math.max(1, Math.ceil(Math.log2(Math.max(2, numLeds))));
-  const LOCK_WINDOW = 10, LOCK_NEEDED = 7;     // need N/N detected in ≥7 of last 10 frames to map
+  // Processing resolution scales with array size (≈34 px/LED across the width); a 5×5 stays at 320, a
+  // 20×20 → 512 (capped for capture/CPU cost).
+  const MAP_W = Math.min(512, Math.max(320, Math.round(Math.sqrt(numLeds) * 34)));
+  // Brightness ramp: geometric steps, stop at the first clearly-visible level, then nudge up for margin.
+  const BRIGHT_LEVELS = [2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233];
+  const VIS_SWING = 28;                                      // temporal swing (0..255) that clears sensor noise
+  const VIS_BLOBS = Math.max(4, Math.round(numLeds * 0.05)); // a handful of distinct blinking blobs = "visible"
 
   let video: HTMLVideoElement;
   let preview: HTMLCanvasElement | undefined = $state();
+  let resultCanvas: HTMLCanvasElement | undefined = $state();
   let stream: MediaStream | null = null;
   let videoTrack: MediaStreamTrack | null = null;
   let zoomCap: { min: number; max: number; step: number } | null = $state(null);
   let zoom = $state(1);
+  let alive = true;
 
-  let phase = $state<'detect' | 'map' | 'result'>('detect');
+  let phase = $state<'frame' | 'tune' | 'capture' | 'result'>('frame');
   let points: (Pt | null)[] = $state([]);
   let snap = $state(1);
   let rectify = $state(true);
   let turns = $state(0);
-  let status = $state('Aim at the strip and hold steady…');
-  let detectedCount = $state(0);
+  let status = $state('Frame the whole device, hold steady, then tap Capture.');
   let calBright = $state(40);
-  let autoFire = $state(true);   // auto-run the map on lock; disabled after repeated misses
-  let mapFails = 0;
-
-  let mapGen = 0;
-  let grab: HTMLCanvasElement | null = null;
-  let frameBuf: Uint8Array[] = [];
-  let bufW = 0, bufH = 0;
-  const BUF = 10;
-  const recent: number[] = [];   // recent detected counts (for the auto-map lock)
-  let briTimer: any = null;
-  let lockedBlobs: { x: number; y: number; n: number }[] = $state([]); // blobs at lock (overlaid during map)
-  let mapProgress = $state(0);   // 0..1 capture progress shown during the map phase
+  let progress = $state(0);          // 0..1 capture progress
+  let capLabel = $state('Capturing…');
+  let gen = 0;                       // invalidates an in-flight ramp/capture when the user acts again
+  // ALL-ON photo + found LED positions, for the result overlay.
+  let overlay: { img: Uint8Array; w: number; h: number; pts: { x: number; y: number }[] } | null = $state(null);
 
   const layout = $derived.by((): Ledmap | null => {
     if (!points.length) return null;
@@ -52,66 +56,21 @@
   });
   const decodedCount = $derived(points.filter(Boolean).length);
 
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   function applyZoom(z: number) { zoom = z; videoTrack?.applyConstraints({ advanced: [{ zoom: z } as any] }).catch(() => {}); }
-  function reStrobe() { frameBuf = []; startCalibration(deviceId, stripIndex, calBright, 'strobe').catch(() => {}); }
-  function closeModal() { phase = 'result'; mapGen++; stopCalibration(deviceId).catch(() => {}); onClose(); }
+  function closeModal() { gen++; phase = 'result'; stopCalibration(deviceId).catch(() => {}); onClose(); }
 
-  // Manual brightness: re-send the strobe at the new level (throttled so a drag doesn't flood BLE).
-  function onBrightness() { if (phase !== 'detect' || briTimer) return; briTimer = setTimeout(() => { briTimer = null; reStrobe(); }, 90); }
-
-  // One loop that keeps the preview LIVE in both phases: full blink-detection while detecting,
-  // and a light video + locked-blob overlay during the map (so it never freezes).
-  function frameLoop() {
-    if (phase === 'result') return;
-    const cv = preview;
-    if (video && video.videoWidth && cv) {
+  // Lightweight preview: just draw the live video (NO per-frame analysis) except on the result screen.
+  function previewLoop() {
+    if (!alive) return;
+    if (phase !== 'result' && video && video.videoWidth && preview) {
       const vw = video.videoWidth, vh = video.videoHeight;
-      const w = Math.min(DET_W, vw), h = Math.round((w / vw) * vh);
-      const ctx = cv.getContext('2d');
-      cv.width = w; cv.height = h;
-      if (ctx) ctx.drawImage(video, 0, 0, w, h);
-
-      if (phase === 'detect') {
-        if (w !== bufW || h !== bufH) { frameBuf = []; bufW = w; bufH = h; }
-        if (!grab) grab = document.createElement('canvas');
-        grab.width = w; grab.height = h;
-        const gctx = grab.getContext('2d', { willReadFrequently: true });
-        if (gctx && ctx) {
-          gctx.drawImage(video, 0, 0, w, h);
-          const d = gctx.getImageData(0, 0, w, h).data;
-          const N = w * h, gray = new Uint8Array(N);
-          for (let i = 0, j = 0; i < d.length; i += 4, j++) { const m = d[i] > d[i + 1] ? d[i] : d[i + 1]; gray[j] = m > d[i + 2] ? m : d[i + 2]; }
-          frameBuf.push(gray); if (frameBuf.length > BUF) frameBuf.shift();
-          if (frameBuf.length >= 5) {
-            const pmin = new Uint8Array(N).fill(255), pmax = new Uint8Array(N);
-            for (const g of frameBuf) for (let i = 0; i < N; i++) { if (g[i] < pmin[i]) pmin[i] = g[i]; if (g[i] > pmax[i]) pmax[i] = g[i]; }
-            const range = new Uint8Array(N); let mx = 0;
-            for (let i = 0; i < N; i++) { const r = pmax[i] - pmin[i]; range[i] = r; if (r > mx) mx = r; }
-            const blobs = mx >= 25 ? detectBlobs(range, w, h, { thresh: Math.max(18, mx * DET_THR) }) : [];
-            detectedCount = blobs.length; lockedBlobs = blobs;
-            ctx.lineWidth = Math.max(1, w / 200);
-            ctx.strokeStyle = blobs.length === numLeds ? '#2ecc71' : '#ffd23f';
-            for (const b of blobs) { ctx.beginPath(); ctx.arc(b.x, b.y, Math.max(3, Math.sqrt(b.n) + 1), 0, 6.283); ctx.stroke(); }
-            recent.push(detectedCount); if (recent.length > LOCK_WINDOW) recent.shift();
-            const hits = recent.filter((c) => c === numLeds).length;
-            status = !autoFire ? `Seeing ${detectedCount}/${numLeds} — adjust, then tap Map`
-              : hits >= LOCK_NEEDED ? 'Locked — mapping…'
-              : detectedCount === numLeds ? `Hold steady… locking (${hits}/${LOCK_NEEDED})`
-              : detectedCount > numLeds ? `Seeing ${detectedCount} (extra) — hold steady…`
-              : `Seeing ${detectedCount}/${numLeds} — frame all LEDs, hold steady…`;
-            if (autoFire && recent.length >= LOCK_WINDOW && hits >= LOCK_NEEDED) runMap(); // → phase 'map'
-          }
-        }
-      } else if (ctx) {
-        // map phase: keep showing the (flashing) strip with the LEDs we locked onto circled
-        ctx.lineWidth = Math.max(1, w / 200); ctx.strokeStyle = '#2ecc71';
-        for (const b of lockedBlobs) { ctx.beginPath(); ctx.arc(b.x, b.y, Math.max(3, Math.sqrt(b.n) + 1), 0, 6.283); ctx.stroke(); }
-      }
+      const pw = Math.min(540, vw), ph = Math.round((pw / vw) * vh);
+      preview.width = pw; preview.height = ph;
+      preview.getContext('2d')?.drawImage(video, 0, 0, pw, ph);
     }
-    setTimeout(frameLoop, phase === 'detect' ? 130 : 180);
+    setTimeout(previewLoop, 100);
   }
-
-  function startDetect() { phase = 'detect'; recent.length = 0; frameBuf = []; reStrobe(); frameLoop(); }
 
   onMount(() => {
     (async () => {
@@ -124,46 +83,141 @@
           zoomCap = { min: caps.zoom.min, max: caps.zoom.max, step: caps.zoom.step || 0.1 };
           zoom = (videoTrack!.getSettings() as any).zoom ?? caps.zoom.min;
         }
-        startDetect();
+        startFrame();
+        previewLoop();
       } catch (e: any) { status = 'Camera error: ' + (e?.message || e); }
     })();
-    return () => { phase = 'result'; stream?.getTracks().forEach((t) => t.stop()); };
+    return () => { alive = false; gen++; stream?.getTracks().forEach((t) => t.stop()); };
   });
 
-  async function runMap() {
-    phase = 'map'; points = []; mapProgress = 0;
-    const myGen = ++mapGen;
-    status = `Reading ${lockedBlobs.length} LEDs… hold steady`;
-    const expMs = FRAME_MS * 3 + (2 + bits) * FRAME_MS * 6 + FRAME_MS + 600; // settle + capture + decode
+  // PHASE 1 — framing. Device steady ALL-ON so the array is clearly lit to aim at.
+  function startFrame() {
+    phase = 'frame';
+    status = 'Frame the whole device, hold steady, then tap Capture.';
+    startCalibration(deviceId, stripIndex, calBright, 'detect').catch(() => {});
+  }
+
+  // PHASE 2 — ramp brightness from low until the blinking strip is clearly visible; return the chosen
+  // level (nudged up a little for SNR margin), or null if nothing showed even at full brightness.
+  async function tuneBrightness(myGen: number): Promise<number | null> {
+    phase = 'tune';
+    for (const B of BRIGHT_LEVELS) {
+      if (myGen !== gen) return null;
+      status = `Finding brightness… (level ${B})`;
+      await startCalibration(deviceId, stripIndex, B, 'strobe');
+      await sleep(FRAME_MS * 2);                              // settle + a couple strobe cycles
+      if (myGen !== gen) return null;
+      const m = await measureSwing(video, 650, MAP_W);
+      if (myGen !== gen) return null;
+      if (m.maxRange >= VIS_SWING && m.blobs >= VIS_BLOBS) return Math.min(255, Math.round(B * 1.3));
+    }
+    return null;
+  }
+
+  // PHASE 3 — structured-light capture + decode → result.
+  async function runCapture(myGen: number) {
+    phase = 'capture'; points = []; overlay = null; progress = 0; capLabel = 'Capturing…';
+    status = 'Capturing… hold steady';
+    const expMs = FRAME_MS * 3 + (1 + bits) * FRAME_MS * 6 + 600;
     const t0 = performance.now();
-    const pTimer = setInterval(() => { if (myGen !== mapGen) { clearInterval(pTimer); return; } mapProgress = Math.min(0.98, (performance.now() - t0) / expMs); }, 100);
+    const pt = setInterval(() => { if (myGen !== gen) { clearInterval(pt); return; } progress = Math.min(0.98, (performance.now() - t0) / expMs); }, 100);
     try {
       await startCalibration(deviceId, stripIndex, calBright, 'full');
-      await new Promise((r) => setTimeout(r, FRAME_MS * 3));
+      await sleep(FRAME_MS * 3);
       const res = await captureAndDecode(video, { bits, frameMs: FRAME_MS, numLeds, cycles: 6, procWidth: MAP_W });
-      clearInterval(pTimer); mapProgress = 1;
-      if (myGen !== mapGen) return;
+      clearInterval(pt); progress = 1;
+      if (myGen !== gen) return;
       points = res.points;
       const got = res.diag?.found ?? 0;
-      if (got >= numLeds) { mapFails = 0; phase = 'result'; status = `Mapped all ${numLeds}! Rotate if needed, then Use this map.`; stopCalibration(deviceId).catch(() => {}); }
-      else { mapFails++; if (mapFails >= 2) autoFire = false; status = got > 0 ? `Got ${got}/${numLeds} — re-aiming…` : 'Missed some — re-aiming…'; startDetect(); } // auto-retry, then manual
+      if (res.debug?.onImage) overlay = { img: res.debug.onImage, w: res.debug.w, h: res.debug.h, pts: res.debug.decoded };
+      phase = 'result';
+      status = got > 0 ? `Mapped ${got}/${numLeds}. Check the overlay — rotate/adjust, then Use, or Recapture.`
+                       : "Couldn't decode the LEDs — try Recapture, move closer, or hold steadier.";
+      stopCalibration(deviceId).catch(() => {});
     } catch (e: any) {
-      clearInterval(pTimer);
-      if (myGen === mapGen) { status = 'Map failed: ' + (e?.message || e); startDetect(); }
+      clearInterval(pt);
+      if (myGen === gen) { status = 'Capture failed: ' + (e?.message || e); startFrame(); }
     }
   }
 
-  function mapNow() { mapFails = 0; runMap(); }
-  function rescan() { points = []; autoFire = true; mapFails = 0; startDetect(); }
+  // Capture button: ramp brightness (unless reusing a manual level), then capture+decode.
+  async function capture(skipTune = false) {
+    const myGen = ++gen;
+    if (!skipTune) {
+      const b = await tuneBrightness(myGen);
+      if (myGen !== gen) return;
+      if (b == null) { status = "Couldn't see the LEDs — darken the room or check the device, then Capture again."; startFrame(); return; }
+      calBright = b;
+    }
+    await runCapture(myGen);
+  }
+
+  function recapture() { capture(true); }     // reuse the current (possibly hand-tuned) brightness
+  function reframe() { points = []; overlay = null; startFrame(); }
+
+  // Record the raw structured-light frames to a .bin (CBC1) for offline decode debugging — at the
+  // auto-tuned brightness, so the recording matches what the decoder actually sees.
+  async function record() {
+    const myGen = ++gen;
+    const b = await tuneBrightness(myGen);
+    if (myGen !== gen) return;
+    if (b == null) { status = "Couldn't see the LEDs to record."; startFrame(); return; }
+    calBright = b;
+    phase = 'capture'; capLabel = 'Recording…'; progress = 0;
+    try {
+      const ms = (1 + bits) * FRAME_MS * 5 * 1.5 + FRAME_MS;   // ≈10s @25 LEDs, ≈17s @400
+      status = `Recording (~${Math.round((ms + FRAME_MS * 3) / 1000)}s, hold steady)…`;
+      await startCalibration(deviceId, stripIndex, calBright, 'full');
+      await sleep(FRAME_MS * 3);
+      const frames = await captureRawFrames(video, ms, MAP_W);
+      if (myGen !== gen) return;
+      if (!frames.length) { status = 'No frames captured.'; startFrame(); return; }
+      const w = frames[0].w, h = frames[0].h, n = frames.length;
+      const buf = new ArrayBuffer(16 + n * (4 + w * h));
+      const dv = new DataView(buf), u8 = new Uint8Array(buf);
+      dv.setUint32(0, 0x43424331, false); // 'CBC1'
+      dv.setUint16(4, w, true); dv.setUint16(6, h, true); dv.setUint16(8, bits, true);
+      dv.setUint16(10, FRAME_MS, true); dv.setUint16(12, numLeds, true); dv.setUint16(14, n, true);
+      let off = 16;
+      for (const f of frames) { dv.setFloat32(off, f.t, true); off += 4; u8.set(f.gray, off); off += w * h; }
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([buf], { type: 'application/octet-stream' }));
+      a.download = `chromabay-capture-strip${stripIndex + 1}-${w}x${h}-${n}f.bin`;
+      a.click(); URL.revokeObjectURL(a.href);
+      status = `Recorded ${n} frames (${w}×${h}) at brightness ${calBright}. Downloaded ${a.download}.`;
+    } catch (e: any) {
+      if (myGen === gen) status = 'Record failed: ' + (e?.message || e);
+    } finally {
+      if (myGen === gen) startFrame();
+    }
+  }
 
   async function use() {
     if (!layout) return;
-    phase = 'result'; mapGen++;
+    gen++; phase = 'result';
     try {
       await stopCalibration(deviceId);
       await uploadStripLayout(deviceId, stripIndex, layout);
       onClose();
     } catch (e: any) { status = 'Upload failed: ' + (e?.message || e); }
+  }
+
+  // Draw the ALL-ON photo with every found LED dotted on top, whenever we land on the result.
+  $effect(() => {
+    if (phase === 'result' && overlay && resultCanvas) drawOverlay(overlay, resultCanvas);
+  });
+  function drawOverlay(o: NonNullable<typeof overlay>, cv: HTMLCanvasElement) {
+    const dispW = Math.min(540, o.w * 2), sc = dispW / o.w, dispH = Math.round(o.h * sc);
+    cv.width = dispW; cv.height = dispH;
+    const ctx = cv.getContext('2d'); if (!ctx) return;
+    const tmp = document.createElement('canvas'); tmp.width = o.w; tmp.height = o.h;
+    const tctx = tmp.getContext('2d'); if (!tctx) return;
+    const id = tctx.createImageData(o.w, o.h);
+    for (let i = 0; i < o.w * o.h; i++) { const v = o.img[i]; id.data[i * 4] = v; id.data[i * 4 + 1] = v; id.data[i * 4 + 2] = v; id.data[i * 4 + 3] = 255; }
+    tctx.putImageData(id, 0, 0);
+    ctx.drawImage(tmp, 0, 0, dispW, dispH);
+    ctx.lineWidth = 1.5; ctx.strokeStyle = '#2ecc71'; ctx.fillStyle = 'rgba(46,204,113,0.55)';
+    for (const p of o.pts) { ctx.beginPath(); ctx.arc(p.x * sc, p.y * sc, Math.max(2.5, sc * 1.6), 0, 6.283); ctx.fill(); ctx.stroke(); }
   }
 </script>
 
@@ -177,20 +231,27 @@
         <!-- svelte-ignore a11y_media_has_caption -->
         <video bind:this={video} playsinline muted style="display:none"></video>
         <div class="al-camwrap">
-          <canvas bind:this={preview} class="al-preview"></canvas>
-          {#if phase === 'detect'}
-            <div class="al-badge" class:ok={detectedCount === numLeds}>{detectedCount} / {numLeds}{#if detectedCount === numLeds} ✓{/if}</div>
-          {:else if phase === 'map'}
-            <div class="al-badge">Reading {lockedBlobs.length} LEDs · {Math.round(mapProgress * 100)}%</div>
-            <div class="al-bar"><div class="al-bar-fill" style="width:{Math.round(mapProgress * 100)}%"></div></div>
+          {#if phase === 'result'}
+            <canvas bind:this={resultCanvas} class="al-preview"></canvas>
+            {#if overlay}<div class="al-badge ok">{overlay.pts.length} / {numLeds} found</div>{/if}
+          {:else}
+            <canvas bind:this={preview} class="al-preview"></canvas>
+            {#if phase === 'tune'}
+              <div class="al-badge">Finding brightness…</div>
+            {:else if phase === 'capture'}
+              <div class="al-badge">{capLabel}{#if progress > 0} {Math.round(progress * 100)}%{/if}</div>
+              {#if progress > 0}<div class="al-bar"><div class="al-bar-fill" style="width:{Math.round(progress * 100)}%"></div></div>{/if}
+            {/if}
           {/if}
         </div>
-        {#if phase === 'detect'}
+        {#if phase === 'frame'}
           {#if zoomCap}
             <label class="al-slider">🔍 <input type="range" min={zoomCap.min} max={zoomCap.max} step={zoomCap.step} value={zoom} oninput={(e) => applyZoom(parseFloat(e.currentTarget.value))} /></label>
           {/if}
-          <label class="al-slider">☀️ <input type="range" min="4" max="200" step="2" bind:value={calBright} oninput={onBrightness} /><span>{calBright}</span></label>
-          {#if !autoFire}<button class="btn primary" onclick={mapNow}>Map now</button>{/if}
+          <div class="al-detrow">
+            <button class="btn primary" onclick={() => capture()}>Capture</button>
+            <button class="btn" onclick={record} title="Save the raw capture for offline debugging">⏺ Record</button>
+          </div>
         {/if}
       </div>
       <div class="al-controls">
@@ -205,8 +266,10 @@
           <label class="cb"><input type="checkbox" bind:checked={rectify} /> Force to rectangle</label>
           <div class="al-result">{layout.width}×{layout.height}, {decodedCount} LEDs</div>
           <LayoutPreview width={layout.width} height={layout.height} map={layout.map} />
+          <label class="al-slider">☀️ <input type="range" min="2" max="255" step="1" bind:value={calBright} /><span>{calBright}</span></label>
           <div class="al-actions">
-            <button class="btn" onclick={rescan}>Rescan</button>
+            <button class="btn" onclick={reframe}>Reframe</button>
+            <button class="btn" onclick={recapture}>Recapture</button>
             <button class="btn primary" onclick={use}>Use this map</button>
           </div>
         {/if}
@@ -233,7 +296,7 @@
   .al-body { display: flex; gap: 1rem; padding: 1rem 1.1rem; flex-wrap: wrap; }
   .al-cam { flex: 1 1 280px; display: flex; flex-direction: column; gap: 0.85rem; }
   .al-camwrap { position: relative; line-height: 0; }
-  .al-preview { width: 100%; border-radius: 8px; background: #000; image-rendering: pixelated; aspect-ratio: 4/3; object-fit: contain; }
+  .al-preview { width: 100%; border-radius: 8px; background: #000; aspect-ratio: 4/3; object-fit: contain; }
   /* Info drawn ON the camera view */
   .al-badge { position: absolute; top: 8px; left: 8px; padding: 3px 9px; border-radius: 9px;
     background: rgba(0,0,0,0.6); color: #fff; font-size: 0.9rem; font-weight: 700; line-height: 1.2; font-variant-numeric: tabular-nums; }
@@ -252,6 +315,7 @@
   .al-status { font-size: 0.9rem; opacity: 0.9; min-height: 2.4em; }
   .al-rotate { display: flex; align-items: center; gap: 0.4rem; font-size: 0.9rem; }
   .al-result { font-size: 0.85rem; opacity: 0.9; }
+  .al-detrow { display: flex; gap: 0.5rem; }
   .al-actions { display: flex; gap: 0.5rem; }
   .al-actions .btn { flex: 1; }
   .cb { display: flex; align-items: center; gap: 0.45rem; font-size: 0.85rem; }
