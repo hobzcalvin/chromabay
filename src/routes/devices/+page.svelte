@@ -726,7 +726,6 @@
         {/if}
       {/if}
     </div>
-    <UsbFlash />
   </section>
 
   <!-- Devices List -->
@@ -989,6 +988,9 @@
         {/each}
       {/if}
     </div>
+
+    <!-- Web-only USB flasher, below the device list -->
+    <UsbFlash />
   </section>
 
   <!-- Status section moved to bottom and made smaller -->

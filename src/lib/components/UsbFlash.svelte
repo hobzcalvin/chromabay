@@ -25,14 +25,14 @@
       <span slot="unsupported" class="usb-note">This browser can't flash over USB (needs Web Serial).</span>
       <span slot="not-allowed" class="usb-note">Allow the serial device when prompted, then retry.</span>
     </esp-web-install-button>
-    <p class="usb-hint">Connect a blank/any ESP32 by USB to install ChromaBay firmware.</p>
+    <p class="usb-hint">Connect any ESP32 with USB to install ChromaBay</p>
   </div>
 {:else if note}
   <p class="usb-note">{note}</p>
 {/if}
 
 <style>
-  .usb-flash { display: flex; flex-direction: column; align-items: center; gap: 0.35rem; }
+  .usb-flash { display: flex; flex-direction: column; align-items: center; gap: 0.35rem; margin-top: 1.5rem; }
   .usb-flash .btn { padding: 0.75rem 1.25rem; border: none; border-radius: 8px; font-size: 0.9rem; font-weight: 600;
     cursor: pointer; background: linear-gradient(135deg, #f59e0b, #d97706); color: #fff; }
   .usb-hint { font-size: 0.78rem; opacity: 0.7; margin: 0; text-align: center; }
