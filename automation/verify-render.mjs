@@ -12,7 +12,10 @@ import { chromium } from 'playwright';
 
 const APP_URL = process.env.APP_URL || 'http://localhost:5173/';
 const TIMEOUT = Number(process.env.WASM_TIMEOUT || 25000);
-const OPS = (process.env.OPS || 'chase,rainbow').split(',');
+// Default to GENERATOR operators (they synthesize output from nothing). Transform operators
+// (scroll/fade/blend/mirror/…) need an input buffer the harness doesn't supply, so they'd read
+// as "black" here — pass them explicitly via OPS only if you wire up inputs.
+const OPS = (process.env.OPS || 'rainbow,plasma,perlinnoise').split(',');
 
 const ok = (s) => `\x1b[32m${s}\x1b[0m`;
 const bad = (s) => `\x1b[31m${s}\x1b[0m`;
