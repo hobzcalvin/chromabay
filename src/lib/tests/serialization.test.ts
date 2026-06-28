@@ -344,25 +344,29 @@ test('Pattern with nodes but no connections', () => {
     'Rainbow node should have output buffer but no input buffer'
   );
   
-  const { nodes: deserializedNodes, edges: deserializedEdges } = deserializePattern(serialized);
-  
-  // The serialized format is buffer-based: meta.output defaults to buffer 0, so
-  // deserialization always reconstructs the output node and wires the last node
-  // writing to buffer 0 (rainbow) into it. The gradient (buffer 1) stays
-  // disconnected. Hence 3 nodes (rainbow + gradient + reconstructed output) and
-  // 1 implicit output edge.
+  // The input had an explicit output node with NOTHING wired to it. The serializer
+  // records meta.output = -1 (the "nothing is wired to the output" sentinel) so the
+  // pattern reloads showing black, rather than auto-wiring whatever sits in a lane.
   passed = passed && assert(
-    deserializedNodes.length === 3 && deserializedEdges.length === 1,
-    `Deserialized pattern should have 3 nodes and 1 implicit output edge. Got nodes: ${deserializedNodes.length}, edges: ${deserializedEdges.length}`
+    serialized.meta.output === -1,
+    `Unwired output should serialize meta.output = -1 (black). Got: ${serialized.meta.output}`
+  );
+
+  const { nodes: deserializedNodes, edges: deserializedEdges } = deserializePattern(serialized);
+
+  // So deserialization reconstructs all 3 nodes (rainbow + gradient + output) but
+  // wires NO implicit edge — the output stays disconnected (black), preserving intent.
+  passed = passed && assert(
+    deserializedNodes.length === 3 && deserializedEdges.length === 0,
+    `Deserialized pattern should have 3 nodes and 0 edges (output left unwired). Got nodes: ${deserializedNodes.length}, edges: ${deserializedEdges.length}`
   );
 
   const outputNode = deserializedNodes.find(n => n.data.type === 'output');
-  const rainbowNode2 = deserializedNodes.find(n => n.data.type === 'rainbow');
   passed = passed && assert(
-    deserializedEdges[0]?.source === rainbowNode2?.id && deserializedEdges[0]?.target === outputNode?.id,
-    'The single edge should connect the buffer-0 writer (rainbow) to the output node'
+    !!outputNode && !deserializedEdges.some(e => e.target === outputNode.id),
+    'The reconstructed output node should have no incoming edge'
   );
-  
+
   return passed;
 });
 

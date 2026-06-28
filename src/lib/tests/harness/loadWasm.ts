@@ -29,11 +29,15 @@ export type WasmModule = {
 let cached: Promise<WasmModule> | null = null;
 
 const WASM_JS_PATH = path.resolve(process.cwd(), 'static/native/fastled.js');
+const WASM_BIN_PATH = path.resolve(process.cwd(), 'static/native/fastled.wasm');
 
 export function loadWasmModule(): Promise<WasmModule> {
 	if (!cached) {
 		cached = (async () => {
 			const src = (await readFile(WASM_JS_PATH, 'utf8')) + '\n;globalThis.__fastledFactory = fastled;';
+			// Hand emscripten the .wasm bytes directly. Otherwise, because the sandbox exposes
+			// `fetch`, it tries to fetch the relative URL "fastled.wasm" (no base) and aborts in Node.
+			const wasmBinary = await readFile(WASM_BIN_PATH);
 			const sandbox: Record<string, any> = {
 				console,
 				process,
@@ -55,7 +59,10 @@ export function loadWasmModule(): Promise<WasmModule> {
 			if (typeof factory !== 'function') {
 				throw new Error('Failed to load fastled WASM factory from static/native/fastled.js');
 			}
-			return factory({});
+			return factory({
+				wasmBinary: new Uint8Array(wasmBinary.buffer, wasmBinary.byteOffset, wasmBinary.byteLength),
+				locateFile: (p: string) => p
+			});
 		})();
 	}
 	return cached;
