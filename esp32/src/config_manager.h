@@ -249,9 +249,12 @@ public:
                             stripConfig.wpG = (wp >> 8) & 0xFF;
                             stripConfig.wpB = wp & 0xFF;
                         } else {
-                            Serial.print(F("[ConfigManager] Unknown key in strip map: ")); Serial.println(key_buffer);
-                            mpack_discard(&reader); 
-                            stripValid = false;
+                            // Unknown/extra key (e.g. a field a different firmware build writes, like
+                            // the dither flag): skip its value but KEEP the strip. Invalidating the
+                            // whole strip here made flashing across firmware variants silently reset
+                            // the LED config to defaults.
+                            Serial.print(F("[ConfigManager] Unknown key in strip map (skipping): ")); Serial.println(key_buffer);
+                            mpack_discard(&reader);
                         }
                         if (mpack_reader_error(&reader) != mpack_ok && stripValid) { /* error handling for value read */ stripValid = false; }
                     }
