@@ -471,7 +471,12 @@ public:
     void show() {
         for (auto& strip_ptr : _strips) {
             if (!strip_ptr) continue;
-            if (strip_ptr->ditherEnabled()) strip_ptr->ditherShow();
+            // Dithering re-Shows at a high sub-frame rate; only emit this frame's first sub-frame
+            // once the previous transmission has finished latching. Showing mid-transmission tears
+            // the serial frame, which on a matrix looks like the image briefly jumping along the
+            // strip. (ditherTick() already guards this way; show() must too.) The updated target is
+            // not lost — ditherTick picks it up on the next loop iteration.
+            if (strip_ptr->ditherEnabled()) { if (strip_ptr->canShow()) strip_ptr->ditherShow(); }
             else strip_ptr->show(false);
         }
     }
