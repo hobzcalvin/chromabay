@@ -342,6 +342,12 @@ void PatternRendererBase::render() {
     // strip immediately after rendering, before the next strip overwrites them.
     const uint32_t bufferCap = getTotalPixels(); // capacity = largest strip's pixels
 
+    // Strips that share the same canvas dimensions render an IDENTICAL graph (same w,h, same
+    // frame time) — so render once and reuse the buffers for each consecutive same-size strip.
+    // Two 40×40 curtains then cost one graph render per frame instead of two. The buffers aren't
+    // touched between a strip's output mapping and the next strip, so reuse is safe.
+    uint16_t lastRenderW = 0, lastRenderH = 0; bool haveRender = false;
+
     for (size_t s = 0; s < ledManager->getNumStrips(); s++) {
         LedConfig::LedBus* strip = ledManager->getStrip(s);
         if (!strip) continue;
@@ -357,7 +363,10 @@ void PatternRendererBase::render() {
             if (w == 0) continue;
         }
 
-        renderGraphAt(w, h);
+        if (!haveRender || w != lastRenderW || h != lastRenderH) {
+            renderGraphAt(w, h);
+            lastRenderW = w; lastRenderH = h; haveRender = true;
+        }
 
         const CRGB* patternBuffer = getBuffer(currentPattern.outputBuffer);
         if (!patternBuffer) continue;

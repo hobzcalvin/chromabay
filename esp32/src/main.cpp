@@ -234,6 +234,8 @@ String receivedData = "";
 // Pattern rendering variables
 unsigned long lastUpdate = 0;
 const unsigned long updateInterval = 20; // Update every 20ms for smooth animation
+unsigned long fpsLastReport = 0;          // serial FPS report timer
+uint32_t fpsFrames = 0;                   // rendered frames since last report
 
 // OTA State Variables
 esp_ota_handle_t ota_handle = 0;
@@ -2073,7 +2075,16 @@ void loop() {
             updateCycle();   // pick the synced playlist pattern before rendering
             patternRenderer->update();
             patternRenderer->render();
+            fpsFrames++;
         }
+    }
+
+    // Render FPS to the serial console every 5s (counts actual rendered frames).
+    if (currentTime - fpsLastReport >= 5000) {
+        float secs = (currentTime - fpsLastReport) / 1000.0f;
+        Serial.printf("[FPS] %.1f fps (%lu frames / %.1fs)\n", fpsFrames / secs, (unsigned long)fpsFrames, secs);
+        fpsFrames = 0;
+        fpsLastReport = currentTime;
     }
 
     // Process received patterns and LED configuration changes on the loop task,
