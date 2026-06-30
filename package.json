@@ -18,6 +18,7 @@
 		"deploy:docs": "npm run build",
 		"ios": "npm run build:dev && npm run sync && npx cap run ios",
 		"ios:phone": "npm run build:dev && npm run sync && npx cap open ios",
+		"ios:live": "npm run build && npm run sync && npx cap open ios",
 		"ios:sim": "npm run build:dev && npm run sync && npx cap run ios --target=7F4BB4F6-1A1C-4163-8C3A-62C604278928",
 		"ship:ios": "bash scripts/ios-release.sh",
 		"android": "npm run build:dev && npm run sync && npx cap run android",
