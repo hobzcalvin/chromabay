@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.120",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.120.zip",
-  "buildDate": "2026-06-29T07:27:32Z",
-  "commitHash": "e732e4f51e18aad5b8cdfb0939eb6444055c182d",
-  "commitMessage": "Perf: render shared-dimension strips once; log FPS to serial every 5s"
+  "version": "0.0.1.121",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.121.zip",
+  "buildDate": "2026-06-30T22:02:42Z",
+  "commitHash": "035f000a82b3464c237d693bbc56b782345062c5",
+  "commitMessage": "Add ios:live build (live-update enabled) for on-device deploys that hot-update"
 }
