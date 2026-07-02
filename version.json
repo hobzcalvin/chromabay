@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.121",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.121.zip",
-  "buildDate": "2026-06-30T22:02:42Z",
-  "commitHash": "035f000a82b3464c237d693bbc56b782345062c5",
-  "commitMessage": "Add ios:live build (live-update enabled) for on-device deploys that hot-update"
+  "version": "0.0.1.122",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.122.zip",
+  "buildDate": "2026-07-02T03:33:58Z",
+  "commitHash": "f1320a165be96dbf7bfeca757c27506f1caa2c3c",
+  "commitMessage": "Device pattern library: clear + delete-by-name (app stays source of truth)"
 }
