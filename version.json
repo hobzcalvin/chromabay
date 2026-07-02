@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.122",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.122.zip",
-  "buildDate": "2026-07-02T03:33:58Z",
-  "commitHash": "f1320a165be96dbf7bfeca757c27506f1caa2c3c",
-  "commitMessage": "Device pattern library: clear + delete-by-name (app stays source of truth)"
+  "version": "0.0.1.123",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.123.zip",
+  "buildDate": "2026-07-02T04:19:56Z",
+  "commitHash": "c4a3040dc44590ed09385421fd678eb6c124aa27",
+  "commitMessage": "Merge feat/temporal-dithering: Fadecandy-style temporal dithering (unproven on HW)"
 }
