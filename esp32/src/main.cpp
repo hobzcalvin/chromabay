@@ -75,6 +75,11 @@ PatternRendererBase* patternRenderer = nullptr;
 // owns the pattern library). Payload is a short string, e.g. "next" (next pattern).
 #define CHARACTERISTIC_UUID_BUTTON_EVENT "a0be83f4-8dc9-47f0-ab40-b19721d20ed1"
 
+// Library Command Characteristic - WRITE ops on the on-device pattern set:
+//   [0x00]                = clear the whole library
+//   [0x01][name UTF-8...] = delete the pattern with that name
+#define CHARACTERISTIC_UUID_LIBRARY_CMD "a0be83f8-8dc9-47f0-ab40-b19721d20ed1"
+
 // OTA Constants
 #define MAX_BLE_CHUNK_SIZE 500 
 
@@ -202,6 +207,12 @@ static int lastCycleIndex = -1;
 static uint32_t pendingCycleIntervalMs = 0;
 static bool pendingCycleEnabled = false;
 static bool newCycleControlAvailable = false;
+
+// Library command staging (see CHARACTERISTIC_UUID_LIBRARY_CMD). Set in the BLE callback,
+// processed on the loop task (does flash I/O).
+static volatile bool newLibCmdAvailable = false;
+static uint8_t libCmdBuf[96];
+static volatile size_t libCmdLen = 0;
 
 // Pattern library index — declared here so the button handler (above the storage
 // helpers) can advance through it. The /lib storage helpers are defined further down.
@@ -895,6 +906,20 @@ class LayoutGetCallbacks : public NimBLECharacteristicCallbacks {
     }
 };
 
+// Library Command Callbacks - stage a [op][payload] command; processLibraryCommand() (loop
+// task) does the flash work so we never touch LittleFS from the BLE host task.
+class LibraryCmdCallbacks : public NimBLECharacteristicCallbacks {
+    void onWrite(NimBLECharacteristic* pCharacteristic) {
+        std::string value = pCharacteristic->getValue();
+        if (value.empty()) return;
+        size_t n = value.length();
+        if (n > sizeof(libCmdBuf)) n = sizeof(libCmdBuf);
+        memcpy(libCmdBuf, value.data(), n);
+        libCmdLen = n;
+        newLibCmdAvailable = true;
+    }
+};
+
 // Calibration Callbacks - start/stop the auto-layout structured-light flash sequence.
 class CalibrationCallbacks : public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic* pCharacteristic) {
@@ -1288,6 +1313,37 @@ static bool libUpsert(const String& name, const uint8_t* msgpack, size_t size) {
     return true;
 }
 
+// Delete a pattern by name. Files are kept contiguous, so shift every higher-indexed file
+// down by one (LittleFS.rename) after removing the target. The live/displayed pattern is
+// untouched. Loop task only (flash I/O).
+static bool libDelete(const String& name) {
+    if (name.length() == 0) return false;
+    int idx = -1;
+    for (size_t i = 0; i < libNames.size(); i++) if (libNames[i] == name) { idx = (int)i; break; }
+    if (idx < 0) return false;
+    LittleFS.remove(libPath(idx));
+    for (size_t j = (size_t)idx + 1; j < libNames.size(); j++) {
+        LittleFS.rename(libPath((int)j), libPath((int)j - 1));
+    }
+    libNames.erase(libNames.begin() + idx);
+    libRebuildOrder();
+    Serial.printf("Library delete '%s' — %u remaining\n", name.c_str(), (unsigned)libNames.size());
+    return true;
+}
+
+// Remove every stored pattern (the live/displayed pattern keeps running). Scans the full
+// index range so it also sweeps up any straggler left by a partial delete. Loop task only.
+static void libClear() {
+    for (size_t i = 0; i < LIB_SCAN_MAX; i++) {
+        String p = libPath((int)i);
+        if (LittleFS.exists(p)) LittleFS.remove(p);
+    }
+    LittleFS.remove(LIB_CURRENT_FILE);
+    libNames.clear();
+    libRebuildOrder();
+    Serial.println("Library cleared");
+}
+
 // Load the pattern at file-index `idx` into the renderer (strips the name header).
 static bool libLoadIndex(int idx) {
     if (idx < 0 || (size_t)idx >= libNames.size() || patternRenderer == nullptr) return false;
@@ -1664,6 +1720,22 @@ void processLayoutGetRequest() {
     Serial.printf("[Layout] Strip %d read-back sent (%u bytes)\n", idx, (unsigned)len);
 }
 
+// Apply a staged library command (clear / delete-by-name) on the loop task.
+void processLibraryCommand() {
+    if (!newLibCmdAvailable) return;
+    newLibCmdAvailable = false;
+    size_t n = libCmdLen;
+    if (n < 1) return;
+    uint8_t op = libCmdBuf[0];
+    if (op == 0x00) {
+        libClear();
+    } else if (op == 0x01 && n > 1) {
+        String name;
+        for (size_t i = 1; i < n; i++) name += (char)libCmdBuf[i];
+        libDelete(name);
+    }
+}
+
 // Drive one structured-light calibration frame onto the strips (replaces pattern render
 // while calibrating). Frame = (elapsed / CALIB_FRAME_MS) mod (2 + bits).
 void renderCalibrationFrame() {
@@ -1977,6 +2049,9 @@ void setup() {
             pLayoutSetCharacteristic->setCallbacks(new LayoutSetCallbacks());
             pLayoutGetCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_LAYOUT_GET, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY);
             pLayoutGetCharacteristic->setCallbacks(new LayoutGetCallbacks());
+
+            NimBLECharacteristic* pLibraryCmdCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_LIBRARY_CMD, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR);
+            pLibraryCmdCharacteristic->setCallbacks(new LibraryCmdCallbacks());
             NimBLECharacteristic* pCalibrationCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_CALIBRATION, NIMBLE_PROPERTY::WRITE);
             pCalibrationCharacteristic->setCallbacks(new CalibrationCallbacks());
             
@@ -2095,6 +2170,7 @@ void loop() {
     processReceivedLedConfig();
     processReceivedLayout();
     processLayoutGetRequest();
+    processLibraryCommand();
     processReceivedBrightness();
     processButton();
     processDeviceName();

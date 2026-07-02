@@ -5,7 +5,7 @@
   import { patterns, loadPatterns, switchToPattern, currentPatternName, createEmptyPattern, saveAsPattern } from '$lib/stores/patternsStore';
   import PatternPreview from '$lib/components/PatternPreview.svelte';
   import type { SerializedPattern } from '$lib/patternSerializer';
-  import { syncPatternToAllDevices, setCycleOnDevice, sendSinglePatternToDevice } from '$lib/ble';
+  import { syncPatternToAllDevices, setCycleOnDevice, sendSinglePatternToDevice, clearLibraryOnAllDevices, deletePatternOnAllDevices } from '$lib/ble';
   import { currentPattern } from '$lib/stores/patternsStore';
   import { connectedDevices, getConnectedDevicesList } from '$lib/stores/deviceStore';
   import { get } from 'svelte/store';
@@ -37,6 +37,18 @@
       } catch (e) {
         console.error('Cycle update failed for', device.deviceId, e);
       }
+    }
+  }
+
+  // Wipe the connected devices' stored pattern set (removes orphans that were sent before
+  // delete-propagation existed). The devices keep showing their current pattern; they
+  // repopulate as you view patterns while connected.
+  async function clearDevicePatterns() {
+    if (!confirm('Clear all stored patterns from connected device(s)? Their live pattern keeps running; the cycle list is emptied.')) return;
+    try {
+      await clearLibraryOnAllDevices();
+    } catch (e) {
+      console.error('Clear device library failed:', e);
     }
   }
 
@@ -118,8 +130,11 @@
     if (!pattern.meta?.name) return;
     
     // Second tap: actually delete (no confirm dialog)
+    const name = pattern.meta.name;
     const { deletePatternByName } = await import('$lib/stores/patternsStore');
-    await deletePatternByName(pattern.meta.name);
+    await deletePatternByName(name);
+    // Propagate the delete to any connected devices so it leaves their cycle too.
+    deletePatternOnAllDevices(name).catch((e) => console.error('Device pattern delete failed:', e));
     // Hide swipe state after deletion
     if (swipeStates[pattern.meta.name]) {
       swipeStates[pattern.meta.name].isSwipeRevealed = false;
@@ -205,6 +220,7 @@
       <input type="number" min="1" step="1" bind:value={cycleSeconds} disabled={!cycleEnabled} onchange={applyCycle} style="width:64px;" />
       seconds
     </label>
+    <button onclick={clearDevicePatterns} style="margin:0 0 16px;padding:6px 12px;font-size:0.85rem;border:1px solid rgba(255,255,255,0.3);border-radius:6px;background:rgba(255,255,255,0.08);color:inherit;cursor:pointer;">Clear device patterns</button>
   {/if}
 
   {#if patternsList.length === 0}

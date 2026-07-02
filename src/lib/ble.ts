@@ -64,6 +64,7 @@ const CHARACTERISTIC_UUID_LED_CONFIG_SET = "a0be83ee-8dc9-47f0-ab40-b19721d20ed1
 const CHARACTERISTIC_UUID_LAYOUT_SET = "a0be83f5-8dc9-47f0-ab40-b19721d20ed1"; // arbitrary pixel layout (WLED ledmap), per strip
 const CHARACTERISTIC_UUID_LAYOUT_GET = "a0be83f6-8dc9-47f0-ab40-b19721d20ed1"; // read back a strip's layout (notify-chunked)
 const CHARACTERISTIC_UUID_CALIBRATION = "a0be83f7-8dc9-47f0-ab40-b19721d20ed1"; // auto-layout structured-light flash control
+const CHARACTERISTIC_UUID_LIBRARY_CMD = "a0be83f8-8dc9-47f0-ab40-b19721d20ed1"; // on-device pattern library ops (clear / delete-by-name)
 
 // Timestamp Sync Characteristic - for synchronizing time across devices
 const CHARACTERISTIC_UUID_TIMESTAMP_SYNC = "a0be83ef-8dc9-47f0-ab40-b19721d20ed1";
@@ -876,6 +877,36 @@ export async function sendSinglePatternToDevice(deviceId: string, pattern: any):
   const msgpackData = msgpackEncode(pattern) as Uint8Array;
   const dataView = new DataView(msgpackData.buffer, msgpackData.byteOffset, msgpackData.byteLength);
   await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_PATTERN_SYNC, dataView);
+}
+
+// === ON-DEVICE PATTERN LIBRARY MAINTENANCE ===
+// The app is the source of truth (device→app sync isn't built), so these keep the device's
+// stored/cycled set aligned with the app: [0x00] clears all; [0x01]+name deletes one.
+
+/** Wipe ALL stored patterns on one device (the live/displayed pattern keeps running). */
+export async function clearDeviceLibrary(deviceId: string): Promise<void> {
+  const dv = new DataView(new Uint8Array([0x00]).buffer);
+  await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_LIBRARY_CMD, dv);
+}
+
+/** Delete the pattern with this name from one device's library. */
+export async function deletePatternOnDevice(deviceId: string, name: string): Promise<void> {
+  const nameBytes = new TextEncoder().encode(name);
+  const out = new Uint8Array(1 + nameBytes.length);
+  out[0] = 0x01;
+  out.set(nameBytes, 1);
+  await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_LIBRARY_CMD, new DataView(out.buffer));
+}
+
+/** Best-effort clear on every connected device. */
+export async function clearLibraryOnAllDevices(): Promise<void> {
+  await Promise.allSettled(Array.from(connectedDevices.keys()).map((id) => clearDeviceLibrary(id)));
+}
+
+/** Best-effort delete-by-name on every connected device (wired to in-app pattern deletes). */
+export async function deletePatternOnAllDevices(name: string): Promise<void> {
+  if (connectedDevices.size === 0) return;
+  await Promise.allSettled(Array.from(connectedDevices.keys()).map((id) => deletePatternOnDevice(id, name)));
 }
 
 /**
