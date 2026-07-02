@@ -1590,6 +1590,8 @@ void processReceivedLedConfig() {
                             stripConfig.wpR = (wp >> 16) & 0xFF;
                             stripConfig.wpG = (wp >> 8) & 0xFF;
                             stripConfig.wpB = wp & 0xFF;
+                        } else if (strcmp(strip_key, "de") == 0) {
+                            stripConfig.ditherEnable = mpack_expect_bool(&reader);
                         } else {
                             mpack_discard(&reader);
                         }
@@ -2194,6 +2196,13 @@ void loop() {
     if (deviceConnected && !oldDeviceConnected) {
         Serial.println("BLE client connected");
         oldDeviceConnected = deviceConnected;
+    }
+
+    // Temporal dithering: between animation frames, emit high-rate sub-frames for any
+    // strips small/fast enough to dither (no-op otherwise). This is what makes low
+    // brightness smooth instead of banded.
+    if (!ota_in_progress) {
+        ledMgr.ditherTick();
     }
 
     delay(1);

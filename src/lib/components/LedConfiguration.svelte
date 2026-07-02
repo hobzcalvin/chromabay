@@ -250,6 +250,11 @@
                       </span>
                     </span>
                   </label>
+                  <label class="checkbox-label">
+                    <input id={buildId('dither', index)} name="dither" type="checkbox"
+                      checked={strip.dither ?? true} onchange={(e) => { strip.dither = e.currentTarget.checked; }} />
+                    Temporal dithering (smoother low brightness; auto-enables only on small/fast strips)
+                  </label>
                 </div>
               </details>
               <details class="sub-section">

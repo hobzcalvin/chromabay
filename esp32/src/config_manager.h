@@ -28,6 +28,7 @@ namespace ConfigKeys {
     const char* const ORIENTATION = "ort";
     const char* const GAMMA = "gm"; // per-strip gamma*100 (u16), optional
     const char* const WHITE_POINT = "wp"; // per-strip white point packed 0xRRGGBB (u32), optional
+    const char* const DITHER = "de"; // per-strip temporal-dither opt-in (bool), optional
 } // namespace ConfigKeys
 
 // Structure to hold the complete configuration for serialization/deserialization
@@ -73,8 +74,8 @@ public:
             const LedBus* bus = _ledManager.getStrip(i);
             if (bus) {
                 const LedStripConfig& stripConfig = bus->getConfig();
-                // Each strip is a map (10 key-value pairs incl. gamma + white point)
-                mpack_start_map(&writer, 10);
+                // Each strip is a map (11 key-value pairs incl. gamma + white point + dither)
+                mpack_start_map(&writer, 11);
                 mpack_write_cstr(&writer, ConfigKeys::CHIPSET);
                 mpack_write_u8(&writer, static_cast<uint8_t>(stripConfig.chipset));
                 mpack_write_cstr(&writer, ConfigKeys::PIN);
@@ -95,6 +96,8 @@ public:
                 mpack_write_u16(&writer, (uint16_t)(stripConfig.gamma * 100.0f + 0.5f));
                 mpack_write_cstr(&writer, ConfigKeys::WHITE_POINT);
                 mpack_write_u32(&writer, ((uint32_t)stripConfig.wpR << 16) | ((uint32_t)stripConfig.wpG << 8) | (uint32_t)stripConfig.wpB);
+                mpack_write_cstr(&writer, ConfigKeys::DITHER);
+                mpack_write_bool(&writer, stripConfig.ditherEnable);
                 mpack_finish_map(&writer);
             }
         }
@@ -248,6 +251,8 @@ public:
                             stripConfig.wpR = (wp >> 16) & 0xFF;
                             stripConfig.wpG = (wp >> 8) & 0xFF;
                             stripConfig.wpB = wp & 0xFF;
+                        } else if (strcmp(key_buffer, ConfigKeys::DITHER) == 0) {
+                            stripConfig.ditherEnable = mpack_expect_bool(&reader);
                         } else {
                             // Unknown/extra key (e.g. a field a different firmware build writes, like
                             // the dither flag): skip its value but KEEP the strip. Invalidating the
@@ -497,7 +502,7 @@ private:
         mpack_write_cstr(&writer, ConfigKeys::STRIPS);
         mpack_start_array(&writer, defaultConfigStruct.strips.size());
         for (const auto& stripCfg : defaultConfigStruct.strips) {
-            mpack_start_map(&writer, 10); // + gamma + white point
+            mpack_start_map(&writer, 11); // + gamma + white point + dither
             mpack_write_cstr(&writer, ConfigKeys::CHIPSET);     mpack_write_u8(&writer, static_cast<uint8_t>(stripCfg.chipset));
             mpack_write_cstr(&writer, ConfigKeys::PIN);         mpack_write_u8(&writer, stripCfg.pin);
             mpack_write_cstr(&writer, ConfigKeys::NUM_LEDS);    mpack_write_u16(&writer, stripCfg.numLeds);
@@ -508,6 +513,7 @@ private:
             mpack_write_cstr(&writer, ConfigKeys::ORIENTATION); mpack_write_u8(&writer, stripCfg.orientation);
             mpack_write_cstr(&writer, ConfigKeys::GAMMA);       mpack_write_u16(&writer, (uint16_t)(stripCfg.gamma * 100.0f + 0.5f));
             mpack_write_cstr(&writer, ConfigKeys::WHITE_POINT); mpack_write_u32(&writer, ((uint32_t)stripCfg.wpR << 16) | ((uint32_t)stripCfg.wpG << 8) | (uint32_t)stripCfg.wpB);
+            mpack_write_cstr(&writer, ConfigKeys::DITHER);      mpack_write_bool(&writer, stripCfg.ditherEnable);
             mpack_finish_map(&writer);
         }
         mpack_finish_array(&writer);
