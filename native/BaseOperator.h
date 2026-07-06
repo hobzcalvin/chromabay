@@ -61,7 +61,7 @@ struct ParameterValue {
 struct ParameterInfo {
     std::string name;
     std::string label;
-    enum Type { FLOAT, INT, BOOL, COLOR, SELECT } type;
+    enum Type { FLOAT, INT, BOOL, COLOR, SELECT, STRING } type; // STRING last: keeps existing values stable
     ParameterValue defaultValue;
     ParameterValue minValue;
     ParameterValue maxValue;

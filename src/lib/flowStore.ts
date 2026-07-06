@@ -12,7 +12,7 @@ export function resetGlobalStartTime(): void {
 }
 
 // Parameter types
-export type ParameterType = 'float' | 'range' | 'integer' | 'hue' | 'color' | 'select' | 'boolean';
+export type ParameterType = 'float' | 'range' | 'integer' | 'hue' | 'color' | 'select' | 'boolean' | 'string';
 
 export interface Parameter {
   label: string;
@@ -329,7 +329,8 @@ class WasmOperatorManager {
       case 2: type = 'boolean'; break; // WASM BOOL type -> checkbox
       case 3: type = 'color'; break;
       case 4: type = 'select'; break;
-      default: 
+      case 5: type = 'string'; break;
+      default:
         console.warn(`Unknown WASM parameter type ${wasmParam.type}, defaulting to float`);
         type = 'float';
         break;
@@ -546,6 +547,9 @@ class WasmOperatorManager {
                 break;
               case 4: // SELECT — an enum: send the integer option index, not the label.
                 this.wasmModule.ccall('setOperatorIntParameter', null, ['number', 'number', 'number'], [instanceId, i, parseInt(value as any, 10) || 0]);
+                break;
+              case 5: // STRING — free text.
+                this.wasmModule.ccall('setOperatorStringParameter', null, ['number', 'number', 'string'], [instanceId, i, String(value ?? '')]);
                 break;
             }
           }

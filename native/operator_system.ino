@@ -117,6 +117,15 @@ extern "C" {
                         buffer += std::string("\"") + param.options[i] + "\"";
                     }
                     buffer += "]";
+                } else if (param.type == ParameterInfo::STRING) {
+                    // Text param: default is a JSON-escaped string; maxLen bounds the editor input.
+                    std::string esc;
+                    for (char c : param.defaultValue.stringVal) {
+                        if (c == '"' || c == '\\') esc += '\\';
+                        if (c == '\n') { esc += "\\n"; continue; }
+                        esc += c;
+                    }
+                    buffer += ",\"default\":\"" + esc + "\",\"maxLen\":255";
                 }
                 
                 buffer += "}";

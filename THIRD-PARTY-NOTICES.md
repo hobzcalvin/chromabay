@@ -44,6 +44,29 @@ Apache License 2.0 — see <https://www.apache.org/licenses/LICENSE-2.0> and pro
 | makuna/NeoPixelBus | 2.8.4 | **LGPL-3.0** | © Michael C. Miller & contributors |
 | arduino-esp32 core (espressif32 @ 7.0.1, framework 3.20017) | 3.20017 | **LGPL-2.1-or-later** | © Espressif Systems & contributors |
 | ESP-IDF (bundled in the core) | — | Apache-2.0 (+ BSD/MIT parts) | © Espressif Systems |
+| Spleen font (bitmap glyphs for the Text operator; embedded via `native/text_fonts.h`, compiled into both the firmware and the WASM preview) | 2.1.0-era | **BSD-2-Clause** | © 2018–2026 Frédéric Cambus |
+
+### Spleen font (BSD-2-Clause)
+
+The Text operator embeds bitmap glyphs generated from the Spleen fonts (5×8, 8×16, 16×32).
+Redistribution requires retaining this notice:
+
+```
+Copyright (c) 2018-2026, Frederic Cambus
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification, are
+permitted provided that the following conditions are met:
+1. Redistributions of source code must retain the above copyright notice, this list of
+   conditions and the following disclaimer.
+2. Redistributions in binary form must reproduce the above copyright notice, this list of
+   conditions and the following disclaimer in the documentation and/or other materials
+   provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS
+OR IMPLIED WARRANTIES ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS
+BE LIABLE FOR ANY DAMAGES ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE.
+```
 
 ### LGPL components — source availability & relinking offer
 

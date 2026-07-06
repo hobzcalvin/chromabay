@@ -296,6 +296,15 @@
                 {/if}
               </select>
             </div>
+          {:else if param.type === 'string'}
+            <input
+              id={inputId}
+              class="text-input"
+              type="text"
+              maxlength="255"
+              value={String(getParameterValue(param) ?? '')}
+              oninput={(e) => updateParameter(param, (e.target as HTMLInputElement).value)}
+            />
           {/if}
         </div>
       {/each}
