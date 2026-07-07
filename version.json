@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.125",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.125.zip",
-  "buildDate": "2026-07-07T05:35:41Z",
-  "commitHash": "81adfb660ae244ade0b6720fc40eab3d4a2b6566",
-  "commitMessage": "Parameter automation (LFO / noise / random) — shared math, moving-slider UI"
+  "version": "0.0.1.126",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.126.zip",
+  "buildDate": "2026-07-07T18:04:05Z",
+  "commitHash": "f408e36a6a659319dfcc035c0b0339990002df0c",
+  "commitMessage": "Add Sentry (client): errors + tracing + session/canvas replay"
 }
