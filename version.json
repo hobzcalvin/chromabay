@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.128",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.128.zip",
-  "buildDate": "2026-07-07T20:45:16Z",
-  "commitHash": "22d867f3cd41186dd3094ff54dd61c7264b47541",
-  "commitMessage": "CI: drop flaky Microsoft apt repos before apt-get update (esp32-release)"
+  "version": "0.0.1.129",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.129.zip",
+  "buildDate": "2026-07-07T21:16:12Z",
+  "commitHash": "9c855e47ddece348b0afb12ab4815cbca5fb8670",
+  "commitMessage": "Param popover: always fit the viewport; scroll content when taller (esp. automation panel)"
 }
