@@ -15,6 +15,7 @@
 
 // Include the base operator system
 #include "BaseOperator.h"
+#include "Modulation.h"
 
 // Include all operators via centralized list
 #include "OperatorList.h"
@@ -22,6 +23,10 @@
 // Global operator instance management - using vectors with unique_ptr
 std::vector<std::unique_ptr<BaseOperator>> activeOperators;
 std::vector<std::vector<ParameterValue>> operatorParameters;
+// Per-instance, per-parameter automation (LFO/noise/random). Applied over the base parameter
+// value each frame in renderOperator; the operator itself never sees the difference.
+struct OpModulator { bool active = false; int shape = 0; float mn = 0.0f, mx = 1.0f, period = 1.0f; };
+std::vector<std::vector<OpModulator>> operatorModulators;
 int nextOperatorId = 1;
 
 extern "C" {
@@ -246,7 +251,34 @@ extern "C" {
             operatorParameters[operatorId][paramIndex] = CRGB(r, g, b);
         }
     }
-    
+
+    // ========================================
+    // PARAMETER AUTOMATION API
+    // ========================================
+
+    EMSCRIPTEN_KEEPALIVE
+    void setOperatorModulator(int operatorId, int paramIndex, int shape, float mn, float mx, float period) {
+        if (operatorId < 0 || paramIndex < 0) return;
+        if ((int)operatorModulators.size() <= operatorId) operatorModulators.resize(operatorId + 1);
+        auto& mods = operatorModulators[operatorId];
+        if ((int)mods.size() <= paramIndex) mods.resize(paramIndex + 1);
+        mods[paramIndex] = { true, shape, mn, mx, period };
+    }
+
+    EMSCRIPTEN_KEEPALIVE
+    void clearOperatorModulator(int operatorId, int paramIndex) {
+        if (operatorId >= 0 && operatorId < (int)operatorModulators.size() &&
+            paramIndex >= 0 && paramIndex < (int)operatorModulators[operatorId].size()) {
+            operatorModulators[operatorId][paramIndex].active = false;
+        }
+    }
+
+    // Standalone evaluation for the editor's live slider readout (no instance needed).
+    EMSCRIPTEN_KEEPALIVE
+    float evalModulator(int shape, float mn, float mx, float period, uint32_t timestampMs, int seed) {
+        return Modulation::modulate(shape, mn, mx, period, timestampMs, (uint32_t)seed);
+    }
+
     // ========================================
     // SIMPLE RENDERING API
     // ========================================
@@ -268,6 +300,27 @@ extern "C" {
                 operatorParameters[operatorId] :
                 emptyParams;
 
+            // Apply any parameter automation over a COPY of the base values (never mutate the
+            // stored base). seed = paramIndex so two Random/Perlin params don't move in lockstep.
+            static std::vector<ParameterValue> eff;
+            eff = parameters;
+            if (operatorId < (int)operatorModulators.size()) {
+                auto& mods = operatorModulators[operatorId];
+                auto info = activeOperators[operatorId]->getParameterInfo();
+                // A param left at its default may not exist in the base vector; size eff up with
+                // defaults so a modulated index is always present (else automation would no-op).
+                if ((int)eff.size() < (int)info.size()) {
+                    size_t old = eff.size(); eff.resize(info.size());
+                    for (size_t k = old; k < info.size(); k++) eff[k] = info[k].defaultValue;
+                }
+                for (int i = 0; i < (int)mods.size() && i < (int)eff.size(); i++) {
+                    if (!mods[i].active) continue;
+                    float v = Modulation::modulate(mods[i].shape, mods[i].mn, mods[i].mx, mods[i].period, timestampMs, (uint32_t)i);
+                    if (i < (int)info.size() && info[i].type == ParameterInfo::INT) eff[i] = ParameterValue((int)lroundf(v));
+                    else eff[i] = ParameterValue(v);
+                }
+            }
+
             activeOperators[operatorId]->render(
                 inputBuffer1,
                 inputBuffer2,
@@ -276,7 +329,7 @@ extern "C" {
                 height,
                 timestampMs,
                 deltaTimeMs,
-                parameters
+                eff
             );
         }
     }

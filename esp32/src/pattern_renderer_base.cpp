@@ -308,8 +308,23 @@ void PatternRendererBase::renderGraphAt(uint16_t width, uint16_t height) {
         CRGB* renderOut = aliases ? getBufferPtr(SCRATCH_BUFFER) : outputBuffer;
         if (!renderOut) renderOut = outputBuffer; // scratch unavailable -> in-place fallback
 
+        // Apply parameter automation (LFO/noise/random) over a reused copy of the base values,
+        // seeded by param index so Random/Perlin params don't move in lockstep. Same math + clock
+        // as the WASM preview (native/Modulation.h), so device and app agree.
+        const std::vector<ParameterValue>* params = &node.parameters;
+        if (!node.modulators.empty()) {
+            _effParams = node.parameters;
+            for (size_t i = 0; i < node.modulators.size() && i < _effParams.size(); i++) {
+                const ParamModulator& md = node.modulators[i];
+                if (!md.active) continue;
+                float v = Modulation::modulate(md.shape, md.mn, md.mx, md.period, frameFloatTime, (uint32_t)i);
+                _effParams[i] = md.isInt ? ParameterValue((int)lroundf(v)) : ParameterValue(v);
+            }
+            params = &_effParams;
+        }
+
         node.op->render(inputBuffer1, inputBuffer2, renderOut,
-                        width, height, frameFloatTime, frameFloatDelta, node.parameters);
+                        width, height, frameFloatTime, frameFloatDelta, *params);
 
         if (renderOut != outputBuffer) {
             memcpy(outputBuffer, renderOut, totalPixels * sizeof(CRGB));
@@ -626,7 +641,51 @@ bool PatternRendererBase::loadPatternFromMessagePack(const uint8_t* data, unsign
                         }
                     }
                 }
-                
+
+                // Parse parameter automation ("m": paramName -> {s:shape, lo:min, hi:max, pr:period}).
+                if (mpack_node_map_contains_cstr(nodeObj, "m") && node.op) {
+                    mpack_node_t mNode = mpack_node_map_cstr(nodeObj, "m");
+                    if (mpack_node_type(mNode) == mpack_type_map) {
+                        auto mInfo = node.op->getParameterInfo();
+                        // Ensure base params are sized+defaulted so modulation applies even when no
+                        // "p" was sent (all-default node with automation on).
+                        if (node.parameters.size() < mInfo.size()) {
+                            size_t old = node.parameters.size();
+                            node.parameters.resize(mInfo.size());
+                            for (size_t p = old; p < mInfo.size(); p++) node.parameters[p] = mInfo[p].defaultValue;
+                        }
+                        node.modulators.resize(mInfo.size());
+                        auto numOf = [](mpack_node_t n) -> float {
+                            switch (mpack_node_type(n)) {
+                                case mpack_type_float:  return mpack_node_float(n);
+                                case mpack_type_double: return (float)mpack_node_double(n);
+                                case mpack_type_int:    return (float)mpack_node_int(n);
+                                case mpack_type_uint:   return (float)mpack_node_uint(n);
+                                default: return 0.0f;
+                            }
+                        };
+                        size_t mc = mpack_node_map_count(mNode);
+                        for (size_t j = 0; j < mc; j++) {
+                            mpack_node_t k = mpack_node_map_key_at(mNode, j);
+                            mpack_node_t v = mpack_node_map_value_at(mNode, j);
+                            if (mpack_node_type(k) != mpack_type_str || mpack_node_type(v) != mpack_type_map) continue;
+                            char kb[32]; mpack_node_copy_cstr(k, kb, sizeof(kb));
+                            std::string pn(kb);
+                            int pi = -1;
+                            for (size_t p = 0; p < mInfo.size(); p++) if (mInfo[p].name == pn) { pi = (int)p; break; }
+                            if (pi < 0) continue;
+                            ParamModulator mod;
+                            mod.active = true;
+                            mod.isInt  = (mInfo[pi].type == ParameterInfo::INT);
+                            mod.shape  = mpack_node_map_contains_cstr(v, "s")  ? (int)numOf(mpack_node_map_cstr(v, "s"))  : 0;
+                            mod.mn     = mpack_node_map_contains_cstr(v, "lo") ? numOf(mpack_node_map_cstr(v, "lo")) : 0.0f;
+                            mod.mx     = mpack_node_map_contains_cstr(v, "hi") ? numOf(mpack_node_map_cstr(v, "hi")) : 1.0f;
+                            mod.period = mpack_node_map_contains_cstr(v, "pr") ? numOf(mpack_node_map_cstr(v, "pr")) : 1.0f;
+                            node.modulators[pi] = mod;
+                        }
+                    }
+                }
+
                 // Only add node if operator was created successfully
                 if (node.op) {
                     pattern.nodes.push_back(std::move(node));

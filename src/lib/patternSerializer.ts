@@ -17,6 +17,7 @@ import {
   getNodeBuffer
 } from './flowStore';
 import { interactiveParameters, setParameterInteractive } from './stores/interactiveStore';
+import { modulators, setModulator } from './stores/modulatorStore';
 import { get } from 'svelte/store';
 
 /**
@@ -41,6 +42,9 @@ export interface SerializedNode {
 
   /** Interactive parameters - parameter names that should have knobs on interact page */
   x?: Record<string, number>;
+
+  /** Automated parameters - paramName -> { s:shape, lo:min, hi:max, pr:period(sec) } */
+  m?: Record<string, { s: number; lo: number; hi: number; pr: number }>;
 }
 
 /**
@@ -370,6 +374,7 @@ export function serializePattern(
   
   // Get interactive parameters once before serialization
   const currentInteractiveParams = get(interactiveParameters);
+  const currentModulators = get(modulators);
 
   // Step 4: Create serialized nodes with lane-based buffer assignment
   const serializedNodes: SerializedNode[] = nodesToSerialize.map((node) => {
@@ -454,7 +459,17 @@ export function serializePattern(
         serializedNode.x = interactiveFlags;
       }
     }
-    
+
+    // Add parameter automation if any
+    const nodeMods = currentModulators.get(node.id);
+    if (nodeMods && nodeMods.size > 0) {
+      const m: Record<string, { s: number; lo: number; hi: number; pr: number }> = {};
+      for (const [paramName, cfg] of nodeMods.entries()) {
+        m[paramName] = { s: cfg.shape, lo: cfg.min, hi: cfg.max, pr: cfg.period };
+      }
+      serializedNode.m = m;
+    }
+
     return serializedNode;
   }).filter(Boolean) as SerializedNode[];
   
@@ -722,7 +737,15 @@ export function deserializePattern(
         setParameterInteractive(nodeId, paramName, true);
       }
     }
-    
+
+    // Restore parameter automation (global load only, like interactive params).
+    if (sNode.m && applyInteractiveParameters) {
+      for (const paramName in sNode.m) {
+        const c = sNode.m[paramName];
+        setModulator(nodeId, paramName, { shape: c.s, min: c.lo, max: c.hi, period: c.pr });
+      }
+    }
+
     // For visual consistency in PatternNode if it reads data.parameters directly
     newNode.data.parameters = Object.fromEntries(currentParamsForNode.entries());
     

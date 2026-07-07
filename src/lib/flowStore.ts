@@ -1,6 +1,7 @@
 import { writable, get } from 'svelte/store';
 import type { Node, Edge, Connection } from '@xyflow/svelte';
 import { clearNodeInteractiveParameters } from './stores/interactiveStore';
+import { getModulator } from './stores/modulatorStore';
 import { renderConfig, type RenderConfig } from './renderConfig';
 
 // Global start time for synchronized animations across all nodes
@@ -552,6 +553,16 @@ class WasmOperatorManager {
                 this.wasmModule.ccall('setOperatorStringParameter', null, ['number', 'number', 'string'], [instanceId, i, String(value ?? '')]);
                 break;
             }
+          }
+
+          // Sync parameter automation: numeric sliders (float=0, integer=1) can be modulated;
+          // the WASM applies it over the base value each frame. Push/clear so edits take effect.
+          const modCfg = (paramInfo.type === 0 || paramInfo.type === 1) ? getModulator(nodeId, paramInfo.name) : null;
+          if (modCfg) {
+            this.wasmModule.ccall('setOperatorModulator', null, ['number', 'number', 'number', 'number', 'number', 'number'],
+              [instanceId, i, modCfg.shape, modCfg.min, modCfg.max, modCfg.period]);
+          } else {
+            this.wasmModule.ccall('clearOperatorModulator', null, ['number', 'number'], [instanceId, i]);
           }
         } catch (paramError) {
           console.error(`Error setting parameter ${i} for node ${nodeId}:`, paramError);

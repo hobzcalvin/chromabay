@@ -13,16 +13,26 @@
 
 // Include native operator system (now ESP32-compatible!)
 #include "../../native/BaseOperator.h"
+#include "../../native/Modulation.h"
 #include "../../native/OperatorList.h"
+
+// Per-parameter automation config (parallel to PatternNode.parameters; inactive = static value).
+struct ParamModulator {
+    bool active = false;
+    bool isInt = false;   // round the modulated value for integer params (cached from param info)
+    int shape = 0;
+    float mn = 0.0f, mx = 1.0f, period = 1.0f;
+};
 
 // Node structure for pattern execution
 struct PatternNode {
     std::unique_ptr<BaseOperator> op;  // Unique pointer to operator
     std::vector<ParameterValue> parameters;
+    std::vector<ParamModulator> modulators; // empty, or same size as parameters
     int inputBuffer = -1;     // Buffer index to read from (-1 if none)
     int outputBuffer = 0;     // Buffer index to write to
     int secondInputBuffer = -1; // Second input for blend operations
-    
+
     PatternNode() : op(nullptr) {}
 };
 
@@ -47,7 +57,8 @@ protected:
     // so all strips render the same instant.
     uint32_t frameFloatTime = 0;
     uint32_t frameFloatDelta = 0;
-    
+    std::vector<ParameterValue> _effParams; // reused scratch for modulated parameter values
+
     // Timestamp synchronization
     unsigned long syncedBaseTime = 0;       // Synchronized base timestamp
     unsigned long syncedLocalTime = 0;      // Local millis() when sync was received

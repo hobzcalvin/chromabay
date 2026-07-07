@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { getNodeDefinition, setNodeParameter, getNodeParameter, deleteNode, nodeParameters, type Parameter } from '../flowStore';
   import { getParameterInteractive, setParameterInteractive, MAX_INTERACTIVE_PARAMS, interactiveParameters } from '../stores/interactiveStore';
+  import { modulators, getModulator, setModulator, clearModulator, SHAPES, type ModulatorConfig } from '../stores/modulatorStore';
   import type { Node } from '@xyflow/svelte';
 
   export let node: Node;
@@ -117,7 +118,8 @@
   onMount(() => {
     // Add backdrop click handler
     document.addEventListener('click', handleDocumentClick);
-    
+    modRaf = requestAnimationFrame(tickLive); // drive the automated-slider thumbs
+
     return () => {
       document.removeEventListener('click', handleDocumentClick);
     };
@@ -125,6 +127,7 @@
 
   onDestroy(() => {
     clearTimeout(deleteTimeout);
+    cancelAnimationFrame(modRaf);
   });
 
   function getUniqueInputId(paramName: string): string {
@@ -134,15 +137,75 @@
   function handleInteractiveToggle(param: Parameter, event: Event) {
     const checkbox = event.target as HTMLInputElement;
     const wantsInteractive = checkbox.checked;
-    
+
     const success = setParameterInteractive(node.id, param.name, wantsInteractive);
-    
+
     if (!success) {
       // Revert the checkbox state
       checkbox.checked = false;
       // Show error message
       alert(`Maximum of ${MAX_INTERACTIVE_PARAMS} interactive parameters allowed. Please uncheck other parameters first.`);
+    } else if (wantsInteractive) {
+      // Interactive and automated are mutually exclusive.
+      clearModulator(node.id, param.name);
     }
+  }
+
+  // ---- Parameter automation (LFO / noise / random) ----
+  let automating: Parameter | null = null;              // param whose automation sub-panel is open
+  let liveValues: Record<string, number> = {};          // live modulated value per param (moving thumb)
+  let modRaf = 0;
+
+  const SLIDER_TYPES = new Set(['float', 'integer', 'range', 'hue']);
+  const isSlider = (p: Parameter) => SLIDER_TYPES.has(p.type as string);
+  // Reactive modulator lookup (subscribes to the store).
+  $: getModReactive = (paramName: string): ModulatorConfig | null => $modulators.get(node.id)?.get(paramName) ?? null;
+
+  function paramRange(p: Parameter) { return { lo: p.min ?? 0, hi: p.max ?? ((p.type === 'hue') ? 255 : 1) }; }
+
+  function openAutomation(param: Parameter) {
+    if (!getModulator(node.id, param.name)) {
+      const { lo, hi } = paramRange(param);
+      setModulator(node.id, param.name, { shape: 0, min: lo, max: hi, period: 5 });
+      if (getParameterInteractive(node.id, param.name)) setParameterInteractive(node.id, param.name, false); // exclusive
+    }
+    automating = param;
+  }
+  function stopAutomation(param: Parameter) { clearModulator(node.id, param.name); automating = null; }
+  function updateMod(param: Parameter, patch: Partial<ModulatorConfig>) {
+    const cur = getModulator(node.id, param.name); if (!cur) return;
+    setModulator(node.id, param.name, { ...cur, ...patch });
+  }
+
+  // Tiny SVG waveform for each shape (viewBox 0 0 32 14).
+  function shapePath(s: number): string {
+    switch (s) {
+      case 0: return 'M0 7 Q4 0 8 7 T16 7 T24 7 T32 7';                 // sine
+      case 1: return 'M0 13 L8 1 L16 13 L24 1 L32 13';                  // triangle
+      case 2: return 'M0 13 L14 1 L14 13 L28 1 L28 13';                 // sawtooth
+      case 3: return 'M0 13 L0 1 L16 1 L16 13 L32 13 L32 1';            // square
+      case 4: return 'M0 10 L8 10 L8 3 L16 3 L16 13 L24 13 L24 6 L32 6';// random
+      case 5: return 'M0 8 Q6 3 12 7 T24 6 T32 9';                      // perlin
+      default: return 'M0 7 L32 7';
+    }
+  }
+
+  // Live value for the moving thumb — evaluated via the shared WASM math (same as preview+device).
+  function tickLive() {
+    const m: any = (typeof window !== 'undefined') ? (window as any).getWasmModule?.() : null;
+    const nodeMods = $modulators.get(node.id);
+    if (m && nodeMods && nodeMods.size && nodeDefinition) {
+      const t = Math.floor(performance.now()) % 1000000;
+      let i = 0;
+      for (const p of nodeDefinition.params) {
+        const cfg = nodeMods.get(p.name);
+        if (cfg) liveValues[p.name] = m.ccall('evalModulator', 'number',
+          ['number','number','number','number','number','number'], [cfg.shape, cfg.min, cfg.max, cfg.period, t, i]);
+        i++;
+      }
+      liveValues = liveValues; // reactivity
+    }
+    modRaf = requestAnimationFrame(tickLive);
   }
 </script>
 
@@ -173,7 +236,28 @@
   </div>
   
   <div class="popover-content">
-    {#if nodeDefinition && nodeDefinition.params.length > 0}
+    {#if automating}
+      {@const p = automating}
+      {@const cfg = getModReactive(p.name)}
+      <div class="automation-panel">
+        <button type="button" class="back-btn" onclick={() => (automating = null)}>← Back</button>
+        <h4 class="auto-title">Automate: {p.label}</h4>
+        {#if cfg}
+          <div class="shape-grid">
+            {#each SHAPES as name, si}
+              <button type="button" class="shape-btn" class:sel={cfg.shape === si} title={name} onclick={() => updateMod(p, { shape: si })}>
+                <svg viewBox="0 0 32 14" width="36" height="16" aria-hidden="true"><path d={shapePath(si)} fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+                <span>{name}</span>
+              </button>
+            {/each}
+          </div>
+          <label class="mod-field">Min <input type="number" step="any" value={cfg.min} oninput={(e) => updateMod(p, { min: parseFloat(e.currentTarget.value) })} /></label>
+          <label class="mod-field">Max <input type="number" step="any" value={cfg.max} oninput={(e) => updateMod(p, { max: parseFloat(e.currentTarget.value) })} /></label>
+          <label class="mod-field">Period (sec/cycle) <input type="number" min="0.1" step="0.1" value={cfg.period} oninput={(e) => updateMod(p, { period: Math.max(0.1, parseFloat(e.currentTarget.value) || 0.1) })} /></label>
+          <button type="button" class="stop-btn" onclick={() => stopAutomation(p)}>Stop automating</button>
+        {/if}
+      </div>
+    {:else if nodeDefinition && nodeDefinition.params.length > 0}
       {#each nodeDefinition.params as param (param.name)}
         {@const inputId = getUniqueInputId(param.name)}
         <div class="parameter-group">
@@ -188,13 +272,25 @@
               />
               <label for="interactive-{inputId}" class="hand-emoji" title="Interactive parameter (shows knob on interact page)">🖐️</label>
             </div>
+            {#if isSlider(param)}
+              <button type="button" class="automate-btn" class:active={!!getModReactive(param.name)}
+                title="Automate this parameter (LFO / noise / random)" onclick={() => openAutomation(param)}>🔄</button>
+            {/if}
           </div>
           
-          {#if param.type === 'float'}
+          {#if isSlider(param) && getModReactive(param.name)}
+            {@const cfg = getModReactive(param.name)!}
+            <div class="automated-control" role="button" tabindex="0" title="Edit automation"
+              onclick={() => openAutomation(param)} onkeydown={(e) => { if (e.key === 'Enter') openAutomation(param); }}>
+              <input type="range" min={param.min ?? 0} max={param.max ?? (param.type === 'hue' ? 255 : 1)} step="any"
+                value={liveValues[param.name] ?? cfg.min} disabled />
+              <span class="auto-tag">🔄 {SHAPES[cfg.shape]} · {(+cfg.min).toFixed(1)}–{(+cfg.max).toFixed(1)} · {cfg.period}s</span>
+            </div>
+          {:else if param.type === 'float'}
             <div class="float-control">
-              <input 
+              <input
                 id={inputId}
-                type="range" 
+                type="range"
                 min={param.min ?? 0} 
                 max={param.max ?? 1} 
                 step={((param.max ?? 1) - (param.min ?? 0)) / 100}
@@ -606,4 +702,27 @@
     text-align: center;
     margin: 0;
   }
+
+  /* ---- Parameter automation ---- */
+  .automate-btn {
+    background: none; border: none; cursor: pointer; font-size: 0.95rem;
+    opacity: 0.4; padding: 0 2px; line-height: 1; filter: grayscale(1);
+  }
+  .automate-btn.active { opacity: 1; filter: none; }
+  .automated-control { display: flex; flex-direction: column; gap: 4px; cursor: pointer; }
+  .automated-control input[type="range"] { width: 100%; accent-color: #22d3ee; opacity: 0.9; }
+  .auto-tag { font-size: 0.72rem; color: #22d3ee; font-variant-numeric: tabular-nums; }
+  .automation-panel { display: flex; flex-direction: column; gap: 10px; }
+  .back-btn { align-self: flex-start; background: none; border: none; color: #93c5fd; cursor: pointer; font-size: 0.85rem; padding: 0; }
+  .auto-title { margin: 0; font-size: 0.95rem; color: #e5e7eb; }
+  .shape-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .shape-btn {
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    background: #111827; border: 1px solid #374151; border-radius: 6px; color: #9ca3af;
+    padding: 6px 2px; cursor: pointer; font-size: 0.7rem;
+  }
+  .shape-btn.sel { border-color: #22d3ee; color: #22d3ee; background: #0e2a30; }
+  .mod-field { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 0.8rem; color: #d1d5db; }
+  .mod-field input { width: 90px; background: #111827; border: 1px solid #374151; border-radius: 4px; color: #e5e7eb; padding: 4px 6px; }
+  .stop-btn { margin-top: 4px; background: #3f1d1d; border: 1px solid #7f1d1d; color: #fca5a5; border-radius: 6px; padding: 6px; cursor: pointer; font-size: 0.8rem; }
 </style> 
