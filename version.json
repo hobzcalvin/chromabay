@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.133",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.133.zip",
-  "buildDate": "2026-07-07T21:44:19Z",
-  "commitHash": "3acb2bc4ab5f362592c3584bf0e0974321a17aad",
-  "commitMessage": "Fix parameter popover reposition: effTop/effLeft must be reactive, not functions"
+  "version": "0.0.1.134",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.134.zip",
+  "buildDate": "2026-07-07T22:01:47Z",
+  "commitHash": "c09da062c3563d8b4c33ed8f959192af7355bd04",
+  "commitMessage": "Clamp popover to the flow-canvas clip region, not just the window"
 }
