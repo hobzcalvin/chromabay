@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.132",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.132.zip",
-  "buildDate": "2026-07-07T21:34:08Z",
-  "commitHash": "4fd418f49cdc15731ca203e149f3edce304512db",
-  "commitMessage": "Param popover: re-fit to viewport on resize (moves up when the panel grows)"
+  "version": "0.0.1.133",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.133.zip",
+  "buildDate": "2026-07-07T21:44:19Z",
+  "commitHash": "3acb2bc4ab5f362592c3584bf0e0974321a17aad",
+  "commitMessage": "Fix parameter popover reposition: effTop/effLeft must be reactive, not functions"
 }
