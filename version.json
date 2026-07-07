@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.130",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.130.zip",
-  "buildDate": "2026-07-07T21:23:05Z",
-  "commitHash": "12eebf55d42e64e417f7d9d2a5a39c3a3a88445d",
-  "commitMessage": "Param popover: portal to <body> so viewport max-height/scroll actually applies"
+  "version": "0.0.1.131",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.131.zip",
+  "buildDate": "2026-07-07T21:29:26Z",
+  "commitHash": "867d7f63a0d263e4e9f41ac1a6a47b5c1b137e79",
+  "commitMessage": "Revert popover portal (broke Svelte 5 event delegation → clicks closed it)"
 }
