@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.126",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.126.zip",
-  "buildDate": "2026-07-07T18:04:05Z",
-  "commitHash": "f408e36a6a659319dfcc035c0b0339990002df0c",
-  "commitMessage": "Add Sentry (client): errors + tracing + session/canvas replay"
+  "version": "0.0.1.127",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.127.zip",
+  "buildDate": "2026-07-07T20:34:40Z",
+  "commitHash": "145581db9f92825cdd6f413f7411c4afe7a20159",
+  "commitMessage": "Add filled-SVG operator design doc (folds in Symbol)"
 }
