@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.131",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.131.zip",
-  "buildDate": "2026-07-07T21:29:26Z",
-  "commitHash": "867d7f63a0d263e4e9f41ac1a6a47b5c1b137e79",
-  "commitMessage": "Revert popover portal (broke Svelte 5 event delegation → clicks closed it)"
+  "version": "0.0.1.132",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.132.zip",
+  "buildDate": "2026-07-07T21:34:08Z",
+  "commitHash": "4fd418f49cdc15731ca203e149f3edce304512db",
+  "commitMessage": "Param popover: re-fit to viewport on resize (moves up when the panel grows)"
 }

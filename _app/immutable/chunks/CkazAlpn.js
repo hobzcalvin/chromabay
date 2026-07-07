@@ -1,0 +1,1 @@
+import{g as c,u as i,r as o,i as d,s as u}from"./DiRwcdCF.js";function k(e,n,s){c(()=>{var r=i(()=>n(e,s==null?void 0:s())||{});if(s&&(r!=null&&r.update)){var a=!1,t={};o(()=>{var f=s();d(f),a&&u(t,f)&&(t=f,r.update(f))}),a=!0}if(r!=null&&r.destroy)return()=>r.destroy()})}export{k as a};
