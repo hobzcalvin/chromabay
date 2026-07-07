@@ -48,22 +48,45 @@
   // measured; null until then.
   let clampedTop: number | null = null;
   let clampedLeft: number | null = null;
+  let clampedMaxH: number | null = null;
   let resizeObserver: ResizeObserver | null = null;
+
+  // Intersect the viewport with every overflow-clipping ancestor (the flow canvas has
+  // `overflow: hidden`). Chrome clips this position:fixed popover to that region even though
+  // no ancestor is its containing block, so clamping to the WINDOW isn't enough — it'd still
+  // be cut off at the canvas edge. We clamp to the real visible box instead.
+  function visibleBounds() {
+    let top = 0, left = 0, right = window.innerWidth, bottom = window.innerHeight;
+    for (let a = popoverElement?.parentElement; a; a = a.parentElement) {
+      const s = getComputedStyle(a);
+      if (s.overflowX !== 'visible' || s.overflowY !== 'visible') {
+        const r = a.getBoundingClientRect();
+        top = Math.max(top, r.top); left = Math.max(left, r.left);
+        right = Math.min(right, r.right); bottom = Math.min(bottom, r.bottom);
+      }
+    }
+    return { top, left, right, bottom };
+  }
 
   function clampToViewport() {
     if (!popoverElement || !visible || typeof window === 'undefined') return;
+    const m = 8; // margin inside the visible box
+    const b = visibleBounds();
+    const availH = b.bottom - b.top - 2 * m;
+    clampedMaxH = Math.max(160, availH); // cap height to the canvas; content scrolls past that
     const r = popoverElement.getBoundingClientRect();
-    const m = 8; // viewport margin
+    const h = Math.min(r.height, availH); // effective height once max-height applies
     const p = getPopoverPosition();
-    if (p.top !== undefined) clampedTop = Math.max(m, Math.min(p.top, window.innerHeight - r.height - m));
-    if (p.left !== undefined) clampedLeft = Math.max(m, Math.min(p.left, window.innerWidth - r.width - m));
+    if (p.top !== undefined) clampedTop = Math.max(b.top + m, Math.min(p.top, b.bottom - h - m));
+    if (p.left !== undefined) clampedLeft = Math.max(b.left + m, Math.min(p.left, b.right - r.width - m));
   }
   // NOTE: these MUST be reactive `$:` values, not functions. The style attribute below reads
   // `effTop`/`effLeft`; Svelte only re-renders it when identifiers it references change. A
   // function call `effTop()` hides `clampedTop` inside the body, so updating clampedTop would
-  // never repaint the DOM (the clamp ran but the popover never moved — the bug we just fixed).
+  // never repaint the DOM (the clamp ran but the popover never moved — a bug we hit before).
   $: effTop = clampedTop ?? top ?? 80;
   $: effLeft = clampedLeft ?? left ?? 20;
+  $: effMaxH = clampedMaxH;
 
   // Re-clamp after any content/anchor change (tick lets the DOM settle first). The ResizeObserver
   // (set up in onMount) covers content-driven size changes like opening the automation panel.
@@ -245,7 +268,7 @@
 <div 
   bind:this={popoverElement}
   class="parameter-popover"
-  style="position: fixed; top: {effTop}px; left: {effLeft}px; visibility: {visible ? 'visible' : 'hidden'}; opacity: {visible ? '1' : '0'}; transition: opacity 0.2s ease;"
+  style="position: fixed; top: {effTop}px; left: {effLeft}px; max-height: {effMaxH ? effMaxH + 'px' : 'calc(100vh - 16px)'}; visibility: {visible ? 'visible' : 'hidden'}; opacity: {visible ? '1' : '0'}; transition: opacity 0.2s ease;"
   onclick={(e) => e.stopPropagation()}
   onkeydown={(e) => e.stopPropagation()}
   role="dialog"
