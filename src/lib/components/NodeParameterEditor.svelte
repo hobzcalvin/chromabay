@@ -58,8 +58,12 @@
     if (p.top !== undefined) clampedTop = Math.max(m, Math.min(p.top, window.innerHeight - r.height - m));
     if (p.left !== undefined) clampedLeft = Math.max(m, Math.min(p.left, window.innerWidth - r.width - m));
   }
-  const effTop = (): number => clampedTop ?? getPopoverPosition().top ?? 80;
-  const effLeft = (): number => clampedLeft ?? getPopoverPosition().left ?? 20;
+  // NOTE: these MUST be reactive `$:` values, not functions. The style attribute below reads
+  // `effTop`/`effLeft`; Svelte only re-renders it when identifiers it references change. A
+  // function call `effTop()` hides `clampedTop` inside the body, so updating clampedTop would
+  // never repaint the DOM (the clamp ran but the popover never moved — the bug we just fixed).
+  $: effTop = clampedTop ?? top ?? 80;
+  $: effLeft = clampedLeft ?? left ?? 20;
 
   // Re-clamp after any content/anchor change (tick lets the DOM settle first). The ResizeObserver
   // (set up in onMount) covers content-driven size changes like opening the automation panel.
@@ -241,7 +245,7 @@
 <div 
   bind:this={popoverElement}
   class="parameter-popover"
-  style="position: fixed; top: {effTop()}px; left: {effLeft()}px; visibility: {visible ? 'visible' : 'hidden'}; opacity: {visible ? '1' : '0'}; transition: opacity 0.2s ease;"
+  style="position: fixed; top: {effTop}px; left: {effLeft}px; visibility: {visible ? 'visible' : 'hidden'}; opacity: {visible ? '1' : '0'}; transition: opacity 0.2s ease;"
   onclick={(e) => e.stopPropagation()}
   onkeydown={(e) => e.stopPropagation()}
   role="dialog"
