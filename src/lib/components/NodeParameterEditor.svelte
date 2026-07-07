@@ -41,6 +41,15 @@
     };
   }
 
+  // Cap the popover to the space between its anchor and the viewport edge, so it's always fully
+  // on-screen (the content area scrolls if the params/automation panel is taller).
+  function popoverMaxHeight(): string {
+    const p = getPopoverPosition();
+    if (p.top !== undefined) return `max-height: calc(100vh - ${p.top + 8}px);`;
+    if (p.bottom !== undefined) return `max-height: calc(100vh - ${p.bottom + 8}px);`;
+    return '';
+  }
+
   function getParameterValue(param: Parameter): any {
     const nodeParams = $nodeParameters.get(node.id);
     if (nodeParams && nodeParams.has(param.name)) {
@@ -212,7 +221,7 @@
 <div 
   bind:this={popoverElement}
   class="parameter-popover"
-  style="position: fixed; {getPopoverPosition().top !== undefined ? `top: ${getPopoverPosition().top}px;` : ''} {getPopoverPosition().left !== undefined ? `left: ${getPopoverPosition().left}px;` : ''} {getPopoverPosition().right !== undefined ? `right: ${getPopoverPosition().right}px;` : ''} {getPopoverPosition().bottom !== undefined ? `bottom: ${getPopoverPosition().bottom}px;` : ''} visibility: {visible ? 'visible' : 'hidden'}; opacity: {visible ? '1' : '0'}; transition: opacity 0.2s ease;"
+  style="position: fixed; {getPopoverPosition().top !== undefined ? `top: ${getPopoverPosition().top}px;` : ''} {getPopoverPosition().left !== undefined ? `left: ${getPopoverPosition().left}px;` : ''} {getPopoverPosition().right !== undefined ? `right: ${getPopoverPosition().right}px;` : ''} {getPopoverPosition().bottom !== undefined ? `bottom: ${getPopoverPosition().bottom}px;` : ''} {popoverMaxHeight()} visibility: {visible ? 'visible' : 'hidden'}; opacity: {visible ? '1' : '0'}; transition: opacity 0.2s ease;"
   onclick={(e) => e.stopPropagation()}
   onkeydown={(e) => e.stopPropagation()}
   role="dialog"
@@ -417,11 +426,18 @@
     border-radius: 8px;
     box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
     width: 300px;
-    max-height: 400px;
-    overflow-y: auto;
+    max-width: calc(100vw - 16px);   /* never wider than the viewport */
+    /* Fallback cap; the inline style refines this to the space below/above the anchor so the
+       popover is always fully on-screen. The content area (not the header) does the scrolling. */
+    max-height: calc(100vh - 16px);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;                /* clip to the rounded corners; .popover-content scrolls */
     z-index: 1000;
     color: white;
   }
+
+  .popover-header { flex: 0 0 auto; }
 
   .popover-header {
     display: flex;
@@ -502,6 +518,9 @@
 
   .popover-content {
     padding: 16px;
+    flex: 1 1 auto;
+    min-height: 0;        /* allow the flex child to shrink so overflow scrolls */
+    overflow-y: auto;     /* scrollbars when the params/automation panel is taller than the popover */
   }
 
   .parameter-group {
