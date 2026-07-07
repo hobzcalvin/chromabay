@@ -39,6 +39,9 @@ jobs:
     
     - name: Install mbedTLS for PSA crypto
       run: |
+        # The runner's pre-installed Microsoft apt repos intermittently serve invalid InRelease
+        # files (NOSPLIT), failing apt-get update. We only need Ubuntu, so drop them first.
+        sudo grep -lr packages.microsoft.com /etc/apt/sources.list.d/ 2>/dev/null | xargs -r sudo rm -f
         sudo apt-get update
         sudo apt-get install -y libmbedtls-dev
     
@@ -153,7 +156,8 @@ jobs:
 
     - name: Update firmware registry on GitHub Pages
       run: |
-        # Install jq for JSON manipulation
+        # Install jq for JSON manipulation (drop the flaky Microsoft repos first — see above)
+        sudo grep -lr packages.microsoft.com /etc/apt/sources.list.d/ 2>/dev/null | xargs -r sudo rm -f
         sudo apt-get update && sudo apt-get install -y jq
         
         # Get hardware version from firmware
