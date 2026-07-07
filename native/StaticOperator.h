@@ -16,7 +16,7 @@ public:
     void render(
         CRGB* /* in1 */, CRGB* /* in2 */, CRGB* outputBuffer,
         uint32_t width, uint32_t height,
-        uint32_t timestampMs, uint32_t /* deltaTimeMs */,
+        uint32_t /* timestampMs */, uint32_t deltaTimeMs,
         const std::vector<ParameterValue>& parameters
     ) override {
         float speed = getFloat(parameters, 0, 12.0f);  // reseeds per second
@@ -24,7 +24,7 @@ public:
         float fill = getFloat(parameters, 2, 1.0f);    // 0..1 fraction lit
         if (fill < 0) fill = 0; if (fill > 1) fill = 1;
 
-        uint32_t frame = (uint32_t)(timestampMs * 0.001f * speed);
+        uint32_t frame = (uint32_t)advancePhase(deltaTimeMs, speed); // integrated: smooth speed changes
         uint8_t fillThresh = (uint8_t)(fill * 255.0f);
 
         for (uint32_t y = 0; y < height; y++) {

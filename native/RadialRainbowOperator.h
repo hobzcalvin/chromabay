@@ -16,8 +16,8 @@ public:
         CRGB* outputBuffer,
         uint32_t width,
         uint32_t height,
-        uint32_t timestampMs,
-        uint32_t /* deltaTimeMs */,
+        uint32_t /* timestampMs */,
+        uint32_t deltaTimeMs,
         const std::vector<ParameterValue>& parameters
     ) override {
         float speed = getFloat(parameters, 0, 120.0f);
@@ -25,9 +25,9 @@ public:
         float center_x = getFloat(parameters, 2, 0.5f);
         float center_y = getFloat(parameters, 3, 0.5f);
         float frequency = getFloat(parameters, 4, 1.0f);
-        
-        // Get time-based hue offset with speed scaling
-        uint8_t hue_offset = (uint8_t)((timestampMs * speed / 1000.0f)) & 0xFF;
+
+        // Integrated hue offset (smooth when speed changes; see BaseOperator::advancePhase).
+        uint8_t hue_offset = (uint8_t)fmodf(advancePhase(deltaTimeMs, speed), 256.0f);
         
         // Calculate the maximum possible distance from center for normalization
         float max_distance = sqrt((center_x * center_x) + (center_y * center_y));

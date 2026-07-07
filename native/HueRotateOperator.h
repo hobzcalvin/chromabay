@@ -12,8 +12,8 @@ public:
         CRGB* outputBuffer,
         uint32_t width,
         uint32_t height,
-        uint32_t timestampMs,
-        uint32_t /* deltaTimeMs */,
+        uint32_t /* timestampMs */,
+        uint32_t deltaTimeMs,
         const std::vector<ParameterValue>& parameters
     ) override {
         float speed = getFloat(parameters, 0, 30.0f); // hue units per second
@@ -24,7 +24,8 @@ public:
             for (uint32_t i = 0; i < total; i++) outputBuffer[i] = CRGB::Black;
             return;
         }
-        int shift = (int)(timestampMs * 0.001f * speed) + offset;
+        // Integrated hue shift (smooth when speed changes; see BaseOperator::advancePhase).
+        int shift = (int)fmodf(advancePhase(deltaTimeMs, speed), 256.0f) + offset;
         uint8_t hShift = (uint8_t)(((shift % 256) + 256) % 256);
 
         for (uint32_t i = 0; i < total; i++) {

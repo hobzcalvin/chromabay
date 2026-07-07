@@ -13,7 +13,7 @@ public:
     void render(
         CRGB* /* in1 */, CRGB* /* in2 */, CRGB* outputBuffer,
         uint32_t width, uint32_t height,
-        uint32_t timestampMs, uint32_t /* deltaTimeMs */,
+        uint32_t /* timestampMs */, uint32_t deltaTimeMs,
         const std::vector<ParameterValue>& parameters
     ) override {
         if (width == 0 || height == 0) return;
@@ -40,7 +40,7 @@ public:
         int startX;
         if (scroll) {
             const int span = textW + (int)width;             // travel one full text width + a screen
-            float off = fmodf((float)timestampMs * 0.001f * speed, (float)span);
+            float off = fmodf(advancePhase(deltaTimeMs, speed), (float)span); // integrated: smooth speed changes
             if (off < 0) off += span;
             startX = (int)width - (int)off;                  // enters from the right, moves left
         } else {

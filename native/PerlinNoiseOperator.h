@@ -11,8 +11,8 @@ public:
         CRGB* outputBuffer,
         uint32_t width,
         uint32_t height,
-        uint32_t timestampMs,
-        uint32_t /* deltaTimeMs */,
+        uint32_t /* timestampMs */,
+        uint32_t deltaTimeMs,
         const std::vector<ParameterValue>& parameters
     ) override {
         float scale = getFloat(parameters, 0, 4.0f); // Noise scale
@@ -23,8 +23,8 @@ public:
         int octaves = getInt(parameters, 5, 1);          // fractal detail (1 = plain Perlin)
         float warp = getFloat(parameters, 6, 0.0f);      // domain warp: organic swirl/flow
 
-        // Time factor for animation (scale for FastLED noise)
-        uint16_t time_factor = (uint16_t)(timestampMs * speed * 0.01f);
+        // Integrated time factor (smooth when speed changes; see BaseOperator::advancePhase).
+        uint16_t time_factor = (uint16_t)fmodf(advancePhase(deltaTimeMs, speed * 10.0f), 65536.0f);
 
         // Scale factor for noise coordinates
         uint16_t noise_scale = (uint16_t)(scale * 1000.0f);

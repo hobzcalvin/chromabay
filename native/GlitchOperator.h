@@ -20,8 +20,8 @@ public:
         CRGB* outputBuffer,
         uint32_t width,
         uint32_t height,
-        uint32_t timestampMs,
-        uint32_t /* deltaTimeMs */,
+        uint32_t /* timestampMs */,
+        uint32_t deltaTimeMs,
         const std::vector<ParameterValue>& parameters
     ) override {
         uint32_t total = width * height;
@@ -44,7 +44,7 @@ public:
         if (maxOff < 1) maxOff = 1;
         int chan = (int)(intensity * (float)width * 0.05f);
         uint32_t prob = (uint32_t)(intensity * 255.0f); // chance a block is displaced
-        uint32_t frame = (uint32_t)(timestampMs * 0.001f * speed * 8.0f);
+        uint32_t frame = (uint32_t)advancePhase(deltaTimeMs, speed * 8.0f); // integrated: smooth speed changes
 
         for (uint32_t y = 0; y < height; y++) {
             for (uint32_t x = 0; x < width; x++) {

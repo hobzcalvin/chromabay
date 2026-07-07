@@ -10,7 +10,7 @@ public:
     void render(
         CRGB* /* in1 */, CRGB* /* in2 */, CRGB* outputBuffer,
         uint32_t width, uint32_t height,
-        uint32_t timestampMs, uint32_t /* deltaTimeMs */,
+        uint32_t /* timestampMs */, uint32_t deltaTimeMs,
         const std::vector<ParameterValue>& parameters
     ) override {
         float speed = getFloat(parameters, 0, 1.0f);
@@ -22,7 +22,7 @@ public:
         // matching Rainbow/Gradient/Perlin) and multiply by a reference dimension, so a tiny display
         // and a large one show the SAME pattern at the same Scale. Centered so Scale zooms about the middle.
         const float REF = 32.0f;
-        float t = timestampMs * 0.001f * speed;
+        float t = advancePhase(deltaTimeMs, speed); // integrated: smooth when speed changes
         for (uint32_t y = 0; y < height; y++) {
             for (uint32_t x = 0; x < width; x++) {
                 float fx = ((float)x - width * 0.5f) / (float)width * REF * scale;

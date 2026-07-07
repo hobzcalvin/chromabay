@@ -12,8 +12,8 @@ public:
         CRGB* outputBuffer,
         uint32_t width,
         uint32_t height,
-        uint32_t timestampMs,
-        uint32_t /* deltaTimeMs */,
+        uint32_t /* timestampMs */,
+        uint32_t deltaTimeMs,
         const std::vector<ParameterValue>& parameters
     ) override {
         float rate = getFloat(parameters, 0, 2.0f); // Flashes per second
@@ -21,15 +21,10 @@ public:
         float hue = getFloat(parameters, 2, 0.0f);
         float saturation = getFloat(parameters, 3, 0.0f); // 0 = white strobe
 
-        // Calculate strobe timing
-        float period_ms = 1000.0f / rate; // Period in milliseconds
-        float on_time_ms = period_ms * duty_cycle;
-        
-        // Current position in the cycle
-        float cycle_pos = fmod((float)timestampMs, period_ms);
-        
-        // Determine if we're in the ON or OFF phase
-        bool is_on = cycle_pos < on_time_ms;
+        // Integrated flash phase (smooth when rate changes; see BaseOperator::advancePhase).
+        float cycles = advancePhase(deltaTimeMs, rate);
+        float frac = cycles - floorf(cycles); // 0..1 within the current flash
+        bool is_on = frac < duty_cycle;
         
         uint32_t totalPixels = width * height;
         

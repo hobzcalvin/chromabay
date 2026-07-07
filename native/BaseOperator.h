@@ -102,8 +102,20 @@ public:
     virtual const char* getDisplayName() const = 0;
     virtual std::vector<ParameterInfo> getParameterInfo() const = 0;
     
+    // Integrated animation phase. Operators that used `timestampMs * rate` should instead call
+    // advancePhase(deltaTimeMs, rate) and use the returned value. This accumulates ∫rate·dt, which
+    // equals timestampMs*rate while `rate` is constant (identical look), but changing rate — by a
+    // slider or by automation — moves it CONTINUOUSLY instead of jumping by timestampMs*Δrate.
+    // Per-instance state; persists across frames, resets when the operator is created.
+    float advancePhase(uint32_t deltaTimeMs, float ratePerSec) {
+        float dt = (float)deltaTimeMs * 0.001f;
+        if (dt < 0.0f || dt > 0.5f) dt = 0.016f; // guard first-frame / clock-wrap deltas
+        _phase += dt * ratePerSec;
+        return _phase;
+    }
+
     // Helper functions for parameter access (ESP32-compatible, no templates)
-    
+
     float getFloat(const std::vector<ParameterValue>& params, size_t index, float defaultVal = 0.0f) const {
         if (index >= params.size()) return defaultVal;
         const ParameterValue& param = params[index];
@@ -161,6 +173,9 @@ public:
         int v = 128 + (int)(total / norm);
         return (uint8_t)(v < 0 ? 0 : (v > 255 ? 255 : v));
     }
+
+protected:
+    float _phase = 0.0f; // accumulated animation phase (see advancePhase)
 };
 
 // Operator factory function type (using unique_ptr)

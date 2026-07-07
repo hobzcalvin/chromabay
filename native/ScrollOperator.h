@@ -18,8 +18,8 @@ public:
         CRGB* outputBuffer,
         uint32_t width,
         uint32_t height,
-        uint32_t timestampMs,
-        uint32_t /* deltaTimeMs */,
+        uint32_t /* timestampMs */,
+        uint32_t deltaTimeMs,
         const std::vector<ParameterValue>& parameters
     ) override {
         uint32_t total = width * height;
@@ -33,7 +33,8 @@ public:
         int span = vertical ? (int)height : (int)width;
         if (span < 1) span = 1;
         // %/sec is resolution-independent: 100%/sec scrolls the whole image across in 1s.
-        int shift = wrap((int)lroundf((timestampMs * 0.001f) * (speed / 100.0f) * (float)span), span);
+        // Integrated fraction-of-span (smooth when speed changes; see BaseOperator::advancePhase).
+        int shift = wrap((int)lroundf(advancePhase(deltaTimeMs, speed / 100.0f) * (float)span), span);
 
         int idx = 0;
         for (uint32_t y = 0; y < height; y++) {

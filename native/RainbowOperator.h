@@ -16,21 +16,21 @@ public:
         CRGB* outputBuffer,
         uint32_t width,
         uint32_t height,
-        uint32_t timestampMs,
-        uint32_t /* deltaTimeMs */,
+        uint32_t /* timestampMs */,
+        uint32_t deltaTimeMs,
         const std::vector<ParameterValue>& parameters
     ) override {
         float speed = getFloat(parameters, 0, 120.0f);
         float saturation = getFloat(parameters, 1, 255.0f);
         float angle = getFloat(parameters, 2, 0.0f);
-        
+
         // Convert angle to radians
         float angle_rad = angle * M_PI / 180.0f;
         float cos_angle = cos(angle_rad);
         float sin_angle = sin(angle_rad);
-        
-        // Get time-based hue offset with speed scaling
-        uint8_t hue_offset = (uint8_t)((timestampMs * speed / 1000.0f)) & 0xFF;
+
+        // Integrated hue offset (smooth when speed changes; see BaseOperator::advancePhase).
+        uint8_t hue_offset = (uint8_t)fmodf(advancePhase(deltaTimeMs, speed), 256.0f);
         
         // Loop through all pixels in the 2D buffer
         for (uint32_t y = 0; y < height; y++) {

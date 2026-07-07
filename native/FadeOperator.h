@@ -16,17 +16,16 @@ public:
         CRGB* outputBuffer,
         uint32_t width,
         uint32_t height,
-        uint32_t timestampMs,
-        uint32_t /* deltaTimeMs */,
+        uint32_t /* timestampMs */,
+        uint32_t deltaTimeMs,
         const std::vector<ParameterValue>& parameters
     ) override {
         float speed = getFloat(parameters, 0, 1.0f);
         float hue = getFloat(parameters, 1, 30.0f); // Default to orange-ish
         float saturation = getFloat(parameters, 2, 255.0f);
-        
-        // Calculate fade intensity using sine wave
-        float timeInSeconds = timestampMs * 0.001f;
-        float fadeIntensity = (sin(timeInSeconds * speed) + 1.0f) * 0.5f; // 0.0 to 1.0
+
+        // Integrated fade phase (smooth when speed changes; see BaseOperator::advancePhase).
+        float fadeIntensity = (sinf(advancePhase(deltaTimeMs, speed)) + 1.0f) * 0.5f; // 0.0 to 1.0
         
         uint32_t totalPixels = width * height;
         

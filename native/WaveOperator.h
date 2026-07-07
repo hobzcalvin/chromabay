@@ -28,7 +28,7 @@ public:
     void render(
         CRGB* /* in1 */, CRGB* /* in2 */, CRGB* outputBuffer,
         uint32_t width, uint32_t height,
-        uint32_t timestampMs, uint32_t /* deltaTimeMs */,
+        uint32_t /* timestampMs */, uint32_t deltaTimeMs,
         const std::vector<ParameterValue>& parameters
     ) override {
         float speed = getFloat(parameters, 0, 30.0f);   // % of a loop per second
@@ -52,7 +52,7 @@ public:
         float span = wf * fabsf(dx) + hf * fabsf(dy);
         if (span < 1.0f) span = 1.0f;
         float minP = (dx < 0 ? wf * dx : 0.0f) + (dy < 0 ? hf * dy : 0.0f);
-        float phase = timestampMs * 0.001f * (speed / 100.0f);
+        float phase = advancePhase(deltaTimeMs, speed / 100.0f); // integrated: smooth when speed changes
 
         for (uint32_t y = 0; y < height; y++) {
             for (uint32_t x = 0; x < width; x++) {

@@ -104,8 +104,8 @@ public:
         CRGB* outputBuffer,
         uint32_t width,
         uint32_t height,
-        uint32_t timestampMs,
-        uint32_t /* deltaTimeMs */,
+        uint32_t /* timestampMs */,
+        uint32_t deltaTimeMs,
         const std::vector<ParameterValue>& parameters
     ) override {
         float speed      = getFloat(parameters, 0, 1.5f);   // glyphs per second (0 = freeze)
@@ -115,7 +115,7 @@ public:
 
         int idx;
         if (speed > 0.0f) {
-            idx = (int)((timestampMs * 0.001f) * speed) % GLYPH_COUNT;
+            idx = (int)fmodf(advancePhase(deltaTimeMs, speed), (float)GLYPH_COUNT); // integrated: smooth speed changes
             if (idx < 0) idx += GLYPH_COUNT;
         } else {
             idx = chosen % GLYPH_COUNT;
