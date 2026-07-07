@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, tick } from 'svelte';
   import { getNodeDefinition, setNodeParameter, getNodeParameter, deleteNode, nodeParameters, type Parameter } from '../flowStore';
   import { getParameterInteractive, setParameterInteractive, MAX_INTERACTIVE_PARAMS, interactiveParameters } from '../stores/interactiveStore';
   import { modulators, getModulator, setModulator, clearModulator, SHAPES, type ModulatorConfig } from '../stores/modulatorStore';
@@ -41,14 +41,29 @@
     };
   }
 
-  // Cap the popover to the space between its anchor and the viewport edge, so it's always fully
-  // on-screen (the content area scrolls if the params/automation panel is taller).
-  function popoverMaxHeight(): string {
+  // Keep the popover fully on-screen. The parent anchors it below the node, but its height changes
+  // (e.g. opening the taller automation panel), so we clamp its top/left to its ACTUAL measured
+  // size on every resize — sliding it up/left as needed. Only when it's taller than the whole
+  // viewport does the CSS max-height + scroll kick in. clampedTop/Left override the anchor once
+  // measured; null until then.
+  let clampedTop: number | null = null;
+  let clampedLeft: number | null = null;
+  let resizeObserver: ResizeObserver | null = null;
+
+  function clampToViewport() {
+    if (!popoverElement || !visible || typeof window === 'undefined') return;
+    const r = popoverElement.getBoundingClientRect();
+    const m = 8; // viewport margin
     const p = getPopoverPosition();
-    if (p.top !== undefined) return `max-height: calc(100vh - ${p.top + 8}px);`;
-    if (p.bottom !== undefined) return `max-height: calc(100vh - ${p.bottom + 8}px);`;
-    return '';
+    if (p.top !== undefined) clampedTop = Math.max(m, Math.min(p.top, window.innerHeight - r.height - m));
+    if (p.left !== undefined) clampedLeft = Math.max(m, Math.min(p.left, window.innerWidth - r.width - m));
   }
+  const effTop = (): number => clampedTop ?? getPopoverPosition().top ?? 80;
+  const effLeft = (): number => clampedLeft ?? getPopoverPosition().left ?? 20;
+
+  // Re-clamp after any content/anchor change (tick lets the DOM settle first). The ResizeObserver
+  // (set up in onMount) covers content-driven size changes like opening the automation panel.
+  $: if (visible && (top || left || node || automating)) tick().then(clampToViewport);
 
   function getParameterValue(param: Parameter): any {
     const nodeParams = $nodeParameters.get(node.id);
@@ -128,6 +143,10 @@
     // Add backdrop click handler
     document.addEventListener('click', handleDocumentClick);
     modRaf = requestAnimationFrame(tickLive); // drive the automated-slider thumbs
+    // Re-fit whenever the popover's size changes (e.g. opening the automation panel).
+    resizeObserver = new ResizeObserver(() => clampToViewport());
+    if (popoverElement) resizeObserver.observe(popoverElement);
+    clampToViewport();
 
     return () => {
       document.removeEventListener('click', handleDocumentClick);
@@ -137,6 +156,7 @@
   onDestroy(() => {
     clearTimeout(deleteTimeout);
     cancelAnimationFrame(modRaf);
+    resizeObserver?.disconnect();
   });
 
   function getUniqueInputId(paramName: string): string {
@@ -221,7 +241,7 @@
 <div 
   bind:this={popoverElement}
   class="parameter-popover"
-  style="position: fixed; {getPopoverPosition().top !== undefined ? `top: ${getPopoverPosition().top}px;` : ''} {getPopoverPosition().left !== undefined ? `left: ${getPopoverPosition().left}px;` : ''} {getPopoverPosition().right !== undefined ? `right: ${getPopoverPosition().right}px;` : ''} {getPopoverPosition().bottom !== undefined ? `bottom: ${getPopoverPosition().bottom}px;` : ''} {popoverMaxHeight()} visibility: {visible ? 'visible' : 'hidden'}; opacity: {visible ? '1' : '0'}; transition: opacity 0.2s ease;"
+  style="position: fixed; top: {effTop()}px; left: {effLeft()}px; visibility: {visible ? 'visible' : 'hidden'}; opacity: {visible ? '1' : '0'}; transition: opacity 0.2s ease;"
   onclick={(e) => e.stopPropagation()}
   onkeydown={(e) => e.stopPropagation()}
   role="dialog"
