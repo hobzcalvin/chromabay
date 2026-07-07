@@ -5,15 +5,6 @@
   import { modulators, getModulator, setModulator, clearModulator, SHAPES, type ModulatorConfig } from '../stores/modulatorStore';
   import type { Node } from '@xyflow/svelte';
 
-  // Render the popover as a direct child of <body>. It's `position: fixed`, but SvelteFlow wraps
-  // its children in a CSS-transformed pane, which would make `fixed` resolve to that pane instead
-  // of the viewport — throwing off the viewport-relative max-height/position. Portaling to body
-  // makes `fixed` (and 100vh) truly viewport-relative.
-  function portal(node: HTMLElement) {
-    document.body.appendChild(node);
-    return { destroy() { node.remove(); } };
-  }
-
   export let node: Node;
   export let onClose: () => void;
   // Changed to const as per svelte-check warning if only for external reference / initial value
@@ -229,7 +220,6 @@
 
 <div 
   bind:this={popoverElement}
-  use:portal
   class="parameter-popover"
   style="position: fixed; {getPopoverPosition().top !== undefined ? `top: ${getPopoverPosition().top}px;` : ''} {getPopoverPosition().left !== undefined ? `left: ${getPopoverPosition().left}px;` : ''} {getPopoverPosition().right !== undefined ? `right: ${getPopoverPosition().right}px;` : ''} {getPopoverPosition().bottom !== undefined ? `bottom: ${getPopoverPosition().bottom}px;` : ''} {popoverMaxHeight()} visibility: {visible ? 'visible' : 'hidden'}; opacity: {visible ? '1' : '0'}; transition: opacity 0.2s ease;"
   onclick={(e) => e.stopPropagation()}
