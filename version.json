@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.127",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.127.zip",
-  "buildDate": "2026-07-07T20:34:40Z",
-  "commitHash": "145581db9f92825cdd6f413f7411c4afe7a20159",
-  "commitMessage": "Add filled-SVG operator design doc (folds in Symbol)"
+  "version": "0.0.1.128",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.128.zip",
+  "buildDate": "2026-07-07T20:45:16Z",
+  "commitHash": "22d867f3cd41186dd3094ff54dd61c7264b47541",
+  "commitMessage": "CI: drop flaky Microsoft apt repos before apt-get update (esp32-release)"
 }
