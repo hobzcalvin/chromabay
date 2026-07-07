@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.124",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.124.zip",
-  "buildDate": "2026-07-06T18:05:34Z",
-  "commitHash": "0605b8099bc4a33c672ddc4eeed239324a7d8c48",
-  "commitMessage": "Add Text operator + STRING parameter type (scrolling/static, responsive bitmap fonts)"
+  "version": "0.0.1.125",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.125.zip",
+  "buildDate": "2026-07-07T05:35:41Z",
+  "commitHash": "81adfb660ae244ade0b6720fc40eab3d4a2b6566",
+  "commitMessage": "Parameter automation (LFO / noise / random) — shared math, moving-slider UI"
 }
