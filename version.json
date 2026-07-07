@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.129",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.129.zip",
-  "buildDate": "2026-07-07T21:16:12Z",
-  "commitHash": "9c855e47ddece348b0afb12ab4815cbca5fb8670",
-  "commitMessage": "Param popover: always fit the viewport; scroll content when taller (esp. automation panel)"
+  "version": "0.0.1.130",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.130.zip",
+  "buildDate": "2026-07-07T21:23:05Z",
+  "commitHash": "12eebf55d42e64e417f7d9d2a5a39c3a3a88445d",
+  "commitMessage": "Param popover: portal to <body> so viewport max-height/scroll actually applies"
 }
