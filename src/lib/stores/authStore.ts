@@ -3,8 +3,18 @@
 // gallery + the synced owner-key keyring (see PATTERN_LIFECYCLE.md); it is never required.
 import { writable } from 'svelte/store';
 import { browser } from '$app/environment';
+import { base } from '$app/paths';
 import { supabase } from '../supabase';
 import type { User } from '@supabase/supabase-js';
+
+// Where the confirmation link should land. Must be allowlisted in Supabase
+// (Auth → URL Configuration → Redirect URLs). Uses the current web origin so it works
+// on both the deployed site and localhost; native (Capacitor) confirmation needs a
+// universal link — see SETUP_GUIDE.md.
+function redirectTo(): string | undefined {
+  if (!browser) return undefined;
+  return `${window.location.origin}${base}/account`;
+}
 
 export const authUser = writable<User | null>(null);
 export const authReady = writable(false);
@@ -23,7 +33,11 @@ if (browser && supabase) {
 /** Sign up. Returns whether a session was created immediately (false ⇒ email confirmation needed). */
 export async function signUp(email: string, password: string): Promise<{ needsConfirm: boolean }> {
   if (!supabase) throw new Error('Cloud sync is not configured');
-  const { data, error } = await supabase.auth.signUp({ email, password });
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: { emailRedirectTo: redirectTo() },
+  });
   if (error) throw error;
   return { needsConfirm: !data.session };
 }

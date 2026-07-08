@@ -14,7 +14,7 @@
       if (mode === 'up') {
         const { needsConfirm } = await signUp(email.trim(), password);
         notice = needsConfirm
-          ? 'Account created — check your email for a confirmation link, then sign in.'
+          ? 'Account created. Check your email for a confirmation link (it comes from Supabase — noreply@mail.app.supabase.io — so check spam), then sign in.'
           : 'Account created and signed in.';
         if (needsConfirm) mode = 'in';
       } else {

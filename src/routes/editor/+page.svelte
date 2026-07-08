@@ -8,6 +8,8 @@
   import NodeParameterEditor from '$lib/components/NodeParameterEditor.svelte';
   import PatternActions from '$lib/components/PatternActions.svelte';
   import { loadPatterns, currentPattern } from '$lib/stores/patternsStore';
+  import { goto } from '$app/navigation';
+  import { base } from '$app/paths';
   // Hidden for now: import PatternSerializationPanel from '$lib/components/PatternSerializationPanel.svelte';
   
   // Initialize patterns on mount
@@ -422,8 +424,10 @@
 <main>
   <div class="header">
     <h1>🎯 Pattern Editor</h1>
-    
-    <PatternActions 
+
+    <button class="interact-btn" title="Interact with this pattern" aria-label="Interact" onclick={() => goto(`${base}/interact`)}>🎛️</button>
+
+    <PatternActions
       bind:showAddNodeDropdown 
       bind:addNodeDropdownRef 
       {handleAddNode}
@@ -522,6 +526,21 @@
     font-weight: 700;
     text-shadow: 0 2px 4px rgba(0,0,0,0.3);
   }
+
+  /* Jump to the Interact page for the current pattern (mirrors the 🎛️ on Patterns). */
+  .interact-btn {
+    position: absolute;
+    left: 0;
+    top: 0;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 10px;
+    font-size: 1.3rem;
+    line-height: 1;
+    padding: 8px 12px;
+    cursor: pointer;
+  }
+  .interact-btn:hover { background: rgba(0, 0, 0, 0.5); }
 
   .flow-container {
     flex: 1;
