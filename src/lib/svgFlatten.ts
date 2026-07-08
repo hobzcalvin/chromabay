@@ -176,9 +176,21 @@ export function encodeContours(contours: Contour[], budget = 160): string {
   return `1|${parts.join(';')}`;
 }
 
-/** Convenience: `d` string → encoded blob for the SvgFill `path` param. */
-export function flattenSvgPath(d: string, budget = 160): string {
-  return encodeContours(parsePath(d), budget);
+/**
+ * Pull a usable path out of whatever the user pasted. Accepts a full `<svg>`, a lone
+ * `<path .../>`, an attribute soup, or a bare `d` string — grabs the FIRST `d="…"`/`d='…'`
+ * it sees (negative lookbehind avoids matching `id=`, `data-d=`, `width=`, etc.) and falls
+ * back to treating the whole input as the path when there's no `d=` at all.
+ */
+export function extractPathData(input: string): string {
+  const m = input.match(/(?<![\w-])d\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+  if (m) return (m[1] ?? m[2] ?? '').trim();
+  return input.trim();
+}
+
+/** Convenience: pasted SVG/path text → encoded blob for the SvgFill `path` param. */
+export function flattenSvgPath(input: string, budget = 160): string {
+  return encodeContours(parsePath(extractPathData(input)), budget);
 }
 
 // Preset shapes (viewBox-agnostic; encoder normalises). Heart matches SvgFillOperator kHeart.
