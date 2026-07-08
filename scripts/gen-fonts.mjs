@@ -51,60 +51,58 @@ function parseBdf(path, name) {
   return { name, W, H, bpr, data };
 }
 
-// --- Rasterize a curved typeface to a fixed W×H 1-bit cell via headless Chrome ---
-async function rasterizeFont(name, W, H, fontStack, fontSize) {
+// --- Rasterize a curved typeface to a PROPORTIONAL H-tall 1-bit font via headless Chrome.
+// Each glyph is left-aligned in a fixed-width cell (W = widest advance) but carries its own
+// advance width in `widths[]`, so TextOperator spaces glyphs naturally instead of monospace. ---
+async function rasterizeFont(name, H, fontStack, fontSize) {
   const browser = await chromium.launch({ channel: 'chrome', headless: true });
   const page = await browser.newPage();
-  const data = await page.evaluate(({ FIRST, LAST, W, H, fontStack, fontSize }) => {
-    const cvs = document.createElement('canvas');
-    cvs.width = W; cvs.height = H;
+  const res = await page.evaluate(({ FIRST, LAST, H, fontStack, fontSize }) => {
+    const probe = document.createElement('canvas').getContext('2d');
+    probe.font = `${fontSize}px ${fontStack}`;
+    // Advance width per glyph (typographic spacing, includes side bearings).
+    const widths = [];
+    let maxAdv = 1;
+    for (let c = FIRST; c <= LAST; c++) {
+      const a = Math.max(1, Math.round(probe.measureText(String.fromCharCode(c)).width));
+      widths.push(a); if (a > maxAdv) maxAdv = a;
+    }
+    const W = maxAdv + 1;              // cell wide enough to hold the widest glyph's ink
+    const baseY = H - 7;               // baseline; leaves room for descenders
+    const cvs = document.createElement('canvas'); cvs.width = W; cvs.height = H;
     const ctx = cvs.getContext('2d', { willReadFrequently: true });
-    const maxInk = W - 1;          // leave a 1px right gutter between monospace cells
-    const baseY = H - 6;           // baseline: room for descenders below
+    const bpr = Math.ceil(W / 8);
     const out = [];
     for (let c = FIRST; c <= LAST; c++) {
       ctx.clearRect(0, 0, W, H);
-      const ch = String.fromCharCode(c);
       ctx.font = `${fontSize}px ${fontStack}`;
-      ctx.textAlign = 'center';
+      ctx.textAlign = 'left';          // pen at x=0; natural left side bearing preserved
       ctx.textBaseline = 'alphabetic';
-      const m = ctx.measureText(ch);
-      const inkW = (m.actualBoundingBoxLeft || 0) + (m.actualBoundingBoxRight || 0);
-      const sx = inkW > maxInk ? maxInk / inkW : 1;   // condense only glyphs too wide to fit
-      ctx.save();
-      ctx.translate(W / 2, baseY);
-      ctx.scale(sx, 1);
       ctx.fillStyle = '#fff';
-      ctx.fillText(ch, 0, 0);
-      ctx.restore();
+      ctx.fillText(String.fromCharCode(c), 0, baseY);
       const px = ctx.getImageData(0, 0, W, H).data;
-      const bpr = Math.ceil(W / 8);
       for (let y = 0; y < H; y++) {
         for (let b = 0; b < bpr; b++) {
           let byte = 0;
           for (let bit = 0; bit < 8; bit++) {
             const x = b * 8 + bit;
-            if (x < W) {
-              const a = px[(y * W + x) * 4 + 3];      // alpha
-              if (a >= 110) byte |= 0x80 >> bit;       // 1-bit threshold
-            }
+            if (x < W && px[(y * W + x) * 4 + 3] >= 110) byte |= 0x80 >> bit;
           }
           out.push(byte);
         }
       }
     }
-    return out;
-  }, { FIRST, LAST, W, H, fontStack, fontSize });
+    return { W, bpr, data: out, widths };
+  }, { FIRST, LAST, H, fontStack, fontSize });
   await browser.close();
-  const bpr = Math.ceil(W / 8);
-  console.log(`${name}: ${W}x${H} bpr=${bpr} (rasterized ${fontStack} @${fontSize}px) bytes=${data.length}`);
-  return { name, W, H, bpr, data };
+  console.log(`${name}: ${res.W}x${H} bpr=${res.bpr} proportional (${fontStack} @${fontSize}px) bytes=${res.data.length}`);
+  return { name, W: res.W, H, bpr: res.bpr, data: res.data, widths: res.widths };
 }
 
 const fonts = [
   parseBdf(await ensureBdf('5x8'), 'FONT_5x8'),
   parseBdf(await ensureBdf('8x16'), 'FONT_8x16'),
-  await rasterizeFont('FONT_16x32', 16, 32, "'Helvetica Neue', Helvetica, Arial, sans-serif", 30),
+  await rasterizeFont('FONT_16x32', 32, "'Helvetica Neue', Helvetica, Arial, sans-serif", 30),
 ];
 
 let out = `#pragma once
@@ -114,7 +112,8 @@ let out = `#pragma once
 // MSB-first (pixel x -> bit 0x80>>(x&7)).
 #include <cstdint>
 namespace TextFonts {
-struct BitmapFont { uint8_t w, h, bytesPerRow; const uint8_t* data; };
+// widths == nullptr → monospace (advance = w); else per-glyph advance table (proportional).
+struct BitmapFont { uint8_t w, h, bytesPerRow; const uint8_t* data; const uint8_t* widths; };
 static const int FIRST_CHAR = ${FIRST};
 static const int NUM_GLYPHS = ${N};
 `;
@@ -123,7 +122,13 @@ for (const f of fonts) {
   for (let i = 0; i < f.data.length; i += 24) {
     out += '  ' + f.data.slice(i, i + 24).map((b) => '0x' + b.toString(16).padStart(2, '0')).join(',') + ',\n';
   }
-  out += `};\nstatic const BitmapFont ${f.name} = {${f.W}, ${f.H}, ${f.bpr}, ${f.name}_DATA};\n`;
+  out += `};\n`;
+  let widthsRef = 'nullptr';
+  if (f.widths) {
+    widthsRef = `${f.name}_WIDTHS`;
+    out += `static const uint8_t ${widthsRef}[] = {${f.widths.join(',')}};\n`;
+  }
+  out += `static const BitmapFont ${f.name} = {${f.W}, ${f.H}, ${f.bpr}, ${f.name}_DATA, ${widthsRef}};\n`;
 }
 out += `}\n`;
 writeFileSync('native/text_fonts.h', out);

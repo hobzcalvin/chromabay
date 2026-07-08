@@ -32,11 +32,18 @@ public:
         if (height >= TextFonts::FONT_16x32.h) f = &TextFonts::FONT_16x32;
         else if (height >= TextFonts::FONT_8x16.h) f = &TextFonts::FONT_8x16;
         const int fw = f->w, fh = f->h, bpr = f->bytesPerRow;
-        const int advance = fw;                              // Spleen cell already includes side spacing
-        const int textW = (int)text.size() * advance;
         const int vOff = ((int)height - fh) / 2;             // vertical centre
 
-        // Horizontal start x of the text's left edge (screen coords).
+        // Per-glyph advance: proportional fonts carry a widths[] table; monospace fonts (Spleen)
+        // advance by the cell width. This is what makes spacing look right (r narrow, m wide).
+        auto advOf = [&](unsigned char ch) -> int {
+            int g = (int)ch - TextFonts::FIRST_CHAR;
+            if (g < 0 || g >= TextFonts::NUM_GLYPHS) return 0;
+            return f->widths ? (int)f->widths[g] : fw;
+        };
+        int textW = 0;
+        for (size_t i = 0; i < text.size(); i++) textW += advOf((unsigned char)text[i]);
+
         int startX;
         if (scroll) {
             const int span = textW + (int)width;             // travel one full text width + a screen
@@ -47,21 +54,27 @@ public:
             startX = (textW <= (int)width) ? ((int)width - textW) / 2 : 0; // centre, else left-align
         }
 
-        for (uint32_t y = 0; y < height; y++) {
-            int ty = (int)y - vOff;
-            if (ty < 0 || ty >= fh) continue;
-            for (uint32_t x = 0; x < width; x++) {
-                int tx = (int)x - startX;
-                if (tx < 0 || tx >= textW) continue;
-                int gi = tx / advance;                       // which character
-                int col = tx % advance;                      // column within the cell
-                if (col >= fw) continue;                     // (spacing gap, if advance > fw)
-                unsigned char ch = (unsigned char)text[gi];
-                if (ch < TextFonts::FIRST_CHAR || ch >= TextFonts::FIRST_CHAR + TextFonts::NUM_GLYPHS) continue;
-                int g = ch - TextFonts::FIRST_CHAR;
-                uint8_t byte = f->data[(size_t)(g * fh + ty) * bpr + (col >> 3)];
-                if (byte & (0x80 >> (col & 7))) outputBuffer[(size_t)y * width + x] = CHSV(hue, sat, 255);
+        // Blit each glyph at the running cursor, advancing by its own width. We write the whole
+        // fixed-width cell but only set lit pixels, so the blank right of a narrow glyph never
+        // clobbers the next one.
+        int cursor = startX;
+        for (size_t ci = 0; ci < text.size(); ci++) {
+            unsigned char ch = (unsigned char)text[ci];
+            int g = (int)ch - TextFonts::FIRST_CHAR;
+            const int a = advOf(ch);
+            if (g >= 0 && g < TextFonts::NUM_GLYPHS && cursor + fw > 0 && cursor < (int)width) {
+                for (int ty = 0; ty < fh; ty++) {
+                    int sy = vOff + ty;
+                    if (sy < 0 || sy >= (int)height) continue;
+                    for (int col = 0; col < fw; col++) {
+                        int sx = cursor + col;
+                        if (sx < 0 || sx >= (int)width) continue;
+                        uint8_t byte = f->data[(size_t)(g * fh + ty) * bpr + (col >> 3)];
+                        if (byte & (0x80 >> (col & 7))) outputBuffer[(size_t)sy * width + sx] = CHSV(hue, sat, 255);
+                    }
+                }
             }
+            cursor += a;
         }
     }
 
