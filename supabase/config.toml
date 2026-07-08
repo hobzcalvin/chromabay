@@ -1,0 +1,13 @@
+# Supabase config for the ChromaBay project (ref cwyypvhyrkaalagvjebp).
+# Migrations in supabase/migrations/ are applied by the GitHub integration:
+# pushing a branch spins up a preview DB; merging to main applies to production.
+project_id = "cwyypvhyrkaalagvjebp"
+
+[db]
+major_version = 15
+
+[auth]
+enable_signup = true
+# Anonymous sign-in lets the app work local-first and only upgrade to a real
+# account when the user wants cross-client ownership / gallery publishing.
+enable_anonymous_sign_ins = true
