@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.156",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.156.zip",
-  "buildDate": "2026-07-08T21:11:57Z",
-  "commitHash": "94aaff72ac7590624a4436fbef0710e82b462a18",
-  "commitMessage": "SETUP_GUIDE: concrete Google Workspace SMTP relay steps for Supabase email"
+  "version": "0.0.1.157",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.157.zip",
+  "buildDate": "2026-07-08T23:17:03Z",
+  "commitHash": "4b997e76ace321b4915bcf4aabe537470bfbc834",
+  "commitMessage": "SETUP_GUIDE: recommend Resend (API key, no App Password) over Google relay"
 }
