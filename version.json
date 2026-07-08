@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.138",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.138.zip",
-  "buildDate": "2026-07-08T05:33:38Z",
-  "commitHash": "e99c9142280bed781214286bbf1b5665f5cb1061",
-  "commitMessage": "Text: make the 32px font proportional (per-glyph advance widths)"
+  "version": "0.0.1.142",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.142.zip",
+  "buildDate": "2026-07-08T05:45:40Z",
+  "commitHash": "75695ab3a43aa74e2d5cfde692c3ab2fb5a2c40d",
+  "commitMessage": "CI: Node 22 for deploy (supabase auth-js needs >=22); add node Reset button"
 }
