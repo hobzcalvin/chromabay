@@ -25,7 +25,7 @@
           notice = 'That email is already registered. Try signing in, or reset your password below.';
           mode = 'in';
         } else if (needsConfirm) {
-          notice = 'Account created. Check your email for a confirmation link (from Supabase — noreply@mail.app.supabase.io, so check spam), then sign in.';
+          notice = 'Account created. Check your email for a confirmation link (from ChromaBay / grant@revoltlabs.co — check spam), then sign in.';
           showResend = true;
           mode = 'in';
         } else {
