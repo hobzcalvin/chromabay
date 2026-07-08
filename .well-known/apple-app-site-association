@@ -1,0 +1,13 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["68683H96V7.com.revoltlabs.chromabay"],
+        "components": [
+          { "/": "/account*", "comment": "auth confirm / redirect returns into the app" },
+          { "/": "/auth*" }
+        ]
+      }
+    ]
+  }
+}

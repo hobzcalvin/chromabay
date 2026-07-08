@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.146",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.146.zip",
-  "buildDate": "2026-07-08T05:59:54Z",
-  "commitHash": "6ba5cb784ce26fefb57021c365b8a068a1a6b22e",
-  "commitMessage": "Editor 🎛️ Interact button; auth email redirect + clearer sender copy"
+  "version": "0.0.1.147",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.147.zip",
+  "buildDate": "2026-07-08T06:02:39Z",
+  "commitHash": "c69f019392bf1ef9ff8e82f0f9dbd066a650fe1b",
+  "commitMessage": "Add universal-links AASA + SETUP_GUIDE (domain, auth email, deep-links, TestFlight)"
 }
