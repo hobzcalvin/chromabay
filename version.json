@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.144",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.144.zip",
-  "buildDate": "2026-07-08T05:49:23Z",
-  "commitHash": "c68d0f503049ede8ab5864081698787c5f0b9c86",
-  "commitMessage": "Patterns: scroll the current pattern into view on landing"
+  "version": "0.0.1.145",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.145.zip",
+  "buildDate": "2026-07-08T05:56:54Z",
+  "commitHash": "5076b0bd2332baa8112fdc5ba30405f4c7b309fd",
+  "commitMessage": "Knobs: make slide gestures directional (up/right=increase), not quadrant-based"
 }
