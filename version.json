@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.136",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.136.zip",
-  "buildDate": "2026-07-08T05:10:34Z",
-  "commitHash": "e9371d4e2bd06bce59c7a1bfa40a7afe63c19bd9",
-  "commitMessage": "Text: replace boxy 32px Spleen font with rasterized Helvetica curves"
+  "version": "0.0.1.137",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.137.zip",
+  "buildDate": "2026-07-08T05:24:23Z",
+  "commitHash": "b448cee2f2a2ace3a4b65e76827a65b58ae6f33a",
+  "commitMessage": "Add SVG Fill operator: browser-flattened polygons, on-device scanline fill"
 }
