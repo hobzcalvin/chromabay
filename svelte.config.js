@@ -21,8 +21,9 @@ const config = {
 			strict: true
 		}),
 		paths: {
-			// Only use /chromabay base path for GitHub Pages, not for iOS app or local dev
-			base: process.env.GITHUB_PAGES ? '/chromabay' : ''
+			// Served from the chromabay.app apex root (custom domain) — no base path anywhere.
+			// (Was '/chromabay' for the old github.io/<repo> project-pages URL before the domain.)
+			base: ''
 		}
 	}
 };

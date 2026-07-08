@@ -91,11 +91,13 @@ jobs:
           export VITE_SUPABASE_URL="https://cwyypvhyrkaalagvjebp.supabase.co"
           export VITE_SUPABASE_ANON_KEY="sb_publishable_c5CSmQ-d7sWcntjziCkMMw_ZFaIOwMW"
           export NODE_ENV=production
-          export GITHUB_PAGES=true
           # Temporarily modify svelte.config.js to build to docs folder
           sed -i "s/pages: 'build'/pages: 'docs'/" svelte.config.js
           sed -i "s/assets: 'build'/assets: 'docs'/" svelte.config.js
           npm run build
+          # Persist the custom domain on every deploy (keep_files also preserves GitHub's own
+          # CNAME, but write it explicitly so chromabay.app serving never regresses).
+          echo "chromabay.app" > docs/CNAME
 
       - name: Build mobile live update bundle (no base path)
         run: |
