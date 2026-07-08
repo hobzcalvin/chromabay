@@ -94,7 +94,7 @@
   });
 
   let firmwareRegistry: FirmwareRegistryEntry[] = $state([]);
-  let espFirmwareRegistryUrl = "https://hobzcalvin.github.io/chromabay/firmware/esp32/esp32_firmware_registry.json";
+  let espFirmwareRegistryUrl = "https://chromabay.app/firmware/esp32/esp32_firmware_registry.json";
 
   // Fetch firmware registry on app load
   async function initializeFirmwareRegistry() {
@@ -627,7 +627,7 @@
     settings.showUpdateConfirmation = false;
     settings.otaStatus = { statusMessage: 'Starting OTA update...', progress: 0 };
 
-    const baseUrl = 'https://hobzcalvin.github.io/chromabay';
+    const baseUrl = 'https://chromabay.app';
     const firmwareUrl = `${baseUrl}/${settings.latestFirmware.path}`;
     const signatureUrl = `${baseUrl}/${settings.latestFirmware.signaturePath}`;
 

@@ -67,7 +67,7 @@ if (browser && Capacitor.isNativePlatform() && !dev && !isLocalBuild) {
           console.log('📱 UPDATE: Current version:', currentVersion);
           
           // Fetch version manifest from GitHub Pages
-          const manifestUrl = `https://hobzcalvin.github.io/chromabay/version.json?t=${Date.now()}`;
+          const manifestUrl = `https://chromabay.app/version.json?t=${Date.now()}`;
           console.log('📱 UPDATE: Fetching manifest from:', manifestUrl);
           
           const response = await fetch(manifestUrl);
