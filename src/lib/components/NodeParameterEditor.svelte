@@ -168,6 +168,28 @@
     }
   }
 
+  // Reset all params to their operator defaults (+ clear any automation). Two-click "Really?"
+  // confirm, mirroring Delete, since it's destructive to the node's tuning.
+  let resetConfirmState = false;
+  let resetTimeout: ReturnType<typeof setTimeout> | undefined;
+  function handleResetNode() {
+    if (!resetConfirmState) {
+      resetConfirmState = true;
+      clearTimeout(resetTimeout);
+      resetTimeout = setTimeout(() => { resetConfirmState = false; }, 3000);
+    } else {
+      clearTimeout(resetTimeout);
+      resetConfirmState = false;
+      if (nodeDefinition) {
+        for (const p of nodeDefinition.params) {
+          setNodeParameter(node.id, p.name, p.default);
+          clearModulator(node.id, p.name);
+        }
+      }
+      svgText = '';
+    }
+  }
+
   function handleClose() {
     // Cleanup is now handled by the parent component
     onClose();
@@ -292,8 +314,15 @@
     <h3 id="popover-header-title">{node.data.label} Parameters</h3>
     <div class="header-buttons">
       {#if node.data.type !== 'output'}
-        <button 
-          class="delete-btn" 
+        <button
+          class="reset-btn"
+          class:reset-confirm={resetConfirmState}
+          onclick={handleResetNode}
+        >
+          {resetConfirmState ? 'Really?' : 'Reset'}
+        </button>
+        <button
+          class="delete-btn"
           class:delete-confirm={deleteConfirmState}
           onclick={handleDeleteNode}
         >
@@ -586,6 +615,33 @@
   .delete-btn.delete-confirm:hover {
     background: #d97706;
   }
+
+  .reset-btn {
+    background: #374151;
+    border: none;
+    color: #e5e7eb;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 4px 8px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    min-width: 50px;
+    transition: background-color 0.2s ease;
+  }
+
+  .reset-btn:hover { background: #4b5563; }
+
+  .reset-btn.reset-confirm {
+    background: #f59e0b;
+    color: white;
+    animation: pulse 0.5s ease-in-out;
+  }
+
+  .reset-btn.reset-confirm:hover { background: #d97706; }
 
   @keyframes pulse {
     0%, 100% { transform: scale(1); }
