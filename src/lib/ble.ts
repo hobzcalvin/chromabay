@@ -874,7 +874,9 @@ export async function setCycleOnDevice(deviceId: string, enabled: boolean, inter
  * by name (meta.name) and shows it. ("Here's your pattern now.")
  */
 export async function sendSinglePatternToDevice(deviceId: string, pattern: any): Promise<void> {
-  const msgpackData = msgpackEncode(pattern) as Uint8Array;
+  // Strip app/cloud-sync metadata (id/updatedAt/deleted) — the device wire is name+output only.
+  const clean = { ...pattern, meta: { name: pattern?.meta?.name, output: pattern?.meta?.output ?? 1 } };
+  const msgpackData = msgpackEncode(clean) as Uint8Array;
   const dataView = new DataView(msgpackData.buffer, msgpackData.byteOffset, msgpackData.byteLength);
   await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_PATTERN_SYNC, dataView);
 }

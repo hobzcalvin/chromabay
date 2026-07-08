@@ -59,6 +59,10 @@ export interface SerializedPattern {
     name?: string;
     /** The buffer index that the ESP32 should treat as the final output for display */
     output: number;
+    /** Stable pattern identity for cloud sync (minted client-side; never sent to the device). */
+    id?: string;
+    /** Last-writer-wins clock for cloud sync (epoch ms). Not sent to the device. */
+    updatedAt?: number;
   };
 }
 

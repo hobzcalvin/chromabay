@@ -7,6 +7,7 @@
   import { loadPatterns, currentPattern } from '$lib/stores/patternsStore';
   import { loadSerializedPattern, initializeDefaultPattern } from '$lib/flowStore';
   import { SvelteFlowProvider } from '@xyflow/svelte';
+  import '$lib/patternSync'; // activates cloud library sync (inert unless signed in)
 
   $: connected = $connectedDevices.size;
 
