@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.150",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.150.zip",
-  "buildDate": "2026-07-08T17:49:57Z",
-  "commitHash": "f48cf381073802135a8a9c1a5a1f4957b902a07e",
-  "commitMessage": "Point app fetches at chromabay.app (not old github.io/chromabay path)"
+  "version": "0.0.1.151",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.151.zip",
+  "buildDate": "2026-07-08T18:02:43Z",
+  "commitHash": "51450fb6f04da7cca5c2982b16a2ef4bb435a78a",
+  "commitMessage": "auth: use https chromabay.app redirect for native signups (not capacitor://)"
 }
