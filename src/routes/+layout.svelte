@@ -79,6 +79,10 @@
         <span class="emoji">✏️</span>
         <span class="label">Editor</span>
       </a>
+      <a href="{base}/account" class:active={$page.url.pathname.startsWith(`${base}/account`)}>
+        <span class="emoji">👤</span>
+        <span class="label">Account</span>
+      </a>
     </nav>
   </div>
 </SvelteFlowProvider>

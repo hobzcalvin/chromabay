@@ -87,6 +87,9 @@ jobs:
           export VITE_BUILD_DATE="${{ steps.version.outputs.BUILD_DATE }}"
           export VITE_COMMIT_HASH="${{ steps.version.outputs.COMMIT_HASH }}"
           export VITE_COMMIT_MESSAGE="${{ steps.version.outputs.COMMIT_MESSAGE }}"
+          # Supabase (public anon/publishable key — RLS protects data; safe to embed in the client bundle)
+          export VITE_SUPABASE_URL="https://cwyypvhyrkaalagvjebp.supabase.co"
+          export VITE_SUPABASE_ANON_KEY="sb_publishable_c5CSmQ-d7sWcntjziCkMMw_ZFaIOwMW"
           export NODE_ENV=production
           export GITHUB_PAGES=true
           # Temporarily modify svelte.config.js to build to docs folder
@@ -100,6 +103,9 @@ jobs:
           export VITE_BUILD_DATE="${{ steps.version.outputs.BUILD_DATE }}"
           export VITE_COMMIT_HASH="${{ steps.version.outputs.COMMIT_HASH }}"
           export VITE_COMMIT_MESSAGE="${{ steps.version.outputs.COMMIT_MESSAGE }}"
+          # Supabase (public anon/publishable key — RLS protects data; safe to embed in the client bundle)
+          export VITE_SUPABASE_URL="https://cwyypvhyrkaalagvjebp.supabase.co"
+          export VITE_SUPABASE_ANON_KEY="sb_publishable_c5CSmQ-d7sWcntjziCkMMw_ZFaIOwMW"
           export NODE_ENV=production
           # Ensure GITHUB_PAGES is not set for mobile build
           unset GITHUB_PAGES
