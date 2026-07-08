@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.149",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.149.zip",
-  "buildDate": "2026-07-08T17:45:09Z",
-  "commitHash": "dc1298e696367c0bb6b25edb59b70d318615e80d",
-  "commitMessage": "Custom domain cutover: serve at chromabay.app root (base=''), persist CNAME"
+  "version": "0.0.1.150",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.150.zip",
+  "buildDate": "2026-07-08T17:49:57Z",
+  "commitHash": "f48cf381073802135a8a9c1a5a1f4957b902a07e",
+  "commitMessage": "Point app fetches at chromabay.app (not old github.io/chromabay path)"
 }
