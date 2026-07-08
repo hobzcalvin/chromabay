@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.154",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.154.zip",
-  "buildDate": "2026-07-08T18:57:51Z",
-  "commitHash": "a49c2b31f708746767e71b23c5638fe68e85775d",
-  "commitMessage": "Pattern library cloud sync: cross-client push/pull with LWW + tombstones"
+  "version": "0.0.1.155",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.155.zip",
+  "buildDate": "2026-07-08T20:32:01Z",
+  "commitHash": "0a5d35d00f550f9a7b4bbf661ac625c21e2fb0b8",
+  "commitMessage": "Pattern sync: realtime — pull changes from other open sessions instantly"
 }
