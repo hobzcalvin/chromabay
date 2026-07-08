@@ -80,13 +80,35 @@ By default the email is from `noreply@mail.app.supabase.io` (rate-limited ~3–4
 - **Wording/branding**: Dashboard → **Authentication → Email Templates → Confirm signup**.
   Edit subject/body HTML (add the ChromaBay name/logo). Keep the `{{ .ConfirmationURL }}`
   token.
-- **Send from `@chromabay.app`** (removes Supabase branding + lifts rate limits): Dashboard
-  → **Authentication → SMTP Settings** → enable custom SMTP. Use a transactional provider
-  (Resend, Postmark, SendGrid, Amazon SES). You'll add their DNS records (SPF/DKIM) to
-  Namecheap and set sender `no-reply@chromabay.app`. Resend has the simplest free tier.
+- **Custom SMTP via Google Workspace SMTP relay** (chosen — uses the existing Workspace on
+  `revoltlabs.co`, whose SPF/DKIM are already set, so no extra DNS; moves email off Supabase's
+  shared pool → fixes the bounce warning + the ~4/hr rate limit). Steps:
 
-Optional for dev friction: **Authentication → Providers → Email** → toggle **Confirm email
-OFF** so signups work instantly without the email round-trip. (Turn back on for production.)
+  **A. Google Admin (admin.google.com):** Apps → Google Workspace → Gmail → **Routing** →
+  **SMTP relay service** → Add:
+    - Allowed senders: **Only addresses in my domains**
+    - **Require SMTP Authentication** ✔ and **Require TLS encryption** ✔
+      (don't use IP allowlisting — Supabase's sending IPs aren't fixed)
+    - Save (can take minutes–hours to apply).
+    - Add `noreply@revoltlabs.co` as an alias on an existing user (Directory → Users → user →
+      Alternate emails) so the From address is a valid in-domain address.
+
+  **B. App Password** (for the relay to authenticate): pick a Workspace user (yourself or a
+  dedicated `relay@revoltlabs.co`), turn on **2-Step Verification**, then Google Account →
+  Security → **App passwords** → create one ("Mail" / "Supabase") → copy the 16 chars.
+
+  **C. Supabase → Authentication → SMTP Settings → enable custom SMTP:**
+    - Host `smtp-relay.gmail.com`, Port `587`
+    - Username: the authenticating Workspace email (e.g. `relay@revoltlabs.co`)
+    - Password: the App Password
+    - Sender email `noreply@revoltlabs.co`, Sender name `ChromaBay`
+    - Save, send a test (or trigger a password reset to yourself).
+
+  Later, to send from `@chromabay.app` instead, add it as a Workspace domain alias and set up
+  its SPF/DKIM; until then `revoltlabs.co` sends immediately.
+
+Immediate stopgap (before SMTP is live): **Authentication → Providers → Email** → toggle
+**Confirm email OFF** so no emails send at all (zero bounces). Turn back on after SMTP works.
 
 ---
 
