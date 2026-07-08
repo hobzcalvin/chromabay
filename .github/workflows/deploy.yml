@@ -98,6 +98,10 @@ jobs:
           # Persist the custom domain on every deploy (keep_files also preserves GitHub's own
           # CNAME, but write it explicitly so chromabay.app serving never regresses).
           echo "chromabay.app" > docs/CNAME
+          # SPA fallback: serve the app shell for ANY unknown path so client-side routes
+          # (/patterns, /devices, …) render on GitHub Pages. Replaces the old spa-github-pages
+          # redirect 404.html, which looped/exploded at the apex root (no /chromabay segment).
+          cp docs/index.html docs/404.html
 
       - name: Build mobile live update bundle (no base path)
         run: |
