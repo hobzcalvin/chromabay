@@ -58,6 +58,20 @@
   onMount(async () => {
     await loadPatterns();
   });
+
+  // Bring the current pattern into view when landing on this page (it may be far down a
+  // long list). Fires once, when the item mounts as current or first becomes current.
+  function scrollToCurrent(node: HTMLElement, isCurrent: boolean) {
+    let done = false;
+    const maybe = (v: boolean) => {
+      if (v && !done) {
+        done = true;
+        requestAnimationFrame(() => node.scrollIntoView({ block: 'center', behavior: 'auto' }));
+      }
+    };
+    maybe(isCurrent);
+    return { update: maybe };
+  }
   
   // Make a pattern the current one: load it into the flow store (used by Interact and
   // the Editor) and push it to all connected devices. No navigation.
@@ -237,10 +251,11 @@
         {@const isCurrentPattern = patternName === currentName}
         {@const swipeState = swipeStates[patternName]}
         
-        <div 
-          class="pattern-item" 
+        <div
+          class="pattern-item"
           class:current={isCurrentPattern}
           class:swiped={swipeState?.isSwipeRevealed}
+          use:scrollToCurrent={isCurrentPattern}
           onclick={(e) => handlePatternItemClick(pattern, e)}
           ontouchstart={(e) => handleTouchStart(e, patternName)}
           ontouchmove={(e) => handleTouchMove(e, patternName)}
