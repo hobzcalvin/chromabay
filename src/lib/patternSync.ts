@@ -75,14 +75,34 @@ function scheduleSync(delay = 1500): void {
   debounceTimer = setTimeout(() => { void syncNow(); }, delay);
 }
 
+// --- Realtime: react to changes made on the user's OTHER open sessions ---------------------
+let channel: ReturnType<NonNullable<typeof supabase>['channel']> | null = null;
+async function subscribeRealtime(uid: string): Promise<void> {
+  if (!supabase || channel) return;
+  // Ensure Realtime uses the user's JWT so RLS scopes postgres_changes to their rows.
+  const token = (await supabase.auth.getSession()).data.session?.access_token;
+  if (token) supabase.realtime.setAuth(token);
+  channel = supabase
+    .channel(`library:${uid}`)
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'library_patterns', filter: `user_id=eq.${uid}` },
+      () => scheduleSync(400), // a remote change → reconcile soon (self-echoes are LWW no-ops)
+    )
+    .subscribe();
+}
+function unsubscribeRealtime(): void {
+  if (supabase && channel) { supabase.removeChannel(channel); channel = null; }
+}
+
 if (browser) {
   // Push (debounced) whenever the local library changes via a user edit/delete.
   setLibraryChangeHook(() => scheduleSync());
-  // Full reconcile when a user signs in (fires once per new session id).
+  // On sign-in: full reconcile + subscribe to realtime. On sign-out: drop the subscription.
   let lastUid: string | null = null;
   authUser.subscribe((u) => {
     const uid = u?.id ?? null;
-    if (uid && uid !== lastUid) { lastUid = uid; void syncNow(); }
-    if (!uid) lastUid = null;
+    if (uid && uid !== lastUid) { lastUid = uid; void syncNow(); void subscribeRealtime(uid); }
+    if (!uid && lastUid) { lastUid = null; unsubscribeRealtime(); }
   });
 }
