@@ -80,9 +80,18 @@ By default the email is from `noreply@mail.app.supabase.io` (rate-limited ~3–4
 - **Wording/branding**: Dashboard → **Authentication → Email Templates → Confirm signup**.
   Edit subject/body HTML (add the ChromaBay name/logo). Keep the `{{ .ConfirmationURL }}`
   token.
-- **Custom SMTP via Google Workspace SMTP relay** (chosen — uses the existing Workspace on
-  `revoltlabs.co`, whose SPF/DKIM are already set, so no extra DNS; moves email off Supabase's
-  shared pool → fixes the bounce warning + the ~4/hr rate limit). Steps:
+- **RECOMMENDED — Resend (API key, no App Password).** Modern transactional provider; no
+  user login / 2-Step / App Password — just an API key + domain DNS. Free 3,000/mo.
+  1. Supabase → **Integrations → Resend → Connect** (auto-creates the API key + fills SMTP).
+     Manual equivalent: SMTP host `smtp.resend.com`, port `465`, user `resend`, password =
+     Resend API key.
+  2. Resend → **Domains → Add `chromabay.app`** → paste the DKIM/SPF/DMARC records it shows
+     into Namecheap Advanced DNS (all on `send.`/`_dmarc.`/DKIM hosts — they don't touch the
+     apex `A` records or `www` CNAME) → **Verify**.
+  3. Sender `noreply@chromabay.app`, name `ChromaBay`. Gets you real @chromabay.app branding.
+
+- **ALTERNATIVE — Google Workspace SMTP relay** (uses the existing Workspace on
+  `revoltlabs.co`, SPF/DKIM already set; but requires the legacy App Password dance). Steps:
 
   **A. Google Admin (admin.google.com):** Apps → Google Workspace → Gmail → **Routing** →
   **SMTP relay service** → Add:
