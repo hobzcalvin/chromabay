@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.151",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.151.zip",
-  "buildDate": "2026-07-08T18:02:43Z",
-  "commitHash": "51450fb6f04da7cca5c2982b16a2ef4bb435a78a",
-  "commitMessage": "auth: use https chromabay.app redirect for native signups (not capacitor://)"
+  "version": "0.0.1.152",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.152.zip",
+  "buildDate": "2026-07-08T18:36:16Z",
+  "commitHash": "b24b39d200113df9606c674776aae586dfb7186d",
+  "commitMessage": "Account: fix 'already registered' messaging + add password reset flow"
 }
