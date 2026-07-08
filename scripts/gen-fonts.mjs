@@ -1,13 +1,26 @@
-// Generate native/text_fonts.h from Spleen BDF fonts (BSD-2-Clause, Frédéric Cambus).
-// Extracts printable ASCII 32..126 (95 glyphs) for a few monospace sizes into flat,
-// row-major, MSB-first bitmap arrays the TextOperator can index. Run:
-//   for s in 5x8 8x16 16x32; do curl -so /tmp/spleen-$s.bdf \
-//     https://raw.githubusercontent.com/fcambus/spleen/master/spleen-$s.bdf; done
-//   node scripts/gen-fonts.mjs
-import { readFileSync, writeFileSync } from 'node:fs';
+// Generate native/text_fonts.h.
+//   - FONT_5x8 / FONT_8x16: Spleen BDF (BSD-2-Clause, Frédéric Cambus) — crisp pixel fonts,
+//     ideal at tiny sizes where anti-aliasing would just muddy things.
+//   - FONT_16x32: rasterized from a real curved sans-serif (Helvetica/Arial) via headless
+//     Chrome, thresholded to 1-bit. Spleen's 16x32 was boxy/hard to read at size; a true
+//     typeface with curves reads far better on a 40px-tall display.
+// Run:  node scripts/gen-fonts.mjs   (auto-downloads the Spleen BDFs to /tmp if missing)
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { chromium } from 'playwright';
 
 const FIRST = 32, LAST = 126, N = LAST - FIRST + 1;
 
+async function ensureBdf(size) {
+  const path = `/tmp/spleen-${size}.bdf`;
+  if (existsSync(path)) return path;
+  const url = `https://raw.githubusercontent.com/fcambus/spleen/master/spleen-${size}.bdf`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`fetch ${url}: ${res.status}`);
+  writeFileSync(path, Buffer.from(await res.arrayBuffer()));
+  return path;
+}
+
+// --- Spleen BDF → flat row-major MSB-first bitmap (unchanged from the original) ---
 function parseBdf(path, name) {
   const lines = readFileSync(path, 'utf8').split('\n');
   let W = 0, H = 0;
@@ -23,7 +36,6 @@ function parseBdf(path, name) {
       inBitmap = false; enc = -1;
     } else if (inBitmap) { rows.push(l.trim()); }
   }
-  // Flatten to (N * H * bpr) bytes, in char order, zero-filled for any missing glyph/row.
   const data = [];
   for (let c = FIRST; c <= LAST; c++) {
     const rowsHex = glyphs.get(c) || [];
@@ -35,21 +47,71 @@ function parseBdf(path, name) {
       }
     }
   }
-  const missing = []; for (let c = FIRST; c <= LAST; c++) if (!glyphs.has(c)) missing.push(c);
-  if (missing.length) console.warn(`${name}: missing glyphs ${missing.join(',')}`);
   console.log(`${name}: ${W}x${H} bpr=${bpr} glyphs=${glyphs.size}/${N} bytes=${data.length}`);
   return { name, W, H, bpr, data };
 }
 
+// --- Rasterize a curved typeface to a fixed W×H 1-bit cell via headless Chrome ---
+async function rasterizeFont(name, W, H, fontStack, fontSize) {
+  const browser = await chromium.launch({ channel: 'chrome', headless: true });
+  const page = await browser.newPage();
+  const data = await page.evaluate(({ FIRST, LAST, W, H, fontStack, fontSize }) => {
+    const cvs = document.createElement('canvas');
+    cvs.width = W; cvs.height = H;
+    const ctx = cvs.getContext('2d', { willReadFrequently: true });
+    const maxInk = W - 1;          // leave a 1px right gutter between monospace cells
+    const baseY = H - 6;           // baseline: room for descenders below
+    const out = [];
+    for (let c = FIRST; c <= LAST; c++) {
+      ctx.clearRect(0, 0, W, H);
+      const ch = String.fromCharCode(c);
+      ctx.font = `${fontSize}px ${fontStack}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'alphabetic';
+      const m = ctx.measureText(ch);
+      const inkW = (m.actualBoundingBoxLeft || 0) + (m.actualBoundingBoxRight || 0);
+      const sx = inkW > maxInk ? maxInk / inkW : 1;   // condense only glyphs too wide to fit
+      ctx.save();
+      ctx.translate(W / 2, baseY);
+      ctx.scale(sx, 1);
+      ctx.fillStyle = '#fff';
+      ctx.fillText(ch, 0, 0);
+      ctx.restore();
+      const px = ctx.getImageData(0, 0, W, H).data;
+      const bpr = Math.ceil(W / 8);
+      for (let y = 0; y < H; y++) {
+        for (let b = 0; b < bpr; b++) {
+          let byte = 0;
+          for (let bit = 0; bit < 8; bit++) {
+            const x = b * 8 + bit;
+            if (x < W) {
+              const a = px[(y * W + x) * 4 + 3];      // alpha
+              if (a >= 110) byte |= 0x80 >> bit;       // 1-bit threshold
+            }
+          }
+          out.push(byte);
+        }
+      }
+    }
+    return out;
+  }, { FIRST, LAST, W, H, fontStack, fontSize });
+  await browser.close();
+  const bpr = Math.ceil(W / 8);
+  console.log(`${name}: ${W}x${H} bpr=${bpr} (rasterized ${fontStack} @${fontSize}px) bytes=${data.length}`);
+  return { name, W, H, bpr, data };
+}
+
 const fonts = [
-  parseBdf('/tmp/spleen-5x8.bdf', 'FONT_5x8'),
-  parseBdf('/tmp/spleen-8x16.bdf', 'FONT_8x16'),
-  parseBdf('/tmp/spleen-16x32.bdf', 'FONT_16x32'),
+  parseBdf(await ensureBdf('5x8'), 'FONT_5x8'),
+  parseBdf(await ensureBdf('8x16'), 'FONT_8x16'),
+  await rasterizeFont('FONT_16x32', 16, 32, "'Helvetica Neue', Helvetica, Arial, sans-serif", 30),
 ];
 
 let out = `#pragma once
-// GENERATED by scripts/gen-fonts.mjs from Spleen (BSD-2-Clause, (c) Frédéric Cambus). Do not edit.
-// Printable ASCII ${FIRST}..${LAST} (${N} glyphs), row-major, MSB-first (pixel x -> bit 0x80>>(x&7)).
+// GENERATED by scripts/gen-fonts.mjs. Do not edit.
+// FONT_5x8 / FONT_8x16: Spleen (BSD-2-Clause, (c) Frederic Cambus). FONT_16x32: Helvetica/Arial
+// rasterized to 1-bit via Chrome. Printable ASCII ${FIRST}..${LAST} (${N} glyphs), row-major,
+// MSB-first (pixel x -> bit 0x80>>(x&7)).
 #include <cstdint>
 namespace TextFonts {
 struct BitmapFont { uint8_t w, h, bytesPerRow; const uint8_t* data; };
