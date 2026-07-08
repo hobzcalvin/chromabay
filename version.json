@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.153",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.153.zip",
-  "buildDate": "2026-07-08T18:38:09Z",
-  "commitHash": "f4b81268ea446a88a4d7672d57fc073909b3c690",
-  "commitMessage": "Fix SPA routing on GitHub Pages: 404.html = app shell, drop redirect hack"
+  "version": "0.0.1.154",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.154.zip",
+  "buildDate": "2026-07-08T18:57:51Z",
+  "commitHash": "a49c2b31f708746767e71b23c5638fe68e85775d",
+  "commitMessage": "Pattern library cloud sync: cross-client push/pull with LWW + tombstones"
 }
