@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.147",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.147.zip",
-  "buildDate": "2026-07-08T06:02:39Z",
-  "commitHash": "c69f019392bf1ef9ff8e82f0f9dbd066a650fe1b",
-  "commitMessage": "Add universal-links AASA + SETUP_GUIDE (domain, auth email, deep-links, TestFlight)"
+  "version": "0.0.1.148",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.148.zip",
+  "buildDate": "2026-07-08T17:35:01Z",
+  "commitHash": "8758a4939759854faf146d34b92bdd9b33c813f7",
+  "commitMessage": "SETUP_GUIDE: clarify apex-canonical + www→apex redirect (Namecheap/Pages)"
 }
