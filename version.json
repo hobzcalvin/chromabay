@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.145",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.145.zip",
-  "buildDate": "2026-07-08T05:56:54Z",
-  "commitHash": "5076b0bd2332baa8112fdc5ba30405f4c7b309fd",
-  "commitMessage": "Knobs: make slide gestures directional (up/right=increase), not quadrant-based"
+  "version": "0.0.1.146",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.146.zip",
+  "buildDate": "2026-07-08T05:59:54Z",
+  "commitHash": "6ba5cb784ce26fefb57021c365b8a068a1a6b22e",
+  "commitMessage": "Editor 🎛️ Interact button; auth email redirect + clearer sender copy"
 }
