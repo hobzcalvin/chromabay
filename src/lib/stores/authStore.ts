@@ -13,7 +13,12 @@ import type { User } from '@supabase/supabase-js';
 // universal link — see SETUP_GUIDE.md.
 function redirectTo(): string | undefined {
   if (!browser) return undefined;
-  return `${window.location.origin}${base}/account`;
+  const origin = window.location.origin;
+  // Web (localhost dev or chromabay.app) → return to the same origin. Native app runs on
+  // capacitor://localhost, which is a dead link in an email client — use the real https URL
+  // instead (opens in Safari now; opens the app directly once Associated Domains is set up).
+  if (origin.startsWith('http')) return `${origin}${base}/account`;
+  return 'https://chromabay.app/account';
 }
 
 export const authUser = writable<User | null>(null);
