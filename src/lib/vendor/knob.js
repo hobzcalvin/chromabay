@@ -1053,14 +1053,21 @@ let Knob;
         angle -= self.__initialAngleDiff;
       }
       else {
+        // FIX (chromabay): upstream slides use a tangential "wheel" model — the direction
+        // flips based on which quadrant you grabbed (initialTouchLocationX/Y). On a touch
+        // slider that reads as inverted/random (a vertical drag increases or decreases
+        // depending on whether you touched left vs right of center). Make slides plainly
+        // directional instead: drag right or up = increase, left or down = decrease,
+        // regardless of grab point. (value = map(angle, angleStart..End, valueMax..Min), so
+        // value rises as angle falls — hence `-=`/`+=` below.)
         if (self.__slideXDetected) {
           const change = (currentTouchLeft - self.__lastTouchLeft) * self.options.angleSlideRatio;
-          angle += (self.__initialTouchLocationY === "top") ? -change : change;
+          angle -= change; // right = increase
         }
 
         if (self.__slideYDetected) {
           const change = (currentTouchTop - self.__lastTouchTop) * self.options.angleSlideRatio;
-          angle += (self.__initialTouchLocationX === "right") ? -change : change;
+          angle += change; // up (top decreases) = increase
         }
       }
 
@@ -1090,5 +1097,7 @@ let Knob;
 //   - __angleFromValue: made the true inverse of __valueFromAngles (was mirrored,
 //     causing a value jump on grab).
 //   - val()/angle(): use `!= null` instead of truthiness so a value/angle of 0 sets.
+//   - __getAngleFromGesture slides: made directional (up/right=increase) instead of the
+//     upstream quadrant-dependent "wheel" model, which felt inverted on a touch slider.
 // Plus this ES export so the Svelte RotaryKnob can import the otherwise-global `Knob`.
 export { Knob };
