@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.134",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.134.zip",
-  "buildDate": "2026-07-07T22:01:47Z",
-  "commitHash": "c09da062c3563d8b4c33ed8f959192af7355bd04",
-  "commitMessage": "Clamp popover to the flow-canvas clip region, not just the window"
+  "version": "0.0.1.135",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.135.zip",
+  "buildDate": "2026-07-08T05:03:31Z",
+  "commitHash": "0d47cfe9b5f6d0f17f3b683ebc29302555da62b5",
+  "commitMessage": "Add unified Pattern Lifecycle plan (identity, ownership, sharing, gallery)"
 }
