@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.157",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.157.zip",
-  "buildDate": "2026-07-08T23:17:03Z",
-  "commitHash": "4b997e76ace321b4915bcf4aabe537470bfbc834",
-  "commitMessage": "SETUP_GUIDE: recommend Resend (API key, no App Password) over Google relay"
+  "version": "0.0.1.158",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.158.zip",
+  "buildDate": "2026-07-08T23:29:12Z",
+  "commitHash": "6f08a0f0ace22fca3ba17555faca7e33cf8b2a17",
+  "commitMessage": "Account: name the real email sender (grant@revoltlabs.co) in the confirm notice"
 }
