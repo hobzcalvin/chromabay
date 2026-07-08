@@ -4,20 +4,6 @@
 		<meta charset="utf-8" />
 		<link rel="icon" href="/favicon.png" />
 		<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-		<script>
-			// GitHub Pages SPA routing handler
-			(function(l) {
-				if (l.search[1] === '/' ) {
-					var decoded = l.search.slice(1).split('&').map(function(s) { 
-						return s.replace(/~and~/g, '&')
-					}).join('?');
-					window.history.replaceState(null, null,
-						l.pathname.slice(0, -1) + decoded + l.hash
-					);
-				}
-			}(window.location))
-		</script>
-		
 		<!-- FastLED WASM Operator System -->
 		<script>
 			// Global WASM module initialization
@@ -101,14 +87,14 @@
 		</script>
 		
 		
-		<link rel="modulepreload" href="/_app/immutable/entry/start.etlVqO1N.js">
-		<link rel="modulepreload" href="/_app/immutable/chunks/CGPX7MdV.js">
+		<link rel="modulepreload" href="/_app/immutable/entry/start.BIyABnzL.js">
+		<link rel="modulepreload" href="/_app/immutable/chunks/jjfUO1tY.js">
 		<link rel="modulepreload" href="/_app/immutable/chunks/D1tFLEMY.js">
-		<link rel="modulepreload" href="/_app/immutable/chunks/D2NTcaOj.js">
+		<link rel="modulepreload" href="/_app/immutable/chunks/DOGz9Jog.js">
 		<link rel="modulepreload" href="/_app/immutable/chunks/BuLfQwnM.js">
-		<link rel="modulepreload" href="/_app/immutable/entry/app.DzJTLNV8.js">
+		<link rel="modulepreload" href="/_app/immutable/entry/app.TNwV2jfn.js">
 		<link rel="modulepreload" href="/_app/immutable/chunks/Cr0W8eoB.js">
-		<link rel="modulepreload" href="/_app/immutable/chunks/Kogee4_o.js">
+		<link rel="modulepreload" href="/_app/immutable/chunks/C74MXSXk.js">
 		<link rel="modulepreload" href="/_app/immutable/chunks/BvQvhKuT.js">
 		<link rel="modulepreload" href="/_app/immutable/chunks/jliWcXMS.js">
 		<link rel="modulepreload" href="/_app/immutable/chunks/CAaS2ZYr.js">
@@ -121,15 +107,15 @@
 		<div style="display: contents">
 			<script>
 				{
-					__sveltekit_r56fen = {
+					__sveltekit_1171vgc = {
 						base: ""
 					};
 
 					const element = document.currentScript.parentElement;
 
 					Promise.all([
-						import("/_app/immutable/entry/start.etlVqO1N.js"),
-						import("/_app/immutable/entry/app.DzJTLNV8.js")
+						import("/_app/immutable/entry/start.BIyABnzL.js"),
+						import("/_app/immutable/entry/app.TNwV2jfn.js")
 					]).then(([kit, app]) => {
 						kit.start(app, element);
 					});

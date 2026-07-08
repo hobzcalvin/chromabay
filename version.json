@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.152",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.152.zip",
-  "buildDate": "2026-07-08T18:36:16Z",
-  "commitHash": "b24b39d200113df9606c674776aae586dfb7186d",
-  "commitMessage": "Account: fix 'already registered' messaging + add password reset flow"
+  "version": "0.0.1.153",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.153.zip",
+  "buildDate": "2026-07-08T18:38:09Z",
+  "commitHash": "f4b81268ea446a88a4d7672d57fc073909b3c690",
+  "commitMessage": "Fix SPA routing on GitHub Pages: 404.html = app shell, drop redirect hack"
 }
