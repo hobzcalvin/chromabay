@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.142",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.142.zip",
-  "buildDate": "2026-07-08T05:45:40Z",
-  "commitHash": "75695ab3a43aa74e2d5cfde692c3ab2fb5a2c40d",
-  "commitMessage": "CI: Node 22 for deploy (supabase auth-js needs >=22); add node Reset button"
+  "version": "0.0.1.143",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.143.zip",
+  "buildDate": "2026-07-08T05:47:59Z",
+  "commitHash": "a256fa51e35a27e60a0e16fa0fc3fefd1535e2eb",
+  "commitMessage": "SVG paste: extract the first d= from arbitrary pasted markup"
 }
