@@ -3,6 +3,7 @@
   import { getNodeDefinition, setNodeParameter, getNodeParameter, deleteNode, nodeParameters, type Parameter } from '../flowStore';
   import { getParameterInteractive, setParameterInteractive, MAX_INTERACTIVE_PARAMS, interactiveParameters } from '../stores/interactiveStore';
   import { modulators, getModulator, setModulator, clearModulator, SHAPES, type ModulatorConfig } from '../stores/modulatorStore';
+  import { flattenSvgPath, PRESETS } from '../svgFlatten';
   import type { Node } from '@xyflow/svelte';
 
   export let node: Node;
@@ -102,6 +103,18 @@
 
   function updateParameter(param: Parameter, value: any) {
     setNodeParameter(node.id, param.name, value);
+  }
+
+  // SVG Fill: the `path` param stores a flattened polygon blob, not the raw SVG. The user
+  // pastes a `d` string or picks a preset; we flatten in-browser and store the blob.
+  let svgText = '';
+  function applySvgPath(param: Parameter, d: string) {
+    try { const enc = flattenSvgPath(d); if (enc.length > 2) updateParameter(param, enc); } catch { /* ignore bad paths */ }
+  }
+  function applySvgPreset(param: Parameter, name: string) {
+    if (!name || !(name in PRESETS)) return;
+    svgText = PRESETS[name];
+    applySvgPath(param, PRESETS[name]);
   }
 
   function handleColorChange(param: Parameter, event: Event) {
@@ -449,14 +462,30 @@
               </select>
             </div>
           {:else if param.type === 'string'}
-            <input
-              id={inputId}
-              class="text-input"
-              type="text"
-              maxlength="255"
-              value={String(getParameterValue(param) ?? '')}
-              oninput={(e) => updateParameter(param, (e.target as HTMLInputElement).value)}
-            />
+            {#if node.data.type === 'svgfill' && param.name === 'path'}
+              <div class="svg-input">
+                <select class="svg-preset" onchange={(e) => applySvgPreset(param, (e.currentTarget as HTMLSelectElement).value)}>
+                  <option value="">Preset…</option>
+                  {#each Object.keys(PRESETS) as name}<option value={name}>{name}</option>{/each}
+                </select>
+                <textarea
+                  class="svg-d"
+                  rows="3"
+                  placeholder="Paste an SVG path (the d=&quot;…&quot; value)"
+                  bind:value={svgText}
+                  oninput={() => applySvgPath(param, svgText)}
+                ></textarea>
+              </div>
+            {:else}
+              <input
+                id={inputId}
+                class="text-input"
+                type="text"
+                maxlength="4096"
+                value={String(getParameterValue(param) ?? '')}
+                oninput={(e) => updateParameter(param, (e.target as HTMLInputElement).value)}
+              />
+            {/if}
           {/if}
         </div>
       {/each}
@@ -791,4 +820,7 @@
   .mod-field { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 0.8rem; color: #d1d5db; }
   .mod-field input { width: 90px; background: #111827; border: 1px solid #374151; border-radius: 4px; color: #e5e7eb; padding: 4px 6px; }
   .stop-btn { margin-top: 4px; background: #3f1d1d; border: 1px solid #7f1d1d; color: #fca5a5; border-radius: 6px; padding: 6px; cursor: pointer; font-size: 0.8rem; }
+  .svg-input { display: flex; flex-direction: column; gap: 6px; }
+  .svg-preset { background: #111827; border: 1px solid #374151; border-radius: 4px; color: #e5e7eb; padding: 4px 6px; font-size: 0.8rem; }
+  .svg-d { background: #111827; border: 1px solid #374151; border-radius: 4px; color: #e5e7eb; padding: 6px; font-size: 0.75rem; font-family: monospace; resize: vertical; }
 </style> 

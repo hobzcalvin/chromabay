@@ -46,6 +46,7 @@
 #include "GlitchOperator.h"
 #include "SymbolOperator.h"
 #include "TextOperator.h"
+#include "SvgFillOperator.h"
 
 // Add your new operators here:
 // #include "RainbowOperator.h"

@@ -130,7 +130,9 @@ extern "C" {
                         if (c == '\n') { esc += "\\n"; continue; }
                         esc += c;
                     }
-                    buffer += ",\"default\":\"" + esc + "\",\"maxLen\":255";
+                    // 4096 accommodates flattened SVG-fill polygon blobs (SvgFillOperator),
+                    // not just short Text strings.
+                    buffer += ",\"default\":\"" + esc + "\",\"maxLen\":4096";
                 }
                 
                 buffer += "}";
