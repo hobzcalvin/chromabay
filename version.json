@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.155",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.155.zip",
-  "buildDate": "2026-07-08T20:32:01Z",
-  "commitHash": "0a5d35d00f550f9a7b4bbf661ac625c21e2fb0b8",
-  "commitMessage": "Pattern sync: realtime — pull changes from other open sessions instantly"
+  "version": "0.0.1.156",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.156.zip",
+  "buildDate": "2026-07-08T21:11:57Z",
+  "commitHash": "94aaff72ac7590624a4436fbef0710e82b462a18",
+  "commitMessage": "SETUP_GUIDE: concrete Google Workspace SMTP relay steps for Supabase email"
 }
