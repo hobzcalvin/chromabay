@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.137",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.137.zip",
-  "buildDate": "2026-07-08T05:24:23Z",
-  "commitHash": "b448cee2f2a2ace3a4b65e76827a65b58ae6f33a",
-  "commitMessage": "Add SVG Fill operator: browser-flattened polygons, on-device scanline fill"
+  "version": "0.0.1.138",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.138.zip",
+  "buildDate": "2026-07-08T05:33:38Z",
+  "commitHash": "e99c9142280bed781214286bbf1b5665f5cb1061",
+  "commitMessage": "Text: make the 32px font proportional (per-glyph advance widths)"
 }
