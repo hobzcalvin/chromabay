@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.148",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.148.zip",
-  "buildDate": "2026-07-08T17:35:01Z",
-  "commitHash": "8758a4939759854faf146d34b92bdd9b33c813f7",
-  "commitMessage": "SETUP_GUIDE: clarify apex-canonical + www→apex redirect (Namecheap/Pages)"
+  "version": "0.0.1.149",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.149.zip",
+  "buildDate": "2026-07-08T17:45:09Z",
+  "commitHash": "dc1298e696367c0bb6b25edb59b70d318615e80d",
+  "commitMessage": "Custom domain cutover: serve at chromabay.app root (base=''), persist CNAME"
 }
