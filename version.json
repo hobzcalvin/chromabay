@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.135",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.135.zip",
-  "buildDate": "2026-07-08T05:03:31Z",
-  "commitHash": "0d47cfe9b5f6d0f17f3b683ebc29302555da62b5",
-  "commitMessage": "Add unified Pattern Lifecycle plan (identity, ownership, sharing, gallery)"
+  "version": "0.0.1.136",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.136.zip",
+  "buildDate": "2026-07-08T05:10:34Z",
+  "commitHash": "e9371d4e2bd06bce59c7a1bfa40a7afe63c19bd9",
+  "commitMessage": "Text: replace boxy 32px Spleen font with rasterized Helvetica curves"
 }
