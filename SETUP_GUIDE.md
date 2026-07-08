@@ -31,10 +31,19 @@ default "parking"/CNAME records, then add **Host Records**:
 Save. DNS can take 30 min–24 h to propagate; check with
 `dig chromabay.app +short` (should list the four IPs).
 
+**Goal: `chromabay.app` canonical, `www.chromabay.app` → redirects to it.** That's what
+this setup produces. The `www` CNAME does **not** make `www` primary — it only makes `www`
+*resolve* so GitHub can catch the request and 301-redirect it to the apex. The direction is
+decided in §1b by which domain you enter as the Pages custom domain (enter the apex). Keep
+the `www` record; without it, `www.chromabay.app` would fail to resolve instead of
+redirecting.
+
 ### 1b. GitHub Pages
-Repo → **Settings → Pages** → **Custom domain** → enter `chromabay.app` → **Save**.
-Wait for the green "DNS check successful", then tick **Enforce HTTPS** (may take an hour
-for the cert). GitHub writes a `CNAME` file to `gh-pages`.
+Repo → **Settings → Pages** → **Custom domain** → enter **`chromabay.app`** (the apex, NOT
+`www.chromabay.app` — entering the apex is what makes it canonical and makes `www` redirect
+*to* it) → **Save**. Wait for the green "DNS check successful", then tick **Enforce HTTPS**
+(may take an hour for the cert; GitHub issues certs for both apex and `www`). GitHub writes
+a `CNAME` file to `gh-pages`.
 
 ### 1c. Repo cutover (do this AFTER 1a/1b are green — I can apply it in one commit)
 Two changes are needed so the site serves at the domain root instead of `/chromabay`:
