@@ -17,10 +17,19 @@ ESP32 projects crash in the field with no serial cable attached, and the maker h
 brownout? panic? watchdog? a null deref in their render loop? The data to answer that is *already
 captured on the chip* (ELF coredump partition, `esp_reset_reason()`), it just never leaves.
 
-There's a big, ready-made audience: **[WLED](https://github.com/Aircoookie/WLED)** alone runs on
-a huge installed base of ESP32/ESP8266 devices, is Arduino-framework, is almost always on WiFi,
-and its users constantly debug mystery reboots. A clean usermod could give them crash reporting
-essentially for free — and put Sentry in front of the entire maker LED community.
+There's a big, ready-made audience: **[WLED](https://github.com/wled/WLED)** (18k★, Arduino
+framework, almost always on WiFi, huge installed base). It has a long, persistent tail of
+hard-to-diagnose field reboots/crashes. **Signal (not a measured crash rate — keyword-matched
+GitHub search, noisy; and there is no WLED telemetry, which is precisely the gap):** of ~3,700
+issues ever filed, **~600 mention crash / reboot / brownout / watchdog** (56 currently open);
+individual terms: "reboot" 436, "crash" 242, "exception" 151, "boot loop" 51, "guru meditation" 40.
+Flagship threads run enormous: [#3685 "keeps rebooting after 0.14.1"](https://github.com/wled/WLED/issues/3685)
+(184 comments), [#2932 reboots](https://github.com/wled/WLED/issues/2932) (168), and the forum has
+dedicated multi-page threads ([ESP32 random reboots](https://wled.discourse.group/t/help-with-esp32-random-reboots/11638),
+[boards reboot every 4–15 min](https://wled.discourse.group/t/multiple-esp32-boards-randomly-reboot/12503)).
+The tell: these are *years* of GPIO/power/WiFi guesswork because the diagnostic data (reset reason,
+ELF coredump) lives on the chip and never leaves. A usermod that ships symbolicated backtraces to
+Sentry turns those guessing threads into a stack trace — and puts Sentry in front of the maker LED community.
 
 Strategically: this extends Sentry into a segment it doesn't serve turnkey today, and it's a
 *great demo* (crash a $5 microcontroller on stage, watch a symbolicated backtrace land in Sentry).
