@@ -63,6 +63,7 @@ const CHARACTERISTIC_UUID_LED_CONFIG_GET = "a0be83ed-8dc9-47f0-ab40-b19721d20ed1
 const CHARACTERISTIC_UUID_LED_CONFIG_SET = "a0be83ee-8dc9-47f0-ab40-b19721d20ed1";
 const CHARACTERISTIC_UUID_LAYOUT_SET = "a0be83f5-8dc9-47f0-ab40-b19721d20ed1"; // arbitrary pixel layout (WLED ledmap), per strip
 const CHARACTERISTIC_UUID_LAYOUT_GET = "a0be83f6-8dc9-47f0-ab40-b19721d20ed1"; // read back a strip's layout (notify-chunked)
+const CHARACTERISTIC_UUID_LIBRARY_DUMP = "a0be83f9-8dc9-47f0-ab40-b19721d20ed1"; // read the device's stored library (notify-chunked)
 const CHARACTERISTIC_UUID_CALIBRATION = "a0be83f7-8dc9-47f0-ab40-b19721d20ed1"; // auto-layout structured-light flash control
 const CHARACTERISTIC_UUID_LIBRARY_CMD = "a0be83f8-8dc9-47f0-ab40-b19721d20ed1"; // on-device pattern library ops (clear / delete-by-name)
 
@@ -1325,6 +1326,77 @@ export async function getStripLayout(
     } catch (err) {
       if (settle) { const s = settle; settle = null; s(null); }
       console.error('[Layout] read-back failed:', err);
+    }
+  });
+  await cleanup();
+  return result;
+}
+
+/**
+ * Pull the device's stored pattern library back to the app (for the "From Devices" view).
+ * Writes to LIBRARY_DUMP; the device NOTIFYs each pattern's MessagePack framed
+ * [u8 idx][u16 totalLen LE][u16 offset LE][bytes], then a done sentinel idx=0xFF. Returns the
+ * decoded patterns. Mirrors getStripLayout's reassembly.
+ */
+export async function pullDeviceLibrary(deviceId: string): Promise<import('./patternSerializer').SerializedPattern[]> {
+  const bufs = new Map<number, { total: number; buf: Uint8Array; received: number; done: boolean }>();
+  const results: any[] = [];
+  let settle: ((v: any) => void) | null = null;
+  let cleanedUp = false;
+
+  const cleanup = async () => {
+    if (cleanedUp) return; cleanedUp = true;
+    try {
+      if (isWeb()) {
+        const svc = await connectedDevices.get(deviceId)?.gattServer?.getPrimaryService(LED_SERVICE_UUID);
+        const ch = await svc?.getCharacteristic(CHARACTERISTIC_UUID_LIBRARY_DUMP);
+        if (ch) { ch.removeEventListener('characteristicvaluechanged', onWebEvt); await ch.stopNotifications().catch(() => {}); }
+      } else {
+        await BleClient.stopNotifications(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_LIBRARY_DUMP).catch(() => {});
+      }
+    } catch { /* ignore */ }
+  };
+
+  const onFrame = (dv: DataView) => {
+    if (!settle || dv.byteLength < 5) return;
+    const idx = dv.getUint8(0);
+    if (idx === 0xFF) { const s = settle; settle = null; s(results); return; } // done sentinel
+    const totalLen = dv.getUint16(1, true);
+    const offset = dv.getUint16(3, true);
+    let e = bufs.get(idx);
+    if (!e) { e = { total: totalLen, buf: new Uint8Array(totalLen), received: 0, done: false }; bufs.set(idx, e); }
+    const dataLen = dv.byteLength - 5;
+    for (let i = 0; i < dataLen && offset + i < e.total; i++) e.buf[offset + i] = dv.getUint8(5 + i);
+    e.received = Math.max(e.received, offset + dataLen);
+    if (!e.done && e.received >= e.total) {
+      e.done = true;
+      try { const p = msgpackDecode(e.buf) as any; if (p && Array.isArray(p.nodes)) results.push(p); }
+      catch (err) { console.warn('[LibDump] decode failed for pattern', idx, err); }
+    }
+  };
+  const onWebEvt = (ev: any) => onFrame(ev.target.value as DataView);
+
+  const result = await new Promise<any[]>(async (resolve) => {
+    settle = resolve;
+    const timer = setTimeout(() => { if (settle) { const s = settle; settle = null; s(results); } }, 15000);
+    const orig = settle;
+    settle = (v: any) => { clearTimeout(timer); orig(v); };
+    try {
+      if (isWeb()) {
+        const deviceInfo = connectedDevices.get(deviceId);
+        if (!deviceInfo?.gattServer) throw new Error('Device not connected');
+        const service = await deviceInfo.gattServer.getPrimaryService(LED_SERVICE_UUID);
+        const ch = await service.getCharacteristic(CHARACTERISTIC_UUID_LIBRARY_DUMP);
+        await ch.startNotifications();
+        ch.addEventListener('characteristicvaluechanged', onWebEvt);
+      } else {
+        await BleClient.startNotifications(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_LIBRARY_DUMP, (dv) => onFrame(dv));
+      }
+      await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_LIBRARY_DUMP,
+        new DataView(new Uint8Array([0]).buffer));
+    } catch (err) {
+      if (settle) { const s = settle; settle = null; s(results); }
+      console.error('[LibDump] pull failed:', err);
     }
   });
   await cleanup();

@@ -79,6 +79,10 @@ PatternRendererBase* patternRenderer = nullptr;
 //   [0x00]                = clear the whole library
 //   [0x01][name UTF-8...] = delete the pattern with that name
 #define CHARACTERISTIC_UUID_LIBRARY_CMD "a0be83f8-8dc9-47f0-ab40-b19721d20ed1"
+// Read the device's stored pattern library back to the app (notify-chunked), for the app's
+// "From Devices" view. App writes any byte to request; device NOTIFYs each stored pattern's
+// MessagePack framed [u8 idx][u16 totalLen LE][u16 offset LE][bytes], then a done sentinel idx=0xFF.
+#define CHARACTERISTIC_UUID_LIBRARY_DUMP "a0be83f9-8dc9-47f0-ab40-b19721d20ed1"
 
 // OTA Constants
 #define MAX_BLE_CHUNK_SIZE 500 
@@ -104,6 +108,8 @@ NimBLECharacteristic* pLedConfigGetCharacteristic = nullptr;
 NimBLECharacteristic* pLedConfigSetCharacteristic = nullptr;
 NimBLECharacteristic* pLayoutGetCharacteristic = nullptr; // read back a strip's layout (notify-chunked)
 static volatile int layoutGetRequest = -1;                // strip index requested via LAYOUT_GET write, -1 = none
+NimBLECharacteristic* pLibraryDumpCharacteristic = nullptr; // read the stored library back to the app
+static volatile bool libraryDumpRequest = false;           // set by LIBRARY_DUMP write, served from loop()
 
 // Auto-layout calibration: when active, strips flash a structured-light sequence so the app
 // camera can decode each LED's index -> position. Cycle of (1 + bits) frames, each held
@@ -904,6 +910,11 @@ class LayoutGetCallbacks : public NimBLECharacteristicCallbacks {
         std::string value = pCharacteristic->getValue();
         if (value.length() >= 1) layoutGetRequest = (uint8_t)value[0];
     }
+};
+
+// Library Dump Callbacks - app writes any byte; loop() notifies the whole stored library back.
+class LibraryDumpCallbacks : public NimBLECharacteristicCallbacks {
+    void onWrite(NimBLECharacteristic* /*pCharacteristic*/) { libraryDumpRequest = true; }
 };
 
 // Library Command Callbacks - stage a [op][payload] command; processLibraryCommand() (loop
@@ -1722,6 +1733,51 @@ void processLayoutGetRequest() {
     Serial.printf("[Layout] Strip %d read-back sent (%u bytes)\n", idx, (unsigned)len);
 }
 
+// Respond to a LIBRARY_DUMP request: NOTIFY every stored pattern's MessagePack back to the app,
+// framed [u8 idx][u16 totalLen LE][u16 offset LE][bytes], then a done sentinel idx=0xFF. Runs
+// from loop() (file IO off the BLE task). The msgpack already carries meta.name, so the file's
+// name header is skipped.
+void processLibraryDumpRequest() {
+    if (!libraryDumpRequest || !pLibraryDumpCharacteristic) return;
+    libraryDumpRequest = false;
+    const size_t CH = 180;
+    size_t sent = 0;
+    for (size_t i = 0; i < libNames.size() && i < 255; i++) {
+        File f = LittleFS.open(libPath((int)i), FILE_READ);
+        if (!f) continue;
+        if (f.available() < 2) { f.close(); continue; }
+        uint8_t lo = (uint8_t)f.read(), hi = (uint8_t)f.read();
+        uint16_t nameLen = (uint16_t)lo | ((uint16_t)hi << 8);
+        size_t total = f.size();
+        if (total <= (size_t)(2 + nameLen)) { f.close(); continue; }
+        size_t mpLen = total - (2 + nameLen);
+        if (mpLen > 16384) { f.close(); continue; }
+        f.seek(2 + nameLen);
+        uint8_t* data = (uint8_t*)malloc(mpLen);
+        if (!data) { f.close(); continue; }
+        bool ok = (f.readBytes((char*)data, mpLen) == mpLen);
+        f.close();
+        if (!ok) { free(data); continue; }
+        for (size_t off = 0; off < mpLen; off += CH) {
+            size_t n = (mpLen - off < CH) ? (mpLen - off) : CH;
+            uint8_t frame[5 + 180];
+            frame[0] = (uint8_t)i;
+            frame[1] = mpLen & 0xFF; frame[2] = (mpLen >> 8) & 0xFF;
+            frame[3] = off & 0xFF;   frame[4] = (off >> 8) & 0xFF;
+            memcpy(frame + 5, data + off, n);
+            pLibraryDumpCharacteristic->setValue(frame, 5 + n);
+            pLibraryDumpCharacteristic->notify();
+            delay(8);
+        }
+        free(data);
+        sent++;
+    }
+    uint8_t done[5] = {0xFF, 0, 0, 0, 0};
+    pLibraryDumpCharacteristic->setValue(done, 5);
+    pLibraryDumpCharacteristic->notify();
+    Serial.printf("[LibDump] sent %u/%u patterns\n", (unsigned)sent, (unsigned)libNames.size());
+}
+
 // Apply a staged library command (clear / delete-by-name) on the loop task.
 void processLibraryCommand() {
     if (!newLibCmdAvailable) return;
@@ -2054,6 +2110,9 @@ void setup() {
 
             NimBLECharacteristic* pLibraryCmdCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_LIBRARY_CMD, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR);
             pLibraryCmdCharacteristic->setCallbacks(new LibraryCmdCallbacks());
+
+            pLibraryDumpCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_LIBRARY_DUMP, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY);
+            pLibraryDumpCharacteristic->setCallbacks(new LibraryDumpCallbacks());
             NimBLECharacteristic* pCalibrationCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_CALIBRATION, NIMBLE_PROPERTY::WRITE);
             pCalibrationCharacteristic->setCallbacks(new CalibrationCallbacks());
             
@@ -2172,6 +2231,7 @@ void loop() {
     processReceivedLedConfig();
     processReceivedLayout();
     processLayoutGetRequest();
+    processLibraryDumpRequest();
     processLibraryCommand();
     processReceivedBrightness();
     processButton();
