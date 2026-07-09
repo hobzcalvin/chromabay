@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.162",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.162.zip",
-  "buildDate": "2026-07-09T17:24:35Z",
-  "commitHash": "73460391aefbb9c6d89f1009b9a2fee16694a426",
-  "commitMessage": "ESP32 Sentry doc: replace unsupported WLED claim with sourced, caveated evidence"
+  "version": "0.0.1.163",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.163.zip",
+  "buildDate": "2026-07-09T19:58:28Z",
+  "commitHash": "923e90cbc5c23ccbe6a6892c1630b2bff2bc472a",
+  "commitMessage": "Params: hide Interact (🖐️) + Automate (🔄) on non-scalar params"
 }
