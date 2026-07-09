@@ -705,8 +705,7 @@
 
 <main>
   <header>
-    <h1>🔵 ChromaBay</h1>
-    <p class="subtitle">ESP32 Bluetooth Low Energy Monitor</p>
+    <h1>ChromaBay</h1>
     <p class="company">by ReVolt Labs</p>
   </header>
 
@@ -1020,7 +1019,6 @@
   </section>
 
   <footer>
-    <p>Built with SvelteKit + Capacitor + Bluetooth LE</p>
     <div class="build-info">
       <p>📦 Version: <code>{buildInfo.version}</code> • <code>{buildInfo.commitHash.slice(0, 7)}</code> • 🕒 {formatBuildDate(buildInfo.buildDate)}</p>
     </div>
