@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.169",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.169.zip",
-  "buildDate": "2026-07-09T22:54:07Z",
-  "commitHash": "3ce87e5850b95228c088b7b41b6f65d84b749295",
-  "commitMessage": "From Devices import UI: tabbed gallery modal (Online + From Devices)"
+  "version": "0.0.1.170",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.170.zip",
+  "buildDate": "2026-07-09T22:58:20Z",
+  "commitHash": "c744b7e7863104c9c4f4d8aff72f737a56eee326",
+  "commitMessage": "SVG Fill: show the existing path in the editor instead of a blank field"
 }
