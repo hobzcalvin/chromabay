@@ -361,16 +361,18 @@
         <div class="parameter-group">
           <div class="parameter-header">
             <label class="parameter-label" for={inputId}>{param.label}</label>
-            <div class="interactive-checkbox">
-              <input 
-                type="checkbox" 
-                id="interactive-{inputId}"
-                checked={getParameterInteractiveReactive(node.id, param.name)}
-                onchange={(e) => handleInteractiveToggle(param, e)}
-              />
-              <label for="interactive-{inputId}" class="hand-emoji" title="Interactive parameter (shows knob on interact page)">🖐️</label>
-            </div>
+            <!-- Interact (🖐️) + Automate (🔄) only apply to scalar params — a knob/LFO can't
+                 drive a boolean/select/string/color. Gate both on isSlider. -->
             {#if isSlider(param)}
+              <div class="interactive-checkbox">
+                <input
+                  type="checkbox"
+                  id="interactive-{inputId}"
+                  checked={getParameterInteractiveReactive(node.id, param.name)}
+                  onchange={(e) => handleInteractiveToggle(param, e)}
+                />
+                <label for="interactive-{inputId}" class="hand-emoji" title="Interactive parameter (shows knob on interact page)">🖐️</label>
+              </div>
               <button type="button" class="automate-btn" class:active={!!getModReactive(param.name)}
                 title="Automate this parameter (LFO / noise / random)" onclick={() => openAutomation(param)}>🔄</button>
             {/if}
