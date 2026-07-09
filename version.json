@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.165",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.165.zip",
-  "buildDate": "2026-07-09T22:28:16Z",
-  "commitHash": "deb12d2f853cb6381d0fadf1c55c9dbebf729eb1",
-  "commitMessage": "Color: combined hue/sat wheel in the editor (replaces the two sliders)"
+  "version": "0.0.1.166",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.166.zip",
+  "buildDate": "2026-07-09T22:30:00Z",
+  "commitHash": "68dd6855f28f594f779d2cf979b46c056333036c",
+  "commitMessage": "Interact: render the color wheel for an interactive hue+sat param"
 }
