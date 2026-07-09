@@ -2,6 +2,7 @@
 import { onMount } from 'svelte';
 import PatternRenderer from '$lib/components/PatternRenderer.svelte';
 import RotaryKnob from '$lib/components/RotaryKnob.svelte';
+import ColorWheel from '$lib/components/ColorWheel.svelte';
 import { loadPatterns, currentPattern, patterns, switchToPattern } from '$lib/stores/patternsStore';
 import { loadSerializedPattern, initializeDefaultPattern, forceSyncCurrentPattern, 
          flowNodes, nodeParameters, getNodeDefinition, setNodeParameter, type Parameter } from '$lib/flowStore';
@@ -22,6 +23,9 @@ import { get } from 'svelte/store';
     max: number;
     step: number;
     order: number;
+    kind: 'knob' | 'color';   // a hue+saturation pair renders a wheel, not a knob
+    satParamName?: string;
+    satValue?: number;
   }
   
   let dynamicKnobs: InteractiveKnob[] = [];
@@ -94,7 +98,14 @@ import { get } from 'svelte/store';
         setNodeParameter(knob.nodeId, knob.paramName, knob.value);
         previousKnobValues.set(key, knob.value);
         // Note: setNodeParameter already handles auto-save with debouncing
-        // Optional: console.log(`🎛️ Knob value changed: ${knob.paramLabel} = ${knob.value}`);
+      }
+      // Colour wheel also drives the saturation param.
+      if (knob.kind === 'color' && knob.satParamName) {
+        const sKey = `${knob.nodeId}-${knob.satParamName}`;
+        if (previousKnobValues.get(sKey) !== knob.satValue) {
+          setNodeParameter(knob.nodeId, knob.satParamName, knob.satValue ?? 255);
+          previousKnobValues.set(sKey, knob.satValue ?? 255);
+        }
       }
     }
   }
@@ -164,16 +175,26 @@ import { get } from 'svelte/store';
           step = 1;
         }
         
+        // A hue param on an operator that also has saturation → a colour wheel (controls both).
+        const satDef = nodeDefinition.params.find((p: Parameter) => p.name === 'saturation');
+        const isColor = paramName === 'hue' && !!satDef;
+        const satValue = satDef ? (nodeParams.get('saturation') ?? satDef.default) : 255;
+
         const knob: InteractiveKnob = {
           nodeId,
           paramName,
-          paramLabel: `${node.data.label || nodeDefinition.name} ${paramDef.label}`,
+          paramLabel: isColor
+            ? `${node.data.label || nodeDefinition.name} Color`
+            : `${node.data.label || nodeDefinition.name} ${paramDef.label}`,
           nodeType: node.data.type as string,
           value: currentValue,
           min,
           max,
           step,
-          order: 0 // Default order for now
+          order: 0, // Default order for now
+          kind: isColor ? 'color' : 'knob',
+          satParamName: isColor ? 'saturation' : undefined,
+          satValue,
         };
         
         console.log(`Created knob for ${paramName}: ${knob.paramLabel}`);
@@ -269,13 +290,22 @@ import { get } from 'svelte/store';
         class="knob-container"
         style="left: {knobPositions[i]?.[0] ?? 50}%; top: {knobPositions[i]?.[1] ?? 50}%;"
       >
-        <RotaryKnob
-          bind:value={knob.value}
-          min={knob.min}
-          max={knob.max}
-          step={knob.step}
-          size={knobSize}
-        />
+        {#if knob.kind === 'color'}
+          <ColorWheel
+            hue={knob.value}
+            sat={knob.satValue ?? 255}
+            size={knobSize}
+            on:change={(e) => { knob.value = e.detail.hue; knob.satValue = e.detail.sat; dynamicKnobs = dynamicKnobs; }}
+          />
+        {:else}
+          <RotaryKnob
+            bind:value={knob.value}
+            min={knob.min}
+            max={knob.max}
+            step={knob.step}
+            size={knobSize}
+          />
+        {/if}
         <div class="knob-label" style="font-size: {labelFontPx}px; max-width: {knobSize + 48}px;">{knob.paramLabel}</div>
       </div>
     {/each}
