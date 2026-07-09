@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.158",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.158.zip",
-  "buildDate": "2026-07-08T23:29:12Z",
-  "commitHash": "6f08a0f0ace22fca3ba17555faca7e33cf8b2a17",
-  "commitMessage": "Account: name the real email sender (grant@revoltlabs.co) in the confirm notice"
+  "version": "0.0.1.159",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.159.zip",
+  "buildDate": "2026-07-09T16:54:32Z",
+  "commitHash": "78bc6b7498f685ef7b5b3f955b7d63183e3e03a7",
+  "commitMessage": "Devices: drop the 🔵 dot, 'ESP32 Bluetooth Low Energy Monitor' subheader, and dev tech-stack footer line"
 }
