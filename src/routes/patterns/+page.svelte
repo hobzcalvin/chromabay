@@ -223,8 +223,8 @@
 
 <main class="patterns-page" onclick={handleDocumentClick}>
   <div class="header">
-    <h1>🎨 Patterns</h1>
-    <p class="subtitle">Tap to select • 🎛️ to interact • Pencil to edit • Trash to delete</p>
+    <h1>Patterns</h1>
+    <p class="subtitle">Tap to select • 🎛️ to interact • ✏️ to edit • 🗑️ to delete</p>
   </div>
 
   {#if connectedList.length > 0}

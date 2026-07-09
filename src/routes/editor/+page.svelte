@@ -423,7 +423,7 @@
 
 <main>
   <div class="header">
-    <h1>🎯 Pattern Editor</h1>
+    <h1>Pattern Editor</h1>
 
     <button class="interact-btn" title="Interact with this pattern" aria-label="Interact" onclick={() => goto(`${base}/interact`)}>🎛️</button>
 
