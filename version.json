@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.168",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.168.zip",
-  "buildDate": "2026-07-09T22:50:38Z",
-  "commitHash": "36900be87b702ce3d396dda89c10b442eb93a38d",
-  "commitMessage": "From Devices (firmware+app): device→app library read-back over BLE"
+  "version": "0.0.1.169",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.169.zip",
+  "buildDate": "2026-07-09T22:54:07Z",
+  "commitHash": "3ce87e5850b95228c088b7b41b6f65d84b749295",
+  "commitMessage": "From Devices import UI: tabbed gallery modal (Online + From Devices)"
 }
