@@ -4,6 +4,7 @@
   import { getParameterInteractive, setParameterInteractive, MAX_INTERACTIVE_PARAMS, interactiveParameters } from '../stores/interactiveStore';
   import { modulators, getModulator, setModulator, clearModulator, SHAPES, type ModulatorConfig } from '../stores/modulatorStore';
   import { flattenSvgPath, PRESETS } from '../svgFlatten';
+  import ColorWheel from './ColorWheel.svelte';
   import type { Node } from '@xyflow/svelte';
 
   export let node: Node;
@@ -249,6 +250,12 @@
 
   const SLIDER_TYPES = new Set(['float', 'integer', 'range', 'hue']);
   const isSlider = (p: Parameter) => SLIDER_TYPES.has(p.type as string);
+
+  // Operators with a hue+saturation pair (both FLOAT params) get one combined colour wheel
+  // instead of two sliders. The two params stay underneath — so hue automation still works.
+  $: colorPair = !!nodeDefinition && nodeDefinition.params.some((p) => p.name === 'hue') && nodeDefinition.params.some((p) => p.name === 'saturation');
+  $: satParam = nodeDefinition?.params.find((p) => p.name === 'saturation') ?? null;
+  $: visibleParams = nodeDefinition ? (colorPair ? nodeDefinition.params.filter((p) => p.name !== 'saturation') : nodeDefinition.params) : [];
   // Reactive modulator lookup (subscribes to the store).
   $: getModReactive = (paramName: string): ModulatorConfig | null => $modulators.get(node.id)?.get(paramName) ?? null;
 
@@ -356,11 +363,12 @@
         {/if}
       </div>
     {:else if nodeDefinition && nodeDefinition.params.length > 0}
-      {#each nodeDefinition.params as param (param.name)}
+      {#each visibleParams as param (param.name)}
         {@const inputId = getUniqueInputId(param.name)}
+        {@const isColor = colorPair && param.name === 'hue'}
         <div class="parameter-group">
           <div class="parameter-header">
-            <label class="parameter-label" for={inputId}>{param.label}</label>
+            <label class="parameter-label" for={inputId}>{isColor ? 'Color' : param.label}</label>
             <!-- Interact (🖐️) + Automate (🔄) only apply to scalar params — a knob/LFO can't
                  drive a boolean/select/string/color. Gate both on isSlider. -->
             {#if isSlider(param)}
@@ -378,7 +386,16 @@
             {/if}
           </div>
           
-          {#if isSlider(param) && getModReactive(param.name)}
+          {#if isColor}
+            {@const hv = Number(getParameterValue(param))}
+            {@const sv = Number(satParam ? getParameterValue(satParam) : 255)}
+            {@const hueMod = getModReactive('hue')}
+            <div class="color-wheel-wrap">
+              <ColorWheel hue={hv} sat={sv} size={150} disabled={!!hueMod}
+                on:change={(e) => { updateParameter(param, e.detail.hue); if (satParam) updateParameter(satParam, e.detail.sat); }} />
+              {#if hueMod}<span class="auto-tag">🔄 hue cycling · {SHAPES[hueMod.shape]} · {hueMod.period}s</span>{/if}
+            </div>
+          {:else if isSlider(param) && getModReactive(param.name)}
             {@const cfg = getModReactive(param.name)!}
             <div class="automated-control" role="button" tabindex="0" title="Edit automation"
               onclick={() => openAutomation(param)} onkeydown={(e) => { if (e.key === 'Enter') openAutomation(param); }}>
@@ -881,4 +898,5 @@
   .svg-input { display: flex; flex-direction: column; gap: 6px; }
   .svg-preset { background: #111827; border: 1px solid #374151; border-radius: 4px; color: #e5e7eb; padding: 4px 6px; font-size: 0.8rem; }
   .svg-d { background: #111827; border: 1px solid #374151; border-radius: 4px; color: #e5e7eb; padding: 6px; font-size: 0.75rem; font-family: monospace; resize: vertical; }
+  .color-wheel-wrap { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 6px 0; }
 </style> 
