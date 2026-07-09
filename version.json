@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.163",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.163.zip",
-  "buildDate": "2026-07-09T19:58:28Z",
-  "commitHash": "923e90cbc5c23ccbe6a6892c1630b2bff2bc472a",
-  "commitMessage": "Params: hide Interact (🖐️) + Automate (🔄) on non-scalar params"
+  "version": "0.0.1.164",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.164.zip",
+  "buildDate": "2026-07-09T20:35:44Z",
+  "commitHash": "750d14e83b55e73f0dcf6cd90016271774a848c8",
+  "commitMessage": "SVG Fill: rotate about the minimum-enclosing-circle centre, not the bbox centre"
 }
