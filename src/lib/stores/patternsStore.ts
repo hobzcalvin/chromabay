@@ -444,6 +444,34 @@ export async function deletePatternByName(patternName: string) {
 }
 
 /**
+ * Import a pattern into the local library (from the gallery). Keeps its `author`/`sourceHash`
+ * attribution so an unchanged import stays "by <author>" (editing rebuilds meta without author
+ * → it becomes yours). Auto-suffixes the name on a collision and reports it (dupe warning).
+ */
+export async function importLibraryPattern(incoming: SerializedPattern): Promise<{ name: string; collided: boolean }> {
+  const list = await readStored();
+  let name = incoming.meta?.name || 'Imported';
+  const collided = list.some((p) => p.meta?.name === name);
+  if (collided) { let i = 2; while (list.some((p) => p.meta?.name === `${name} ${i}`)) i++; name = `${name} ${i}`; }
+  const p: SerializedPattern = {
+    nodes: incoming.nodes ?? [],
+    meta: {
+      output: incoming.meta?.output ?? 1,
+      name,
+      id: newId(),
+      updatedAt: nowMs(),
+      author: incoming.meta?.author,
+      sourceHash: incoming.meta?.sourceHash,
+    },
+  };
+  list.push(p);
+  await writeStored(list);
+  patterns.set(list);
+  onLibraryChanged();
+  return { name, collided };
+}
+
+/**
  * Merge remote library rows into the local store: last-writer-wins by `updated_ms`, honoring
  * tombstones (a `deleted` row removes the local copy and records a tombstone so it won't
  * resurrect). Called by the cloud-sync pull. Returns whether anything changed locally.

@@ -63,6 +63,11 @@ export interface SerializedPattern {
     id?: string;
     /** Last-writer-wins clock for cloud sync (epoch ms). Not sent to the device. */
     updatedAt?: number;
+    /** Original gallery author (user id) when imported from someone else; unset = your own. */
+    author?: string;
+    /** Content hash of the pattern as imported — if the current content still matches, it's
+     *  "unchanged from the author" and isn't treated as your own copy. */
+    sourceHash?: string;
   };
 }
 

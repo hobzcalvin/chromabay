@@ -9,7 +9,9 @@
   import { currentPattern } from '$lib/stores/patternsStore';
   import { connectedDevices, getConnectedDevicesList } from '$lib/stores/deviceStore';
   import { get } from 'svelte/store';
-  
+  import GalleryModal from '$lib/components/GalleryModal.svelte';
+
+  let galleryOpen = false;
   let patternsList: SerializedPattern[] = [];
   let currentName = '';
   
@@ -224,8 +226,11 @@
 <main class="patterns-page" onclick={handleDocumentClick}>
   <div class="header">
     <h1>Patterns</h1>
+    <button class="online-btn" onclick={() => (galleryOpen = true)} title="Browse & publish online patterns">🌐 Online</button>
     <p class="subtitle">Tap to select • 🎛️ to interact • ✏️ to edit • 🗑️ to delete</p>
   </div>
+
+  <GalleryModal open={galleryOpen} onClose={() => (galleryOpen = false)} />
 
   {#if connectedList.length > 0}
     <label class="cycle-control" style="display:flex;align-items:center;gap:8px;margin:0 0 16px;">
@@ -334,8 +339,22 @@
   
   .header {
     margin-bottom: 2rem;
+    position: relative;
   }
-  
+  .online-btn {
+    position: absolute;
+    top: 0;
+    right: 0;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #fff;
+    border-radius: 10px;
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 0.9rem;
+  }
+  .online-btn:hover { background: rgba(0, 0, 0, 0.5); }
+
   .header h1 {
     margin: 0 0 0.5rem 0;
     font-size: 2rem;
