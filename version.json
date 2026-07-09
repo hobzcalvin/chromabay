@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.167",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.167.zip",
-  "buildDate": "2026-07-09T22:43:36Z",
-  "commitHash": "5b916328c06e435f391d476ad4807db7ccd545c0",
-  "commitMessage": "Online pattern gallery: publish / browse / import (author-scoped) + upvote-on-adopt"
+  "version": "0.0.1.168",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.168.zip",
+  "buildDate": "2026-07-09T22:50:38Z",
+  "commitHash": "36900be87b702ce3d396dda89c10b442eb93a38d",
+  "commitMessage": "From Devices (firmware+app): device→app library read-back over BLE"
 }
