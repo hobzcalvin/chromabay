@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.160",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.160.zip",
-  "buildDate": "2026-07-09T16:58:40Z",
-  "commitHash": "eaf2747ca175c46dd18c8ab495bbd1a3fe371e73",
-  "commitMessage": "Cleanup: drop title emojis (Editor/Patterns), delete dev /settings route, emoji-ize patterns hints"
+  "version": "0.0.1.161",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.161.zip",
+  "buildDate": "2026-07-09T16:59:45Z",
+  "commitHash": "d72b2cee036fbf2ea7b241644a137e2da0afd874",
+  "commitMessage": "Cleanup: drop 🎯/🎨 title emojis; emoji-ize patterns edit/delete hints"
 }
