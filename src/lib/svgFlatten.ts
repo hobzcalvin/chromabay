@@ -231,6 +231,26 @@ export function flattenSvgPath(input: string, budget = 160): string {
   return encodeContours(parsePath(extractPathData(input)), budget);
 }
 
+/**
+ * Reverse of encodeContours: an encoded blob ("1|n:x,y,…;…") → an SVG path `d` of the
+ * flattened polygons ("M x,y L x,y … Z" per contour). Lets the editor show the current path
+ * instead of a blank field; re-flattening it (the encoder re-normalises) round-trips the shape.
+ */
+export function encodedToPath(encoded: string): string {
+  if (typeof encoded !== 'string' || !encoded.startsWith('1|')) return '';
+  const out: string[] = [];
+  for (const part of encoded.slice(2).split(';')) {
+    const coords = part.split(':')[1];
+    if (!coords) continue;
+    const nums = coords.split(',').map(Number).filter((n) => Number.isFinite(n));
+    if (nums.length < 4) continue;
+    const pts: string[] = [];
+    for (let i = 0; i + 1 < nums.length; i += 2) pts.push(`${nums[i]},${nums[i + 1]}`);
+    out.push('M' + pts.join(' L') + ' Z');
+  }
+  return out.join(' ');
+}
+
 // Preset shapes (viewBox-agnostic; encoder normalises). Heart matches SvgFillOperator kHeart.
 export const PRESETS: Record<string, string> = {
   heart: 'M0,60 C-24,36 -60,20 -60,-20 C-60,-46 -40,-52 -24,-52 C-9,-52 -3,-40 0,-30 C3,-40 9,-52 24,-52 C40,-52 60,-46 60,-20 C60,20 24,36 0,60 Z',

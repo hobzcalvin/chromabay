@@ -3,7 +3,7 @@
   import { getNodeDefinition, setNodeParameter, getNodeParameter, deleteNode, nodeParameters, type Parameter } from '../flowStore';
   import { getParameterInteractive, setParameterInteractive, MAX_INTERACTIVE_PARAMS, interactiveParameters } from '../stores/interactiveStore';
   import { modulators, getModulator, setModulator, clearModulator, SHAPES, type ModulatorConfig } from '../stores/modulatorStore';
-  import { flattenSvgPath, PRESETS } from '../svgFlatten';
+  import { flattenSvgPath, encodedToPath, PRESETS } from '../svgFlatten';
   import ColorWheel from './ColorWheel.svelte';
   import type { Node } from '@xyflow/svelte';
 
@@ -109,6 +109,16 @@
   // SVG Fill: the `path` param stores a flattened polygon blob, not the raw SVG. The user
   // pastes a `d` string or picks a preset; we flatten in-browser and store the blob.
   let svgText = '';
+  // Seed the paste field from the stored path when the popover opens for a new svgfill node,
+  // so it shows the current shape (as flattened polygons) instead of being blank. Only re-seeds
+  // when the node changes — typing mutates svgText without being clobbered.
+  let svgInitFor = '';
+  $: if (node?.data?.type === 'svgfill' && svgInitFor !== node.id) {
+    svgInitFor = node.id;
+    const pathParam = nodeDefinition?.params.find((p) => p.name === 'path');
+    const stored = pathParam ? getParameterValue(pathParam) : '';
+    svgText = typeof stored === 'string' ? encodedToPath(stored) : '';
+  }
   function applySvgPath(param: Parameter, d: string) {
     try { const enc = flattenSvgPath(d); if (enc.length > 2) updateParameter(param, enc); } catch { /* ignore bad paths */ }
   }
