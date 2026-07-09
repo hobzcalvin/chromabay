@@ -144,24 +144,62 @@ function rdp(pts: Contour, eps: number): Contour {
   return [a, b];
 }
 
-/** Normalise contours to bbox-centred [-500,500] ints and encode. `budget` caps total points. */
+// Minimum enclosing circle (Welzl). Its centre is the right pivot for rotation: the shape
+// spins in place with no part swinging wider than another, and normalising by its diameter
+// means the shape never clips at any rotation angle. (Bbox-centre wobbles — e.g. a triangle's
+// true centre sits below its bbox midpoint.)
+type Circle = { x: number; y: number; r: number };
+function inCircle(c: Circle, p: Pt): boolean { return Math.hypot(p.x - c.x, p.y - c.y) <= c.r + 1e-6; }
+function circle2(a: Pt, b: Pt): Circle { return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, r: Math.hypot(a.x - b.x, a.y - b.y) / 2 }; }
+function circle3(a: Pt, b: Pt, c: Pt): Circle {
+  const d = 2 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y));
+  if (Math.abs(d) < 1e-9) { // collinear → smallest circle through the two extremes
+    let best = circle2(a, b);
+    for (const [p, q] of [[a, c], [b, c]] as [Pt, Pt][]) { const cc = circle2(p, q); if (cc.r > best.r) best = cc; }
+    return best;
+  }
+  const a2 = a.x * a.x + a.y * a.y, b2 = b.x * b.x + b.y * b.y, c2 = c.x * c.x + c.y * c.y;
+  const ux = (a2 * (b.y - c.y) + b2 * (c.y - a.y) + c2 * (a.y - b.y)) / d;
+  const uy = (a2 * (c.x - b.x) + b2 * (a.x - c.x) + c2 * (b.x - a.x)) / d;
+  return { x: ux, y: uy, r: Math.hypot(a.x - ux, a.y - uy) };
+}
+function minEnclosingCircle(pts: Pt[]): Circle {
+  const P = pts.slice();
+  for (let i = P.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [P[i], P[j]] = [P[j], P[i]]; } // Welzl shuffle
+  let c: Circle = { x: P[0]?.x ?? 0, y: P[0]?.y ?? 0, r: 0 };
+  for (let i = 0; i < P.length; i++) {
+    if (inCircle(c, P[i])) continue;
+    c = { x: P[i].x, y: P[i].y, r: 0 };
+    for (let j = 0; j < i; j++) {
+      if (inCircle(c, P[j])) continue;
+      c = circle2(P[i], P[j]);
+      for (let k = 0; k < j; k++) if (!inCircle(c, P[k])) c = circle3(P[i], P[j], P[k]);
+    }
+  }
+  return c;
+}
+
+/** Normalise contours: centre on the minimum-enclosing-circle centre, scale by its diameter,
+ *  encode as [-500,500] ints. `budget` caps total points. */
 export function encodeContours(contours: Contour[], budget = 160): string {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const c of contours) for (const p of c) { minX = Math.min(minX, p.x); minY = Math.min(minY, p.y); maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y); }
   if (!isFinite(minX)) return '1|';
-  const w = maxX - minX || 1, h = maxY - minY || 1, span = Math.max(w, h);
-  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+  const bboxSpan = Math.max(maxX - minX || 1, maxY - minY || 1); // used only for decimation eps
+  // Rotation pivot + sizing come from the minimum enclosing circle, not the bbox.
+  const mec = minEnclosingCircle(contours.flat());
+  const cx = mec.x, cy = mec.y, span = Math.max(1, mec.r * 2);
 
   // Drop any trailing point that coincides with the first (curves/Z return to start) so RDP
   // doesn't see a zero-length baseline and collapse the whole contour.
   const cleaned = contours.map((c) => {
     const out = c.slice();
-    while (out.length > 2 && Math.hypot(out[0].x - out[out.length - 1].x, out[0].y - out[out.length - 1].y) < span * 1e-3) out.pop();
+    while (out.length > 2 && Math.hypot(out[0].x - out[out.length - 1].x, out[0].y - out[out.length - 1].y) < bboxSpan * 1e-3) out.pop();
     return out;
   });
 
   // Decimate with an epsilon that scales up until the total point budget is met.
-  let eps = span * 0.004;
+  let eps = bboxSpan * 0.004;
   let dec: Contour[] = [];
   for (let pass = 0; pass < 12; pass++) {
     dec = cleaned.map((c) => rdp(c, eps)).filter((c) => c.length >= 3);
