@@ -1,16 +1,23 @@
 <script lang="ts">
   import { browseGallery, publishPattern, importGalleryPattern, type GalleryPattern } from '$lib/gallery';
-  import { currentPattern, loadPatterns } from '$lib/stores/patternsStore';
+  import { currentPattern, loadPatterns, patterns, importLibraryPattern } from '$lib/stores/patternsStore';
   import { authUser, isConfigured } from '$lib/stores/authStore';
+  import { connectedDevices, getConnectedDevicesList } from '$lib/stores/deviceStore';
+  import { pullDeviceLibrary } from '$lib/ble';
+  import type { SerializedPattern } from '$lib/patternSerializer';
 
   export let open = false;
   export let onClose: () => void = () => {};
 
+  type Tab = 'online' | 'devices';
+  let tab: Tab = 'online';
+  let notice = '';
+  let error = '';
+
+  // --- Online ---
   let items: GalleryPattern[] = [];
   let search = '';
   let loading = false;
-  let notice = '';
-  let error = '';
 
   async function refresh() {
     loading = true; error = '';
@@ -18,9 +25,7 @@
     catch (e: any) { error = e?.message ?? String(e); }
     finally { loading = false; }
   }
-
-  // Load whenever the modal opens.
-  $: if (open) { void refresh(); }
+  $: if (open && tab === 'online') { void refresh(); }
 
   async function doPublish() {
     notice = ''; error = '';
@@ -39,42 +44,95 @@
       notice = collided ? `Imported as “${name}” (you already had that name).` : `Imported “${name}”.`;
     } catch (e: any) { error = e?.message ?? String(e); }
   }
+
+  // --- From Devices ---
+  $: devices = getConnectedDevicesList($connectedDevices); // [{ deviceId, name }]
+  let devicePatterns: SerializedPattern[] = [];
+  let pulledFrom = '';
+  let pulling = false;
+  $: haveNames = new Set($patterns.map((p) => p.meta?.name));
+
+  async function pull(deviceId: string, name: string) {
+    pulling = true; error = ''; notice = ''; devicePatterns = []; pulledFrom = name;
+    try {
+      devicePatterns = await pullDeviceLibrary(deviceId);
+      if (devicePatterns.length === 0) notice = `${name} has no stored patterns (or didn't respond).`;
+    } catch (e: any) { error = e?.message ?? String(e); }
+    finally { pulling = false; }
+  }
+
+  async function importFromDevice(p: SerializedPattern) {
+    notice = ''; error = '';
+    try {
+      const { name, collided } = await importLibraryPattern(p);
+      await loadPatterns();
+      notice = collided ? `Imported as “${name}” (you already had that name).` : `Imported “${name}”.`;
+    } catch (e: any) { error = e?.message ?? String(e); }
+  }
+
+  function setTab(t: Tab) { tab = t; notice = ''; error = ''; }
 </script>
 
 {#if open}
   <div class="overlay" onclick={onClose} role="presentation">
-    <div class="sheet" onclick={(e) => e.stopPropagation()} role="dialog" aria-label="Online patterns">
+    <div class="sheet" onclick={(e) => e.stopPropagation()} role="dialog" aria-label="Get patterns">
       <div class="head">
-        <h2>🌐 Online Patterns</h2>
+        <div class="tabs">
+          <button class:sel={tab === 'online'} onclick={() => setTab('online')}>🌐 Online</button>
+          <button class:sel={tab === 'devices'} onclick={() => setTab('devices')}>📡 From Devices</button>
+        </div>
         <button class="x" onclick={onClose} aria-label="Close">×</button>
       </div>
 
-      <div class="row">
-        <input class="search" placeholder="Search patterns…" bind:value={search} oninput={refresh} />
-        <button class="btn" onclick={doPublish} disabled={!$authUser} title={$authUser ? 'Publish the current pattern' : 'Sign in to publish'}>Publish current</button>
-      </div>
-      {#if !isConfigured}<p class="muted">Cloud not configured.</p>{/if}
-      {#if !$authUser}<p class="muted">Browsing works signed-out; sign in (Account tab) to publish or upvote.</p>{/if}
       {#if error}<p class="error">{error}</p>{/if}
       {#if notice}<p class="notice">{notice}</p>{/if}
 
-      <div class="list">
-        {#if loading}
-          <p class="muted">Loading…</p>
-        {:else if items.length === 0}
-          <p class="muted">No patterns yet{search ? ' for that search' : ''}.</p>
-        {:else}
-          {#each items as g (g.id)}
-            <div class="item">
-              <div class="meta">
-                <span class="name">{g.name}</span>
-                <span class="by">by {g.handle} · ▲ {g.upvote_count}</span>
+      {#if tab === 'online'}
+        <div class="row">
+          <input class="search" placeholder="Search patterns…" bind:value={search} oninput={refresh} />
+          <button class="btn" onclick={doPublish} disabled={!$authUser} title={$authUser ? 'Publish the current pattern' : 'Sign in to publish'}>Publish current</button>
+        </div>
+        {#if !isConfigured}<p class="muted">Cloud not configured.</p>{/if}
+        {#if !$authUser}<p class="muted">Browsing works signed-out; sign in (Account tab) to publish or upvote.</p>{/if}
+        <div class="list">
+          {#if loading}
+            <p class="muted">Loading…</p>
+          {:else if items.length === 0}
+            <p class="muted">No patterns yet{search ? ' for that search' : ''}.</p>
+          {:else}
+            {#each items as g (g.id)}
+              <div class="item">
+                <div class="meta"><span class="name">{g.name}</span><span class="by">by {g.handle} · ▲ {g.upvote_count}</span></div>
+                <button class="btn small" onclick={() => doImport(g)}>Import</button>
               </div>
-              <button class="btn small" onclick={() => doImport(g)}>Import</button>
+            {/each}
+          {/if}
+        </div>
+      {:else}
+        <p class="muted">Pull the patterns stored on a connected device into your library.</p>
+        <div class="list">
+          {#if devices.length === 0}
+            <p class="muted">No connected devices. Connect one on the Devices tab.</p>
+          {:else}
+            <div class="device-row">
+              {#each devices as d (d.deviceId)}
+                <button class="btn small" disabled={pulling} onclick={() => pull(d.deviceId, d.name)}>
+                  {pulling && pulledFrom === d.name ? 'Loading…' : `Load ${d.name}`}
+                </button>
+              {/each}
             </div>
-          {/each}
-        {/if}
-      </div>
+            {#each devicePatterns as p, i (p.meta?.id ?? p.meta?.name ?? i)}
+              <div class="item">
+                <div class="meta">
+                  <span class="name">{p.meta?.name ?? 'Unnamed'}</span>
+                  {#if haveNames.has(p.meta?.name)}<span class="by">already in My Patterns</span>{:else}<span class="by">from {pulledFrom}</span>{/if}
+                </div>
+                <button class="btn small" onclick={() => importFromDevice(p)}>Import</button>
+              </div>
+            {/each}
+          {/if}
+        </div>
+      {/if}
     </div>
   </div>
 {/if}
@@ -83,10 +141,13 @@
   .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 2000; display: flex; align-items: flex-end; justify-content: center; }
   .sheet { background: #1f2937; color: #fff; width: 100%; max-width: 560px; max-height: 82vh; border-radius: 16px 16px 0 0; padding: 1rem; display: flex; flex-direction: column; box-shadow: 0 -8px 30px rgba(0,0,0,0.5); }
   .head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem; }
-  .head h2 { margin: 0; font-size: 1.2rem; }
+  .tabs { display: flex; gap: 0.4rem; }
+  .tabs button { padding: 0.45rem 0.7rem; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; color: rgba(255,255,255,0.7); cursor: pointer; font-weight: 600; font-size: 0.9rem; }
+  .tabs button.sel { background: rgba(102,126,234,0.35); border-color: rgba(102,126,234,0.6); color: #fff; }
   .x { background: none; border: none; color: #9ca3af; font-size: 1.5rem; cursor: pointer; line-height: 1; }
   .row { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; }
   .search { flex: 1; padding: 0.55rem; border-radius: 8px; border: 1px solid #374151; background: #111827; color: #fff; }
+  .device-row { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.5rem; }
   .muted { color: rgba(255,255,255,0.7); font-size: 0.85rem; margin: 0.25rem 0; }
   .error { color: #fca5a5; font-size: 0.85rem; margin: 0.25rem 0; }
   .notice { color: #86efac; font-size: 0.85rem; margin: 0.25rem 0; }
