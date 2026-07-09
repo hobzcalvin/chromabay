@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.161",
-  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.161.zip",
-  "buildDate": "2026-07-09T16:59:45Z",
-  "commitHash": "d72b2cee036fbf2ea7b241644a137e2da0afd874",
-  "commitMessage": "Cleanup: drop 🎯/🎨 title emojis; emoji-ize patterns edit/delete hints"
+  "version": "0.0.1.162",
+  "downloadUrl": "https://hobzcalvin.github.io/chromabay/live-update-0.0.1.162.zip",
+  "buildDate": "2026-07-09T17:24:35Z",
+  "commitHash": "73460391aefbb9c6d89f1009b9a2fee16694a426",
+  "commitMessage": "ESP32 Sentry doc: replace unsupported WLED claim with sourced, caveated evidence"
 }
