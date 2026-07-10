@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.174",
-  "downloadUrl": "https://chromabay.app/live-update-0.0.1.174.zip",
-  "buildDate": "2026-07-10T05:44:16Z",
-  "commitHash": "222104c19fcefd853f0ea03f31393a384b6d025c",
-  "commitMessage": "Pattern previews: animate automation (modulators) in the patterns list"
+  "version": "0.0.1.175",
+  "downloadUrl": "https://chromabay.app/live-update-0.0.1.175.zip",
+  "buildDate": "2026-07-10T06:08:31Z",
+  "commitHash": "68d89087f53fbb830761bc4b692e933099d214e4",
+  "commitMessage": "Pattern sync: chunk PATTERN_SYNC so large (SVG-fill) patterns transfer"
 }
