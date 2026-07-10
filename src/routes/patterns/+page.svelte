@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { base } from '$app/paths';
-  import { patterns, loadPatterns, switchToPattern, currentPatternName, createEmptyPattern, saveAsPattern } from '$lib/stores/patternsStore';
+  import { patterns, loadPatterns, switchToPattern, currentPatternName, createEmptyPattern, saveAsPattern, patternNameExists } from '$lib/stores/patternsStore';
   import PatternPreview from '$lib/components/PatternPreview.svelte';
   import type { SerializedPattern } from '$lib/patternSerializer';
   import { syncPatternToAllDevices, setCycleOnDevice, sendSinglePatternToDevice, clearLibraryOnAllDevices, deletePatternOnAllDevices } from '$lib/ble';
@@ -205,12 +205,23 @@
   async function handleNewPattern() {
     const name = prompt('Enter a name for the new pattern:');
     if (!name?.trim()) return;
-    
+
     try {
+      // Keep names unique: a colliding name would otherwise overwrite the existing
+      // pattern (savePattern matches by name), silently destroying it. Auto-suffix
+      // instead — the same behaviour as importing a duplicate.
+      let finalName = name.trim();
+      if (patternNameExists(finalName)) {
+        let i = 2;
+        while (patternNameExists(`${finalName} ${i}`)) i++;
+        finalName = `${finalName} ${i}`;
+        alert(`A pattern named “${name.trim()}” already exists — created “${finalName}” instead.`);
+      }
+
       // Create and save empty pattern
-      const emptyPattern = createEmptyPattern(name.trim());
-      await saveAsPattern(emptyPattern, name.trim());
-      
+      const emptyPattern = createEmptyPattern(finalName);
+      await saveAsPattern(emptyPattern, finalName);
+
       // Load it into the editor and navigate there
       const { loadSerializedPattern } = await import('$lib/flowStore');
       await loadSerializedPattern(emptyPattern);
