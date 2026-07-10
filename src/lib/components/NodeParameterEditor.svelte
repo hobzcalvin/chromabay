@@ -270,7 +270,21 @@
   // instead of two sliders. The two params stay underneath — so hue automation still works.
   $: colorPair = !!nodeDefinition && nodeDefinition.params.some((p) => p.name === 'hue') && nodeDefinition.params.some((p) => p.name === 'saturation');
   $: satParam = nodeDefinition?.params.find((p) => p.name === 'saturation') ?? null;
-  $: visibleParams = nodeDefinition ? (colorPair ? nodeDefinition.params.filter((p) => p.name !== 'saturation') : nodeDefinition.params) : [];
+  // Convolve: the 9 kernel cells (k1..k9) are edited in a 3×3 grid, not as 9 sliders. Hide
+  // them from the normal list, and show the grid only under the "Custom" preset (index 0).
+  $: isConvolve = node?.data?.type === 'convolve';
+  $: kernelParams = isConvolve && nodeDefinition ? nodeDefinition.params.filter((p) => /^k[1-9]$/.test(p.name)) : [];
+  $: presetParam = isConvolve && nodeDefinition ? (nodeDefinition.params.find((p) => p.name === 'preset') ?? null) : null;
+  $: convolveCustom = isConvolve && presetParam
+    ? String($nodeParameters.get(node.id)?.get('preset') ?? presetParam.default ?? 1) === '0'
+    : false;
+  $: visibleParams = nodeDefinition
+    ? nodeDefinition.params.filter((p) => {
+        if (colorPair && p.name === 'saturation') return false;      // shown in the color wheel
+        if (isConvolve && /^k[1-9]$/.test(p.name)) return false;     // shown in the kernel grid
+        return true;
+      })
+    : [];
   // Reactive modulator lookup (subscribes to the store).
   $: getModReactive = (paramName: string): ModulatorConfig | null => $modulators.get(node.id)?.get(paramName) ?? null;
 
@@ -560,6 +574,28 @@
           {/if}
         </div>
       {/each}
+      {#if isConvolve && convolveCustom}
+        <div class="parameter-group">
+          <div class="parameter-header">
+            <label class="parameter-label">Kernel (3×3)</label>
+          </div>
+          <div class="kernel-grid">
+            {#each kernelParams as kp, ki (kp.name)}
+              <input
+                type="number"
+                step="any"
+                class="kernel-cell"
+                class:center={ki === 4}
+                value={getParameterValue(kp)}
+                oninput={(e) => updateParameter(kp, parseFloat((e.target as HTMLInputElement).value) || 0)}
+                ondblclick={() => resetParam(kp)}
+                title={ki === 4 ? 'Center (weight for this pixel)' : 'Weight for the neighbouring pixel'}
+              />
+            {/each}
+          </div>
+          <p class="kernel-hint">Center is the pixel itself; the 8 around it are its neighbours. Weights are normalised by their sum (unless the sum is 0, e.g. edge kernels).</p>
+        </div>
+      {/if}
     {:else}
       <p class="no-parameters">This node has no parameters to configure.</p>
     {/if}
@@ -894,6 +930,36 @@
     font-style: italic;
     text-align: center;
     margin: 0;
+  }
+
+  /* ---- Convolve: 3×3 kernel grid ("boxes around the center") ---- */
+  .kernel-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 4px;
+    max-width: 180px;
+  }
+  .kernel-cell {
+    width: 100%;
+    box-sizing: border-box;
+    text-align: center;
+    padding: 6px 2px;
+    font-size: 0.9rem;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.06);
+    color: inherit;
+  }
+  .kernel-cell.center {
+    border-color: rgba(120, 170, 255, 0.9);
+    background: rgba(120, 170, 255, 0.14);
+    font-weight: 600;
+  }
+  .kernel-hint {
+    color: #6b7280;
+    font-size: 0.72rem;
+    margin: 6px 0 0;
+    line-height: 1.3;
   }
 
   /* ---- Parameter automation ---- */

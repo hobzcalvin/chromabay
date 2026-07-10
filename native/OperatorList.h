@@ -47,6 +47,8 @@
 #include "SymbolOperator.h"
 #include "TextOperator.h"
 #include "SvgFillOperator.h"
+#include "BlurOperator.h"
+#include "ConvolveOperator.h"
 
 // Add your new operators here:
 // #include "RainbowOperator.h"
