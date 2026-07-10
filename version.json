@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.176",
-  "downloadUrl": "https://chromabay.app/live-update-0.0.1.176.zip",
-  "buildDate": "2026-07-10T06:11:27Z",
-  "commitHash": "944e0cdb190ba02fb192cb65b1453eabd5dcce61",
-  "commitMessage": "Patterns list: key by id, not name — fixes crash on duplicate names"
+  "version": "0.0.1.177",
+  "downloadUrl": "https://chromabay.app/live-update-0.0.1.177.zip",
+  "buildDate": "2026-07-10T06:17:34Z",
+  "commitHash": "8a385be1833f47a53e9a05080f9a0f7f06ffceab",
+  "commitMessage": "Device: stop truncating STRING params to 31 chars (SVG path -> heart)"
 }
