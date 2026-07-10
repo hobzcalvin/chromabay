@@ -262,7 +262,7 @@
     </div>
   {:else}
     <div class="patterns-grid">
-      {#each patternsList as pattern (pattern.meta?.name)}
+      {#each patternsList as pattern (pattern.meta?.id ?? pattern.meta?.name)}
         {@const patternName = pattern.meta?.name || 'Unnamed'}
         {@const isCurrentPattern = patternName === currentName}
         {@const swipeState = swipeStates[patternName]}
