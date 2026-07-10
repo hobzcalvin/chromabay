@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.173",
-  "downloadUrl": "https://chromabay.app/live-update-0.0.1.173.zip",
-  "buildDate": "2026-07-10T03:39:24Z",
-  "commitHash": "602508b47480be2eaf899d220e0d3a64e20282f5",
-  "commitMessage": "Firmware: log stored library pattern names at boot (diagnostic)"
+  "version": "0.0.1.174",
+  "downloadUrl": "https://chromabay.app/live-update-0.0.1.174.zip",
+  "buildDate": "2026-07-10T05:44:16Z",
+  "commitHash": "222104c19fcefd853f0ea03f31393a384b6d025c",
+  "commitMessage": "Pattern previews: animate automation (modulators) in the patterns list"
 }
