@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.179",
-  "downloadUrl": "https://chromabay.app/live-update-0.0.1.179.zip",
-  "buildDate": "2026-07-10T06:43:58Z",
-  "commitHash": "f1b304b4c4d3aacc3bb1008e4b9dc48174e4ef3c",
-  "commitMessage": "Param sliders: double-click / double-tap to reset to default"
+  "version": "0.0.1.180",
+  "downloadUrl": "https://chromabay.app/live-update-0.0.1.180.zip",
+  "buildDate": "2026-07-10T07:02:05Z",
+  "commitHash": "982f45a2de67bc8f0781b7eb0d87a4c216f8a94b",
+  "commitMessage": "BLE: auto-reconnect on unexpected disconnects"
 }
