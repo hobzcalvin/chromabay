@@ -1292,6 +1292,7 @@ static void libScan() {
     }
     libRebuildOrder();
     Serial.printf("Library: %u stored pattern(s)\n", (unsigned)libNames.size());
+    for (size_t i = 0; i < libNames.size(); i++) Serial.printf("  [lib %u] %s\n", (unsigned)i, libNames[i].c_str());
 }
 
 // Store/overwrite a pattern by name (loop task only — does flash I/O). `msgpack`/`size`
