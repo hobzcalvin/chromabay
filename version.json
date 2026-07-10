@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.171",
-  "downloadUrl": "https://chromabay.app/live-update-0.0.1.171.zip",
-  "buildDate": "2026-07-09T23:37:06Z",
-  "commitHash": "f325e3d1b38b53afe51d5744be22ede50c21eae1",
-  "commitMessage": "Live update: point serverDomain + downloadUrl at chromabay.app (no redirect)"
+  "version": "0.0.1.172",
+  "downloadUrl": "https://chromabay.app/live-update-0.0.1.172.zip",
+  "buildDate": "2026-07-10T02:51:29Z",
+  "commitHash": "a99a10cf704ca419dc0f092045fa037dd098d0fe",
+  "commitMessage": "Live update: native reinstalls win over stale bundles (auto-reset + build bump)"
 }
