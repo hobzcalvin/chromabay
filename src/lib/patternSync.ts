@@ -81,6 +81,7 @@ async function subscribeRealtime(uid: string): Promise<void> {
   if (!supabase || channel) return;
   // Ensure Realtime uses the user's JWT so RLS scopes postgres_changes to their rows.
   const token = (await supabase.auth.getSession()).data.session?.access_token;
+  if (channel) return; // Guard against concurrent calls that both passed the first check
   if (token) supabase.realtime.setAuth(token);
   channel = supabase
     .channel(`library:${uid}`)
