@@ -170,8 +170,32 @@ if (browser && Capacitor.isNativePlatform() && !dev && !isLocalBuild) {
         }
       };
 
-      // Check for updates on app start
-      checkForUpdates();
+      // One-time reconcile: if a NEW native binary was installed (build code changed), drop any
+      // stale downloaded live-update bundle so the freshly-built built-in wins. Without this, a
+      // native reinstall is silently overridden by an old downloaded bundle (the trap that froze
+      // the app at the domain cutover). Only fires when the code actually changed vs last launch.
+      const reconcileNativeBuild = async (): Promise<boolean> => {
+        try {
+          const { versionCode } = await LiveUpdate.getVersionCode();
+          const stored = localStorage.getItem('nativeBuildCode');
+          localStorage.setItem('nativeBuildCode', String(versionCode));
+          if (stored != null && stored !== String(versionCode)) {
+            const cur = await LiveUpdate.getCurrentBundle().catch(() => ({ bundleId: null as string | null }));
+            if (cur?.bundleId) {
+              console.log('📱 UPDATE: new native build → dropping stale bundle', cur.bundleId);
+              await LiveUpdate.reset();
+              await LiveUpdate.reload();
+              return true; // reloading into the built-in bundle; don't continue this launch
+            }
+          }
+        } catch (e) {
+          console.error('📱 UPDATE: native-build reconcile failed', e);
+        }
+        return false;
+      };
+
+      // Reconcile a fresh native build first, then check for updates on app start.
+      reconcileNativeBuild().then((didReset) => { if (!didReset) checkForUpdates(); });
 
       // Check for updates when app comes to foreground
       App.addListener('appStateChange', (state: { isActive: boolean }) => {
