@@ -1455,6 +1455,18 @@ if (typeof window !== 'undefined') {
           triggerAutoSave('interactive parameters change');
         });
       }).catch(console.error);
+
+      // Subscribe to automation (modulator) changes so setting an automation pushes
+      // to connected devices immediately. Without this, adding automation only saved
+      // locally and didn't reach the device until the next value edit (e.g. color)
+      // happened to trigger a sync. Guarded by syncPatternIfChanged (no-op if the
+      // serialized pattern is unchanged), so preview thumbnails' modulator writes
+      // — which aren't part of the editor graph — don't cause spurious device pushes.
+      import('$lib/stores/modulatorStore').then(({ modulators }) => {
+        modulators.subscribe(() => {
+          syncPatternIfChanged();
+        });
+      }).catch(console.error);
     } catch (error) {
       console.error('Error setting up pattern sync subscriptions:', error);
     }
