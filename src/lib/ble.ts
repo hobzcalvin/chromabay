@@ -147,7 +147,8 @@ export async function initBle(): Promise<void> {
     if (isWeb() && !unloadHandlerRegistered && typeof window !== 'undefined') {
       unloadHandlerRegistered = true;
       window.addEventListener('pagehide', () => {
-        for (const info of connectedDevices.values()) {
+        for (const [id, info] of connectedDevices.entries()) {
+          noReconnect.add(id); // page is dying — don't let the disconnect event schedule a reconnect
           try { info?.gattServer?.disconnect?.(); } catch { /* already gone */ }
         }
       });
@@ -273,11 +274,61 @@ export async function stopScan(): Promise<void> {
   }
 }
 
+// Auto-reconnect. The device itself is rock-solid (survives heavy traffic, malformed
+// frames, rapid reconnects — never crashes or drops the link on its own), so a
+// disconnect is almost always transient/external: RF/range (an LED curtain across the
+// room sits at a weak RSSI), iOS backgrounding the app, or a brief power blip. Previously
+// any drop just removed the device and left the user to manually re-scan + reconnect —
+// which is the felt "disconnect issue". Now we transparently retry (backoff) unless the
+// user asked to disconnect.
+const reconnectDevices = new Map<string, any>();   // original device arg, for re-connect
+const reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const noReconnect = new Set<string>();             // user-initiated disconnect / page unload
+// Backoff schedule (ms); index past the end repeats the last value.
+const RECONNECT_BACKOFF_MS = [1500, 3000, 5000, 8000, 12000, 15000];
+const RECONNECT_MAX_ATTEMPTS = 12;                 // ~2 min of trying, then stop (device likely off)
+
+function scheduleReconnect(deviceId: string, attempt: number): void {
+  if (noReconnect.has(deviceId)) return;            // user asked to disconnect
+  if (connectedDevices.has(deviceId)) return;       // already back
+  if (reconnectTimers.has(deviceId)) return;        // one already in flight
+  if (!reconnectDevices.has(deviceId)) return;      // nothing to reconnect to
+  if (attempt >= RECONNECT_MAX_ATTEMPTS) {
+    console.warn(`[reconnect] giving up on ${deviceId} after ${attempt} attempts`);
+    reconnectDevices.delete(deviceId);
+    return;
+  }
+  const delay = RECONNECT_BACKOFF_MS[Math.min(attempt, RECONNECT_BACKOFF_MS.length - 1)];
+  console.log(`[reconnect] ${deviceId} attempt ${attempt + 1}/${RECONNECT_MAX_ATTEMPTS} in ${delay}ms`);
+  const timer = setTimeout(async () => {
+    reconnectTimers.delete(deviceId);
+    if (noReconnect.has(deviceId) || connectedDevices.has(deviceId)) return;
+    const device = reconnectDevices.get(deviceId);
+    if (!device) return;
+    try {
+      await connectToDevice(device);               // re-registers sync + disconnect handling
+      console.log(`[reconnect] ${deviceId} reconnected`);
+    } catch (err) {
+      console.warn(`[reconnect] ${deviceId} attempt ${attempt + 1} failed:`, err);
+      scheduleReconnect(deviceId, attempt + 1);
+    }
+  }, delay);
+  reconnectTimers.set(deviceId, timer);
+}
+
+/** Cancel any pending/further reconnection for a device (user-initiated disconnect, unload). */
+function cancelReconnect(deviceId: string): void {
+  const t = reconnectTimers.get(deviceId);
+  if (t) { clearTimeout(t); reconnectTimers.delete(deviceId); }
+  reconnectDevices.delete(deviceId);
+}
+
 // Shared cleanup for any disconnect path: the native onDisconnect callback, the
 // web `gattserverdisconnected` event, or an explicit disconnectFromDevice().
-// Idempotent — safe to call more than once for the same device.
-function handleDeviceDisconnected(deviceId: string): void {
-  console.log(`Device ${deviceId} disconnected — cleaning up`);
+// Idempotent — safe to call more than once for the same device. `intentional` (user
+// disconnect / unload) suppresses auto-reconnect; any other drop schedules one.
+function handleDeviceDisconnected(deviceId: string, intentional = false): void {
+  console.log(`Device ${deviceId} disconnected — cleaning up${intentional ? ' (intentional)' : ''}`);
   const info = connectedDevices.get(deviceId);
   // Remove the web disconnect listener so it doesn't accumulate across reconnects
   // (the underlying BluetoothDevice object persists).
@@ -289,9 +340,24 @@ function handleDeviceDisconnected(deviceId: string): void {
   // Critical: stop the timestamp-sync interval, otherwise it keeps writing to a
   // dead handle every 10s (e.g. after an ESP32 OTA reboot).
   stopTimestampSync(deviceId);
+
+  if (intentional) {
+    cancelReconnect(deviceId);
+  } else {
+    // Unexpected drop — try to get it back automatically.
+    scheduleReconnect(deviceId, 0);
+  }
 }
 
 export async function connectToDevice(device: any): Promise<void> {
+  // Remember this device so a later unexpected drop can auto-reconnect, and clear any
+  // leftover "don't reconnect" suppression / pending timer from a prior session.
+  if (device?.deviceId) {
+    reconnectDevices.set(device.deviceId, device);
+    noReconnect.delete(device.deviceId);
+    const t = reconnectTimers.get(device.deviceId);
+    if (t) { clearTimeout(t); reconnectTimers.delete(device.deviceId); }
+  }
   try {
     if (isWeb()) {
       const gattServer = await bleSerial(() => device.webDevice.gatt.connect());
@@ -354,6 +420,9 @@ export async function connectToDevice(device: any): Promise<void> {
 }
 
 export async function disconnectFromDevice(deviceId: string): Promise<void> {
+  // User asked to disconnect — suppress auto-reconnect and drop any pending retry.
+  noReconnect.add(deviceId);
+  cancelReconnect(deviceId);
   try {
     if (isWeb()) {
       const deviceInfo = connectedDevices.get(deviceId);
@@ -373,7 +442,7 @@ export async function disconnectFromDevice(deviceId: string): Promise<void> {
   }
   // Centralized cleanup (also runs from the disconnect event/callback; idempotent)
   // — always run it so the device is removed from the UI regardless of the above.
-  handleDeviceDisconnected(deviceId);
+  handleDeviceDisconnected(deviceId, true);
   console.log('Disconnected from device');
 }
 
