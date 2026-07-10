@@ -41,7 +41,7 @@ public:
         uint32_t total = width * height;
         if (!in1) { for (uint32_t i = 0; i < total; i++) out[i] = CRGB::Black; return; }
 
-        int preset = getInt(params, 0, 1);
+        int preset = getInt(params, 0, 2);
         float amount = getFloat(params, 1, 1.0f);
         if (amount < 0) amount = 0; if (amount > 1) amount = 1;
 
@@ -81,7 +81,7 @@ public:
 
     std::vector<ParameterInfo> getParameterInfo() const override {
         return {
-            ParameterInfo("preset", "Preset", ParameterInfo::SELECT, 1,
+            ParameterInfo("preset", "Preset", ParameterInfo::SELECT, 2,
                 std::vector<std::string>{ "Custom", "Sharpen", "Edge Detect", "Emboss", "Outline" }),
             ParameterInfo("amount", "Amount", ParameterInfo::FLOAT, 1.0f, 0.0f, 1.0f),
             ParameterInfo("k1", "k1", ParameterInfo::FLOAT, 0.0f, -8.0f, 8.0f),
