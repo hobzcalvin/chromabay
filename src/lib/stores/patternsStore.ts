@@ -3,8 +3,18 @@ import { Preferences } from '@capacitor/preferences';
 import { Capacitor } from '@capacitor/core';
 import type { SerializedPattern } from '$lib/patternSerializer';
 
-// Current patterns store - now just array of SerializedPattern
-export const patterns = writable<SerializedPattern[]>([]);
+// Current patterns store - now just array of SerializedPattern.
+// Wrapped so ensureMeta (which assigns a stable id) always runs before
+// subscribers receive the list, preventing each_key_duplicate in the UI.
+function makePatternsStore() {
+  const { subscribe, set: _set, update } = writable<SerializedPattern[]>([]);
+  function set(list: SerializedPattern[]) {
+    list.forEach(p => ensureMeta(p));
+    _set(list);
+  }
+  return { subscribe, set, update };
+}
+export const patterns = makePatternsStore();
 
 // Currently selected pattern store
 export const currentPattern = writable<SerializedPattern | null>(null);
