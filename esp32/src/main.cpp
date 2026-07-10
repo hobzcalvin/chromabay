@@ -2082,6 +2082,11 @@ void setup() {
     Serial.printf("Device name: %s\n", deviceName.c_str());
     loadButtonPin(); // configure the physical button GPIO (if any)
     NimBLEDevice::init(deviceName.c_str());
+    // Transmit at max power (+9dBm). NimBLE's default is much lower, which showed up as a
+    // weak RSSI (~-80dBm) even at close range and made the link drop-prone. Applies to the
+    // whole radio — advertising, connections, AND OTA transfers — so it also makes firmware
+    // updates more reliable. Set once at boot; costs negligible extra current.
+    NimBLEDevice::setPower(ESP_PWR_LVL_P9);
     // Negotiate a large ATT MTU so OTA chunks (up to MAX_BLE_CHUNK_SIZE = 500B) ride in
     // a single ATT packet instead of being fragmented — fewer link-layer round-trips.
     // The central (iOS) still caps the actual negotiated value; this just raises our max.
