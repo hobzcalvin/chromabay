@@ -106,6 +106,11 @@
     setNodeParameter(node.id, param.name, value);
   }
 
+  // Double-click / double-tap a slider to snap it back to the operator's default.
+  function resetParam(param: Parameter) {
+    setNodeParameter(node.id, param.name, param.default);
+  }
+
   // SVG Fill: the `path` param stores a flattened polygon blob, not the raw SVG. The user
   // pastes a `d` string or picks a preset; we flatten in-browser and store the blob.
   let svgText = '';
@@ -418,12 +423,14 @@
               <input
                 id={inputId}
                 type="range"
-                min={param.min ?? 0} 
-                max={param.max ?? 1} 
+                min={param.min ?? 0}
+                max={param.max ?? 1}
                 step={((param.max ?? 1) - (param.min ?? 0)) / 100}
                 value={getParameterValue(param)}
+                title="Double-click to reset to default"
                 oninput={(e) => handleRangeChange(param, e)}
                 onchange={(e) => handleRangeChange(param, e)}
+                ondblclick={() => resetParam(param)}
                 ontouchstart={(e) => e.stopPropagation()}
                 ontouchmove={(e) => e.stopPropagation()}
                 ontouchend={(e) => e.stopPropagation()}
@@ -445,12 +452,14 @@
               <input
                 id={inputId}
                 type="range"
-                min={param.min || 0} 
-                max={param.max || 100} 
+                min={param.min || 0}
+                max={param.max || 100}
                 step="1"
                 value={getParameterValue(param)}
+                title="Double-click to reset to default"
                 oninput={(e) => handleRangeChange(param, e)}
                 onchange={(e) => handleRangeChange(param, e)}
+                ondblclick={() => resetParam(param)}
                 ontouchstart={(e) => e.stopPropagation()}
                 ontouchmove={(e) => e.stopPropagation()}
                 ontouchend={(e) => e.stopPropagation()}
@@ -459,15 +468,17 @@
             </div>
           {:else if param.type === 'integer'}
             <div class="integer-control">
-              <input 
+              <input
                 id={inputId}
-                type="range" 
-                min={param.min || 0} 
-                max={param.max || 100} 
+                type="range"
+                min={param.min || 0}
+                max={param.max || 100}
                 step="1"
                 value={getParameterValue(param)}
+                title="Double-click to reset to default"
                 oninput={(e) => handleRangeChange(param, e)}
                 onchange={(e) => handleRangeChange(param, e)}
+                ondblclick={() => resetParam(param)}
                 ontouchstart={(e) => e.stopPropagation()}
                 ontouchmove={(e) => e.stopPropagation()}
                 ontouchend={(e) => e.stopPropagation()}
@@ -486,15 +497,17 @@
             </div>
           {:else if param.type === 'hue'}
             <div class="hue-control">
-              <input 
+              <input
                 id={inputId}
-                type="range" 
-                min="0" 
-                max="360" 
+                type="range"
+                min="0"
+                max="360"
                 step="1"
                 value={getParameterValue(param)}
+                title="Double-click to reset to default"
                 oninput={(e) => handleRangeChange(param, e)}
                 onchange={(e) => handleRangeChange(param, e)}
+                ondblclick={() => resetParam(param)}
                 ontouchstart={(e) => e.stopPropagation()}
                 ontouchmove={(e) => e.stopPropagation()}
                 ontouchend={(e) => e.stopPropagation()}
