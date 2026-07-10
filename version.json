@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.182",
-  "downloadUrl": "https://chromabay.app/live-update-0.0.1.182.zip",
-  "buildDate": "2026-07-10T14:51:12Z",
-  "commitHash": "42494b5660a82df81a4087f7a352eeb7b4f07129",
-  "commitMessage": "ESP32: set BLE TX power to max (+9dBm)"
+  "version": "0.0.1.183",
+  "downloadUrl": "https://chromabay.app/live-update-0.0.1.183.zip",
+  "buildDate": "2026-07-10T14:56:41Z",
+  "commitHash": "4e8b0c7555ac9da7af223693998b27dccdf527b1",
+  "commitMessage": "Add Node: classify Blur + Convolve as Modifiers, not Generators"
 }
