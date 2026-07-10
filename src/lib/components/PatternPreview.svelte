@@ -3,6 +3,7 @@
   import { writable } from 'svelte/store';
   import type { SerializedPattern } from '$lib/patternSerializer';
   import { deserializePatternWhenReady } from '$lib/patternSerializer';
+  import { clearNodeModulators } from '$lib/stores/modulatorStore';
   import ContextualPatternNode from './ContextualPatternNode.svelte';
   import { SvelteFlow, type Node, type Edge } from '@xyflow/svelte';
   import '@xyflow/svelte/dist/style.css';
@@ -30,6 +31,9 @@
   let canvasElement: HTMLCanvasElement;
   let ctx: CanvasRenderingContext2D | null = null;
   let animationFrame: number | null = null;
+  // Node IDs this preview registered modulators under (unique per deserialize) —
+  // cleared on unmount so the shared modulators store doesn't grow with every thumbnail.
+  let modulatedNodeIds: string[] = [];
 
   // Offscreen canvas for scaling the output
   const offscreen = document.createElement('canvas');
@@ -71,11 +75,15 @@
     // applyInteractiveParameters: false — previews are isolated; they must not
     // touch the global interactiveParameters store (doing so clobbered the live
     // pattern's interactive flags, so navigating to /patterns lost the knobs).
-    deserializePatternWhenReady(pattern, 5000, { applyInteractiveParameters: false })
+    // applyModulators: true — but we DO want automation to animate in the thumbnail.
+    // Modulators are keyed by this deserialize's unique node IDs, so they can't
+    // clobber the live pattern; we clear them again on unmount (see onDestroy).
+    deserializePatternWhenReady(pattern, 5000, { applyInteractiveParameters: false, applyModulators: true })
       .then(({ nodes, edges, nodeParameters }) => {
         localFlowNodes.set(nodes);
         localFlowEdges.set(edges);
         localNodeParameters.set(nodeParameters);
+        modulatedNodeIds = nodes.map(n => n.id);
       })
       .catch((err) => console.warn('PatternPreview: failed to deserialize pattern', err));
 
@@ -84,6 +92,8 @@
 
   onDestroy(() => {
     if (animationFrame) cancelAnimationFrame(animationFrame);
+    // Release this preview's automation entries from the shared modulators store.
+    for (const id of modulatedNodeIds) clearNodeModulators(id);
   });
 </script>
 

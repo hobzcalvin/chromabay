@@ -620,6 +620,16 @@ export interface DeserializeOptions {
    * strips the live pattern's interactive flags.
    */
   applyInteractiveParameters?: boolean;
+  /**
+   * Whether to apply this pattern's per-node parameter AUTOMATION (modulators, `m`)
+   * to the modulators store so the render animates them. Defaults to
+   * `applyInteractiveParameters` for backward compatibility, but previews override
+   * it to TRUE independently: modulators are keyed by this deserialize's UNIQUE node
+   * IDs (`deserialized_<type>_<ts>_<i>`), so registering them can't clobber the live
+   * pattern's automation the way interactive flags would. Preview callers must clear
+   * these entries on unmount (see PatternPreview) to avoid growing the store.
+   */
+  applyModulators?: boolean;
 }
 
 export function deserializePattern(
@@ -627,6 +637,7 @@ export function deserializePattern(
   options: DeserializeOptions = {}
 ): { nodes: Node[]; edges: Edge[]; nodeParameters: Map<string, Map<string, any>> } {
   const applyInteractiveParameters = options.applyInteractiveParameters ?? true;
+  const applyModulators = options.applyModulators ?? applyInteractiveParameters;
 
   // Clear existing interactive parameters before loading new pattern (global load only)
   if (applyInteractiveParameters) {
@@ -747,8 +758,10 @@ export function deserializePattern(
       }
     }
 
-    // Restore parameter automation (global load only, like interactive params).
-    if (sNode.m && applyInteractiveParameters) {
+    // Restore parameter automation. Applied for the global load AND for isolated
+    // previews (applyModulators), so the patterns-list thumbnails actually animate
+    // their automated params — decoupled from interactive flags, which previews skip.
+    if (sNode.m && applyModulators) {
       for (const paramName in sNode.m) {
         const c = sNode.m[paramName];
         setModulator(nodeId, paramName, { shape: c.s, min: c.lo, max: c.hi, period: c.pr });
