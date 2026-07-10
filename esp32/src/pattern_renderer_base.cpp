@@ -20,6 +20,17 @@ static ParameterValue selectValueFor(const ParameterInfo& info, const char* valu
     return ParameterValue(std::string(value));
 }
 
+// Read a msgpack string node in FULL. The param-value reads below used a fixed
+// char[32], which silently truncated long STRING params — an SVG-fill encoded path
+// (~300-465 chars) became 31 chars of garbage, the operator's decode failed, and it
+// fell back to its default shape (a heart). SELECT labels are short, so the length
+// only matters for free STRING params like the SVG path.
+static std::string mpackFullStr(mpack_node_t node) {
+    size_t len = mpack_node_strlen(node);
+    const char* p = mpack_node_str(node);
+    return (p && len) ? std::string(p, len) : std::string();
+}
+
 // PatternRendererBase implementation using native operators
 PatternRendererBase::PatternRendererBase(LedConfig::LedManager* ledMgr) 
     : ledManager(ledMgr), buffers(nullptr), lastFrameTime(0), frameStartTime(0), globalTime(0), hasPattern(false) {
@@ -590,9 +601,8 @@ bool PatternRendererBase::loadPatternFromMessagePack(const uint8_t* data, unsign
                             } else if (paramType == mpack_type_str) {
                                 // SELECT values arrive as the option label; store its index so
                                 // operators can read it with getInt(). Other strings kept as-is.
-                                char vb[32];
-                                mpack_node_copy_cstr(paramNode, vb, sizeof(vb));
-                                node.parameters[j] = selectValueFor(paramInfo[j], vb);
+                                std::string vb = mpackFullStr(paramNode);
+                                node.parameters[j] = selectValueFor(paramInfo[j], vb.c_str());
                             }
                             // For nil or unknown types, keep the default value
                         }
@@ -629,9 +639,8 @@ bool PatternRendererBase::loadPatternFromMessagePack(const uint8_t* data, unsign
                                             bool value = mpack_node_bool(valueNode);
                                             node.parameters[k] = ParameterValue(value);
                                         } else if (valueType == mpack_type_str) {
-                                            char vb[32];
-                                            mpack_node_copy_cstr(valueNode, vb, sizeof(vb));
-                                            node.parameters[k] = selectValueFor(paramInfo[k], vb);
+                                            std::string vb = mpackFullStr(valueNode);
+                                            node.parameters[k] = selectValueFor(paramInfo[k], vb.c_str());
                                         }
                                         // For nil or unknown types, keep default value
                                         break;
