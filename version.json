@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.172",
-  "downloadUrl": "https://chromabay.app/live-update-0.0.1.172.zip",
-  "buildDate": "2026-07-10T02:51:29Z",
-  "commitHash": "a99a10cf704ca419dc0f092045fa037dd098d0fe",
-  "commitMessage": "Live update: native reinstalls win over stale bundles (auto-reset + build bump)"
+  "version": "0.0.1.173",
+  "downloadUrl": "https://chromabay.app/live-update-0.0.1.173.zip",
+  "buildDate": "2026-07-10T03:39:24Z",
+  "commitHash": "602508b47480be2eaf899d220e0d3a64e20282f5",
+  "commitMessage": "Firmware: log stored library pattern names at boot (diagnostic)"
 }
