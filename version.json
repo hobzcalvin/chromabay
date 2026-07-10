@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.183",
-  "downloadUrl": "https://chromabay.app/live-update-0.0.1.183.zip",
-  "buildDate": "2026-07-10T14:56:41Z",
-  "commitHash": "4e8b0c7555ac9da7af223693998b27dccdf527b1",
-  "commitMessage": "Add Node: classify Blur + Convolve as Modifiers, not Generators"
+  "version": "0.0.1.184",
+  "downloadUrl": "https://chromabay.app/live-update-0.0.1.184.zip",
+  "buildDate": "2026-07-10T15:21:43Z",
+  "commitHash": "4eea5fbdb135aa68d46735ea498bee8a8f1b6834",
+  "commitMessage": "Convolve: default preset to Edge Detect"
 }
