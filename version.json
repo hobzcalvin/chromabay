@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.178",
-  "downloadUrl": "https://chromabay.app/live-update-0.0.1.178.zip",
-  "buildDate": "2026-07-10T06:38:04Z",
-  "commitHash": "9af7e75b161d4cfebc59c896fbeb66a62a7aba7d",
-  "commitMessage": "Automation: push to device the moment it's set, not on next edit"
+  "version": "0.0.1.179",
+  "downloadUrl": "https://chromabay.app/live-update-0.0.1.179.zip",
+  "buildDate": "2026-07-10T06:43:58Z",
+  "commitHash": "f1b304b4c4d3aacc3bb1008e4b9dc48174e4ef3c",
+  "commitMessage": "Param sliders: double-click / double-tap to reset to default"
 }
