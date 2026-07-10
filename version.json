@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.180",
-  "downloadUrl": "https://chromabay.app/live-update-0.0.1.180.zip",
-  "buildDate": "2026-07-10T07:02:05Z",
-  "commitHash": "982f45a2de67bc8f0781b7eb0d87a4c216f8a94b",
-  "commitMessage": "BLE: auto-reconnect on unexpected disconnects"
+  "version": "0.0.1.181",
+  "downloadUrl": "https://chromabay.app/live-update-0.0.1.181.zip",
+  "buildDate": "2026-07-10T14:25:06Z",
+  "commitHash": "462d2ea875adf8d0db69980be6abb5f19c98b30b",
+  "commitMessage": "Fix subscribeRealtime race condition preventing double Supabase channel subscription"
 }
