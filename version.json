@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.175",
-  "downloadUrl": "https://chromabay.app/live-update-0.0.1.175.zip",
-  "buildDate": "2026-07-10T06:08:31Z",
-  "commitHash": "68d89087f53fbb830761bc4b692e933099d214e4",
-  "commitMessage": "Pattern sync: chunk PATTERN_SYNC so large (SVG-fill) patterns transfer"
+  "version": "0.0.1.176",
+  "downloadUrl": "https://chromabay.app/live-update-0.0.1.176.zip",
+  "buildDate": "2026-07-10T06:11:27Z",
+  "commitHash": "944e0cdb190ba02fb192cb65b1453eabd5dcce61",
+  "commitMessage": "Patterns list: key by id, not name — fixes crash on duplicate names"
 }
