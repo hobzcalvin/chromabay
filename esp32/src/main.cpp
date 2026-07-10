@@ -181,6 +181,15 @@ static bool newPatternAvailable = false;
 // mid-parse on the loop task -> use-after-free -> garbage frame (rainbow artifacts).
 static portMUX_TYPE patternMux = portMUX_INITIALIZER_UNLOCKED;
 
+// Pattern-sync reassembly. A pattern can exceed one BLE write (a CoreBluetooth value
+// caps at 512B — e.g. an SVG-fill pattern with a detailed path), so the app sends it in
+// chunks framed [u16 totalLen LE][u16 offset LE][payload], same scheme as LAYOUT_SET.
+// These are touched only by the BLE host task (onWrite), so no lock is needed here;
+// the completed buffer is handed to the loop task via patternBuffer under patternMux.
+static uint8_t* patternRxBuf = nullptr;
+static size_t patternRxSize = 0;
+static size_t patternRxAccum = 0;
+
 // Debounced pattern persistence. The pattern is applied to the renderer instantly on
 // every BLE update (live preview is unaffected), but writing to flash on every update
 // would thrash LittleFS during editing. We stage the latest pattern and persist it
@@ -960,28 +969,39 @@ class CalibrationCallbacks : public NimBLECharacteristicCallbacks {
 // Pattern Sync Callbacks - for receiving messagepack-encoded patterns
 class PatternSyncCallbacks : public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic* pCharacteristic) {
-        std::string rxValue = pCharacteristic->getValue();
-        if (rxValue.length() == 0) return;
+        std::string value = pCharacteristic->getValue();
+        if (value.length() < 4) return; // need [u16 totalLen][u16 offset]
+        const uint8_t* d = (const uint8_t*)value.data();
+        uint16_t totalLen = (uint16_t)(d[0] | (d[1] << 8));
+        uint16_t offset   = (uint16_t)(d[2] | (d[3] << 8));
+        size_t dataLen = value.length() - 4;
+        if (totalLen == 0 || totalLen > 16384) return; // sanity
 
-        // Build the new buffer OUTSIDE the critical section — malloc/free must not
-        // run while holding a portMUX spinlock.
-        size_t len = rxValue.length();
-        uint8_t* buf = (uint8_t*)malloc(len);
-        if (buf == nullptr) {
-            Serial.println("Pattern Sync: Failed to allocate memory for pattern");
-            return;
+        // Reassemble chunks (malloc/free here run OUTSIDE the spinlock, on the BLE task).
+        if (offset == 0) { // first chunk: (re)allocate the reassembly buffer
+            if (patternRxBuf) { free(patternRxBuf); patternRxBuf = nullptr; }
+            patternRxBuf = (uint8_t*)malloc(totalLen);
+            patternRxSize = patternRxBuf ? totalLen : 0;
+            patternRxAccum = 0;
+            if (!patternRxBuf) { Serial.println("Pattern Sync: alloc failed"); return; }
         }
-        memcpy(buf, rxValue.data(), len);
+        if (!patternRxBuf || (size_t)offset + dataLen > patternRxSize) return; // out of order / overrun
+        memcpy(patternRxBuf + offset, d + 4, dataLen);
+        patternRxAccum = (size_t)offset + dataLen; // writes are serialized + in order
+        if (patternRxAccum < patternRxSize) return; // more chunks still coming
 
-        // Atomically publish the new buffer to the loop task. We only swap pointers
-        // under the lock; the previous unconsumed buffer is freed afterwards, outside
-        // the lock. The loop task takes ownership before parsing (see
-        // processReceivedPattern), so it can never read a buffer we free here.
+        // Complete pattern reassembled — hand the buffer to the loop task (which takes
+        // ownership and frees it). We only swap pointers under the lock; the previous
+        // unconsumed buffer is freed afterwards, outside the lock.
+        uint8_t* full = patternRxBuf;
+        size_t fullLen = patternRxSize;
+        patternRxBuf = nullptr; patternRxSize = 0; patternRxAccum = 0;
+
         uint8_t* old = nullptr;
         portENTER_CRITICAL(&patternMux);
         old = patternBuffer;
-        patternBuffer = buf;
-        patternBufferSize = len;
+        patternBuffer = full;
+        patternBufferSize = fullLen;
         newPatternAvailable = true;
         portEXIT_CRITICAL(&patternMux);
         if (old != nullptr) free(old);

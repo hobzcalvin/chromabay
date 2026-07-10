@@ -827,16 +827,15 @@ export async function syncPatternToAllDevices(): Promise<void> {
     console.log('Serialized pattern:', serializedPattern);
     
     // Encode as MessagePack
-    const msgpackData = msgpackEncode(serializedPattern);
-    const dataView = new DataView(msgpackData.buffer, msgpackData.byteOffset, msgpackData.byteLength);
-    
+    const msgpackData = msgpackEncode(serializedPattern) as Uint8Array;
+
     console.log(`Pattern serialized: ${msgpackData.byteLength} bytes`);
-    
+
     // Send to all connected devices
     const syncPromises = Array.from(connectedDevices.keys()).map(async (deviceId) => {
       try {
         console.log(`Sending pattern to device ${deviceId}`);
-        await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_PATTERN_SYNC, dataView);
+        await sendPatternChunked(deviceId, msgpackData);
         console.log(`Pattern sent successfully to device ${deviceId}`);
       } catch (error) {
         console.error(`Failed to send pattern to device ${deviceId}:`, error);
@@ -878,8 +877,32 @@ export async function sendSinglePatternToDevice(deviceId: string, pattern: any):
   // Strip app/cloud-sync metadata (id/updatedAt/deleted) — the device wire is name+output only.
   const clean = { ...pattern, meta: { name: pattern?.meta?.name, output: pattern?.meta?.output ?? 1 } };
   const msgpackData = msgpackEncode(clean) as Uint8Array;
-  const dataView = new DataView(msgpackData.buffer, msgpackData.byteOffset, msgpackData.byteLength);
-  await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_PATTERN_SYNC, dataView);
+  await sendPatternChunked(deviceId, msgpackData);
+}
+
+/**
+ * Send a msgpack-encoded pattern to PATTERN_SYNC in chunks framed
+ * [u16 totalLen LE][u16 offset LE][payload], reassembled on the device (mirrors
+ * LAYOUT_SET). A single BLE write is capped ~512B by CoreBluetooth, so a larger
+ * pattern (e.g. a detailed SVG-fill path) would otherwise be silently truncated
+ * and never load. Writes are serialized + in-order via bleSerial, which the
+ * device's offset-based reassembly relies on.
+ */
+async function sendPatternChunked(deviceId: string, msgpackData: Uint8Array): Promise<void> {
+  const total = msgpackData.byteLength;
+  if (total === 0) return;
+  const HEADER = 4;
+  const MAX_PAYLOAD = MAX_BLE_CHUNK_SIZE - HEADER; // keep each write under the MTU cap
+  for (let offset = 0; offset < total; offset += MAX_PAYLOAD) {
+    const payloadLen = Math.min(MAX_PAYLOAD, total - offset);
+    const frame = new Uint8Array(HEADER + payloadLen);
+    const dv = new DataView(frame.buffer);
+    dv.setUint16(0, total, true);  // totalLen LE
+    dv.setUint16(2, offset, true); // offset LE
+    frame.set(msgpackData.subarray(offset, offset + payloadLen), HEADER);
+    const view = new DataView(frame.buffer, 0, frame.byteLength);
+    await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_PATTERN_SYNC, view);
+  }
 }
 
 // === ON-DEVICE PATTERN LIBRARY MAINTENANCE ===
