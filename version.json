@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.190",
-  "downloadUrl": "https://chromabay.app/live-update-0.0.1.190.zip",
-  "buildDate": "2026-07-11T21:50:40Z",
-  "commitHash": "2347bb55bf4cbe64f847203544ae2146a447bd76",
-  "commitMessage": "Interact: enum knobs (envelope + any select param), with fit-to-knob labels"
+  "version": "0.0.1.192",
+  "downloadUrl": "https://chromabay.app/live-update-0.0.1.192.zip",
+  "buildDate": "2026-07-11T21:59:27Z",
+  "commitHash": "b84e552916d4ea2f8b64020067c7c0866dc90219",
+  "commitMessage": "deploy: remove template-expression braces from a comment that broke workflow compile"
 }
