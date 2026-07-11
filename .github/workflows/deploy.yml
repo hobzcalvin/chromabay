@@ -79,9 +79,9 @@ jobs:
           echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
           echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT  # ISO 8601 UTC so the app can localize it
           echo "COMMIT_HASH=${{ github.sha }}" >> $GITHUB_OUTPUT
-          # Strip characters that break the downstream `export VITE_COMMIT_MESSAGE="…"` shell line
-          # and the version.json heredoc when this value is inlined via ${{ }} — double quotes,
-          # backticks, backslashes, dollar signs. (A commit subject with "quotes" failed the build.)
+          # Strip characters that break the downstream export VITE_COMMIT_MESSAGE line and the
+          # version.json heredoc when this value is template-substituted into them: double quotes,
+          # backticks, backslashes, dollar signs. (A commit subject with quotes failed the build.)
           echo "COMMIT_MESSAGE=$(git log -1 --pretty=%B | head -1 | tr -d '"`\\$')" >> $GITHUB_OUTPUT
 
       - name: Build for GitHub Pages
