@@ -237,6 +237,13 @@ void PatternRendererBase::setPattern(Pattern&& pattern) {
             // are discarded.
             for (size_t i = 0; i < pattern.nodes.size(); i++) {
                 pattern.nodes[i].op = std::move(currentPattern.nodes[i].op);
+                // Carry modulator phase state so a live period/speed change stays continuous
+                // on-device (the app resends the whole pattern on every tweak).
+                auto& oldMods = currentPattern.nodes[i].modulators;
+                auto& newMods = pattern.nodes[i].modulators;
+                for (size_t j = 0; j < newMods.size() && j < oldMods.size(); j++) {
+                    newMods[j].st = oldMods[j].st;
+                }
             }
             preserved = true;
         }
@@ -328,7 +335,7 @@ void PatternRendererBase::renderGraphAt(uint16_t width, uint16_t height) {
             for (size_t i = 0; i < node.modulators.size() && i < _effParams.size(); i++) {
                 const ParamModulator& md = node.modulators[i];
                 if (!md.active) continue;
-                float v = Modulation::modulate(md.shape, md.mn, md.mx, md.period, frameFloatTime, (uint32_t)i);
+                float v = Modulation::modulate(md.st, md.shape, md.mn, md.mx, md.period, frameFloatTime, (uint32_t)i);
                 _effParams[i] = md.isInt ? ParameterValue((int)lroundf(v)) : ParameterValue(v);
             }
             params = &_effParams;

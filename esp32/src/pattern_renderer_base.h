@@ -22,6 +22,9 @@ struct ParamModulator {
     bool isInt = false;   // round the modulated value for integer params (cached from param info)
     int shape = 0;
     float mn = 0.0f, mx = 1.0f, period = 1.0f;
+    // Phase state (mutable: updated during const render) so a live period change stays continuous.
+    // Carried across pattern reloads by the PRESERVED path in setPattern().
+    mutable Modulation::ModState st;
 };
 
 // Node structure for pattern execution

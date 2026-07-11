@@ -48,4 +48,29 @@ inline float modulate(int shape, float mn, float mx, float period, uint32_t tMs,
     return mn + (mx - mn) * shaped01(shape, phase, seed);
 }
 
+// Per-parameter state so the phase can stay continuous when `period` is changed LIVE (e.g. an
+// interactive speed knob). Persists across frames per (operator, parameter).
+struct ModState {
+    float offset = 0.0f;     // phase offset that absorbs live period changes
+    float lastPeriod = 0.0f;
+    bool  init = false;
+};
+
+// Stateful modulate: phase is still anchored to the shared clock (so a STEADY automation stays
+// in sync across devices + preview), but when `period` changes we shift `offset` to keep the
+// phase continuous instead of snapping — which is what caused the "crazy spin" when dragging the
+// speed. Same fix the operators use with advancePhase, but done here without losing clock-sync.
+inline float modulate(ModState& st, int shape, float mn, float mx, float period, uint32_t tMs, uint32_t seed) {
+    float tSec = (float)tMs * 0.001f;
+    float per = period > 0.0001f ? period : 0.0001f;
+    if (!st.init) { st.lastPeriod = per; st.offset = 0.0f; st.init = true; }
+    else if (per != st.lastPeriod) {
+        float oldPhase = tSec / st.lastPeriod + st.offset;
+        st.offset = oldPhase - tSec / per;   // keep phase continuous across the change
+        st.lastPeriod = per;
+    }
+    float phase = tSec / per + st.offset;
+    return mn + (mx - mn) * shaped01(shape, phase, seed);
+}
+
 } // namespace Modulation
