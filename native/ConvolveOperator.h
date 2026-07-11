@@ -54,13 +54,22 @@ public:
         if (_src.size() != total) _src.resize(total);
         for (uint32_t i = 0; i < total; i++) _src[i] = in1[i];
 
+        // Resolution-independent reach. A 3x3 kernel is defined in pixels, so on a high-res
+        // display it would only touch immediate neighbours and its effect would shrink to a
+        // hairline. Sample the 3x3 neighbourhood at a spacing (d px) that scales with the
+        // display, anchored so a ~REF_DIM-pixel display uses the native 1px 3x3. Below that it
+        // simply can't get finer than adjacent pixels (d stays 1).
+        const int REF_DIM = 48;
+        int base = (int)(width < height ? width : height);
+        int d = (base + REF_DIM / 2) / REF_DIM; if (d < 1) d = 1; // round(base / REF_DIM)
+
         for (uint32_t y = 0; y < height; y++) {
             for (uint32_t x = 0; x < width; x++) {
                 float r = 0, g = 0, b = 0;
                 for (int ky = -1; ky <= 1; ky++) {
-                    int yy = (int)y + ky; if (yy < 0) yy = 0; if (yy >= (int)height) yy = (int)height - 1;
+                    int yy = (int)y + ky * d; if (yy < 0) yy = 0; if (yy >= (int)height) yy = (int)height - 1;
                     for (int kx = -1; kx <= 1; kx++) {
-                        int xx = (int)x + kx; if (xx < 0) xx = 0; if (xx >= (int)width) xx = (int)width - 1;
+                        int xx = (int)x + kx * d; if (xx < 0) xx = 0; if (xx >= (int)width) xx = (int)width - 1;
                         float w = ker.k[(ky + 1) * 3 + (kx + 1)];
                         const CRGB& c = _src[(size_t)yy * width + xx];
                         r += c.r * w; g += c.g * w; b += c.b * w;
