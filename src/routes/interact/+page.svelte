@@ -24,8 +24,9 @@ import { get } from 'svelte/store';
     max: number;
     step: number;
     order: number;
-    kind: 'knob' | 'color' | 'mod';   // color = hue+sat wheel; mod = one field of an automation (live)
+    kind: 'knob' | 'color' | 'mod' | 'enum';   // color = hue+sat wheel; mod = automation field; enum = a select
     modField?: ModField;              // for kind 'mod': which automation field this knob drives
+    labels?: string[];                // for enum knobs (select options, or automation envelope shapes)
     satParamName?: string;
     satValue?: number;
   }
@@ -105,6 +106,9 @@ import { get } from 'svelte/store';
           const cur = getModulator(knob.nodeId, knob.paramName);
           if (cur) setModulator(knob.nodeId, knob.paramName,
             { ...cur, [knob.modField]: knob.modField === 'shape' ? Math.round(knob.value) : knob.value });
+        } else if (knob.kind === 'enum') {
+          // Select param: the stored value is the option index (as a string).
+          setNodeParameter(knob.nodeId, knob.paramName, String(Math.round(knob.value)));
         } else {
           setNodeParameter(knob.nodeId, knob.paramName, knob.value);
           // Note: setNodeParameter already handles auto-save with debouncing
@@ -186,7 +190,11 @@ import { get } from 'svelte/store';
           max = 360;
           step = 1;
         }
-        
+
+        // Enum/select: the knob steps through the options (value = option index) and shows labels.
+        const selOptions = (paramDef.type as string) === 'select' ? (paramDef.options ?? []) : null;
+        if (selOptions) { min = 0; max = Math.max(0, selOptions.length - 1); step = 1; }
+
         // A hue param on an operator that also has saturation → a colour wheel (controls both).
         const satDef = nodeDefinition.params.find((p: Parameter) => p.name === 'saturation');
         const isColor = paramName === 'hue' && !!satDef;
@@ -199,12 +207,13 @@ import { get } from 'svelte/store';
             ? `${node.data.label || nodeDefinition.name} Color`
             : `${node.data.label || nodeDefinition.name} ${paramDef.label}`,
           nodeType: node.data.type as string,
-          value: currentValue,
+          value: selOptions ? (Number(currentValue) || 0) : currentValue,
           min,
           max,
           step,
           order: 0, // Default order for now
-          kind: isColor ? 'color' : 'knob',
+          kind: isColor ? 'color' : (selOptions ? 'enum' : 'knob'),
+          labels: selOptions ? selOptions.map((o) => o.label) : undefined,
           satParamName: isColor ? 'saturation' : undefined,
           satValue,
         };
@@ -246,6 +255,7 @@ import { get } from 'svelte/store';
               nodeId, paramName, nodeType: node.data.type as string,
               paramLabel: `${base} ${suffix}`,
               value, min, max, step, order: 1, kind: 'mod', modField: field,
+              labels: field === 'shape' ? [...SHAPES] : undefined,
             },
             order: 1,
           });
@@ -355,6 +365,7 @@ import { get } from 'svelte/store';
             max={knob.max}
             step={knob.step}
             size={knobSize}
+            labels={knob.labels ?? []}
           />
         {/if}
         <div class="knob-label" style="font-size: {labelFontPx}px; max-width: {knobSize + 48}px;">{knob.paramLabel}</div>

@@ -12,6 +12,9 @@
   export let max: number = 100;
   export let step: number = 1;
   export let size: number = 200;
+  // When set, the knob is an ENUM selector: `value` is the option index, and the option's
+  // text is shown in the face (shrunk to fit) instead of a number.
+  export let labels: string[] = [];
 
   const dispatch = createEventDispatcher<{
     start: void;
@@ -127,7 +130,14 @@
 
   // Reactive values driving the SVG
   $: angle = valueToAngle(value);
-  $: displayValue = value.toFixed(1);
+  $: isEnum = labels.length > 0;
+  $: displayValue = isEnum
+    ? (labels[Math.max(0, Math.min(labels.length - 1, Math.round(value)))] ?? '')
+    : value.toFixed(1);
+  // Shrink the enum label so it fits the knob face (viewBox units); longer labels → smaller.
+  $: valueFontSize = isEnum ? Math.max(18, Math.min(44, 300 / Math.max(String(displayValue).length, 3))) : 44;
+  $: valueAnchor = isEnum ? 'middle' : 'start';
+  $: valueX = isEnum ? 103.5 : 45.3246625;
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -234,11 +244,11 @@
               </g>
               <g id="label">
                   <g id="labeltext" fill-opacity="1" fill="#E6D7D7">
-                      <text id="534f4e02-5541-3607-0966-af0b025d80e0" font-family="Helvetica" font-size="44" font-weight="normal" fill="#E6D7D7" class="text-7 value-text" filter="url(#12f618f7-e258-b597-3ed6-242484ddad8f)">
-          <tspan x="45.3246625" y="117.884225">{displayValue}</tspan>
+                      <text id="534f4e02-5541-3607-0966-af0b025d80e0" font-family="Helvetica" font-size={valueFontSize} font-weight="normal" text-anchor={valueAnchor} fill="#E6D7D7" class="text-7 value-text" filter="url(#12f618f7-e258-b597-3ed6-242484ddad8f)">
+          <tspan x={valueX} y="117.884225" textLength={isEnum ? 170 : undefined} lengthAdjust="spacingAndGlyphs">{displayValue}</tspan>
       </text>
-                      <text id="92ebe866-c281-70c7-7b0e-a373cee013a9" font-family="Helvetica" font-size="44" font-weight="normal" fill="#E6D7D7" class="text-7 value-text">
-          <tspan x="45.3246625" y="117.884225">{displayValue}</tspan>
+                      <text id="92ebe866-c281-70c7-7b0e-a373cee013a9" font-family="Helvetica" font-size={valueFontSize} font-weight="normal" text-anchor={valueAnchor} fill="#E6D7D7" class="text-7 value-text">
+          <tspan x={valueX} y="117.884225" textLength={isEnum ? 170 : undefined} lengthAdjust="spacingAndGlyphs">{displayValue}</tspan>
       </text>
                   </g>
                   <circle id="Oval-6" stroke="#979797" fill-opacity="0.730000019" fill="url(#3cc0e5b8-1f0a-886b-f635-8fcb19212870)" transform="translate(100.351759, 100.351759) rotate(-45.000000) translate(-100.351759, -100.351759) " cx="100.351759" cy="100.351759" r="70.3517588"/>

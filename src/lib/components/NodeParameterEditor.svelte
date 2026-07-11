@@ -265,6 +265,9 @@
 
   const SLIDER_TYPES = new Set(['float', 'integer', 'range', 'hue']);
   const isSlider = (p: Parameter) => SLIDER_TYPES.has(p.type as string);
+  // Interactive (a knob on the Interact page) also works for enums — the knob steps through the
+  // options. Automation (an LFO) still only makes sense for a continuous slider.
+  const canInteract = (p: Parameter) => isSlider(p) || (p.type as string) === 'select';
 
   // Operators with a hue+saturation pair (both FLOAT params) get one combined colour wheel
   // instead of two sliders. The two params stay underneath — so hue automation still works.
@@ -416,9 +419,9 @@
         <div class="parameter-group">
           <div class="parameter-header">
             <label class="parameter-label" for={inputId}>{isColor ? 'Color' : param.label}</label>
-            <!-- Interact (🖐️) + Automate (🔄) only apply to scalar params — a knob/LFO can't
-                 drive a boolean/select/string/color. Gate both on isSlider. -->
-            {#if isSlider(param)}
+            <!-- Interact (🖐️) works for sliders AND enums (knob steps the options); Automate (🔄)
+                 is slider-only (an LFO can't sensibly drive a bool/string/color). -->
+            {#if canInteract(param)}
               <div class="interactive-checkbox">
                 <input
                   type="checkbox"
@@ -428,6 +431,8 @@
                 />
                 <label for="interactive-{inputId}" class="hand-emoji" title="Interactive parameter (shows knob on interact page)">🖐️</label>
               </div>
+            {/if}
+            {#if isSlider(param)}
               <button type="button" class="automate-btn" class:active={!!getModReactive(param.name)}
                 title="Automate this parameter (LFO / noise / random)" onclick={() => openAutomation(param)}>🔄</button>
             {/if}
