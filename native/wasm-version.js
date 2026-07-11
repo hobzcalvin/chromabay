@@ -1,1 +1,1 @@
-window.__WASM_VERSION="dd930d08c557";
+window.__WASM_VERSION="2c52dde5849f";

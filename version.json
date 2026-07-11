@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.184",
-  "downloadUrl": "https://chromabay.app/live-update-0.0.1.184.zip",
-  "buildDate": "2026-07-10T15:21:43Z",
-  "commitHash": "4eea5fbdb135aa68d46735ea498bee8a8f1b6834",
-  "commitMessage": "Convolve: default preset to Edge Detect"
+  "version": "0.0.1.185",
+  "downloadUrl": "https://chromabay.app/live-update-0.0.1.185.zip",
+  "buildDate": "2026-07-11T01:47:20Z",
+  "commitHash": "0759b7a55f8e0d0748b9f66031e08a10103fe067",
+  "commitMessage": "Blur + Convolve: make the effect resolution-independent"
 }
