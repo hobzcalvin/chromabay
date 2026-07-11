@@ -2,7 +2,7 @@
   import { onMount, onDestroy, tick } from 'svelte';
   import { getNodeDefinition, setNodeParameter, getNodeParameter, deleteNode, nodeParameters, type Parameter } from '../flowStore';
   import { getParameterInteractive, setParameterInteractive, MAX_INTERACTIVE_PARAMS, interactiveParameters } from '../stores/interactiveStore';
-  import { modulators, getModulator, setModulator, clearModulator, SHAPES, type ModulatorConfig } from '../stores/modulatorStore';
+  import { modulators, getModulator, setModulator, clearModulator, SHAPES, type ModulatorConfig, type ModField } from '../stores/modulatorStore';
   import { flattenSvgPath, encodedToPath, PRESETS } from '../svgFlatten';
   import ColorWheel from './ColorWheel.svelte';
   import type { Node } from '@xyflow/svelte';
@@ -303,6 +303,17 @@
     const cur = getModulator(node.id, param.name); if (!cur) return;
     setModulator(node.id, param.name, { ...cur, ...patch });
   }
+  // Any automation field (envelope/min/max/period) can be exposed as its own live control
+  // on the Interact page. These toggle membership in the modulator's `interactive` set.
+  function modInteractive(cfg: ModulatorConfig | null | undefined, field: ModField): boolean {
+    return !!cfg?.interactive?.includes(field);
+  }
+  function toggleModInteractive(param: Parameter, field: ModField) {
+    const cur = getModulator(node.id, param.name); if (!cur) return;
+    const set = new Set(cur.interactive ?? []);
+    if (set.has(field)) set.delete(field); else set.add(field);
+    updateMod(param, { interactive: Array.from(set) });
+  }
 
   // Tiny SVG waveform for each shape (viewBox 0 0 32 14).
   function shapePath(s: number): string {
@@ -377,6 +388,13 @@
         <button type="button" class="back-btn" onclick={() => (automating = null)}>← Back</button>
         <h4 class="auto-title">Automate: {p.label}</h4>
         {#if cfg}
+          {#snippet handBtn(field: ModField)}
+            <span class="interactive-checkbox">
+              <input type="checkbox" id="mod-iv-{p.name}-{field}" checked={modInteractive(cfg, field)} onchange={() => toggleModInteractive(p, field)} />
+              <label for="mod-iv-{p.name}-{field}" class="hand-emoji" title="Interactive">🖐️</label>
+            </span>
+          {/snippet}
+          <div class="mod-field"><span class="mod-label">Envelope {@render handBtn('shape')}</span></div>
           <div class="shape-grid">
             {#each SHAPES as name, si}
               <button type="button" class="shape-btn" class:sel={cfg.shape === si} title={name} onclick={() => updateMod(p, { shape: si })}>
@@ -385,13 +403,9 @@
               </button>
             {/each}
           </div>
-          <label class="mod-field">Min <input type="number" step="any" value={cfg.min} oninput={(e) => updateMod(p, { min: parseFloat(e.currentTarget.value) })} /></label>
-          <label class="mod-field">Max <input type="number" step="any" value={cfg.max} oninput={(e) => updateMod(p, { max: parseFloat(e.currentTarget.value) })} /></label>
-          <label class="mod-field">Period (sec/cycle) <input type="number" min="0.1" step="0.1" value={cfg.period} oninput={(e) => updateMod(p, { period: Math.max(0.1, parseFloat(e.currentTarget.value) || 0.1) })} /></label>
-          <div class="interactive-checkbox">
-            <input type="checkbox" id="mod-interactive-{p.name}" checked={!!cfg.interactive} onchange={(e) => updateMod(p, { interactive: e.currentTarget.checked })} />
-            <label for="mod-interactive-{p.name}" class="hand-emoji" title="Interactive speed (shows a Speed knob on the interact page)">🖐️</label>
-          </div>
+          <div class="mod-field"><span class="mod-label">Min {@render handBtn('min')}</span> <input type="number" step="any" value={cfg.min} oninput={(e) => updateMod(p, { min: parseFloat(e.currentTarget.value) })} /></div>
+          <div class="mod-field"><span class="mod-label">Max {@render handBtn('max')}</span> <input type="number" step="any" value={cfg.max} oninput={(e) => updateMod(p, { max: parseFloat(e.currentTarget.value) })} /></div>
+          <div class="mod-field"><span class="mod-label">Period (s) {@render handBtn('period')}</span> <input type="number" min="0.1" step="0.1" value={cfg.period} oninput={(e) => updateMod(p, { period: Math.max(0.1, parseFloat(e.currentTarget.value) || 0.1) })} /></div>
           <button type="button" class="stop-btn" onclick={() => stopAutomation(p)}>Stop automating</button>
         {/if}
       </div>
@@ -986,6 +1000,7 @@
   }
   .shape-btn.sel { border-color: #22d3ee; color: #22d3ee; background: #0e2a30; }
   .mod-field { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 0.8rem; color: #d1d5db; }
+  .mod-label { display: inline-flex; align-items: center; gap: 6px; }
   .mod-field input { width: 90px; background: #111827; border: 1px solid #374151; border-radius: 4px; color: #e5e7eb; padding: 4px 6px; }
   .stop-btn { margin-top: 4px; background: #3f1d1d; border: 1px solid #7f1d1d; color: #fca5a5; border-radius: 6px; padding: 6px; cursor: pointer; font-size: 0.8rem; }
   .svg-input { display: flex; flex-direction: column; gap: 6px; }

@@ -10,12 +10,15 @@ import { writable, get } from 'svelte/store';
 export const SHAPES = ['Sine', 'Triangle', 'Sawtooth', 'Square', 'Random', 'Perlin'] as const;
 export type Shape = number; // 0..5, index into SHAPES
 
+// Which of an automation's own fields can be driven live from the Interact page.
+export type ModField = 'shape' | 'min' | 'max' | 'period';
+
 export interface ModulatorConfig {
   shape: Shape;   // 0..5
   min: number;
   max: number;
   period: number; // seconds per cycle (for Random: seconds between jumps)
-  interactive?: boolean; // expose the automation's speed (period) as a live knob on the Interact page
+  interactive?: ModField[]; // fields exposed as live controls on the Interact page (any subset)
 }
 
 // nodeId -> paramName -> config

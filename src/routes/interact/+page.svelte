@@ -7,7 +7,7 @@ import { loadPatterns, currentPattern, patterns, switchToPattern } from '$lib/st
 import { loadSerializedPattern, initializeDefaultPattern, forceSyncCurrentPattern, 
          flowNodes, nodeParameters, getNodeDefinition, setNodeParameter, type Parameter } from '$lib/flowStore';
 import { interactiveParameters } from '$lib/stores/interactiveStore';
-import { modulators, getModulator, setModulator } from '$lib/stores/modulatorStore';
+import { modulators, getModulator, setModulator, SHAPES, type ModField } from '$lib/stores/modulatorStore';
 import type { Node } from '@xyflow/svelte';
 import { get } from 'svelte/store';
 
@@ -24,7 +24,8 @@ import { get } from 'svelte/store';
     max: number;
     step: number;
     order: number;
-    kind: 'knob' | 'color' | 'speed';   // color = hue+sat wheel; speed = an automation's period (live)
+    kind: 'knob' | 'color' | 'mod';   // color = hue+sat wheel; mod = one field of an automation (live)
+    modField?: ModField;              // for kind 'mod': which automation field this knob drives
     satParamName?: string;
     satValue?: number;
   }
@@ -79,7 +80,8 @@ import { get } from 'svelte/store';
             !dynamicKnobs[i] ||
             knob.nodeId !== dynamicKnobs[i]?.nodeId ||
             knob.paramName !== dynamicKnobs[i]?.paramName ||
-            knob.kind !== dynamicKnobs[i]?.kind
+            knob.kind !== dynamicKnobs[i]?.kind ||
+            knob.modField !== dynamicKnobs[i]?.modField
           )) {
         dynamicKnobs = newKnobs;
         console.log('🎛️ Reactively updated knobs:', dynamicKnobs.length);
@@ -93,15 +95,16 @@ import { get } from 'svelte/store';
   // Reactive statement to update parameters when knob values change
   $: {
     for (const knob of dynamicKnobs) {
-      const key = `${knob.nodeId}-${knob.paramName}-${knob.kind}`;
+      const key = `${knob.nodeId}-${knob.paramName}-${knob.kind}-${knob.modField ?? ''}`;
       const previousValue = previousKnobValues.get(key);
 
       // Only update if the value actually changed
       if (previousValue !== knob.value) {
-        if (knob.kind === 'speed') {
-          // The knob value is RATE (cycles/sec); the modulator stores PERIOD (sec/cycle).
+        if (knob.kind === 'mod' && knob.modField) {
+          // Drive one field of the automation live (shape is an integer index).
           const cur = getModulator(knob.nodeId, knob.paramName);
-          if (cur) setModulator(knob.nodeId, knob.paramName, { ...cur, period: knob.value > 0.001 ? 1 / knob.value : cur.period });
+          if (cur) setModulator(knob.nodeId, knob.paramName,
+            { ...cur, [knob.modField]: knob.modField === 'shape' ? Math.round(knob.value) : knob.value });
         } else {
           setNodeParameter(knob.nodeId, knob.paramName, knob.value);
           // Note: setNodeParameter already handles auto-save with debouncing
@@ -211,8 +214,9 @@ import { get } from 'svelte/store';
       }
     }
     
-    // Automation speed knobs: any modulator flagged `interactive` gets a live "Speed" knob.
-    // The knob value is RATE (cycles/sec) so turning it up = faster; period = 1/rate.
+    // Automation knobs: each automation field (envelope/min/max/period) flagged interactive
+    // gets its own live knob. Numeric fields map to their natural range; the envelope is a
+    // discrete knob stepping through the shapes.
     const currentModulators = get(modulators);
     for (const [nodeId, params] of currentModulators.entries()) {
       const node = currentNodes.find(n => n.id === nodeId);
@@ -220,24 +224,32 @@ import { get } from 'svelte/store';
       const nodeDefinition = getNodeDefinition(node.data.type as string);
       if (!nodeDefinition) continue;
       for (const [paramName, cfg] of params.entries()) {
-        if (!cfg.interactive) continue;
+        const fields = cfg.interactive ?? [];
+        if (fields.length === 0) continue;
         const paramDef = nodeDefinition.params.find((p: Parameter) => p.name === paramName);
-        const rate = cfg.period > 0.001 ? 1 / cfg.period : 0.2;
-        knobsWithOrder.push({
-          knob: {
-            nodeId,
-            paramName,
-            paramLabel: `${node.data.label || nodeDefinition.name} ${paramDef?.label ?? paramName} Speed`,
-            nodeType: node.data.type as string,
-            value: rate,
-            min: 0.05,   // 20 s / cycle (slow)
-            max: 5,      // 0.2 s / cycle (fast)
-            step: 0.01,
-            order: 1,    // after the base-value knobs
-            kind: 'speed',
-          },
-          order: 1,
-        });
+        const base = `${node.data.label || nodeDefinition.name} ${paramDef?.label ?? paramName}`;
+        for (const field of fields) {
+          let value: number, min: number, max: number, step: number, suffix: string;
+          if (field === 'period') {
+            value = cfg.period; min = 0.1; max = 30; step = 0.1; suffix = 'Period';
+          } else if (field === 'shape') {
+            value = cfg.shape; min = 0; max = SHAPES.length - 1; step = 1; suffix = 'Envelope';
+          } else {
+            // min / max endpoints live in the driven parameter's own units.
+            const lo = paramDef?.min ?? 0, hi = paramDef?.max ?? 1;
+            value = field === 'min' ? cfg.min : cfg.max;
+            min = lo; max = hi; step = (hi - lo) > 20 ? 1 : 0.01;
+            suffix = field === 'min' ? 'Min' : 'Max';
+          }
+          knobsWithOrder.push({
+            knob: {
+              nodeId, paramName, nodeType: node.data.type as string,
+              paramLabel: `${base} ${suffix}`,
+              value, min, max, step, order: 1, kind: 'mod', modField: field,
+            },
+            order: 1,
+          });
+        }
       }
     }
 
@@ -324,7 +336,7 @@ import { get } from 'svelte/store';
 <!-- Dynamic rotary knobs overlay -->
 {#if dynamicKnobs.length > 0}
   <div class="knobs-overlay">
-    {#each dynamicKnobs.slice(0, 6) as knob, i (knob.nodeId + '-' + knob.paramName + '-' + knob.kind)}
+    {#each dynamicKnobs.slice(0, 6) as knob, i (knob.nodeId + '-' + knob.paramName + '-' + knob.kind + '-' + (knob.modField ?? ''))}
       <div
         class="knob-container"
         style="left: {knobPositions[i]?.[0] ?? 50}%; top: {knobPositions[i]?.[1] ?? 50}%;"
