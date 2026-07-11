@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.186",
-  "downloadUrl": "https://chromabay.app/live-update-0.0.1.186.zip",
-  "buildDate": "2026-07-11T05:53:25Z",
-  "commitHash": "5154b81980334a3a76927440323c2febe50d171c",
-  "commitMessage": "Interact: live "Speed" knob for automated parameters"
+  "version": "0.0.1.187",
+  "downloadUrl": "https://chromabay.app/live-update-0.0.1.187.zip",
+  "buildDate": "2026-07-11T15:44:09Z",
+  "commitHash": "83560ed72abae3014df61bae1dbc5b7d0f7c607c",
+  "commitMessage": "Automation: interactive-speed toggle mirrors the standard 🖐️ hand button"
 }
