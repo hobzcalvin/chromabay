@@ -43,8 +43,8 @@ export interface SerializedNode {
   /** Interactive parameters - parameter names that should have knobs on interact page */
   x?: Record<string, number>;
 
-  /** Automated parameters - paramName -> { s:shape, lo:min, hi:max, pr:period(sec) } */
-  m?: Record<string, { s: number; lo: number; hi: number; pr: number }>;
+  /** Automated parameters - paramName -> { s:shape, lo:min, hi:max, pr:period(sec), iv?:1 speed-interactive } */
+  m?: Record<string, { s: number; lo: number; hi: number; pr: number; iv?: number }>;
 }
 
 /**
@@ -472,9 +472,9 @@ export function serializePattern(
     // Add parameter automation if any
     const nodeMods = currentModulators.get(node.id);
     if (nodeMods && nodeMods.size > 0) {
-      const m: Record<string, { s: number; lo: number; hi: number; pr: number }> = {};
+      const m: Record<string, { s: number; lo: number; hi: number; pr: number; iv?: number }> = {};
       for (const [paramName, cfg] of nodeMods.entries()) {
-        m[paramName] = { s: cfg.shape, lo: cfg.min, hi: cfg.max, pr: cfg.period };
+        m[paramName] = { s: cfg.shape, lo: cfg.min, hi: cfg.max, pr: cfg.period, ...(cfg.interactive ? { iv: 1 } : {}) };
       }
       serializedNode.m = m;
     }
@@ -764,7 +764,7 @@ export function deserializePattern(
     if (sNode.m && applyModulators) {
       for (const paramName in sNode.m) {
         const c = sNode.m[paramName];
-        setModulator(nodeId, paramName, { shape: c.s, min: c.lo, max: c.hi, period: c.pr });
+        setModulator(nodeId, paramName, { shape: c.s, min: c.lo, max: c.hi, period: c.pr, interactive: !!c.iv });
       }
     }
 

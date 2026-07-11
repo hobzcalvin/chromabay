@@ -7,6 +7,7 @@ import { loadPatterns, currentPattern, patterns, switchToPattern } from '$lib/st
 import { loadSerializedPattern, initializeDefaultPattern, forceSyncCurrentPattern, 
          flowNodes, nodeParameters, getNodeDefinition, setNodeParameter, type Parameter } from '$lib/flowStore';
 import { interactiveParameters } from '$lib/stores/interactiveStore';
+import { modulators, getModulator, setModulator } from '$lib/stores/modulatorStore';
 import type { Node } from '@xyflow/svelte';
 import { get } from 'svelte/store';
 
@@ -23,7 +24,7 @@ import { get } from 'svelte/store';
     max: number;
     step: number;
     order: number;
-    kind: 'knob' | 'color';   // a hue+saturation pair renders a wheel, not a knob
+    kind: 'knob' | 'color' | 'speed';   // color = hue+sat wheel; speed = an automation's period (live)
     satParamName?: string;
     satValue?: number;
   }
@@ -69,14 +70,16 @@ import { get } from 'svelte/store';
   
   // Reactive statement to regenerate knobs when interactive parameters change
   $: {
-    // Wait for stores to be properly loaded and watch interactive parameters
-    if ($flowNodes.length > 0 && $interactiveParameters) {
+    // Wait for stores to be properly loaded and watch interactive params AND automations
+    // ($modulators referenced so interactive-speed knobs appear/disappear reactively).
+    if ($flowNodes.length > 0 && $interactiveParameters && $modulators) {
       const newKnobs = generateDynamicKnobs();
-      if (newKnobs.length !== dynamicKnobs.length || 
-          newKnobs.some((knob, i) => 
-            !dynamicKnobs[i] || 
-            knob.nodeId !== dynamicKnobs[i]?.nodeId || 
-            knob.paramName !== dynamicKnobs[i]?.paramName
+      if (newKnobs.length !== dynamicKnobs.length ||
+          newKnobs.some((knob, i) =>
+            !dynamicKnobs[i] ||
+            knob.nodeId !== dynamicKnobs[i]?.nodeId ||
+            knob.paramName !== dynamicKnobs[i]?.paramName ||
+            knob.kind !== dynamicKnobs[i]?.kind
           )) {
         dynamicKnobs = newKnobs;
         console.log('🎛️ Reactively updated knobs:', dynamicKnobs.length);
@@ -90,14 +93,20 @@ import { get } from 'svelte/store';
   // Reactive statement to update parameters when knob values change
   $: {
     for (const knob of dynamicKnobs) {
-      const key = `${knob.nodeId}-${knob.paramName}`;
+      const key = `${knob.nodeId}-${knob.paramName}-${knob.kind}`;
       const previousValue = previousKnobValues.get(key);
-      
+
       // Only update if the value actually changed
       if (previousValue !== knob.value) {
-        setNodeParameter(knob.nodeId, knob.paramName, knob.value);
+        if (knob.kind === 'speed') {
+          // The knob value is RATE (cycles/sec); the modulator stores PERIOD (sec/cycle).
+          const cur = getModulator(knob.nodeId, knob.paramName);
+          if (cur) setModulator(knob.nodeId, knob.paramName, { ...cur, period: knob.value > 0.001 ? 1 / knob.value : cur.period });
+        } else {
+          setNodeParameter(knob.nodeId, knob.paramName, knob.value);
+          // Note: setNodeParameter already handles auto-save with debouncing
+        }
         previousKnobValues.set(key, knob.value);
-        // Note: setNodeParameter already handles auto-save with debouncing
       }
       // Colour wheel also drives the saturation param.
       if (knob.kind === 'color' && knob.satParamName) {
@@ -202,6 +211,36 @@ import { get } from 'svelte/store';
       }
     }
     
+    // Automation speed knobs: any modulator flagged `interactive` gets a live "Speed" knob.
+    // The knob value is RATE (cycles/sec) so turning it up = faster; period = 1/rate.
+    const currentModulators = get(modulators);
+    for (const [nodeId, params] of currentModulators.entries()) {
+      const node = currentNodes.find(n => n.id === nodeId);
+      if (!node) continue;
+      const nodeDefinition = getNodeDefinition(node.data.type as string);
+      if (!nodeDefinition) continue;
+      for (const [paramName, cfg] of params.entries()) {
+        if (!cfg.interactive) continue;
+        const paramDef = nodeDefinition.params.find((p: Parameter) => p.name === paramName);
+        const rate = cfg.period > 0.001 ? 1 / cfg.period : 0.2;
+        knobsWithOrder.push({
+          knob: {
+            nodeId,
+            paramName,
+            paramLabel: `${node.data.label || nodeDefinition.name} ${paramDef?.label ?? paramName} Speed`,
+            nodeType: node.data.type as string,
+            value: rate,
+            min: 0.05,   // 20 s / cycle (slow)
+            max: 5,      // 0.2 s / cycle (fast)
+            step: 0.01,
+            order: 1,    // after the base-value knobs
+            kind: 'speed',
+          },
+          order: 1,
+        });
+      }
+    }
+
     // Sort knobs by their order (for consistent positioning)
     knobsWithOrder.sort((a, b) => a.order - b.order);
     
@@ -285,7 +324,7 @@ import { get } from 'svelte/store';
 <!-- Dynamic rotary knobs overlay -->
 {#if dynamicKnobs.length > 0}
   <div class="knobs-overlay">
-    {#each dynamicKnobs.slice(0, 6) as knob, i (knob.nodeId + '-' + knob.paramName)}
+    {#each dynamicKnobs.slice(0, 6) as knob, i (knob.nodeId + '-' + knob.paramName + '-' + knob.kind)}
       <div
         class="knob-container"
         style="left: {knobPositions[i]?.[0] ?? 50}%; top: {knobPositions[i]?.[1] ?? 50}%;"

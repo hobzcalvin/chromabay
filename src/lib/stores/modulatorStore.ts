@@ -15,6 +15,7 @@ export interface ModulatorConfig {
   min: number;
   max: number;
   period: number; // seconds per cycle (for Random: seconds between jumps)
+  interactive?: boolean; // expose the automation's speed (period) as a live knob on the Interact page
 }
 
 // nodeId -> paramName -> config
