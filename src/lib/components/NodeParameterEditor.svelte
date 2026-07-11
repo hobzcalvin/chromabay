@@ -388,10 +388,10 @@
           <label class="mod-field">Min <input type="number" step="any" value={cfg.min} oninput={(e) => updateMod(p, { min: parseFloat(e.currentTarget.value) })} /></label>
           <label class="mod-field">Max <input type="number" step="any" value={cfg.max} oninput={(e) => updateMod(p, { max: parseFloat(e.currentTarget.value) })} /></label>
           <label class="mod-field">Period (sec/cycle) <input type="number" min="0.1" step="0.1" value={cfg.period} oninput={(e) => updateMod(p, { period: Math.max(0.1, parseFloat(e.currentTarget.value) || 0.1) })} /></label>
-          <label class="mod-toggle">
-            <input type="checkbox" checked={!!cfg.interactive} onchange={(e) => updateMod(p, { interactive: e.currentTarget.checked })} />
-            <span>🖐️ Interactive speed <em>— adds a live Speed knob on the Interact page</em></span>
-          </label>
+          <div class="interactive-checkbox">
+            <input type="checkbox" id="mod-interactive-{p.name}" checked={!!cfg.interactive} onchange={(e) => updateMod(p, { interactive: e.currentTarget.checked })} />
+            <label for="mod-interactive-{p.name}" class="hand-emoji" title="Interactive speed (shows a Speed knob on the interact page)">🖐️</label>
+          </div>
           <button type="button" class="stop-btn" onclick={() => stopAutomation(p)}>Stop automating</button>
         {/if}
       </div>
@@ -987,9 +987,6 @@
   .shape-btn.sel { border-color: #22d3ee; color: #22d3ee; background: #0e2a30; }
   .mod-field { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 0.8rem; color: #d1d5db; }
   .mod-field input { width: 90px; background: #111827; border: 1px solid #374151; border-radius: 4px; color: #e5e7eb; padding: 4px 6px; }
-  .mod-toggle { display: flex; align-items: flex-start; gap: 8px; font-size: 0.8rem; color: #d1d5db; cursor: pointer; }
-  .mod-toggle input { margin-top: 2px; }
-  .mod-toggle em { color: #6b7280; font-style: italic; }
   .stop-btn { margin-top: 4px; background: #3f1d1d; border: 1px solid #7f1d1d; color: #fca5a5; border-radius: 6px; padding: 6px; cursor: pointer; font-size: 0.8rem; }
   .svg-input { display: flex; flex-direction: column; gap: 6px; }
   .svg-preset { background: #111827; border: 1px solid #374151; border-radius: 4px; color: #e5e7eb; padding: 4px 6px; font-size: 0.8rem; }
