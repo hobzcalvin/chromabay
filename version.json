@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.185",
-  "downloadUrl": "https://chromabay.app/live-update-0.0.1.185.zip",
-  "buildDate": "2026-07-11T01:47:20Z",
-  "commitHash": "0759b7a55f8e0d0748b9f66031e08a10103fe067",
-  "commitMessage": "Blur + Convolve: make the effect resolution-independent"
+  "version": "0.0.1.186",
+  "downloadUrl": "https://chromabay.app/live-update-0.0.1.186.zip",
+  "buildDate": "2026-07-11T05:53:25Z",
+  "commitHash": "5154b81980334a3a76927440323c2febe50d171c",
+  "commitMessage": "Interact: live "Speed" knob for automated parameters"
 }
