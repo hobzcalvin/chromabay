@@ -24,7 +24,7 @@
   // (Fire seeds from its instance pointer) differ between probe instances. Keep this in
   // sync when adding operators; unknown ops default to "generator" (previewed on black).
   const MODIFIER_OPS = new Set([
-    'blend', 'blur', 'convolve', 'fade', 'glitch', 'huegray', 'huerotate',
+    'blend', 'blur', 'convolve', 'fade', 'feedback', 'glitch', 'huegray', 'huerotate',
     'invert', 'lumahue', 'mirror', 'posterize', 'scroll', 'tile'
   ]);
   const isGeneratorOp = (type: string) => !MODIFIER_OPS.has(type);

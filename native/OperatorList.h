@@ -49,6 +49,8 @@
 #include "SvgFillOperator.h"
 #include "BlurOperator.h"
 #include "ConvolveOperator.h"
+#include "InterferenceOperator.h"
+#include "FeedbackOperator.h"
 
 // Add your new operators here:
 // #include "RainbowOperator.h"
