@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.192",
-  "downloadUrl": "https://chromabay.app/live-update-0.0.1.192.zip",
-  "buildDate": "2026-07-11T21:59:27Z",
-  "commitHash": "b84e552916d4ea2f8b64020067c7c0866dc90219",
-  "commitMessage": "deploy: remove template-expression braces from a comment that broke workflow compile"
+  "version": "0.0.1.193",
+  "downloadUrl": "https://chromabay.app/live-update-0.0.1.193.zip",
+  "buildDate": "2026-07-12T08:32:44Z",
+  "commitHash": "2ee59f943cc0f3a5ec42c103c5d1d2c3aa9ddda3",
+  "commitMessage": "Add Interference (sum of random plane waves) and Feedback (frame memory) operators"
 }
