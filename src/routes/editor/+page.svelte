@@ -66,6 +66,8 @@
     right?: number;
     bottom?: number;
     caretX?: number;   // node centre X (screen px) — the popover draws a caret pointing here
+    caretY?: number;   // node centre Y (screen px), for side placements
+    caretSide?: 'top' | 'bottom' | 'left' | 'right'; // direction the caret points at the node
   } | null = $state(null);
   let clientWidth: number = $state(0);
   let clientHeight: number = $state(0);
@@ -181,31 +183,57 @@
       left: initialX,
     };
 
-    // After it renders: scroll the node toward the TOP of the canvas so there's room, then anchor
-    // the popover directly BELOW the node (so you can always see the node you're editing), with a
-    // caret pointing up at it. The popover caps its own height to the space below (see the editor).
+    // After it renders: pick the BEST of four placements (below / above / right / left) — the one
+    // needing the least viewport scroll to show both the node and the popover — then scroll only if
+    // needed and point a caret at the node. Wide canvases prefer the sides (node stays put); narrow
+    // ones prefer above/below. This avoids the constant scroll-to-fit the old below-only anchor did.
     tick().then(() => {
-      const editorElement = document.querySelector('.parameter-popover') as HTMLElement;
-      if (!editorElement || !parameterEditor || !flowContainer) return;
-      const editorRect = editorElement.getBoundingClientRect();
+      const el = document.querySelector('.parameter-popover') as HTMLElement;
+      if (!el || !parameterEditor || !flowContainer) return;
+      const er = el.getBoundingClientRect();
       const c = flowContainer.getBoundingClientRect();
       const nr = nodeElement.getBoundingClientRect();
-      const GAP = 12, TOPGAP = 14;
+      const pw = er.width, ph = er.height, GAP = 12, M = 8;
+      const availTop = c.top + M, availBot = c.bottom - M;
+      const cxN = nr.left + nr.width / 2, cyN = nr.top + nr.height / 2;
+      const wide = c.width > 700;
 
-      // Bring a low node up so the popover fits beneath it; never shove a high node further down.
-      const scrollDelta = Math.max(0, nr.top - (c.top + TOPGAP));
-      if (scrollDelta > 4) {
-        const vp = viewport.current;
-        setViewport({ x: vp.x, y: vp.y - scrollDelta, zoom: vp.zoom });
+      const cands = [
+        { side: 'below', caret: 'top',    x: cxN - pw / 2,        y: nr.bottom + GAP,     fitsH: true },
+        { side: 'above', caret: 'bottom', x: cxN - pw / 2,        y: nr.top - GAP - ph,   fitsH: true },
+        { side: 'right', caret: 'left',   x: nr.right + GAP,      y: cyN - ph / 2,        fitsH: nr.right + GAP + pw <= c.right - M },
+        { side: 'left',  caret: 'right',  x: nr.left - GAP - pw,  y: cyN - ph / 2,        fitsH: nr.left - GAP - pw >= c.left + M },
+      ] as const;
+      const rank: Record<string, number> = wide
+        ? { right: 0, left: 1, below: 2, above: 3 }
+        : { below: 0, above: 1, right: 2, left: 3 };
+
+      let best: any = null;
+      for (const k of cands) {
+        const top = Math.min(nr.top, k.y), bot = Math.max(nr.bottom, k.y + ph);
+        let scroll = 0;                                   // +ve = move content up, -ve = down
+        if (top < availTop) scroll = top - availTop;
+        else if (bot > availBot) scroll = bot - availBot;
+        const fitsV = (bot - top) <= (availBot - availTop);
+        let cost = Math.abs(scroll) + rank[k.side] * 0.01;
+        if (!k.fitsH) cost += 1e6;                        // no room on that side
+        if (!fitsV) cost += 5e3;                          // can't show both fully
+        if (!best || cost < best.cost) best = { ...k, scroll, cost };
       }
-      const nodeBottom = nr.bottom - scrollDelta;
-      const nodeCenterX = nr.left + nr.width / 2;
 
-      // Centre the popover under the node, clamped horizontally to the flow container.
-      let finalX = nodeCenterX - editorRect.width / 2;
-      finalX = Math.max(c.left + 12, Math.min(finalX, c.right - editorRect.width - 12));
-
-      parameterEditor = { ...parameterEditor, left: finalX, top: nodeBottom + GAP, caretX: nodeCenterX };
+      if (Math.abs(best.scroll) > 4) {
+        const vp = viewport.current;
+        setViewport({ x: vp.x, y: vp.y - best.scroll, zoom: vp.zoom });
+      }
+      // Everything shifts up by `scroll` on screen. Clamp X only for above/below (sides must stay
+      // glued to the node); the popover's own clamp is the final safety net.
+      let fx = best.x;
+      if (best.side === 'below' || best.side === 'above') fx = Math.max(c.left + 12, Math.min(fx, c.right - pw - 12));
+      parameterEditor = {
+        ...parameterEditor,
+        left: fx, top: best.y - best.scroll,
+        caretSide: best.caret, caretX: cxN, caretY: cyN - best.scroll,
+      };
     });
   }
   
@@ -462,6 +490,8 @@
           right={parameterEditor?.right}
           bottom={parameterEditor?.bottom}
           caretX={parameterEditor?.caretX}
+          caretY={parameterEditor?.caretY}
+          caretSide={parameterEditor?.caretSide}
           bind:deleteConfirmState
           bind:deleteTimeout
           onClose={closeParameterEditor}

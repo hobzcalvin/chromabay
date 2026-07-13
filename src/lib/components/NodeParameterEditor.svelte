@@ -15,8 +15,11 @@
   export let visible: boolean = true;
   export let top: number | undefined = undefined;
   export let left: number | undefined = undefined;
-  // Node centre X (screen px): the caret points here, and it's kept within the popover's width.
+  // Caret: points at the node the popover belongs to. caretX/caretY are the node centre (screen
+  // px); caretSide is the direction the caret points (chosen by the editor's placement).
   export let caretX: number | undefined = undefined;
+  export let caretY: number | undefined = undefined;
+  export let caretSide: 'top' | 'bottom' | 'left' | 'right' | undefined = undefined;
   export let right: number | undefined = undefined;
   export let bottom: number | undefined = undefined;
   export let deleteConfirmState: boolean = false;
@@ -53,7 +56,7 @@
   let clampedTop: number | null = null;
   let clampedLeft: number | null = null;
   let clampedMaxH: number | null = null;
-  let caretLeft: number | null = null; // caret x within the popover (px from its left edge)
+  let caretStyle: string | null = null; // absolute position for the caret (px), or null to hide
   let resizeObserver: ResizeObserver | null = null;
 
   // Intersect the viewport with every overflow-clipping ancestor (the flow canvas has
@@ -87,9 +90,23 @@
     const h = Math.min(r.height, availH); // effective height once max-height applies
     if (p.top !== undefined) clampedTop = Math.max(b.top + m, Math.min(p.top, b.bottom - h - m));
     if (p.left !== undefined) clampedLeft = Math.max(b.left + m, Math.min(p.left, b.right - r.width - m));
-    // Caret x = node centre relative to the popover's left edge, kept inside the rounded corners.
-    const finalLeft = clampedLeft ?? p.left ?? 0;
-    caretLeft = (caretX != null) ? Math.max(14, Math.min(caretX - finalLeft, r.width - 14)) : null;
+    // Caret sits on the popover edge nearest the node, offset to line up with the node centre
+    // (clamped inside the rounded corners). Position depends on which side the editor chose.
+    const fLeft = clampedLeft ?? p.left ?? 0;
+    const fTop = clampedTop ?? p.top ?? 0;
+    if (caretSide && (caretX != null || caretY != null)) {
+      if (caretSide === 'top' || caretSide === 'bottom') {
+        const cx = Math.max(14, Math.min((caretX ?? fLeft) - fLeft, r.width - 14));
+        const y = caretSide === 'top' ? fTop - 8 : fTop + r.height - 1;
+        caretStyle = `left: ${fLeft + cx - 8}px; top: ${y}px;`;
+      } else {
+        const cy = Math.max(14, Math.min((caretY ?? fTop) - fTop, r.height - 14));
+        const x = caretSide === 'left' ? fLeft - 8 : fLeft + r.width - 1;
+        caretStyle = `top: ${fTop + cy - 8}px; left: ${x}px;`;
+      }
+    } else {
+      caretStyle = null;
+    }
   }
   // NOTE: these MUST be reactive `$:` values, not functions. The style attribute below reads
   // `effTop`/`effLeft`; Svelte only re-renders it when identifiers it references change. A
@@ -101,7 +118,7 @@
 
   // Re-clamp after any content/anchor change (tick lets the DOM settle first). The ResizeObserver
   // (set up in onMount) covers content-driven size changes like opening the automation panel.
-  $: if (visible && (top || left || caretX || node || automating)) tick().then(clampToViewport);
+  $: if (visible && (top || left || caretX || caretY || caretSide || node || automating)) tick().then(clampToViewport);
 
   function getParameterValue(param: Parameter): any {
     const nodeParams = $nodeParameters.get(node.id);
@@ -359,9 +376,9 @@
   }
 </script>
 
-<!-- Caret pointing up at the node. A sibling (not a child) because the popover clips overflow. -->
-{#if visible && caretLeft != null}
-  <div class="popover-caret" style="position: fixed; top: {effTop - 8}px; left: {effLeft + caretLeft - 8}px;"></div>
+<!-- Caret pointing at the node. A sibling (not a child) because the popover clips overflow. -->
+{#if visible && caretStyle}
+  <div class="popover-caret caret-{caretSide}" style="position: fixed; {caretStyle}"></div>
 {/if}
 
 <div
@@ -643,12 +660,26 @@
   .popover-caret {
     width: 0;
     height: 0;
-    border-left: 8px solid transparent;
-    border-right: 8px solid transparent;
-    border-bottom: 9px solid #1f2937;      /* points UP, matches the popover background */
-    filter: drop-shadow(0 -1px 0 #374151); /* hint of the popover's border on the caret edges */
     z-index: 1001;
     pointer-events: none;
+  }
+  /* Each variant is a triangle in the popover's background colour, pointing toward the node, with
+     a drop-shadow on the outward edges to hint the popover's border. */
+  .caret-top {    /* popover below node — points up */
+    border-left: 8px solid transparent; border-right: 8px solid transparent;
+    border-bottom: 9px solid #1f2937; filter: drop-shadow(0 -1px 0 #374151);
+  }
+  .caret-bottom { /* popover above node — points down */
+    border-left: 8px solid transparent; border-right: 8px solid transparent;
+    border-top: 9px solid #1f2937; filter: drop-shadow(0 1px 0 #374151);
+  }
+  .caret-left {   /* popover right of node — points left */
+    border-top: 8px solid transparent; border-bottom: 8px solid transparent;
+    border-right: 9px solid #1f2937; filter: drop-shadow(-1px 0 0 #374151);
+  }
+  .caret-right {  /* popover left of node — points right */
+    border-top: 8px solid transparent; border-bottom: 8px solid transparent;
+    border-left: 9px solid #1f2937; filter: drop-shadow(1px 0 0 #374151);
   }
 
   .parameter-popover {
