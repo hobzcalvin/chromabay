@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.198",
-  "downloadUrl": "https://chromabay.app/live-update-0.0.1.198.zip",
-  "buildDate": "2026-07-13T22:18:41Z",
-  "commitHash": "43ef3252034444467964822daab7056f5c9e173b",
-  "commitMessage": "Trim excess params on Bands + Interference"
+  "version": "0.0.1.199",
+  "downloadUrl": "https://chromabay.app/live-update-0.0.1.199.zip",
+  "buildDate": "2026-07-13T22:28:35Z",
+  "commitHash": "323a9598408180c10e2cba677cebfe99fd11bc43",
+  "commitMessage": "Editor popover: smart placement (side/above/below) to minimize scrolling"
 }
