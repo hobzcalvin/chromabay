@@ -51,6 +51,8 @@
 #include "ConvolveOperator.h"
 #include "InterferenceOperator.h"
 #include "FeedbackOperator.h"
+#include "VennOperator.h"
+#include "BandsOperator.h"
 
 // Add your new operators here:
 // #include "RainbowOperator.h"
