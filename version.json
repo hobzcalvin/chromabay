@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.193",
-  "downloadUrl": "https://chromabay.app/live-update-0.0.1.193.zip",
-  "buildDate": "2026-07-12T08:32:44Z",
-  "commitHash": "2ee59f943cc0f3a5ec42c103c5d1d2c3aa9ddda3",
-  "commitMessage": "Add Interference (sum of random plane waves) and Feedback (frame memory) operators"
+  "version": "0.0.1.194",
+  "downloadUrl": "https://chromabay.app/live-update-0.0.1.194.zip",
+  "buildDate": "2026-07-13T19:53:58Z",
+  "commitHash": "0f2806d16ef0e8fe564bcd4514fc5e381e222159",
+  "commitMessage": "ship:ios: headless provisioning + epoch build number"
 }
