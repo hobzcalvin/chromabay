@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.194",
-  "downloadUrl": "https://chromabay.app/live-update-0.0.1.194.zip",
-  "buildDate": "2026-07-13T19:53:58Z",
-  "commitHash": "0f2806d16ef0e8fe564bcd4514fc5e381e222159",
-  "commitMessage": "ship:ios: headless provisioning + epoch build number"
+  "version": "0.0.1.195",
+  "downloadUrl": "https://chromabay.app/live-update-0.0.1.195.zip",
+  "buildDate": "2026-07-13T21:03:05Z",
+  "commitHash": "9ba71d3986feeb7f560334ca0658a710aabfa5e2",
+  "commitMessage": "Feedback: self-demonstrating spiral-tunnel default"
 }
