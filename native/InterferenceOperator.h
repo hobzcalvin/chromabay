@@ -24,8 +24,8 @@ public:
         float spread     = getFloat(parameters, 3, 1.0f);   // 0 = one direction, 1 = fully random
         uint8_t hue      = (uint8_t)getInt(parameters, 4, 150);
         uint8_t sat      = (uint8_t)getInt(parameters, 5, 255);
-        float contrast   = getFloat(parameters, 6, 1.0f);
-        uint32_t seed    = (uint32_t)getInt(parameters, 7, 1);
+        const float contrast = 1.0f;   // baked (was a slider — trimmed as excessive)
+        const uint32_t seed  = 1u;      // baked (was a slider — trimmed)
 
         if (count < 1) count = 1;
         if (count > 12) count = 12;
@@ -73,9 +73,7 @@ public:
             ParameterInfo("speed", "Speed (%/sec)", ParameterInfo::FLOAT, 20.0f, -200.0f, 200.0f),
             ParameterInfo("spread", "Direction spread", ParameterInfo::FLOAT, 1.0f, 0.0f, 1.0f),
             ParameterInfo("hue", "Hue", ParameterInfo::INT, 150, 0, 255),
-            ParameterInfo("saturation", "Saturation", ParameterInfo::INT, 255, 0, 255),
-            ParameterInfo("contrast", "Contrast", ParameterInfo::FLOAT, 1.0f, 0.1f, 3.0f),
-            ParameterInfo("seed", "Seed", ParameterInfo::INT, 1, 0, 999)
+            ParameterInfo("saturation", "Saturation", ParameterInfo::INT, 255, 0, 255)
         };
     }
 };

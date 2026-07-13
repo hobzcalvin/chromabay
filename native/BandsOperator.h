@@ -24,11 +24,12 @@ public:
         float speed      = getFloat(params, 2, 25.0f);  // %/sec
         int motion       = getInt(params, 3, 0);        // 0 Scroll, 1 Bounce
         float baseAngle  = getFloat(params, 4, 90.0f);  // deg (90 = vertical bands, moving sideways)
-        float angleSpread= getFloat(params, 5, 0.0f);   // 0 = parallel, 1 = every band its own angle
-        float speedSpread= getFloat(params, 6, 0.4f);   // per-band speed variation
-        float widthSpread= getFloat(params, 7, 0.3f);   // per-band width variation
-        uint8_t sat      = (uint8_t)getInt(params, 8, 255);
-        uint32_t seed    = (uint32_t)getInt(params, 9, 1);
+        float spread     = getFloat(params, 5, 0.0f);   // 0 = parallel, 1 = every band its own angle
+        uint8_t sat      = (uint8_t)getInt(params, 6, 255);
+        // Baked-in variety (were separate sliders — trimmed as excessive): fixed seed + modest
+        // per-band speed/width variation so the bands don't all march in lockstep.
+        const uint32_t seed = 1u;
+        const float speedSpread = 0.4f, widthSpread = 0.3f;
 
         if (count < 1) count = 1;
         if (count > 16) count = 16;
@@ -42,7 +43,7 @@ public:
         for (int i = 0; i < count; i++) {
             uint8_t hue = (uint8_t)(255.0f * (float)i / (float)count); // hues spread round the wheel
             float aRnd = Modulation::hash01((uint32_t)(i * 4 + 1), seed);
-            float ang = (baseAngle + angleSpread * (aRnd * 360.0f - 180.0f)) * (kTwoPi / 360.0f);
+            float ang = (baseAngle + spread * (aRnd * 360.0f - 180.0f)) * (kTwoPi / 360.0f);
             float dx = cosf(ang), dy = sinf(ang);
             float span = wf * fabsf(dx) + hf * fabsf(dy); if (span < 1.0f) span = 1.0f;
             float minP = (dx < 0 ? wf * dx : 0.0f) + (dy < 0 ? hf * dy : 0.0f);
@@ -84,11 +85,8 @@ public:
             ParameterInfo("speed", "Speed (%/sec)", ParameterInfo::FLOAT, 25.0f, -200.0f, 200.0f),
             ParameterInfo("motion", "Motion", ParameterInfo::SELECT, 0, std::vector<std::string>{ "Scroll", "Bounce" }),
             ParameterInfo("angle", "Angle", ParameterInfo::FLOAT, 90.0f, 0.0f, 360.0f),
-            ParameterInfo("angleSpread", "Angle spread", ParameterInfo::FLOAT, 0.0f, 0.0f, 1.0f),
-            ParameterInfo("speedSpread", "Speed spread", ParameterInfo::FLOAT, 0.4f, 0.0f, 1.0f),
-            ParameterInfo("widthSpread", "Width spread", ParameterInfo::FLOAT, 0.3f, 0.0f, 1.0f),
-            ParameterInfo("saturation", "Saturation", ParameterInfo::INT, 255, 0, 255),
-            ParameterInfo("seed", "Seed", ParameterInfo::INT, 1, 0, 999)
+            ParameterInfo("spread", "Spread", ParameterInfo::FLOAT, 0.0f, 0.0f, 1.0f),
+            ParameterInfo("saturation", "Saturation", ParameterInfo::INT, 255, 0, 255)
         };
     }
 };
