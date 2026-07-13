@@ -198,70 +198,59 @@
       const c = flowContainer.getBoundingClientRect();
       const nr = nodeElement.getBoundingClientRect();
       const pw = er.width, ph = er.height, GAP = 12, M = 8;
-      const availTop = c.top + M, availBot = c.bottom - M;
-      const cxN = nr.left + nr.width / 2, cyN = nr.top + nr.height / 2;
+      const availTop = c.top + M, availBot = c.bottom - M, availL = c.left + M, availR = c.right - M;
+      const colH = availBot - availTop;
       const wide = c.width > 700;
+      const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(v, hi));
 
+      // 1. Scroll ONLY enough to bring the NODE fully into view — never enough to push it out. The
+      //    popover then caps to the room on its side and scrolls internally (it never shoves the node).
+      let scroll = 0;
+      if (nr.top < availTop) scroll = nr.top - availTop;            // node above view → content down
+      else if (nr.bottom > availBot) scroll = nr.bottom - availBot; // node below view → content up
+      const nTop = nr.top - scroll, nBot = nr.bottom - scroll;
+      const nCx = nr.left + nr.width / 2, nCy = (nr.top + nr.height / 2) - scroll;
+
+      // 2. Free room around the now-visible node. Sides use the whole column (the node is beside the
+      //    popover, so its height never blocks it); above/below use their vertical slice.
       const cands = [
-        { side: 'below', caret: 'top',    x: cxN - pw / 2,        y: nr.bottom + GAP,     fitsH: true },
-        { side: 'above', caret: 'bottom', x: cxN - pw / 2,        y: nr.top - GAP - ph,   fitsH: true },
-        { side: 'right', caret: 'left',   x: nr.right + GAP,      y: cyN - ph / 2,        fitsH: nr.right + GAP + pw <= c.right - M },
-        { side: 'left',  caret: 'right',  x: nr.left - GAP - pw,  y: cyN - ph / 2,        fitsH: nr.left - GAP - pw >= c.left + M },
-      ] as const;
+        { side: 'below', caret: 'top',    fits: (availBot - (nBot + GAP)) >= 150, maxH: availBot - (nBot + GAP) },
+        { side: 'above', caret: 'bottom', fits: ((nTop - GAP) - availTop) >= 150, maxH: (nTop - GAP) - availTop },
+        { side: 'right', caret: 'left',   fits: (availR - (nr.right + GAP)) >= pw, maxH: colH },
+        { side: 'left',  caret: 'right',  fits: ((nr.left - GAP) - availL) >= pw,  maxH: colH },
+      ];
       const rank: Record<string, number> = wide
         ? { right: 0, left: 1, below: 2, above: 3 }
         : { below: 0, above: 1, right: 2, left: 3 };
-
+      // Prefer a fitting side (by preference); if none fits, take the one with the most room.
       let best: any = null;
       for (const k of cands) {
-        const top = Math.min(nr.top, k.y), bot = Math.max(nr.bottom, k.y + ph);
-        let scroll = 0;                                   // +ve = move content up, -ve = down
-        if (top < availTop) scroll = top - availTop;
-        else if (bot > availBot) scroll = bot - availBot;
-        const fitsV = (bot - top) <= (availBot - availTop);
-        let cost = Math.abs(scroll) + rank[k.side] * 0.01;
-        if (!k.fitsH) cost += 1e6;                        // no room on that side
-        if (!fitsV) cost += 5e3;                          // can't show both fully
-        if (!best || cost < best.cost) best = { ...k, scroll, cost };
+        const score = (k.fits ? 0 : 1e6 - Math.max(0, k.maxH)) + rank[k.side];
+        if (!best || score < best.score) best = { ...k, score };
       }
 
+      const maxH = Math.max(160, Math.floor(best.maxH));
+      const finalH = Math.min(ph, maxH);
+      let fx: number, fy: number;
+      if (best.side === 'below')      { fy = nBot + GAP;            fx = clamp(nCx - pw / 2, availL, availR - pw); }
+      else if (best.side === 'above') { fy = (nTop - GAP) - finalH; fx = clamp(nCx - pw / 2, availL, availR - pw); }
+      else if (best.side === 'right') { fx = nr.right + GAP;        fy = clamp(nTop, availTop, availBot - finalH); }
+      else                            { fx = nr.left - GAP - pw;    fy = clamp(nTop, availTop, availBot - finalH); }
+
+      // Apply the minimal scroll, and remember the viewport for pan-detection (compare to the
+      // post-scroll target so our own scroll doesn't read as a pan).
       const vp0 = viewport.current;
-      const targetY = vp0.y - best.scroll;
-      if (Math.abs(best.scroll) > 4) setViewport({ x: vp0.x, y: targetY, zoom: vp0.zoom });
-      // Remember the viewport the caret was placed at; the $effect below drops the caret once the
-      // canvas is panned/zoomed away from it (we compare against the post-scroll target, not the
-      // pre-scroll value, so our own placement scroll doesn't count as a pan).
+      const targetY = vp0.y - scroll;
+      if (Math.abs(scroll) > 4) setViewport({ x: vp0.x, y: targetY, zoom: vp0.zoom });
       caretVp = `${Math.round(vp0.x)},${Math.round(targetY)},${vp0.zoom}`;
-      // The placement scroll settles asynchronously; don't treat that settle as a user pan. Arm
-      // the pan-detector only after it settles (the $effect tracks the viewport meanwhile).
       caretArmed = false;
       if (caretArmTimer) clearTimeout(caretArmTimer);
       caretArmTimer = setTimeout(() => { caretArmed = true; }, 450);
 
-      // Node position after the scroll, and the free height on the chosen side (so the popover can
-      // expand to fill it without overlapping the node) — passed to the popover as maxHeight.
-      const nrTop = nr.top - best.scroll, nrBot = nr.bottom - best.scroll;
-      let maxH: number;
-      if (best.side === 'below')      maxH = availBot - (nrBot + GAP);
-      else if (best.side === 'above') maxH = (nrTop - GAP) - availTop;
-      else                            maxH = availBot - availTop;      // beside the node: whole column
-      maxH = Math.max(160, Math.floor(maxH));
-      const finalH = Math.min(ph, maxH);
-
-      // Vertical anchor for the popover.
-      let fy: number;
-      if (best.side === 'above')      fy = (nrTop - GAP) - finalH;
-      else if (best.side === 'below') fy = nrBot + GAP;
-      else                            fy = Math.max(availTop, Math.min((cyN - best.scroll) - finalH / 2, availBot - finalH));
-
-      // Clamp X only for above/below (sides must stay glued to the node).
-      let fx = best.x;
-      if (best.side === 'below' || best.side === 'above') fx = Math.max(c.left + 12, Math.min(fx, c.right - pw - 12));
-
       parameterEditor = {
         ...parameterEditor,
         left: fx, top: fy, maxHeight: maxH,
-        caretSide: best.caret, caretX: cxN, caretY: cyN - best.scroll,
+        caretSide: best.caret, caretX: nCx, caretY: nCy,
       };
     });
   }
