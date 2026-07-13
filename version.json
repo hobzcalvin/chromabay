@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.201",
-  "downloadUrl": "https://chromabay.app/live-update-0.0.1.201.zip",
-  "buildDate": "2026-07-13T22:52:55Z",
-  "commitHash": "ba7a0aba1a6b51f6b057f61c67f098ec55f2284d",
-  "commitMessage": "Editor popover: don't drop the caret from the placement scroll (missing on reopen)"
+  "version": "0.0.1.202",
+  "downloadUrl": "https://chromabay.app/live-update-0.0.1.202.zip",
+  "buildDate": "2026-07-13T23:13:04Z",
+  "commitHash": "a540a5694664e7ed573989b1dc937d0d2901e7ac",
+  "commitMessage": "Editor popover: only scroll to keep the NODE visible; cap popover to side's room"
 }
