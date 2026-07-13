@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.200",
-  "downloadUrl": "https://chromabay.app/live-update-0.0.1.200.zip",
-  "buildDate": "2026-07-13T22:45:33Z",
-  "commitHash": "f967b8a304cc8ee4cd3fc326e5ec992b089a1838",
-  "commitMessage": "Editor popover: fill available height + drop caret when canvas moves"
+  "version": "0.0.1.201",
+  "downloadUrl": "https://chromabay.app/live-update-0.0.1.201.zip",
+  "buildDate": "2026-07-13T22:52:55Z",
+  "commitHash": "ba7a0aba1a6b51f6b057f61c67f098ec55f2284d",
+  "commitMessage": "Editor popover: don't drop the caret from the placement scroll (missing on reopen)"
 }
