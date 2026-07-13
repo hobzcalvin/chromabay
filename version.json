@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.197",
-  "downloadUrl": "https://chromabay.app/live-update-0.0.1.197.zip",
-  "buildDate": "2026-07-13T21:54:53Z",
-  "commitHash": "13546c3acc0859f705a2ab264c9796ebb7b99382",
-  "commitMessage": "Editor popover: keep the node visible + caret pointing at it"
+  "version": "0.0.1.198",
+  "downloadUrl": "https://chromabay.app/live-update-0.0.1.198.zip",
+  "buildDate": "2026-07-13T22:18:41Z",
+  "commitHash": "43ef3252034444467964822daab7056f5c9e173b",
+  "commitMessage": "Trim excess params on Bands + Interference"
 }
