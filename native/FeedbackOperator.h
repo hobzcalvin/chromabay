@@ -42,9 +42,9 @@ public:
         const std::vector<ParameterValue>& params
     ) override {
         uint32_t total = width * height;
-        float feedback = getFloat(params, 0, 0.90f);
-        float zoom     = getFloat(params, 1, 1.0f);
-        float rotate   = getFloat(params, 2, 0.0f);   // deg / sec
+        float feedback = getFloat(params, 0, 0.92f);
+        float zoom     = getFloat(params, 1, 1.4f);
+        float rotate   = getFloat(params, 2, 15.0f);  // deg / sec
         float dx       = getFloat(params, 3, 0.0f);   // fraction of width / sec
         float dy       = getFloat(params, 4, 0.0f);   // fraction of height / sec
         int mode       = getInt(params, 5, 0);        // 0 Lighten, 1 Add, 2 Screen
@@ -99,9 +99,10 @@ public:
 
     std::vector<ParameterInfo> getParameterInfo() const override {
         return {
-            ParameterInfo("feedback", "Feedback", ParameterInfo::FLOAT, 0.90f, 0.0f, 1.0f),
-            ParameterInfo("zoom", "Zoom /sec", ParameterInfo::FLOAT, 1.0f, 0.25f, 4.0f),
-            ParameterInfo("rotate", "Rotate (deg/sec)", ParameterInfo::FLOAT, 0.0f, -360.0f, 360.0f),
+            // Defaults draw a spiral zoom-tunnel out of the box so the effect is obvious.
+            ParameterInfo("feedback", "Feedback", ParameterInfo::FLOAT, 0.92f, 0.0f, 1.0f),
+            ParameterInfo("zoom", "Zoom /sec", ParameterInfo::FLOAT, 1.4f, 0.25f, 4.0f),
+            ParameterInfo("rotate", "Rotate (deg/sec)", ParameterInfo::FLOAT, 15.0f, -360.0f, 360.0f),
             ParameterInfo("dx", "Drift X /sec", ParameterInfo::FLOAT, 0.0f, -1.0f, 1.0f),
             ParameterInfo("dy", "Drift Y /sec", ParameterInfo::FLOAT, 0.0f, -1.0f, 1.0f),
             ParameterInfo("mode", "Blend", ParameterInfo::SELECT, 0,
