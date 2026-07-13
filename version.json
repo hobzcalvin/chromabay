@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.195",
-  "downloadUrl": "https://chromabay.app/live-update-0.0.1.195.zip",
-  "buildDate": "2026-07-13T21:03:05Z",
-  "commitHash": "9ba71d3986feeb7f560334ca0658a710aabfa5e2",
-  "commitMessage": "Feedback: self-demonstrating spiral-tunnel default"
+  "version": "0.0.1.196",
+  "downloadUrl": "https://chromabay.app/live-update-0.0.1.196.zip",
+  "buildDate": "2026-07-13T21:48:23Z",
+  "commitHash": "f67152f6f8d483a04fb21bdb78980fea96aacdec",
+  "commitMessage": "Add Venn (orbiting RGB circles) and Bands (moving colour stripes) generators"
 }
