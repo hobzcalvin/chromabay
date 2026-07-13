@@ -71,6 +71,8 @@
     maxHeight?: number; // free vertical space the editor allotted for the popover on its chosen side
   } | null = $state(null);
   let caretVp: string | null = null; // viewport signature when the caret was placed (to detect pans)
+  let caretArmed = false;            // false during the placement-scroll settle, so it isn't mistaken for a pan
+  let caretArmTimer: ReturnType<typeof setTimeout> | null = null;
   let clientWidth: number = $state(0);
   let clientHeight: number = $state(0);
   let flowContainer: HTMLDivElement;
@@ -230,6 +232,11 @@
       // canvas is panned/zoomed away from it (we compare against the post-scroll target, not the
       // pre-scroll value, so our own placement scroll doesn't count as a pan).
       caretVp = `${Math.round(vp0.x)},${Math.round(targetY)},${vp0.zoom}`;
+      // The placement scroll settles asynchronously; don't treat that settle as a user pan. Arm
+      // the pan-detector only after it settles (the $effect tracks the viewport meanwhile).
+      caretArmed = false;
+      if (caretArmTimer) clearTimeout(caretArmTimer);
+      caretArmTimer = setTimeout(() => { caretArmed = true; }, 450);
 
       // Node position after the scroll, and the free height on the chosen side (so the popover can
       // expand to fill it without overlapping the node) — passed to the popover as maxHeight.
@@ -272,8 +279,10 @@
   // handled separately via onnodedragstart, since dragging a node doesn't change the viewport.)
   $effect(() => {
     const v = viewport.current;
-    if (!v || !caretVp || !parameterEditor?.caretSide) return;
-    if (`${Math.round(v.x)},${Math.round(v.y)},${v.zoom}` !== caretVp) dropCaret();
+    if (!v || !parameterEditor?.caretSide) return;
+    const key = `${Math.round(v.x)},${Math.round(v.y)},${v.zoom}`;
+    if (!caretArmed) { caretVp = key; return; } // settle window: follow the viewport, don't drop
+    if (key !== caretVp) dropCaret();
   });
   
   // Close parameter editor
