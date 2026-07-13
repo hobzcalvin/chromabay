@@ -65,6 +65,7 @@
     left?: number;
     right?: number;
     bottom?: number;
+    caretX?: number;   // node centre X (screen px) — the popover draws a caret pointing here
   } | null = $state(null);
   let clientWidth: number = $state(0);
   let clientHeight: number = $state(0);
@@ -180,66 +181,31 @@
       left: initialX,
     };
 
-    // Use tick to wait for the parameter editor to render, then adjust position
+    // After it renders: scroll the node toward the TOP of the canvas so there's room, then anchor
+    // the popover directly BELOW the node (so you can always see the node you're editing), with a
+    // caret pointing up at it. The popover caps its own height to the space below (see the editor).
     tick().then(() => {
-      // Find the rendered parameter editor element and measure its width
       const editorElement = document.querySelector('.parameter-popover') as HTMLElement;
-      if (editorElement && parameterEditor && flowContainer) {
-        const editorRect = editorElement.getBoundingClientRect();
-        const flowContainerRect = flowContainer.getBoundingClientRect();
-        const adjustedX = nodeRect.left + (nodeRect.width / 2) - (editorRect.width / 2);
-        
-        // Check for vertical overflow (below the fold)
-        const editorBottom = editorRect.bottom;
-        const containerBottom = flowContainerRect.bottom;
-        const isEditorBelowFold = editorBottom > containerBottom;
-        
-        // Check for horizontal overflow (left and right sides)
-        const editorLeft = editorRect.left;
-        const editorRight = editorRect.right;
-        const containerLeft = flowContainerRect.left;
-        const containerRight = flowContainerRect.right;
-        const isEditorOffLeft = editorLeft < containerLeft;
-        const isEditorOffRight = editorRight > containerRight;
-        
-        let finalX = adjustedX;
-        let finalY = parameterEditor.top || 0;
-        
-        // Handle horizontal overflow - only move the editor, not the viewport
-        if (isEditorOffLeft) {
-          const bufferSpace = 20;
-          finalX = containerLeft + bufferSpace;
-        } else if (isEditorOffRight) {
-          const bufferSpace = 20;
-          finalX = containerRight - editorRect.width - bufferSpace;
-        }
-        
-        // Handle vertical overflow - move both editor and viewport
-        if (isEditorBelowFold) {
-          // Calculate how much we need to move up to make it fully visible
-          const overflowAmount = editorBottom - containerBottom;
-          const bufferSpace = 20; // Add some buffer space
-          const totalMoveUp = overflowAmount + bufferSpace;
-          
-          // Move the parameter editor up
-          finalY = finalY - totalMoveUp;
-          
-          // Also move the viewport up by the same amount
-          const currentViewport = viewport.current;
-          setViewport({
-            x: currentViewport.x,
-            y: currentViewport.y - totalMoveUp,
-            zoom: currentViewport.zoom
-          });
-        }
-        
-        // Update parameter editor position with final calculated values
-        parameterEditor = {
-          ...parameterEditor,
-          left: finalX,
-          top: finalY,
-        };
+      if (!editorElement || !parameterEditor || !flowContainer) return;
+      const editorRect = editorElement.getBoundingClientRect();
+      const c = flowContainer.getBoundingClientRect();
+      const nr = nodeElement.getBoundingClientRect();
+      const GAP = 12, TOPGAP = 14;
+
+      // Bring a low node up so the popover fits beneath it; never shove a high node further down.
+      const scrollDelta = Math.max(0, nr.top - (c.top + TOPGAP));
+      if (scrollDelta > 4) {
+        const vp = viewport.current;
+        setViewport({ x: vp.x, y: vp.y - scrollDelta, zoom: vp.zoom });
       }
+      const nodeBottom = nr.bottom - scrollDelta;
+      const nodeCenterX = nr.left + nr.width / 2;
+
+      // Centre the popover under the node, clamped horizontally to the flow container.
+      let finalX = nodeCenterX - editorRect.width / 2;
+      finalX = Math.max(c.left + 12, Math.min(finalX, c.right - editorRect.width - 12));
+
+      parameterEditor = { ...parameterEditor, left: finalX, top: nodeBottom + GAP, caretX: nodeCenterX };
     });
   }
   
@@ -495,6 +461,7 @@
           left={parameterEditor?.left}
           right={parameterEditor?.right}
           bottom={parameterEditor?.bottom}
+          caretX={parameterEditor?.caretX}
           bind:deleteConfirmState
           bind:deleteTimeout
           onClose={closeParameterEditor}

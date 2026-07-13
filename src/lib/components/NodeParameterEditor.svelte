@@ -15,6 +15,8 @@
   export let visible: boolean = true;
   export let top: number | undefined = undefined;
   export let left: number | undefined = undefined;
+  // Node centre X (screen px): the caret points here, and it's kept within the popover's width.
+  export let caretX: number | undefined = undefined;
   export let right: number | undefined = undefined;
   export let bottom: number | undefined = undefined;
   export let deleteConfirmState: boolean = false;
@@ -51,6 +53,7 @@
   let clampedTop: number | null = null;
   let clampedLeft: number | null = null;
   let clampedMaxH: number | null = null;
+  let caretLeft: number | null = null; // caret x within the popover (px from its left edge)
   let resizeObserver: ResizeObserver | null = null;
 
   // Intersect the viewport with every overflow-clipping ancestor (the flow canvas has
@@ -74,13 +77,19 @@
     if (!popoverElement || !visible || typeof window === 'undefined') return;
     const m = 8; // margin inside the visible box
     const b = visibleBounds();
-    const availH = b.bottom - b.top - 2 * m;
-    clampedMaxH = Math.max(160, availH); // cap height to the canvas; content scrolls past that
+    const p = getPopoverPosition();
+    // Cap height to the space BELOW the anchor, so the popover sits under the node instead of
+    // sliding up over it — keeping the node you're editing visible. Content scrolls past the cap.
+    const anchorTop = p.top ?? (b.top + m);
+    const availH = Math.max(160, b.bottom - m - anchorTop);
+    clampedMaxH = availH;
     const r = popoverElement.getBoundingClientRect();
     const h = Math.min(r.height, availH); // effective height once max-height applies
-    const p = getPopoverPosition();
     if (p.top !== undefined) clampedTop = Math.max(b.top + m, Math.min(p.top, b.bottom - h - m));
     if (p.left !== undefined) clampedLeft = Math.max(b.left + m, Math.min(p.left, b.right - r.width - m));
+    // Caret x = node centre relative to the popover's left edge, kept inside the rounded corners.
+    const finalLeft = clampedLeft ?? p.left ?? 0;
+    caretLeft = (caretX != null) ? Math.max(14, Math.min(caretX - finalLeft, r.width - 14)) : null;
   }
   // NOTE: these MUST be reactive `$:` values, not functions. The style attribute below reads
   // `effTop`/`effLeft`; Svelte only re-renders it when identifiers it references change. A
@@ -92,7 +101,7 @@
 
   // Re-clamp after any content/anchor change (tick lets the DOM settle first). The ResizeObserver
   // (set up in onMount) covers content-driven size changes like opening the automation panel.
-  $: if (visible && (top || left || node || automating)) tick().then(clampToViewport);
+  $: if (visible && (top || left || caretX || node || automating)) tick().then(clampToViewport);
 
   function getParameterValue(param: Parameter): any {
     const nodeParams = $nodeParameters.get(node.id);
@@ -350,7 +359,12 @@
   }
 </script>
 
-<div 
+<!-- Caret pointing up at the node. A sibling (not a child) because the popover clips overflow. -->
+{#if visible && caretLeft != null}
+  <div class="popover-caret" style="position: fixed; top: {effTop - 8}px; left: {effLeft + caretLeft - 8}px;"></div>
+{/if}
+
+<div
   bind:this={popoverElement}
   class="parameter-popover"
   style="position: fixed; top: {effTop}px; left: {effLeft}px; max-height: {effMaxH ? effMaxH + 'px' : 'calc(100vh - 16px)'}; visibility: {visible ? 'visible' : 'hidden'}; opacity: {visible ? '1' : '0'}; transition: opacity 0.2s ease;"
@@ -626,6 +640,17 @@
 </div>
 
 <style>
+  .popover-caret {
+    width: 0;
+    height: 0;
+    border-left: 8px solid transparent;
+    border-right: 8px solid transparent;
+    border-bottom: 9px solid #1f2937;      /* points UP, matches the popover background */
+    filter: drop-shadow(0 -1px 0 #374151); /* hint of the popover's border on the caret edges */
+    z-index: 1001;
+    pointer-events: none;
+  }
+
   .parameter-popover {
     background: #1f2937;
     border: 1px solid #374151;
