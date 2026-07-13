@@ -20,6 +20,9 @@
   export let caretX: number | undefined = undefined;
   export let caretY: number | undefined = undefined;
   export let caretSide: 'top' | 'bottom' | 'left' | 'right' | undefined = undefined;
+  // Max height the editor allotted for this placement (the free space on the chosen side, so the
+  // popover expands to fill it without overlapping the node). Falls back to the full column.
+  export let maxHeight: number | undefined = undefined;
   export let right: number | undefined = undefined;
   export let bottom: number | undefined = undefined;
   export let deleteConfirmState: boolean = false;
@@ -81,10 +84,9 @@
     const m = 8; // margin inside the visible box
     const b = visibleBounds();
     const p = getPopoverPosition();
-    // Cap height to the space BELOW the anchor, so the popover sits under the node instead of
-    // sliding up over it — keeping the node you're editing visible. Content scrolls past the cap.
-    const anchorTop = p.top ?? (b.top + m);
-    const availH = Math.max(160, b.bottom - m - anchorTop);
+    // Height is the editor's allotment for the chosen side (the free space beside/above/below the
+    // node); fall back to the full visible column. Content scrolls past the cap.
+    const availH = maxHeight ?? Math.max(160, (b.bottom - b.top) - 2 * m);
     clampedMaxH = availH;
     const r = popoverElement.getBoundingClientRect();
     const h = Math.min(r.height, availH); // effective height once max-height applies
@@ -114,11 +116,11 @@
   // never repaint the DOM (the clamp ran but the popover never moved — a bug we hit before).
   $: effTop = clampedTop ?? top ?? 80;
   $: effLeft = clampedLeft ?? left ?? 20;
-  $: effMaxH = clampedMaxH;
+  $: effMaxH = clampedMaxH ?? maxHeight ?? null;
 
   // Re-clamp after any content/anchor change (tick lets the DOM settle first). The ResizeObserver
   // (set up in onMount) covers content-driven size changes like opening the automation panel.
-  $: if (visible && (top || left || caretX || caretY || caretSide || node || automating)) tick().then(clampToViewport);
+  $: if (visible && (top || left || caretX || caretY || caretSide || maxHeight || node || automating)) tick().then(clampToViewport);
 
   function getParameterValue(param: Parameter): any {
     const nodeParams = $nodeParameters.get(node.id);

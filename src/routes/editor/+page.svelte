@@ -68,7 +68,9 @@
     caretX?: number;   // node centre X (screen px) — the popover draws a caret pointing here
     caretY?: number;   // node centre Y (screen px), for side placements
     caretSide?: 'top' | 'bottom' | 'left' | 'right'; // direction the caret points at the node
+    maxHeight?: number; // free vertical space the editor allotted for the popover on its chosen side
   } | null = $state(null);
+  let caretVp: string | null = null; // viewport signature when the caret was placed (to detect pans)
   let clientWidth: number = $state(0);
   let clientHeight: number = $state(0);
   let flowContainer: HTMLDivElement;
@@ -221,21 +223,58 @@
         if (!best || cost < best.cost) best = { ...k, scroll, cost };
       }
 
-      if (Math.abs(best.scroll) > 4) {
-        const vp = viewport.current;
-        setViewport({ x: vp.x, y: vp.y - best.scroll, zoom: vp.zoom });
-      }
-      // Everything shifts up by `scroll` on screen. Clamp X only for above/below (sides must stay
-      // glued to the node); the popover's own clamp is the final safety net.
+      const vp0 = viewport.current;
+      const targetY = vp0.y - best.scroll;
+      if (Math.abs(best.scroll) > 4) setViewport({ x: vp0.x, y: targetY, zoom: vp0.zoom });
+      // Remember the viewport the caret was placed at; the $effect below drops the caret once the
+      // canvas is panned/zoomed away from it (we compare against the post-scroll target, not the
+      // pre-scroll value, so our own placement scroll doesn't count as a pan).
+      caretVp = `${Math.round(vp0.x)},${Math.round(targetY)},${vp0.zoom}`;
+
+      // Node position after the scroll, and the free height on the chosen side (so the popover can
+      // expand to fill it without overlapping the node) — passed to the popover as maxHeight.
+      const nrTop = nr.top - best.scroll, nrBot = nr.bottom - best.scroll;
+      let maxH: number;
+      if (best.side === 'below')      maxH = availBot - (nrBot + GAP);
+      else if (best.side === 'above') maxH = (nrTop - GAP) - availTop;
+      else                            maxH = availBot - availTop;      // beside the node: whole column
+      maxH = Math.max(160, Math.floor(maxH));
+      const finalH = Math.min(ph, maxH);
+
+      // Vertical anchor for the popover.
+      let fy: number;
+      if (best.side === 'above')      fy = (nrTop - GAP) - finalH;
+      else if (best.side === 'below') fy = nrBot + GAP;
+      else                            fy = Math.max(availTop, Math.min((cyN - best.scroll) - finalH / 2, availBot - finalH));
+
+      // Clamp X only for above/below (sides must stay glued to the node).
       let fx = best.x;
       if (best.side === 'below' || best.side === 'above') fx = Math.max(c.left + 12, Math.min(fx, c.right - pw - 12));
+
       parameterEditor = {
         ...parameterEditor,
-        left: fx, top: best.y - best.scroll,
+        left: fx, top: fy, maxHeight: maxH,
         caretSide: best.caret, caretX: cxN, caretY: cyN - best.scroll,
       };
     });
   }
+
+  // The popover is position:fixed, so once the canvas pans/zooms or a node is dragged, the caret no
+  // longer lines up with the node. Drop the caret (keep the popover open) instead of leaving a
+  // stale pointer.
+  function dropCaret() {
+    if (parameterEditor && parameterEditor.caretSide) {
+      parameterEditor = { ...parameterEditor, caretSide: undefined };
+    }
+  }
+
+  // Pan/zoom the canvas → the node moves under the fixed popover, so drop the caret. (Node DRAG is
+  // handled separately via onnodedragstart, since dragging a node doesn't change the viewport.)
+  $effect(() => {
+    const v = viewport.current;
+    if (!v || !caretVp || !parameterEditor?.caretSide) return;
+    if (`${Math.round(v.x)},${Math.round(v.y)},${v.zoom}` !== caretVp) dropCaret();
+  });
   
   // Close parameter editor
   function closeParameterEditor() {
@@ -446,11 +485,10 @@
       panOnDrag={true}
       translateExtent={[[0, -Infinity], [450, Infinity]]}
       colorMode="dark"
-      onnodedragstart={closeParameterEditor}
+      onnodedragstart={dropCaret}
       onnodedragstop={onNodeDragStop}
       onnodeclick={handleNodeClick}
       onpaneclick={closeParameterEditor}
-      onmovestart={closeParameterEditor}
       onedgeclick={onEdgeClick}
       nodesConnectable={true}
       zoomOnDoubleClick={false}
@@ -492,6 +530,7 @@
           caretX={parameterEditor?.caretX}
           caretY={parameterEditor?.caretY}
           caretSide={parameterEditor?.caretSide}
+          maxHeight={parameterEditor?.maxHeight}
           bind:deleteConfirmState
           bind:deleteTimeout
           onClose={closeParameterEditor}
