@@ -41,11 +41,8 @@ public:
         const float t = advancePhase(deltaTimeMs, speed * 0.01f); // cycles at base speed (smooth)
 
         for (int i = 0; i < count; i++) {
-            float aRnd = Modulation::hash01((uint32_t)(i * 4 + 1), seed);
-            float ang = (baseAngle + spread * (aRnd * 360.0f - 180.0f)) * (kTwoPi / 360.0f);
-            float dx = cosf(ang), dy = sinf(ang);
-            float span = wf * fabsf(dx) + hf * fabsf(dy); if (span < 1.0f) span = 1.0f;
-            float minP = (dx < 0 ? wf * dx : 0.0f) + (dy < 0 ? hf * dy : 0.0f);
+            // Per-band motion (speed/width/phase are fixed per band); the wrap count `cycle` drives
+            // the per-pass respawn of colour AND angle.
             float spd = 1.0f + speedSpread * (Modulation::hash01((uint32_t)(i * 4 + 2), seed) * 2.0f - 1.0f);
             float wid = widthFrac * (1.0f + widthSpread * (Modulation::hash01((uint32_t)(i * 4 + 3), seed) * 2.0f - 1.0f));
             if (wid < 0.01f) wid = 0.01f;
@@ -54,12 +51,18 @@ public:
             float frac = m - floorf(m);
             float center = (motion == 1) ? (1.0f - fabsf(2.0f * frac - 1.0f)) : frac; // bounce vs scroll
             float halfW = wid * 0.5f;
-            // Each band is "retired" and recoloured every time it wraps off-screen (a new cycle):
-            // start hues spread round the wheel, then advance by a golden-ish step per cycle so the
-            // palette keeps evolving and successive colours stay distinct.
             int cycle = (int)floorf(m);
+
+            // Each band is "retired" and respawned every time it wraps off-screen (a new cycle):
+            // a fresh colour AND a fresh angle within the spread — so with spread>0 the criss-cross
+            // keeps evolving over time (spread==0 stays parallel: the offset is always 0).
             uint8_t hue = (uint8_t)((int)(255.0f * (float)i / (float)count) + cycle * 97);
             CRGB col = CHSV(hue, sat, 255);
+            float aRnd = Modulation::hash01((uint32_t)(i * 4 + 1 + cycle * 101), seed);
+            float ang = (baseAngle + spread * (aRnd * 360.0f - 180.0f)) * (kTwoPi / 360.0f);
+            float dx = cosf(ang), dy = sinf(ang);
+            float span = wf * fabsf(dx) + hf * fabsf(dy); if (span < 1.0f) span = 1.0f;
+            float minP = (dx < 0 ? wf * dx : 0.0f) + (dy < 0 ? hf * dy : 0.0f);
 
             for (uint32_t y = 0; y < height; y++) {
                 for (uint32_t x = 0; x < width; x++) {
