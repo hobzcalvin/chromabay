@@ -15,16 +15,17 @@ public:
         uint32_t /* timestampMs */, uint32_t deltaTimeMs,
         const std::vector<ParameterValue>& params
     ) override {
-        float radius = getFloat(params, 0, 0.32f);   // circle radius, fraction of min(w,h)
-        float orbit  = getFloat(params, 1, 0.18f);   // orbit radius, fraction
-        float speed  = getFloat(params, 2, 20.0f);   // %/sec around the orbit
-        uint8_t val  = (uint8_t)getInt(params, 3, 255);
-        bool soft    = getBool(params, 4, false);    // feathered vs hard edges
+        float radius   = getFloat(params, 0, 0.32f); // circle radius, fraction of min(w,h)
+        float orbit    = getFloat(params, 1, 0.18f); // orbit radius, fraction
+        float speed    = getFloat(params, 2, 20.0f); // %/sec around the orbit
+        float softness = getFloat(params, 3, 0.0f);  // 0 = hard edge; up to 1 = feather across the radius
 
         uint32_t total = width * height;
         for (uint32_t i = 0; i < total; i++) out[i] = CRGB::Black;
         const float base = (float)(width < height ? width : height);
         const float R = radius * base, R2 = R * R, orb = orbit * base;
+        const bool soft = softness > 0.001f;
+        const float inner = R * (1.0f - (softness < 0 ? 0 : (softness > 1 ? 1 : softness))); // full brightness within here
         const float cx = width * 0.5f, cy = height * 0.5f;
         const float twoPi = 6.28318530718f;
         const float t = advancePhase(deltaTimeMs, speed * 0.01f); // cycles (smooth on speed change)
@@ -44,11 +45,12 @@ public:
                 for (int i = 0; i < 3; i++) {
                     float dx = (x + 0.5f) - ccx[i], dy = (y + 0.5f) - ccy[i];
                     float d2 = dx * dx + dy * dy;
-                    if (soft) {
-                        float e = 1.0f - sqrtf(d2) / R;
-                        if (e > 0) { uint8_t v = (uint8_t)(e * val); if (v > rgb[i]) rgb[i] = v; }
-                    } else if (d2 <= R2) {
-                        rgb[i] = val;
+                    if (!soft) {
+                        if (d2 <= R2) rgb[i] = 255;
+                    } else {
+                        float d = sqrtf(d2);
+                        if (d <= inner) rgb[i] = 255;
+                        else if (d < R) rgb[i] = (uint8_t)(255.0f * (R - d) / (R - inner)); // ramp to 0 at the edge
                     }
                 }
                 out[(size_t)y * width + x] = CRGB(rgb[0], rgb[1], rgb[2]);
@@ -64,8 +66,7 @@ public:
             ParameterInfo("radius", "Radius", ParameterInfo::FLOAT, 0.32f, 0.05f, 0.6f),
             ParameterInfo("orbit", "Orbit", ParameterInfo::FLOAT, 0.18f, 0.0f, 0.5f),
             ParameterInfo("speed", "Speed (%/sec)", ParameterInfo::FLOAT, 20.0f, -200.0f, 200.0f),
-            ParameterInfo("brightness", "Brightness", ParameterInfo::INT, 255, 0, 255),
-            ParameterInfo("soft", "Soft edges", ParameterInfo::BOOL, ParameterValue(false))
+            ParameterInfo("softness", "Softness", ParameterInfo::FLOAT, 0.0f, 0.0f, 1.0f)
         };
     }
 };
