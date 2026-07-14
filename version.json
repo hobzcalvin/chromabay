@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.208",
-  "downloadUrl": "https://chromabay.app/live-update-0.0.1.208.zip",
-  "buildDate": "2026-07-14T23:34:22Z",
-  "commitHash": "7b877ab91a1f23a0fdfda1cede86c587b6462338",
-  "commitMessage": "Venn: drop brightness param; replace soft-edges checkbox with a Softness amount"
+  "version": "0.0.1.209",
+  "downloadUrl": "https://chromabay.app/live-update-0.0.1.209.zip",
+  "buildDate": "2026-07-14T23:55:00Z",
+  "commitHash": "c14e2c6f4b5cd9cb95ce0e225e856008cc812189",
+  "commitMessage": "Bands: scroll fully off-screen before respawning (fix visible recolour on wrap)"
 }
