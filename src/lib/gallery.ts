@@ -59,6 +59,26 @@ export async function browseGallery(opts: { search?: string; limit?: number } = 
   }));
 }
 
+/**
+ * When someone opens a share LINK for a pattern that's also published in the gallery, count it as
+ * an upvote (adoption = upvote, same as importing from the gallery). Matches by content hash, so it
+ * works for any copy of the same pattern; no-op if the pattern isn't published or the user is signed
+ * out. Fire-and-forget.
+ */
+export async function upvoteSharedIfPublished(p: SerializedPattern): Promise<void> {
+  if (!supabase) return;
+  const uid = get(authUser)?.id;
+  if (!uid) return;
+  try {
+    const hash = p.meta?.sourceHash || (await contentHash(p));
+    const { data } = await supabase.from('patterns').select('id').eq('content_hash', hash).limit(1);
+    const id = data?.[0]?.id;
+    if (id) await supabase.from('upvotes').upsert({ user_id: uid, pattern_id: id });
+  } catch (e: any) {
+    console.warn('[gallery] shared-link upvote failed:', e?.message);
+  }
+}
+
 /** Copy a gallery pattern into the local library (attributed to its author) + upvote it. */
 export async function importGalleryPattern(g: GalleryPattern): Promise<{ name: string; collided: boolean }> {
   const incoming: SerializedPattern = {

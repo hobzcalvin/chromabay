@@ -29,6 +29,8 @@
             await switchToPattern(name);
             await loadSerializedPattern(shared);
             forceSyncCurrentPattern();
+            // If this shared pattern is published in the gallery, opening the link upvotes it.
+            import('$lib/gallery').then(({ upvoteSharedIfPublished }) => upvoteSharedIfPublished(shared)).catch(() => {});
             return;
           } catch (e) {
             console.error('Failed to open shared pattern link:', e);

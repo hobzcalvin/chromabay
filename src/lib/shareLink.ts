@@ -19,10 +19,19 @@ function fromB64url(str: string): Uint8Array {
   return out;
 }
 
-// Keep only what defines the pattern (nodes carry their params, interactive flags `x`, and
-// automation `m`); drop local/cloud identity so the link is portable and stable.
+// Keep what defines the pattern (nodes carry params, interactive `x`, automation `m`) plus its
+// attribution: `author` (so an unchanged import stays "by ‹author›") and `sourceHash` (content id,
+// used to credit + upvote the matching gallery entry). Drop only the local id/timestamp.
 function cleanForShare(p: SerializedPattern): SerializedPattern {
-  return { nodes: p.nodes ?? [], meta: { name: p.meta?.name || 'Shared Pattern', output: p.meta?.output ?? 1 } };
+  return {
+    nodes: p.nodes ?? [],
+    meta: {
+      name: p.meta?.name || 'Shared Pattern',
+      output: p.meta?.output ?? 1,
+      author: p.meta?.author,
+      sourceHash: p.meta?.sourceHash,
+    },
+  };
 }
 
 export function encodePatternToBlob(p: SerializedPattern): string {

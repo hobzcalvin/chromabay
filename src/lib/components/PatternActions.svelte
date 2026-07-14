@@ -11,6 +11,9 @@
   } from '$lib/stores/patternsStore';
   import { syncPatternToAllDevices } from '$lib/ble';
   import { buildPatternLink } from '$lib/shareLink';
+  import { contentHash } from '$lib/gallery';
+  import { authUser } from '$lib/stores/authStore';
+  import { get } from 'svelte/store';
   import AddNodeModal from './AddNodeModal.svelte';
   
   // Props for Add Node functionality (NODE_TYPES removed - using store instead)
@@ -40,7 +43,14 @@
   let linkCopied = $state(false);
   async function handleCopyLink() {
     try {
-      const link = buildPatternLink(serializeCurrentPattern());
+      const p = serializeCurrentPattern();
+      // Stamp attribution so the link carries credit: keep an existing author (an unchanged
+      // import stays theirs); otherwise credit the sharer. sourceHash is the content id used to
+      // find + upvote the matching gallery entry when someone opens the link.
+      const meta = { ...(p.meta ?? {}) };
+      if (!meta.author) meta.author = get(authUser)?.id;
+      if (!meta.sourceHash) meta.sourceHash = await contentHash(p);
+      const link = buildPatternLink({ ...p, meta });
       await navigator.clipboard.writeText(link);
       linkCopied = true;
       setTimeout(() => { linkCopied = false; }, 1800);
