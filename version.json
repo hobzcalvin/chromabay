@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.207",
-  "downloadUrl": "https://chromabay.app/live-update-0.0.1.207.zip",
-  "buildDate": "2026-07-14T21:00:38Z",
-  "commitHash": "c1d08e806963d73896afce330d58bb74545872a4",
-  "commitMessage": "Share links: carry attribution + upvote the gallery entry on open"
+  "version": "0.0.1.208",
+  "downloadUrl": "https://chromabay.app/live-update-0.0.1.208.zip",
+  "buildDate": "2026-07-14T23:34:22Z",
+  "commitHash": "7b877ab91a1f23a0fdfda1cede86c587b6462338",
+  "commitMessage": "Venn: drop brightness param; replace soft-edges checkbox with a Softness amount"
 }
