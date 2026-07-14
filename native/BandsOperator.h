@@ -49,16 +49,31 @@ public:
             float phase = Modulation::hash01((uint32_t)(i * 4 + 0), seed);
             float m = t * spd + phase;
             float frac = m - floorf(m);
-            float center = (motion == 1) ? (1.0f - fabsf(2.0f * frac - 1.0f)) : frac; // bounce vs scroll
             float halfW = wid * 0.5f;
             int cycle = (int)floorf(m);
+            float center;
+            int colourCycle, angleCycle;
+            if (motion == 1) {
+                // Bounce: stay fully ON-screen and reverse at the edges. The band never leaves, so
+                // there's nothing to "retire" — it keeps a fixed colour and angle.
+                float tri = 1.0f - fabsf(2.0f * frac - 1.0f);          // 0..1
+                float range = 1.0f - 2.0f * halfW; if (range < 0.0f) range = 0.0f;
+                center = halfW + tri * range;
+                colourCycle = 0; angleCycle = 0;
+            } else {
+                // Scroll: travel fully OFF both edges each pass (no toroidal wrap), so a band is
+                // genuinely off-screen at the cycle boundary — that's when it respawns with a new
+                // colour + angle, so the change is never visible mid-screen.
+                const float pad = 0.06f;
+                float travel = 1.0f + 2.0f * halfW + 2.0f * pad;
+                center = -(halfW + pad) + frac * travel;
+                colourCycle = cycle; angleCycle = cycle;
+            }
 
-            // Each band is "retired" and respawned every time it wraps off-screen (a new cycle):
-            // a fresh colour AND a fresh angle within the spread — so with spread>0 the criss-cross
-            // keeps evolving over time (spread==0 stays parallel: the offset is always 0).
-            uint8_t hue = (uint8_t)((int)(255.0f * (float)i / (float)count) + cycle * 97);
+            // start hues spread round the wheel; each respawn advances by a golden-ish step.
+            uint8_t hue = (uint8_t)((int)(255.0f * (float)i / (float)count) + colourCycle * 97);
             CRGB col = CHSV(hue, sat, 255);
-            float aRnd = Modulation::hash01((uint32_t)(i * 4 + 1 + cycle * 101), seed);
+            float aRnd = Modulation::hash01((uint32_t)(i * 4 + 1 + angleCycle * 101), seed);
             float ang = (baseAngle + spread * (aRnd * 360.0f - 180.0f)) * (kTwoPi / 360.0f);
             float dx = cosf(ang), dy = sinf(ang);
             float span = wf * fabsf(dx) + hf * fabsf(dy); if (span < 1.0f) span = 1.0f;
@@ -67,8 +82,7 @@ public:
             for (uint32_t y = 0; y < height; y++) {
                 for (uint32_t x = 0; x < width; x++) {
                     float p = ((float)x * dx + (float)y * dy - minP) / span; // 0..1 along the axis
-                    float d = fabsf(p - center);
-                    if (motion == 0 && d > 0.5f) d = 1.0f - d; // wrap distance (scroll is periodic)
+                    float d = fabsf(p - center);                             // no wrap: bands exit the edges
                     if (d <= halfW) {
                         float b = 1.0f - d / halfW; // triangular profile: bright centre, faded edges
                         size_t idx = (size_t)y * width + x;
