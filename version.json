@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.204",
-  "downloadUrl": "https://chromabay.app/live-update-0.0.1.204.zip",
-  "buildDate": "2026-07-14T04:50:11Z",
-  "commitHash": "b3d298d0a5de1636b654d0f9146b9f5814b314b9",
-  "commitMessage": "Bands: recolour each band when it wraps off-screen so the palette evolves"
+  "version": "0.0.1.205",
+  "downloadUrl": "https://chromabay.app/live-update-0.0.1.205.zip",
+  "buildDate": "2026-07-14T05:19:18Z",
+  "commitHash": "b64a4d2ea510b81448747549be0b705f20d6053c",
+  "commitMessage": "Bands: respawn each band's angle on wrap too (spread evolves over time)"
 }
