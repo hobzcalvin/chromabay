@@ -7,7 +7,8 @@
   import LaneBackground from '$lib/components/LaneBackground.svelte';
   import NodeParameterEditor from '$lib/components/NodeParameterEditor.svelte';
   import PatternActions from '$lib/components/PatternActions.svelte';
-  import { loadPatterns, currentPattern } from '$lib/stores/patternsStore';
+  import { loadPatterns, currentPattern, importLibraryPattern, switchToPattern } from '$lib/stores/patternsStore';
+  import { patternBlobFromHash, decodeBlobToPattern } from '$lib/shareLink';
   import { goto } from '$app/navigation';
   import { base } from '$app/paths';
   // Hidden for now: import PatternSerializationPanel from '$lib/components/PatternSerializationPanel.svelte';
@@ -16,6 +17,26 @@
   onMount(() => {
     (async () => {
       try {
+        // A shared pattern link (chromabay.app/editor#p=…): decode it, import it into the library
+        // as a new pattern, and open it. Strip the hash first so a refresh doesn't re-import.
+        const blob = typeof location !== 'undefined' ? patternBlobFromHash(location.hash) : null;
+        if (blob) {
+          try {
+            const shared = decodeBlobToPattern(blob);
+            history.replaceState(history.state, '', location.pathname + location.search);
+            await loadPatterns();
+            const { name } = await importLibraryPattern(shared);
+            await switchToPattern(name);
+            await loadSerializedPattern(shared);
+            forceSyncCurrentPattern();
+            return;
+          } catch (e) {
+            console.error('Failed to open shared pattern link:', e);
+            history.replaceState(history.state, '', location.pathname + location.search);
+            // fall through to the normal load
+          }
+        }
+
         await loadPatterns();
         // Load the current pattern into the flow editor
         const current = $currentPattern;
@@ -25,7 +46,7 @@
           // Fallback to default pattern
           initializeDefaultPattern();
         }
-        
+
         // Force sync the loaded pattern to connected devices
         forceSyncCurrentPattern();
       } catch (error) {

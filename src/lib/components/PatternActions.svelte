@@ -10,6 +10,7 @@
     createEmptyPattern
   } from '$lib/stores/patternsStore';
   import { syncPatternToAllDevices } from '$lib/ble';
+  import { buildPatternLink } from '$lib/shareLink';
   import AddNodeModal from './AddNodeModal.svelte';
   
   // Props for Add Node functionality (NODE_TYPES removed - using store instead)
@@ -36,6 +37,20 @@
   let newName = $state('');
   let renameName = $state('');
   
+  let linkCopied = $state(false);
+  async function handleCopyLink() {
+    try {
+      const link = buildPatternLink(serializeCurrentPattern());
+      await navigator.clipboard.writeText(link);
+      linkCopied = true;
+      setTimeout(() => { linkCopied = false; }, 1800);
+    } catch (e) {
+      console.error('Copy link failed:', e);
+      alert('Could not copy the link.');
+    }
+    showDropdown = false;
+  }
+
   // Reactive current pattern name
   let patternName = $state('');
   currentPatternName.subscribe(name => {
@@ -217,6 +232,7 @@
         <div class="dropdown-menu">
           <button onclick={handleNew}>➕ New...</button>
           <button onclick={handleDuplicate}>📋 Duplicate...</button>
+          <button onclick={handleCopyLink}>{linkCopied ? '✅ Link copied!' : '🔗 Copy link'}</button>
           <button onclick={handleRename}>✏️ Rename...</button>
           <hr />
           <button onclick={handleDelete} class="delete-action">🗑️ Delete</button>
