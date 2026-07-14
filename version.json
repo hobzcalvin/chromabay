@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.202",
-  "downloadUrl": "https://chromabay.app/live-update-0.0.1.202.zip",
-  "buildDate": "2026-07-13T23:13:04Z",
-  "commitHash": "a540a5694664e7ed573989b1dc937d0d2901e7ac",
-  "commitMessage": "Editor popover: only scroll to keep the NODE visible; cap popover to side's room"
+  "version": "0.0.1.203",
+  "downloadUrl": "https://chromabay.app/live-update-0.0.1.203.zip",
+  "buildDate": "2026-07-14T04:46:39Z",
+  "commitHash": "ad9aae176e443f7ee85069b5edc073dcf8fa1154",
+  "commitMessage": "Editor popover: scroll the node toward the edge to maximize the popover's room"
 }
