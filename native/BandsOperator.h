@@ -41,7 +41,6 @@ public:
         const float t = advancePhase(deltaTimeMs, speed * 0.01f); // cycles at base speed (smooth)
 
         for (int i = 0; i < count; i++) {
-            uint8_t hue = (uint8_t)(255.0f * (float)i / (float)count); // hues spread round the wheel
             float aRnd = Modulation::hash01((uint32_t)(i * 4 + 1), seed);
             float ang = (baseAngle + spread * (aRnd * 360.0f - 180.0f)) * (kTwoPi / 360.0f);
             float dx = cosf(ang), dy = sinf(ang);
@@ -55,6 +54,11 @@ public:
             float frac = m - floorf(m);
             float center = (motion == 1) ? (1.0f - fabsf(2.0f * frac - 1.0f)) : frac; // bounce vs scroll
             float halfW = wid * 0.5f;
+            // Each band is "retired" and recoloured every time it wraps off-screen (a new cycle):
+            // start hues spread round the wheel, then advance by a golden-ish step per cycle so the
+            // palette keeps evolving and successive colours stay distinct.
+            int cycle = (int)floorf(m);
+            uint8_t hue = (uint8_t)((int)(255.0f * (float)i / (float)count) + cycle * 97);
             CRGB col = CHSV(hue, sat, 255);
 
             for (uint32_t y = 0; y < height; y++) {
