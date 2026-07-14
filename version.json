@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.203",
-  "downloadUrl": "https://chromabay.app/live-update-0.0.1.203.zip",
-  "buildDate": "2026-07-14T04:46:39Z",
-  "commitHash": "ad9aae176e443f7ee85069b5edc073dcf8fa1154",
-  "commitMessage": "Editor popover: scroll the node toward the edge to maximize the popover's room"
+  "version": "0.0.1.204",
+  "downloadUrl": "https://chromabay.app/live-update-0.0.1.204.zip",
+  "buildDate": "2026-07-14T04:50:11Z",
+  "commitHash": "b3d298d0a5de1636b654d0f9146b9f5814b314b9",
+  "commitMessage": "Bands: recolour each band when it wraps off-screen so the palette evolves"
 }
