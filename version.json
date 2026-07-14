@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.206",
-  "downloadUrl": "https://chromabay.app/live-update-0.0.1.206.zip",
-  "buildDate": "2026-07-14T19:35:13Z",
-  "commitHash": "9c228fa950d1d7390a850c931d9246b7fc1b0e24",
-  "commitMessage": "Share a pattern by link (self-contained, no backend)"
+  "version": "0.0.1.207",
+  "downloadUrl": "https://chromabay.app/live-update-0.0.1.207.zip",
+  "buildDate": "2026-07-14T21:00:38Z",
+  "commitHash": "c1d08e806963d73896afce330d58bb74545872a4",
+  "commitMessage": "Share links: carry attribution + upvote the gallery entry on open"
 }
