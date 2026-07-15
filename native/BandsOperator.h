@@ -60,6 +60,13 @@ public:
                 float range = 1.0f - 2.0f * halfW; if (range < 0.0f) range = 0.0f;
                 center = halfW + tri * range;
                 colourCycle = 0; angleCycle = 0;
+            } else if (motion == 2) {
+                // Wander: position driven by smooth noise, ranging past both edges — so the band
+                // changes direction mid-display and drifts on/off screen ("dies" and returns). The
+                // hue drifts continuously (below), so a band that wanders back reads as a new colour.
+                float nz = Modulation::valueNoise(m, seed + (uint32_t)(i * 17 + 3));  // 0..1
+                center = -0.3f + nz * 1.6f;                                            // ~[-0.3, 1.3]
+                colourCycle = 0; angleCycle = 0;
             } else {
                 // Scroll: travel fully OFF both edges each pass (no toroidal wrap), so a band is
                 // genuinely off-screen at the cycle boundary — that's when it respawns with a new
@@ -70,8 +77,10 @@ public:
                 colourCycle = cycle; angleCycle = cycle;
             }
 
-            // start hues spread round the wheel; each respawn advances by a golden-ish step.
-            uint8_t hue = (uint8_t)((int)(255.0f * (float)i / (float)count) + colourCycle * 97);
+            // Start hues spread round the wheel; scroll advances by a golden-ish step each respawn;
+            // wander drifts the hue continuously so bands keep changing colour without a visible pop.
+            uint8_t hue = (uint8_t)((int)(255.0f * (float)i / (float)count) + colourCycle * 97
+                                    + (motion == 2 ? (int)(t * 45.0f) : 0));
             CRGB col = CHSV(hue, sat, 255);
             float aRnd = Modulation::hash01((uint32_t)(i * 4 + 1 + angleCycle * 101), seed);
             float ang = (baseAngle + spread * (aRnd * 360.0f - 180.0f)) * (kTwoPi / 360.0f);
@@ -104,7 +113,7 @@ public:
             ParameterInfo("count", "Bands", ParameterInfo::INT, 5, 1, 16),
             ParameterInfo("width", "Width", ParameterInfo::FLOAT, 0.15f, 0.02f, 1.0f),
             ParameterInfo("speed", "Speed (%/sec)", ParameterInfo::FLOAT, 25.0f, -200.0f, 200.0f),
-            ParameterInfo("motion", "Motion", ParameterInfo::SELECT, 0, std::vector<std::string>{ "Scroll", "Bounce" }),
+            ParameterInfo("motion", "Motion", ParameterInfo::SELECT, 0, std::vector<std::string>{ "Scroll", "Bounce", "Wander" }),
             ParameterInfo("angle", "Angle", ParameterInfo::FLOAT, 90.0f, 0.0f, 360.0f),
             ParameterInfo("spread", "Spread", ParameterInfo::FLOAT, 0.0f, 0.0f, 1.0f),
             ParameterInfo("saturation", "Saturation", ParameterInfo::INT, 255, 0, 255)
