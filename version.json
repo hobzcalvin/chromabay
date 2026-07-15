@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.210",
-  "downloadUrl": "https://chromabay.app/live-update-0.0.1.210.zip",
-  "buildDate": "2026-07-15T00:06:43Z",
-  "commitHash": "d6bc1e962f92f3f9525837c66062fb46ba52a377",
-  "commitMessage": "Bands: add a Wander motion mode (noise-driven, drifts on/off screen)"
+  "version": "0.0.1.211",
+  "downloadUrl": "https://chromabay.app/live-update-0.0.1.211.zip",
+  "buildDate": "2026-07-15T19:14:34Z",
+  "commitHash": "7e34dd7fbc4424236794847f2481e6f0fcf7f422",
+  "commitMessage": "Add a privacy policy page at /privacy (App Store requirement)"
 }
