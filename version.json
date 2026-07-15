@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.211",
-  "downloadUrl": "https://chromabay.app/live-update-0.0.1.211.zip",
-  "buildDate": "2026-07-15T19:14:34Z",
-  "commitHash": "7e34dd7fbc4424236794847f2481e6f0fcf7f422",
-  "commitMessage": "Add a privacy policy page at /privacy (App Store requirement)"
+  "version": "0.0.1.212",
+  "downloadUrl": "https://chromabay.app/live-update-0.0.1.212.zip",
+  "buildDate": "2026-07-15T20:42:56Z",
+  "commitHash": "068b667c7ad48f5ba1de303e595ffaaddf4d7fb1",
+  "commitMessage": "Remove the Output node; infer the display target from the graph's terminal"
 }
