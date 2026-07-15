@@ -157,34 +157,32 @@ test('Deserialization back to the correct nodes and edges', () => {
   // Verify deserialization
   let passed = true;
   
+  // No explicit Output node anymore — the graph is just the pattern's own nodes.
   passed = passed && assert(
-    nodes.length === 2, 
-    `Deserialized pattern should have 2 nodes (rainbow + final output). Got: ${nodes.length}`
+    nodes.length === 1,
+    `Deserialized pattern should have 1 node (rainbow; no Output node). Got: ${nodes.length}`
   );
-  
+
   passed = passed && assert(
-    edges.length === 1,
-    `Deserialized pattern should have 1 edge (rainbow to final output). Got: ${edges.length}`
+    edges.length === 0,
+    `Deserialized pattern should have 0 edges (no Output node to wire). Got: ${edges.length}`
   );
-  
+
   // Check node types
   const rainbowNode = nodes.find(n => n.data.type === 'rainbow');
-  const outputNode = nodes.find(n => n.data.type === 'output'); 
-  
+  const outputNode = nodes.find(n => n.data.type === 'output');
+
   passed = passed && assert(!!rainbowNode, 'Rainbow node should be present');
-  passed = passed && assert(!!outputNode, 'Final output node should be present');
+  passed = passed && assert(!outputNode, 'There should be no Output node');
   
   passed = passed && assert(
-    (rainbowNode?.data.parameters as any)?.speed === 0.3 && 
+    (rainbowNode?.data.parameters as any)?.speed === 0.3 &&
     (rainbowNode?.data.parameters as any)?.angle === 45,
     'Rainbow node parameters should be preserved'
   );
-  
-  passed = passed && assert(
-    edges[0].source === rainbowNode?.id && edges[0].target === outputNode?.id,
-    'Edge should connect rainbow to final output'
-  );
-  
+
+  // (No Output node → no edge to assert; the rainbow is itself the inferred display terminal.)
+
   return passed;
 });
 
@@ -344,27 +342,25 @@ test('Pattern with nodes but no connections', () => {
     'Rainbow node should have output buffer but no input buffer'
   );
   
-  // The input had an explicit output node with NOTHING wired to it. The serializer
-  // records meta.output = -1 (the "nothing is wired to the output" sentinel) so the
-  // pattern reloads showing black, rather than auto-wiring whatever sits in a lane.
+  // No explicit Output node: the display target is inferred from a terminal node. Both
+  // disconnected nodes are terminals, so the serializer picks one deterministically — meta.output
+  // is a real lane buffer (>= 0), not the old "black" sentinel.
   passed = passed && assert(
-    serialized.meta.output === -1,
-    `Unwired output should serialize meta.output = -1 (black). Got: ${serialized.meta.output}`
+    serialized.meta.output >= 0,
+    `Unwired multi-node pattern should infer a terminal buffer (>=0). Got: ${serialized.meta.output}`
   );
 
   const { nodes: deserializedNodes, edges: deserializedEdges } = deserializePattern(serialized);
 
-  // So deserialization reconstructs all 3 nodes (rainbow + gradient + output) but
-  // wires NO implicit edge — the output stays disconnected (black), preserving intent.
+  // Deserialization reconstructs the 2 real nodes and no edges (no Output node to wire).
   passed = passed && assert(
-    deserializedNodes.length === 3 && deserializedEdges.length === 0,
-    `Deserialized pattern should have 3 nodes and 0 edges (output left unwired). Got nodes: ${deserializedNodes.length}, edges: ${deserializedEdges.length}`
+    deserializedNodes.length === 2 && deserializedEdges.length === 0,
+    `Deserialized pattern should have 2 nodes and 0 edges (no Output node). Got nodes: ${deserializedNodes.length}, edges: ${deserializedEdges.length}`
   );
 
-  const outputNode = deserializedNodes.find(n => n.data.type === 'output');
   passed = passed && assert(
-    !!outputNode && !deserializedEdges.some(e => e.target === outputNode.id),
-    'The reconstructed output node should have no incoming edge'
+    !deserializedNodes.some(n => n.data.type === 'output'),
+    'There should be no reconstructed Output node'
   );
 
   return passed;
@@ -393,8 +389,8 @@ test('Deserialization handles an unknown node type mid-list without misaligning 
   const blend = nodes.find(n => n.data.type === 'blend');
   const output = nodes.find(n => n.data.type === 'output');
 
-  passed = passed && assert(!!rainbow && !!blend && !!output,
-    'rainbow, blend and reconstructed output nodes should all be present');
+  passed = passed && assert(!!rainbow && !!blend && !output,
+    'rainbow and blend should be present; there is no reconstructed Output node');
   passed = passed && assert(
     !nodes.some(n => n.data.type === 'definitely_not_a_real_operator'),
     'the unknown node type should be dropped, not created'

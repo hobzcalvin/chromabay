@@ -210,8 +210,39 @@ function topologicalSort(nodes: Node[], edges: Edge[]): SortResult {
 }
 
 /**
+ * Infer which node's output drives the final display — replacing the old explicit Output node.
+ * The "final product" is a TERMINAL: a node whose output nothing else consumes (the bottom of a
+ * lane). A real pattern blends its lanes down to one terminal; while you're wiring there may be
+ * several, so we deterministically pick the most-processed one (largest upstream set), then the
+ * bottom-most on screen. Returns null for an empty graph (→ display shows black).
+ */
+export function inferOutputNode(allNodes: Node[], allEdges: Edge[]): Node | null {
+  const real = allNodes.filter(n => (n.data as { type?: string })?.type !== 'output'); // ignore any legacy output node
+  if (real.length === 0) return null;
+  const consumed = new Set(allEdges.map(e => e.source)); // a node that feeds another isn't terminal
+  let terminals = real.filter(n => !consumed.has(n.id));
+  if (terminals.length === 0) terminals = real;          // guard (a cycle leaves no terminal)
+  if (terminals.length === 1) return terminals[0];
+
+  const incoming = new Map<string, string[]>();
+  for (const e of allEdges) {
+    const arr = incoming.get(e.target); if (arr) arr.push(e.source); else incoming.set(e.target, [e.source]);
+  }
+  const ancestorCount = (id: string): number => {
+    const seen = new Set<string>(); const stack = [...(incoming.get(id) ?? [])];
+    while (stack.length) { const s = stack.pop()!; if (seen.has(s)) continue; seen.add(s); for (const p of incoming.get(s) ?? []) stack.push(p); }
+    return seen.size;
+  };
+  return terminals.slice().sort((a, b) => {
+    const d = ancestorCount(b.id) - ancestorCount(a.id); if (d) return d;      // most processed first
+    const dy = (b.position?.y ?? 0) - (a.position?.y ?? 0); if (dy) return dy;  // then bottom-most
+    return a.id < b.id ? -1 : 1;                                               // stable
+  })[0];
+}
+
+/**
  * Serializes a pattern graph into a compact format suitable for BLE transmission.
- * 
+ *
  * @param allNodes - All nodes in the pattern
  * @param allEdges - All edges connecting the nodes
  * @param currentNodeParameters - Map of node parameters
@@ -360,23 +391,11 @@ export function serializePattern(
     positions.forEach((pos, i) => { conflictSafeOrder[pos] = orderedGroup[i]; });
   });
   
-  // Step 2: Find output node and determine final output buffer.
-  // -1 is a sentinel meaning "nothing is wired to the output" — the device (and
-  // preview) then show black instead of whatever happens to sit in the output's lane
-  // buffer. All nodes are still serialized; this only controls what gets displayed.
-  let finalOutputBufferIndex = 0; // Default output buffer (used when there is no output node)
-  const outputNode = allNodes.find(n => n.data.type === 'output');
-
-  if (outputNode) {
-    const inputEdgesToOutputNode = allEdges.filter(edge => edge.target === outputNode.id);
-    if (inputEdgesToOutputNode.length > 0) {
-      const sourceNodeId = inputEdgesToOutputNode[0].source;
-      const sourceNode = allNodes.find(n => n.id === sourceNodeId);
-      finalOutputBufferIndex = sourceNode ? getNodeLaneBuffer(sourceNode) : -1;
-    } else {
-      finalOutputBufferIndex = -1; // output node exists but nothing feeds it
-    }
-  }
+  // Step 2: Infer the final output buffer from the terminal node (no explicit Output node).
+  // -1 means "empty graph" — the device (and preview) show black. All nodes are still
+  // serialized; this only controls which lane buffer gets displayed on the LEDs.
+  const terminalNode = inferOutputNode(allNodes, allEdges);
+  const finalOutputBufferIndex = terminalNode ? getNodeLaneBuffer(terminalNode) : -1;
   
   // Step 3: Filter out output node for serialization (every other node is kept, even
   // if it isn't wired to the output — disconnected nodes must survive a reload).
@@ -828,60 +847,10 @@ export function deserializePattern(
     }
   });
   
-  // Step 4: Add output node
-  const outputDef = getNodeDefinition('output');
-  if (outputDef) {
-    const outputNodeId = `deserialized_output_${Date.now()}`;
-    
-    // Find the maximum dependency level to place output node at the bottom
-    const maxLevel = Math.max(...Array.from(dependencyLevels.values())) + 1;
-    
-    // Find the correct lane for the output node based on the final output buffer.
-    // -1 means "nothing wired to the output"; place it in lane 0 and leave it
-    // unconnected (the source-finding loop below won't match a buffer of -1).
-    const finalOutputBuffer = serializedPattern.meta?.output !== undefined ? serializedPattern.meta.output : 0;
+  // Step 4: (No explicit Output node.) The display target is inferred from the graph's terminal
+  // node at render + serialize time (see inferOutputNode); meta.output still drives the device but
+  // is not materialized as a node in the editor.
 
-    // Position output node in the same lane as the final output buffer (pushed to a
-    // free row if needed, same as every other node).
-    const outputX = getLaneFromBuffer(finalOutputBuffer >= 0 ? finalOutputBuffer : 0);
-    const outputNode = createNodeFromType(outputDef, outputNodeId, {
-      x: outputX,
-      y: placeRow(outputX, maxLevel)
-    });
-    
-    // Add output node parameters (none for output node)
-    newNodeParameters.set(outputNodeId, new Map());
-    
-    // Add output node
-    svelteFlowNodes.push(outputNode);
-    
-    // Find the node that outputs to the final output buffer
-    
-    // Find the last node that writes to this buffer
-    let sourceForOutput: string | undefined;
-    for (let i = serializedPattern.nodes.length - 1; i >= 0; i--) {
-      const node = serializedPattern.nodes[i];
-      const created = indexToNode.get(i); // skip unknown/uncreated nodes
-      if (node.o === finalOutputBuffer && created) {
-        sourceForOutput = created.id;
-        break;
-      }
-    }
-    
-    // Connect output node to the source node
-    if (sourceForOutput) {
-      svelteFlowEdges.push({
-        id: `e_${sourceForOutput}_${outputNodeId}_out`,
-        source: sourceForOutput,
-        target: outputNodeId,
-        sourceHandle: 'output',
-        targetHandle: 'input',
-      });
-    }
-  } else {
-    console.warn('Output node definition not found. This might be due to WASM operators not being loaded yet.');
-  }
-  
   return {
     nodes: svelteFlowNodes,
     edges: svelteFlowEdges,

@@ -37,7 +37,7 @@ let autoSaveTimeout: ReturnType<typeof setTimeout> | undefined;
 // loaded into the editor" (e.g. the patterns page renders isolated previews and
 // never populates the global store), NOT "the user cleared the pattern".
 function hasEditablePattern(): boolean {
-  return get(flowNodes).some(n => (n.data as { type?: string })?.type !== 'output');
+  return get(flowNodes).length > 0; // any node is real content now (no Output node)
 }
 
 // Centralized auto-save function with debouncing
@@ -1379,25 +1379,16 @@ export async function loadSerializedPattern(serializedPattern: SerializedPattern
 
 // Initialize flow with default pattern if no patterns exist
 export function initializeDefaultPattern(): void {
-  // Create default nodes
+  // A single generator — no Output node; the terminal (this node) is the inferred display.
+  const rainbow = getNodeDefinition('rainbow') ?? NODE_TYPES[1];
   const defaultNodes: Node[] = [
-    createNodeFromType(NODE_TYPES[1], '1', { x: LANES.CENTER, y: 100 }),        // First pattern node (rainbow)
-    createNodeFromType(NODE_TYPES[0], '2', { x: LANES.CENTER, y: 250 })         // Output node
-  ];
-
-  // Create default edge
-  const defaultEdges: Edge[] = [
-    { 
-      id: 'e1-2', 
-      source: '1', 
-      target: '2', 
-    }
+    createNodeFromType(rainbow, '1', { x: LANES.CENTER, y: 120 }),
   ];
 
   // Set the stores
   flowNodes.set(defaultNodes);
-  flowEdges.set(defaultEdges);
-  nextNodeId.set(3);
+  flowEdges.set([]);
+  nextNodeId.set(2);
   
   // Mark as clean after initialization
   markPatternClean();
@@ -1408,13 +1399,10 @@ export function initializeEmptyPattern(): void {
   // Reset all stores first
   nodeParameters.set(new Map());
   
-  // Create default output node only
-  const outputNode: Node = createNodeFromType(NODE_TYPES[0], '1', { x: LANES.CENTER, y: 250 });
-
-  // Set the stores with just the output node
-  flowNodes.set([outputNode]);
+  // Truly empty — no Output node anymore. The user adds nodes; the terminal is the display.
+  flowNodes.set([]);
   flowEdges.set([]);
-  nextNodeId.set(2);
+  nextNodeId.set(1);
   
   // Mark as clean after initialization
   markPatternClean();

@@ -2,7 +2,7 @@
   import { onMount, onDestroy, setContext } from 'svelte';
   import { writable } from 'svelte/store';
   import type { SerializedPattern } from '$lib/patternSerializer';
-  import { deserializePatternWhenReady } from '$lib/patternSerializer';
+  import { deserializePatternWhenReady, inferOutputNode } from '$lib/patternSerializer';
   import { clearNodeModulators } from '$lib/stores/modulatorStore';
   import ContextualPatternNode from './ContextualPatternNode.svelte';
   import { SvelteFlow, type Node, type Edge } from '@xyflow/svelte';
@@ -45,7 +45,7 @@
   const offCtx = offscreen.getContext('2d');
 
   // Find the output node id reactively from LOCAL nodes
-  $: outputNodeId = $localFlowNodes.find(n => n.data.type === 'output')?.id ?? '';
+  $: outputNodeId = inferOutputNode($localFlowNodes, $localFlowEdges)?.id ?? '';
 
   function renderOutput() {
     if (!ctx || !offCtx || !outputNodeId) return;
