@@ -1,7 +1,7 @@
 {
-  "version": "0.1.214",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.214.zip",
-  "buildDate": "2026-07-16T17:18:10Z",
-  "commitHash": "75d8dfed5790fac2a697e49f119bcf35b4ed62d1",
-  "commitMessage": "Interact: knobs live below the switcher; fix enum-knob label + pointer"
+  "version": "0.1.215",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.215.zip",
+  "buildDate": "2026-07-16T22:34:15Z",
+  "commitHash": "be5283ad4b9e47414ec9935e9f8b8ed33bf3d657",
+  "commitMessage": "WLED-over-Wi-Fi conversion (native): flash ChromaBay onto a WLED device"
 }
