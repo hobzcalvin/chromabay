@@ -5,6 +5,7 @@ import * as msgpack from '@msgpack/msgpack';
 const msgpackEncode = msgpack.encode;
 const msgpackDecode = msgpack.decode;
 import { serializeCurrentPattern } from './flowStore';
+import { getFirmware, putFirmware } from './firmwareCache';
 
 /**
  * Check if we're running in a web browser
@@ -732,11 +733,38 @@ export async function stopOTAStatusNotifications(deviceId: string): Promise<void
 }
 
 // Main OTA Process Orchestrator
+/**
+ * Download firmware + signature, caching by version so a later OTA can run offline.
+ * Best-effort: returns silently if the fetch fails or IndexedDB is unavailable.
+ * Call this while online (e.g. when the Devices page loads the registry).
+ */
+export async function prefetchFirmware(
+  version: string,
+  date: string,
+  firmwareUrl: string,
+  signatureUrl: string
+): Promise<void> {
+  try {
+    if (await getFirmware(version)) return; // already cached
+    const [binResp, sigResp] = await Promise.all([fetch(firmwareUrl), fetch(signatureUrl)]);
+    if (!binResp.ok || !sigResp.ok) return;
+    const bin = await binResp.arrayBuffer();
+    const sig = await sigResp.arrayBuffer();
+    if (sig.byteLength !== 64) return; // not a valid signature; don't poison the cache
+    await putFirmware({ version, date, bin, sig, cachedAt: Date.now() });
+    console.log(`[OTA] Prefetched firmware ${version} into offline cache.`);
+  } catch (e) {
+    console.warn('[OTA] Firmware prefetch skipped:', e);
+  }
+}
+
 export async function performOTAUpdate(
   deviceId: string,
   firmwareUrl: string,
   signatureUrl: string,
-  progressCallback: (status: OTAUpdateStatus) => void
+  progressCallback: (status: OTAUpdateStatus) => void,
+  version?: string,
+  date?: string
 ): Promise<void> {
   console.log(`[OTA] Starting OTA update for ${deviceId} from ${firmwareUrl}`);
   progressCallback({ statusMessage: 'Starting OTA...' });
@@ -746,18 +774,38 @@ export async function performOTAUpdate(
   let onAck: () => void = () => {};
 
   try {
-    // 1. Fetch firmware and signature
-    progressCallback({ statusMessage: 'Downloading firmware...' });
-    const firmwareResponse = await fetch(firmwareUrl);
-    if (!firmwareResponse.ok) throw new Error(`Failed to download firmware: ${firmwareResponse.statusText}`);
-    const firmwareBuffer = await firmwareResponse.arrayBuffer();
-    progressCallback({ statusMessage: `Firmware downloaded (${firmwareBuffer.byteLength} bytes).` });
+    // 1. Resolve firmware + signature — cache-first, so an OTA can run with NO internet
+    //    if the image was prefetched earlier (see prefetchFirmware). On a cache miss we
+    //    fetch from the registry and store the result for next time.
+    let firmwareBuffer: ArrayBuffer;
+    let signatureBuffer: ArrayBuffer;
+    const cached = version ? await getFirmware(version) : null;
+    if (cached) {
+      firmwareBuffer = cached.bin;
+      signatureBuffer = cached.sig;
+      progressCallback({ statusMessage: `Using cached firmware ${version} (${firmwareBuffer.byteLength} bytes).` });
+    } else {
+      progressCallback({ statusMessage: 'Downloading firmware...' });
+      const firmwareResponse = await fetch(firmwareUrl);
+      if (!firmwareResponse.ok) throw new Error(`Failed to download firmware: ${firmwareResponse.statusText}`);
+      firmwareBuffer = await firmwareResponse.arrayBuffer();
+      progressCallback({ statusMessage: `Firmware downloaded (${firmwareBuffer.byteLength} bytes).` });
 
-    progressCallback({ statusMessage: 'Downloading signature...' });
-    const signatureResponse = await fetch(signatureUrl);
-    if (!signatureResponse.ok) throw new Error(`Failed to download signature: ${signatureResponse.statusText}`);
-    const signatureBuffer = await signatureResponse.arrayBuffer();
-    progressCallback({ statusMessage: `Signature downloaded (${signatureBuffer.byteLength} bytes).` });
+      progressCallback({ statusMessage: 'Downloading signature...' });
+      const signatureResponse = await fetch(signatureUrl);
+      if (!signatureResponse.ok) throw new Error(`Failed to download signature: ${signatureResponse.statusText}`);
+      signatureBuffer = await signatureResponse.arrayBuffer();
+      progressCallback({ statusMessage: `Signature downloaded (${signatureBuffer.byteLength} bytes).` });
+
+      if (signatureBuffer.byteLength !== 64) { // FIRMWARE_SIGNATURE_LENGTH from C++
+          throw new Error(`Invalid signature length: ${signatureBuffer.byteLength}. Expected 64.`);
+      }
+      // Store for offline reuse (best-effort; keyed by version).
+      if (version) {
+        try { await putFirmware({ version, date: date ?? '', bin: firmwareBuffer, sig: signatureBuffer, cachedAt: Date.now() }); }
+        catch (e) { console.warn('[OTA] cache store failed:', e); }
+      }
+    }
 
     if (signatureBuffer.byteLength !== 64) { // FIRMWARE_SIGNATURE_LENGTH from C++
         throw new Error(`Invalid signature length: ${signatureBuffer.byteLength}. Expected 64.`);

@@ -21,6 +21,7 @@
     fetchFirmwareRegistry,
     findLatestFirmware,
     performOTAUpdate,
+    prefetchFirmware,
     startOTAStatusNotifications,
     stopOTAStatusNotifications,
     type DeviceInfo,
@@ -591,6 +592,17 @@
       // Don't bail when device info is missing — if we can't read the current
       // version we should still surface the latest firmware and offer it.
       settings.latestFirmware = findLatestFirmware(firmwareRegistry, settings.deviceInfo?.hw_ver);
+      // Prefetch the latest image into the offline cache now (while presumably online),
+      // so the actual OTA can run even if internet drops later. Best-effort, non-blocking.
+      if (settings.latestFirmware) {
+        const baseUrl = 'https://chromabay.app';
+        prefetchFirmware(
+          settings.latestFirmware.version,
+          settings.latestFirmware.date,
+          `${baseUrl}/${settings.latestFirmware.path}`,
+          `${baseUrl}/${settings.latestFirmware.signaturePath}`
+        );
+      }
       // Offer an update unless we positively know the device is already on the
       // latest version. Unknown current version => offer (better to ask).
       settings.showUpdateConfirmation =
@@ -633,7 +645,9 @@
           }
           // The status callback fires outside Svelte reactivity — reassign so the
           // progress bar and success state actually re-render.
-        }
+        },
+        settings.latestFirmware.version,
+        settings.latestFirmware.date
       );
       statusMessage = 'OTA update completed successfully!';
       // Briefly show success, then return to a fresh-load state: re-read device
