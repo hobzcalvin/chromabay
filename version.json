@@ -1,7 +1,7 @@
 {
-  "version": "0.1.213",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.213.zip",
-  "buildDate": "2026-07-16T16:56:07Z",
-  "commitHash": "d89acc727afdc2548d04eeffd443e491475ccc6b",
-  "commitMessage": "Version scheme (1.0.0 store / 0.1.x hot / fwv0.1) + Devices UI cleanup"
+  "version": "0.1.214",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.214.zip",
+  "buildDate": "2026-07-16T17:18:10Z",
+  "commitHash": "75d8dfed5790fac2a697e49f119bcf35b4ed62d1",
+  "commitMessage": "Interact: knobs live below the switcher; fix enum-knob label + pointer"
 }
