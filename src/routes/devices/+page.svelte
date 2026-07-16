@@ -49,6 +49,7 @@
   import { connectedDevices, getConnectedDevicesList, type ConnectedDevice } from '$lib/stores/deviceStore';
   import LedConfigurationComponent from '$lib/components/LedConfiguration.svelte';
   import UsbFlash from '$lib/components/UsbFlash.svelte';
+  import WledConvert from '$lib/components/WledConvert.svelte';
 
   let bleSupported = $state(false);
   let bleEnabled = $state(false);
@@ -981,6 +982,13 @@
 
     <!-- Web-only USB flasher, below the device list -->
     <UsbFlash />
+
+    <!-- Native-only: convert a WLED device over its Wi-Fi AP (web can't do cleartext HTTP). -->
+    {#if !isWeb}
+      <div class="settings-section">
+        <WledConvert />
+      </div>
+    {/if}
   </section>
 
   <!-- Status section moved to bottom and made smaller -->
