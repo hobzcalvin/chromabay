@@ -134,8 +134,10 @@
   $: displayValue = isEnum
     ? (labels[Math.max(0, Math.min(labels.length - 1, Math.round(value)))] ?? '')
     : value.toFixed(1);
-  // Shrink the enum label so it fits the knob face (viewBox units); longer labels → smaller.
-  $: valueFontSize = isEnum ? Math.max(18, Math.min(44, 300 / Math.max(String(displayValue).length, 3))) : 44;
+  // Shrink the enum label so it fits NATURALLY inside the dark center circle (viewBox
+  // units) — no horizontal stretch. ~209/len keeps even long labels within the face;
+  // short ones cap at 44 (same size as the numeric readout).
+  $: valueFontSize = isEnum ? Math.max(16, Math.min(44, 209 / Math.max(String(displayValue).length, 3))) : 44;
   $: valueAnchor = isEnum ? 'middle' : 'start';
   $: valueX = isEnum ? 103.5 : 45.3246625;
 </script>
@@ -237,18 +239,22 @@
               </g>
               <g id="knob" transform="translate(28.574244, 28.574244) rotate({angle} 71.4356094 71.4356094)">
                   <circle id="Oval-5" fill="#322E2E" cx="71.4356094" cy="71.4356094" r="71.4356094"/>
+                  <!-- Rotating pointer wedge. Hidden for enum knobs: the label already says
+                       the value, and a spinning wedge behind text just reads as noise. -->
+                  {#if !isEnum}
                   <g id="Rectangle-Copy-2" transform="translate(71.500000, 38.169598) scale(1, -1) translate(-71.500000, -38.169598) ">
                         <use fill="black" fill-opacity="1" filter="url(#1dac708c-6252-fad4-d1b2-7c24c1b02857-13)" xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#017c3ebb-7dbc-8e3a-f3b1-e494f4fa7ff8"></use>
                         <use fill="#E6D7D7" fill-rule="evenodd" xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#017c3ebb-7dbc-8e3a-f3b1-e494f4fa7ff8"></use>
                     </g>
+                  {/if}
               </g>
               <g id="label">
                   <g id="labeltext" fill-opacity="1" fill="#E6D7D7">
                       <text id="534f4e02-5541-3607-0966-af0b025d80e0" font-family="Helvetica" font-size={valueFontSize} font-weight="normal" text-anchor={valueAnchor} fill="#E6D7D7" class="text-7 value-text" filter="url(#12f618f7-e258-b597-3ed6-242484ddad8f)">
-          <tspan x={valueX} y="117.884225" textLength={isEnum ? 170 : undefined} lengthAdjust="spacingAndGlyphs">{displayValue}</tspan>
+          <tspan x={valueX} y="117.884225">{displayValue}</tspan>
       </text>
                       <text id="92ebe866-c281-70c7-7b0e-a373cee013a9" font-family="Helvetica" font-size={valueFontSize} font-weight="normal" text-anchor={valueAnchor} fill="#E6D7D7" class="text-7 value-text">
-          <tspan x={valueX} y="117.884225" textLength={isEnum ? 170 : undefined} lengthAdjust="spacingAndGlyphs">{displayValue}</tspan>
+          <tspan x={valueX} y="117.884225">{displayValue}</tspan>
       </text>
                   </g>
                   <circle id="Oval-6" stroke="#979797" fill-opacity="0.730000019" fill="url(#3cc0e5b8-1f0a-886b-f635-8fcb19212870)" transform="translate(100.351759, 100.351759) rotate(-45.000000) translate(-100.351759, -100.351759) " cx="100.351759" cy="100.351759" r="70.3517588"/>

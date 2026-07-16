@@ -54,13 +54,19 @@ import { get } from 'svelte/store';
   let innerWidth = 0;
   let innerHeight = 0;
 
+  // Vertical space the switcher pill occupies at the top. The knob overlay starts below
+  // it (see .knobs-overlay CSS), so knobs live entirely below the switcher — sizing must
+  // use the same reduced height or the top row would be too tall for its band.
+  const TOP_RESERVE = 100;
+
   $: knobCount = Math.min(dynamicKnobs.length, 6);
   $: knobPositions = KNOB_LAYOUTS[knobCount] ?? [];
   // Fit each knob inside its grid cell, reserving room for the label, then clamp.
   $: knobSize = (() => {
     if (knobCount === 0 || innerWidth === 0 || innerHeight === 0) return 160;
+    const usableH = Math.max(120, innerHeight - TOP_RESERVE);
     const cellW = innerWidth / LAYOUT_COLS[knobCount];
-    const cellH = innerHeight / LAYOUT_ROWS[knobCount];
+    const cellH = usableH / LAYOUT_ROWS[knobCount];
     const byWidth = cellW * 0.8;
     const byHeight = cellH * 0.78 - 36; // ~36px reserved for the label
     return Math.round(Math.max(88, Math.min(byWidth, byHeight, 240)));
@@ -426,7 +432,12 @@ import { get } from 'svelte/store';
      pattern behind it; each knob re-enables them. */
   .knobs-overlay {
     position: fixed;
-    inset: 0;
+    /* Start below the switcher pill (its top offset + ~its height) so the knob band is
+       everything below the switcher and the top row never sits under it. */
+    top: calc(max(1rem, env(safe-area-inset-top, 0px)) + 4.25rem);
+    left: 0;
+    right: 0;
+    bottom: 0;
     z-index: 10;
     pointer-events: none;
   }
