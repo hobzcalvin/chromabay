@@ -11,8 +11,10 @@
 #    include "firmware_build.h"
 #  endif
 #endif
+// Base is MAJOR.MINOR ("fwv0.1"); CI appends the build number → e.g. "fwv0.1.143".
+// Bump to "fwv1.0" once hardware/firmware is production-ready.
 #ifndef FIRMWARE_VERSION
-#define FIRMWARE_VERSION "fwv0.0.19"
+#define FIRMWARE_VERSION "fwv0.1"
 #endif
 
 // Hardware Version - Manually update this if hardware changes

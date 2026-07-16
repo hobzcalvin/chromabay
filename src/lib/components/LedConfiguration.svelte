@@ -270,9 +270,9 @@
                   bind:value={layoutJson[index]}></textarea>
                 <div class="layout-actions">
                   <button class="btn primary small" onclick={() => applyLayout(index)}>Apply layout</button>
-                  <button class="btn small" onclick={() => loadCurrentLayout(index)}>Load current</button>
-                  <button class="btn small" onclick={() => clearLayout(index)}>Clear layout</button>
-                  <button class="btn small" onclick={() => (autoLayoutStrip = index)}>📷 Auto-map (camera)</button>
+                  <button class="btn secondary small" onclick={() => loadCurrentLayout(index)}>Load current</button>
+                  <button class="btn secondary small" onclick={() => clearLayout(index)}>Clear layout</button>
+                  <button class="btn secondary small" onclick={() => (autoLayoutStrip = index)}>📷 Auto-map (camera)</button>
                   {#if layoutMsg[index]}<span class="layout-msg">{layoutMsg[index]}</span>{/if}
                 </div>
                 {#if pl}
@@ -303,6 +303,54 @@
 {/if}
 
 <style>
+  /* Buttons match the devices page. Svelte scopes styles per-file, so this component
+     needs its own copy of the .btn rules (the page's don't reach in here). Keep in sync
+     with the .btn block in src/routes/devices/+page.svelte. */
+  .btn {
+    padding: 0.75rem 1.5rem;
+    border: none;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .btn.primary {
+    background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+    color: white;
+  }
+
+  .btn.secondary {
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+  }
+
+  .btn.danger {
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+    color: white;
+  }
+
+  .btn.small {
+    padding: 0.5rem 1rem;
+    font-size: 0.8rem;
+  }
+
+  .btn:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  }
+
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
   /* A section of the device blob — a header + content, not a nested card. */
   .settings-section {
     margin: 0;

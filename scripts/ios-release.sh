@@ -29,7 +29,11 @@ AUTH=(-allowProvisioningUpdates
   -authenticationKeyIssuerID "$ASC_ISSUER_ID")
 
 BUILD=$(date +%s)   # epoch seconds: always increasing, matches the dev-build scheme
-echo "▶ ChromaBay iOS release — build $BUILD"
+# App Store marketing version. The project itself carries a LOW MARKETING_VERSION (0.0.1)
+# so locally-built dev installs sit below the 0.1.x hot-update line and keep receiving
+# hot updates; the STORE binary must ship as 1.0.0, so we override it here only.
+MARKETING="${MARKETING_VERSION:-1.0.0}"
+echo "▶ ChromaBay iOS release — marketing $MARKETING, build $BUILD"
 
 npm run build
 npx cap sync ios
@@ -37,7 +41,7 @@ npx cap sync ios
 rm -rf build/ChromaBay.xcarchive build/ipa
 xcodebuild -workspace ios/App/App.xcworkspace -scheme App -configuration Release \
   -archivePath build/ChromaBay.xcarchive -destination 'generic/platform=iOS' \
-  CURRENT_PROJECT_VERSION="$BUILD" "${AUTH[@]}" archive
+  CURRENT_PROJECT_VERSION="$BUILD" MARKETING_VERSION="$MARKETING" "${AUTH[@]}" archive
 
 xcodebuild -exportArchive -archivePath build/ChromaBay.xcarchive -exportPath build/ipa \
   -exportOptionsPlist ios/ExportOptions.plist "${AUTH[@]}"

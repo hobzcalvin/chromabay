@@ -86,7 +86,7 @@ jobs:
           VERSION="${GITHUB_REF#refs/tags/}"
         else
           # Auto build on main: base from firmware_version.h + monotonic CI build
-          # number → e.g. fwv0.0.19.143 (unique + newest-first sortable).
+          # number → e.g. fwv0.1.143 (unique + newest-first sortable).
           BASE=$(grep '#define FIRMWARE_VERSION' esp32/src/firmware_version.h | sed 's/.*"\(.*\)".*/\1/')
           VERSION="${BASE}.${{ github.run_number }}"
         fi

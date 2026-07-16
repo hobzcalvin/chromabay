@@ -453,42 +453,60 @@
   // itself now — it steps through its own stored library. The app no longer pushes a
   // pattern back in response, so devices keep their independent local selection.)
 
-  async function handleSetButtonPin(deviceId: string) {
+  // Single "Save Configuration" action. Name, button pin, and LED config are three
+  // separate BLE writes, but the user sets them all in one place — so one button pushes
+  // whatever's in the form. Everything is validated up front so we never half-apply a
+  // bad value, then the writes go out in sequence.
+  async function saveConfiguration(deviceId: string) {
     const settings = getDeviceSettings(deviceId);
-    const raw = (buttonPinValue[deviceId] ?? '').trim();
-    const pin = raw === '' ? null : parseInt(raw, 10);
+
+    // --- Validate ---
+    const rawPin = (buttonPinValue[deviceId] ?? settings.buttonPin ?? '').toString().trim();
+    const pin = rawPin === '' ? null : parseInt(rawPin, 10);
     if (pin != null && (isNaN(pin) || pin < 0 || pin > 39)) {
       statusMessage = 'Button pin must be 0–39 (or blank for none)';
       return;
     }
+    const name = (renameValue[deviceId] ?? settings.deviceInfo?.name ?? '').trim();
+    if (settings.ledConfig) {
+      for (const strip of settings.ledConfig.strips) {
+        if (!strip.numLeds || strip.numLeds < 1) {
+          statusMessage = 'Each strip needs a LED count before saving.';
+          return;
+        }
+        if (!strip.width || strip.width < 1 || !strip.height || strip.height < 1) {
+          strip.width = Math.ceil(Math.sqrt(strip.numLeds));
+          strip.height = Math.ceil(strip.numLeds / strip.width);
+        }
+      }
+    }
+
+    // --- Apply ---
+    settings.ledConfigLoading = true;
     try {
+      // Name (skip if blank — never clear the device's name).
+      if (name) {
+        await setDeviceName(deviceId, name);
+        if (settings.deviceInfo) settings.deviceInfo.name = name;
+        connectedDevices.update(devices => {
+          const next = new Map(devices);
+          const d = next.get(deviceId);
+          if (d) next.set(deviceId, { ...d, name });
+          return next;
+        });
+      }
       await setButtonPin(deviceId, pin);
       settings.buttonPin = pin;
-      statusMessage = pin == null ? 'Button disabled' : `Button set to GPIO ${pin}`;
+      if (settings.ledConfig) {
+        console.log(`[devices] 💾 saveConfiguration → ${deviceId}: ${settings.ledConfig.strips.length} strip(s)`, JSON.parse(JSON.stringify(settings.ledConfig)));
+        await setLedConfiguration(deviceId, settings.ledConfig);
+      }
+      statusMessage = 'Configuration saved';
     } catch (error: any) {
-      statusMessage = `Set button failed: ${error.message ?? error}`;
-      console.error('Set button pin error:', error);
-    }
-  }
-
-  async function handleRename(deviceId: string) {
-    const settings = getDeviceSettings(deviceId);
-    const name = (renameValue[deviceId] ?? settings.deviceInfo?.name ?? '').trim();
-    if (!name) { statusMessage = 'Enter a name first'; return; }
-    try {
-      await setDeviceName(deviceId, name);
-      // Reflect immediately: device info + the card's displayed name (no reconnect).
-      if (settings.deviceInfo) settings.deviceInfo.name = name;
-      connectedDevices.update(devices => {
-        const next = new Map(devices);
-        const d = next.get(deviceId);
-        if (d) next.set(deviceId, { ...d, name });
-        return next;
-      });
-      statusMessage = `Renamed to "${name}"`;
-    } catch (error: any) {
-      statusMessage = `Rename failed: ${error.message ?? error}`;
-      console.error('Rename error:', error);
+      statusMessage = `Save failed: ${error.message ?? error}`;
+      console.error('Save configuration error:', error);
+    } finally {
+      settings.ledConfigLoading = false;
     }
   }
 
@@ -512,37 +530,6 @@
     } catch (error: any) {
       console.error(`[devices] ❌ config load FAILED for ${deviceId}:`, error);
       settings.ledConfig = null;
-    } finally {
-      settings.ledConfigLoading = false;
-    }
-  }
-
-  async function saveLedConfig(deviceId: string) {
-    const settings = getDeviceSettings(deviceId);
-    if (!settings.ledConfig) return;
-
-    // Validate + normalize each strip: every strip needs a LED count, and width/height
-    // are derived to cover it (square-ish) if the user left them blank. Guarantees the
-    // firmware always receives valid integers.
-    for (const strip of settings.ledConfig.strips) {
-      if (!strip.numLeds || strip.numLeds < 1) {
-        statusMessage = 'Each strip needs a LED count before saving.';
-        return;
-      }
-      if (!strip.width || strip.width < 1 || !strip.height || strip.height < 1) {
-        strip.width = Math.ceil(Math.sqrt(strip.numLeds));
-        strip.height = Math.ceil(strip.numLeds / strip.width);
-      }
-    }
-
-    settings.ledConfigLoading = true;
-    console.log(`[devices] 💾 saveLedConfig → ${deviceId}: SENDING ${settings.ledConfig.strips.length} strip(s)`, JSON.parse(JSON.stringify(settings.ledConfig)));
-    try {
-      await setLedConfiguration(deviceId, settings.ledConfig);
-      statusMessage = 'LED configuration updated successfully';
-    } catch (error: any) {
-      statusMessage = 'Failed to update LED configuration';
-      console.error('Set LED config error:', error);
     } finally {
       settings.ledConfigLoading = false;
     }
@@ -785,7 +772,6 @@
                         value={renameValue[device.deviceId] ?? settings.deviceInfo.name ?? device.name}
                         oninput={(e) => (renameValue[device.deviceId] = e.currentTarget.value)}
                       />
-                      <button class="btn primary small" onclick={() => handleRename(device.deviceId)}>Rename</button>
                     </div>
                     <div class="rename-row">
                       <label for={`btnpin-${device.deviceId}`}>Button pin</label>
@@ -798,14 +784,10 @@
                         value={buttonPinValue[device.deviceId] ?? (settings.buttonPin ?? '')}
                         oninput={(e) => (buttonPinValue[device.deviceId] = e.currentTarget.value)}
                       />
-                      <button class="btn primary small" onclick={() => handleSetButtonPin(device.deviceId)}>Set</button>
                     </div>
                     <div class="info-grid">
                       <div><strong>Firmware:</strong> {settings.deviceInfo.fw_ver}</div>
                     </div>
-                    <button class="btn secondary small" onclick={() => loadDeviceInfo(device.deviceId)}>
-                      Refresh Info
-                    </button>
                   </div>
                 {/if}
 
@@ -816,7 +798,7 @@
                   idPrefix=""
                   onAddStrip={addLedStrip}
                   onRemoveStrip={removeLedStrip}
-                  onSaveConfig={saveLedConfig}
+                  onSaveConfig={saveConfiguration}
                 />
 
                 <!-- Firmware Update -->
@@ -897,7 +879,6 @@
                         value={renameValue[device.deviceId] ?? settings.deviceInfo.name ?? device.name}
                         oninput={(e) => (renameValue[device.deviceId] = e.currentTarget.value)}
                       />
-                      <button class="btn primary small" onclick={() => handleRename(device.deviceId)}>Rename</button>
                     </div>
                     <div class="rename-row">
                       <label for={`btnpin-${device.deviceId}`}>Button pin</label>
@@ -910,14 +891,10 @@
                         value={buttonPinValue[device.deviceId] ?? (settings.buttonPin ?? '')}
                         oninput={(e) => (buttonPinValue[device.deviceId] = e.currentTarget.value)}
                       />
-                      <button class="btn primary small" onclick={() => handleSetButtonPin(device.deviceId)}>Set</button>
                     </div>
                     <div class="info-grid">
                       <div><strong>Firmware:</strong> {settings.deviceInfo.fw_ver}</div>
                     </div>
-                    <button class="btn secondary small" onclick={() => loadDeviceInfo(device.deviceId)}>
-                      Refresh Info
-                    </button>
                   </div>
                 {/if}
 
@@ -928,7 +905,7 @@
                   idPrefix="web"
                   onAddStrip={addLedStrip}
                   onRemoveStrip={removeLedStrip}
-                  onSaveConfig={saveLedConfig}
+                  onSaveConfig={saveConfiguration}
                 />
 
                 <!-- Firmware Update -->
@@ -1248,29 +1225,21 @@
   }
 
   .rename-row label {
+    flex: 0 0 auto;
     font-size: 0.9rem;
     opacity: 0.85;
   }
 
+  /* Input takes the rest of the line once the label has its space. */
   .rename-row input {
+    flex: 1;
     min-width: 0;
-    padding: 0.4rem 0.6rem;
+    padding: 0.5rem 0.6rem;
     border: 1px solid rgba(255, 255, 255, 0.3);
     border-radius: 4px;
     background: rgba(0, 0, 0, 0.3);
     color: white;
     font-size: 0.9rem;
-  }
-
-  /* Name: roughly the max allowed length (31), not full width. */
-  .rename-row input[type="text"] {
-    width: 22ch;
-    max-width: 100%;
-  }
-
-  /* Button pin: a small number field like the strip Pin input. */
-  .rename-row input[type="number"] {
-    width: 5em;
   }
 
 

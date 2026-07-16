@@ -69,10 +69,11 @@ jobs:
             VERSION="manual-${TIMESTAMP}-${SHORT_SHA}"
             echo "Using manual timestamp version: $VERSION"
           else
-            # Plain push to main: base version from package.json + monotonic CI
-            # build number → e.g. 0.0.1.143 (prettier than branch-hash, and it
-            # changes every deploy so the live-update client detects it).
-            BASE_VERSION=$(node -p "require('./package.json').version")
+            # Plain push to main: MAJOR.MINOR from package.json + monotonic CI build
+            # number as the third component → e.g. 0.1.143. The build number changes
+            # every deploy so the live-update client detects a new version. Bump the
+            # package.json major/minor (e.g. to 1.0) to move the hot-update line.
+            BASE_VERSION=$(node -p "require('./package.json').version.split('.').slice(0,2).join('.')")
             VERSION="${BASE_VERSION}.${{ github.run_number }}"
             echo "Using base+build version: $VERSION"
           fi

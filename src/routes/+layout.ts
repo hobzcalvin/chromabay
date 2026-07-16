@@ -82,15 +82,25 @@ if (browser && Capacitor.isNativePlatform() && !dev && !isLocalBuild) {
           const manifest = await response.json();
           console.log('📱 UPDATE: Remote version manifest:', JSON.stringify(manifest, null, 2));
           
-          // Normalize versions for comparison (remove 'v' prefix if present)
-          const normalizeVersion = (version: string) => version.replace(/^v/, '');
-          const currentVersionNormalized = normalizeVersion(currentVersion);
-          const remoteVersionNormalized = normalizeVersion(manifest.version || '');
-          
-          console.log('📱 UPDATE: Normalized versions - current:', currentVersionNormalized, 'remote:', remoteVersionNormalized);
-          
-          // Check if there's a newer version available
-          if (remoteVersionNormalized && remoteVersionNormalized !== currentVersionNormalized) {
+          // Numeric semver compare (drops any 'v' prefix): returns >0 when a > b.
+          // We ONLY offer an update when the remote is STRICTLY HIGHER than what's running —
+          // never a downgrade. This is what protects the App Store build: it ships as 1.0.0,
+          // and the in-review hot-update line is 0.1.x (lower), so it's never offered to swap
+          // the reviewed binary. Once we bump the hot line to 1.0.x it starts updating again.
+          const cmpVersion = (a: string, b: string): number => {
+            const pa = a.replace(/^v/, '').split('.').map((n) => parseInt(n, 10) || 0);
+            const pb = b.replace(/^v/, '').split('.').map((n) => parseInt(n, 10) || 0);
+            for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+              const d = (pa[i] || 0) - (pb[i] || 0);
+              if (d !== 0) return d < 0 ? -1 : 1;
+            }
+            return 0;
+          };
+
+          console.log('📱 UPDATE: versions - current:', currentVersion, 'remote:', manifest.version);
+
+          // Offer only a strictly-newer version (never a downgrade / sidegrade).
+          if (manifest.version && cmpVersion(manifest.version, currentVersion) > 0) {
             console.log(`📱 UPDATE: Update available! ${manifest.version} (current: ${currentVersion})`);
             
             // Mark that we've asked this session
