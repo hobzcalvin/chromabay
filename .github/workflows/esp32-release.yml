@@ -105,6 +105,25 @@ jobs:
         cd esp32
         pio run
 
+    - name: Build merged factory image (for USB / esp-web-tools)
+      run: |
+        # OTA (BLE) ships just the app image (firmware.bin @ 0x10000). USB flashing a
+        # blank board needs bootloader + partition table + boot_app0 + app in one image at
+        # offset 0. Merge them into ONE artifact from THIS build, so the USB flasher and
+        # OTA are always the same firmware — no separately-committed .bin anywhere.
+        pip install --quiet esptool
+        B=esp32/.pio/build/esp32dev
+        BOOT_APP0=$(find ~/.platformio -name boot_app0.bin | head -1)
+        echo "boot_app0: $BOOT_APP0"
+        esptool.py --chip esp32 merge_bin \
+          --flash_mode dio --flash_freq 40m --flash_size 4MB \
+          -o chromabay-factory.bin \
+          0x1000  "$B/bootloader.bin" \
+          0x8000  "$B/partitions.bin" \
+          0xe000  "$BOOT_APP0" \
+          0x10000 "$B/firmware.bin"
+        ls -l chromabay-factory.bin
+
     - name: Sign firmware with PSA crypto
       run: |
         ./psa_sign_firmware esp32/.pio/build/esp32dev/firmware.bin private_key.raw firmware.sig
@@ -198,7 +217,28 @@ jobs:
         mkdir -p "gh_pages_temp/firmware/esp32/${{ steps.version.outputs.VERSION }}"
         cp esp32/.pio/build/esp32dev/firmware.bin "gh_pages_temp/firmware/esp32/${{ steps.version.outputs.VERSION }}/"
         cp firmware.sig "gh_pages_temp/firmware/esp32/${{ steps.version.outputs.VERSION }}/"
-        
+        # Merged factory image for USB flashing, from THIS same build.
+        cp chromabay-factory.bin "gh_pages_temp/firmware/esp32/${{ steps.version.outputs.VERSION }}/"
+
+        # esp-web-tools manifest, always pointing at the newest factory image. This is the
+        # SINGLE source the USB flasher reads — no committed .bin in the app repo. Parts use
+        # an absolute URL so the manifest location doesn't matter.
+        cat > "gh_pages_temp/firmware/esp32/chromabay-manifest.json" <<MANIFEST
+        {
+          "name": "ChromaBay",
+          "version": "${{ steps.version.outputs.VERSION }}",
+          "new_install_prompt_erase": true,
+          "builds": [
+            {
+              "chipFamily": "ESP32",
+              "parts": [
+                { "path": "https://chromabay.app/firmware/esp32/${{ steps.version.outputs.VERSION }}/chromabay-factory.bin", "offset": 0 }
+              ]
+            }
+          ]
+        }
+        MANIFEST
+
         # Commit and push to gh-pages
         cd gh_pages_temp
         git config user.name 'github-actions[bot]'

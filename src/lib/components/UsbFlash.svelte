@@ -1,40 +1,83 @@
 <script lang="ts">
-  // "Flash ChromaBay over USB" — like install.wled.me. Uses esp-web-tools (Web Serial), so it only
-  // works in a Chromium desktop browser; we hide it everywhere else (iOS app, Safari, Firefox).
-  import { onMount } from 'svelte';
+  // "Flash a new board over USB" — like install.wled.me. Uses esp-web-tools (Web Serial),
+  // desktop-Chromium only. Collapsible: stays a one-line row until the user opens it. Reads
+  // the SAME firmware everyone gets, from the published manifest (no committed .bin).
   import { Capacitor } from '@capacitor/core';
-  import { base } from '$app/paths';
 
-  let ready = $state(false);     // esp-web-tools loaded + Web Serial available
-  let note = $state('');         // why it's unavailable (when it is)
-  const manifest = `${base}/firmware/chromabay-manifest.json`;
+  // Single source of truth: the manifest the firmware CI publishes, pointing at the newest
+  // merged factory image. No manifest/.bin committed in this repo.
+  const MANIFEST_URL = 'https://chromabay.app/firmware/esp32/chromabay-manifest.json';
 
-  onMount(async () => {
-    if (Capacitor.getPlatform() !== 'web') return;            // native app: hide entirely
-    if (!('serial' in navigator)) { note = 'To flash a board over USB, open ChromaBay in desktop Chrome or Edge.'; return; }
-    try { await import('esp-web-tools'); ready = true; }       // registers <esp-web-install-button>
-    catch { note = 'Could not load the USB flasher.'; }
-  });
+  let open = $state(false);
+  type Phase = 'idle' | 'checking' | 'ready' | 'unavailable' | 'wrongbrowser' | 'native';
+  let phase = $state<Phase>('idle');
+
+  async function toggle() {
+    open = !open;
+    if (!open || phase !== 'idle') return;
+
+    if (Capacitor.getPlatform() !== 'web') { phase = 'native'; return; }
+    if (!('serial' in navigator)) { phase = 'wrongbrowser'; return; }
+
+    phase = 'checking';
+    try {
+      await import('esp-web-tools'); // registers <esp-web-install-button>
+      // Confirm the published manifest exists (it appears after the first firmware build
+      // that includes the merged image). Same-origin in prod; a dev/CORS failure just
+      // falls through to the button, which will surface its own error if truly missing.
+      try {
+        const r = await fetch(MANIFEST_URL, { method: 'GET', cache: 'no-store' });
+        phase = r.ok ? 'ready' : 'unavailable';
+      } catch {
+        phase = 'ready';
+      }
+    } catch {
+      phase = 'unavailable';
+    }
+  }
 </script>
 
-{#if ready}
-  <div class="usb-flash">
-    <!-- esp-web-tools custom element; slots style the trigger + messages -->
-    <esp-web-install-button {manifest}>
-      <button slot="activate" class="btn">⚡ Flash ChromaBay over USB</button>
-      <span slot="unsupported" class="usb-note">This browser can't flash over USB (needs Web Serial).</span>
-      <span slot="not-allowed" class="usb-note">Allow the serial device when prompted, then retry.</span>
-    </esp-web-install-button>
-    <p class="usb-hint">Connect any ESP32 with USB to install ChromaBay</p>
-  </div>
-{:else if note}
-  <p class="usb-note">{note}</p>
-{/if}
+<div class="method">
+  <button class="method-head" onclick={toggle} aria-expanded={open}>
+    <span>Flash a new board over USB</span>
+    <span class="chev">{open ? '▾' : '▸'}</span>
+  </button>
+
+  {#if open}
+    <div class="method-body">
+      {#if phase === 'checking'}
+        <p class="note">Loading…</p>
+      {:else if phase === 'native'}
+        <p class="note">USB flashing runs in <strong>desktop Chrome or Edge</strong> — open chromabay.app there, plug in the board, and flash.</p>
+      {:else if phase === 'wrongbrowser'}
+        <p class="note">This browser can't talk to USB. Open ChromaBay in <strong>desktop Chrome or Edge</strong>.</p>
+      {:else if phase === 'unavailable'}
+        <p class="note">USB flashing becomes available after the next firmware release (it installs the same image as OTA).</p>
+      {:else if phase === 'ready'}
+        <p class="lead">Install ChromaBay on any ESP32 — even a blank one, or one running WLED (this erases it).</p>
+        <esp-web-install-button manifest={MANIFEST_URL}>
+          <button slot="activate" class="btn">⚡ Flash ChromaBay over USB</button>
+          <span slot="unsupported" class="note">This browser can't flash over USB (needs Web Serial).</span>
+          <span slot="not-allowed" class="note">Allow the serial device when prompted, then retry.</span>
+        </esp-web-install-button>
+        <p class="hint">Connect the board with USB, then click to install.</p>
+      {/if}
+    </div>
+  {/if}
+</div>
 
 <style>
-  .usb-flash { display: flex; flex-direction: column; align-items: center; gap: 0.35rem; margin-top: 1.5rem; }
-  .usb-flash .btn { padding: 0.75rem 1.25rem; border: none; border-radius: 8px; font-size: 0.9rem; font-weight: 600;
+  .method { border-top: 1px solid rgba(255, 255, 255, 0.12); padding-top: 1.25rem; }
+  .method-head {
+    width: 100%; display: flex; justify-content: space-between; align-items: center;
+    background: none; border: none; color: inherit; cursor: pointer;
+    font-size: 1.05rem; font-weight: 600; opacity: 0.95; padding: 0;
+  }
+  .chev { opacity: 0.7; }
+  .method-body { margin-top: 0.75rem; font-size: 0.9rem; display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-start; }
+  .lead { opacity: 0.9; margin: 0; }
+  .btn { padding: 0.5rem 1rem; border: none; border-radius: 8px; font-size: 0.9rem; font-weight: 600;
     cursor: pointer; background: linear-gradient(135deg, #f59e0b, #d97706); color: #fff; }
-  .usb-hint { font-size: 0.78rem; opacity: 0.7; margin: 0; text-align: center; }
-  .usb-note { font-size: 0.82rem; opacity: 0.75; text-align: center; }
+  .hint { font-size: 0.78rem; opacity: 0.7; margin: 0; }
+  .note { font-size: 0.85rem; opacity: 0.8; margin: 0; }
 </style>

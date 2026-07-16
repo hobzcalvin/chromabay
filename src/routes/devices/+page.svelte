@@ -980,15 +980,17 @@
       {/if}
     </div>
 
-    <!-- Web-only USB flasher, below the device list -->
-    <UsbFlash />
+  </section>
 
-    <!-- Native-only: convert a WLED device over its Wi-Fi AP (web can't do cleartext HTTP). -->
-    {#if !isWeb}
-      <div class="settings-section">
-        <WledConvert />
-      </div>
-    {/if}
+  <!-- Install / add a device — one compact section; each method expands only when engaged. -->
+  <section class="install-section">
+    <h2 class="install-title">Install on a device</h2>
+    <p class="install-intro">Put ChromaBay on new hardware, or convert a device running WLED.</p>
+    <UsbFlash />
+    <WledConvert
+      firmwareUrl={firmwareRegistry[0] ? `https://chromabay.app/${firmwareRegistry[0].path}` : ''}
+      firmwareVersion={firmwareRegistry[0]?.version ?? ''}
+    />
   </section>
 
   <!-- Status section moved to bottom and made smaller -->
@@ -1394,6 +1396,23 @@
   .btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+
+  .install-section {
+    margin-top: 1.5rem;
+    padding: 1.25rem;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+  }
+  .install-title {
+    margin: 0;
+    font-size: 1.15rem;
+  }
+  .install-intro {
+    margin: 0.35rem 0 0.5rem;
+    font-size: 0.9rem;
+    opacity: 0.75;
   }
 
   footer {
