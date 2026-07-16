@@ -1,7 +1,7 @@
 {
-  "version": "0.0.1.212",
-  "downloadUrl": "https://chromabay.app/live-update-0.0.1.212.zip",
-  "buildDate": "2026-07-15T20:42:56Z",
-  "commitHash": "068b667c7ad48f5ba1de303e595ffaaddf4d7fb1",
-  "commitMessage": "Remove the Output node; infer the display target from the graph's terminal"
+  "version": "0.1.213",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.213.zip",
+  "buildDate": "2026-07-16T16:56:07Z",
+  "commitHash": "d89acc727afdc2548d04eeffd443e491475ccc6b",
+  "commitMessage": "Version scheme (1.0.0 store / 0.1.x hot / fwv0.1) + Devices UI cleanup"
 }
