@@ -789,7 +789,9 @@ export function deserializePattern(
         const interactive = Array.isArray(c.iv)
           ? (c.iv as any[]).filter((f): f is any => typeof f === 'string')
           : (typeof c.iv === 'number' && c.iv ? ['period'] : undefined);
-        setModulator(nodeId, paramName, { shape: c.s, min: c.lo, max: c.hi, period: c.pr, interactive: interactive as any });
+        // silent: bulk load, not a user edit — must not trigger the global autosave
+        // (a preview deserialize doing so re-wrote localStorage and looped the list).
+        setModulator(nodeId, paramName, { shape: c.s, min: c.lo, max: c.hi, period: c.pr, interactive: interactive as any }, true);
       }
     }
 

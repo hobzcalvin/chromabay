@@ -28,13 +28,18 @@ export function getModulator(nodeId: string, paramName: string): ModulatorConfig
   return get(modulators).get(nodeId)?.get(paramName) ?? null;
 }
 
-export function setModulator(nodeId: string, paramName: string, cfg: ModulatorConfig): void {
+// `silent` skips the autosave side-effect. Deserialize (global load AND isolated
+// previews) registers modulators in bulk — that is not a user "set automation"
+// action, so it must not schedule a save. Left unguarded, preview deserializes on
+// the patterns list autosaved the current pattern, which rewrote localStorage and
+// re-mounted every thumbnail → endless re-deserialize loop (~500ms debounce).
+export function setModulator(nodeId: string, paramName: string, cfg: ModulatorConfig, silent = false): void {
   modulators.update((m) => {
     if (!m.has(nodeId)) m.set(nodeId, new Map());
     m.get(nodeId)!.set(paramName, cfg);
     return m;
   });
-  autosave('parameter automation set');
+  if (!silent) autosave('parameter automation set');
 }
 
 export function clearModulator(nodeId: string, paramName: string): void {
