@@ -1,7 +1,7 @@
 {
-  "version": "0.1.216",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.216.zip",
-  "buildDate": "2026-07-16T22:48:06Z",
-  "commitHash": "d91fb1baf22ad1b18504b9b65a5233f694a93be2",
-  "commitMessage": "Devices: one compact Install section; unify USB firmware source in CI"
+  "version": "0.1.220",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.220.zip",
+  "buildDate": "2026-07-17T14:34:19Z",
+  "commitHash": "fc64a6e6cd156cdad6d8297bb95722818fa24ce4",
+  "commitMessage": "Add missing FirmwareDownloads.svelte + firmwareVariants.ts (fix deploy build)"
 }
