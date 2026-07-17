@@ -1,7 +1,7 @@
 {
-  "version": "0.1.225",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.225.zip",
-  "buildDate": "2026-07-17T23:02:18Z",
-  "commitHash": "fd535c4f227b02041b4eb99eaf42a60b6ba0b75d",
-  "commitMessage": "Bottom nav paints to the physical edge (no canvas showing below it)"
+  "version": "0.1.226",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.226.zip",
+  "buildDate": "2026-07-17T23:15:25Z",
+  "commitHash": "46982e3abd65f4389ea05c2e90b39d275c95089a",
+  "commitMessage": "Pattern lifecycle phase 3: N-Synced button + device-library layer"
 }
