@@ -52,7 +52,6 @@
 
   {#if open}
     <div class="method-body">
-      <p class="lead">Replace WLED with ChromaBay on a device that's already installed — over Wi-Fi, no USB.</p>
 
       {#if isNative}
         <!-- Automated path (native app only) -->
@@ -80,7 +79,7 @@
 
       <!-- Manual path (works everywhere) -->
       <div class="path">
-        <h5>{isNative ? 'Or do it yourself in WLED' : 'Do it in WLED'}</h5>
+        <h5>Or do it yourself</h5>
         <ol>
           <li>Download the ChromaBay firmware:
             {#if firmwareUrl}
