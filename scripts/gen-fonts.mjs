@@ -99,8 +99,24 @@ async function rasterizeFont(name, H, fontStack, fontSize) {
   return { name, W: res.W, H, bpr: res.bpr, data: res.data, widths: res.widths };
 }
 
+// Per-glyph overrides for the small Spleen font. On tiny displays (6px) TextOperator floors
+// to FONT_5x8 and vertically clips it, so descenders that live in the bottom row vanish.
+// Spleen's 'y' put its left-hook in row 7 (clipped at 6px → a lone 1px tail), so we raise the
+// hook to row 6 (top-row-first, MSB-left, top 5 bits). Keeps a proper left-pointing tail at 6px.
+const FONT_5x8_OVERRIDES = {
+  0x79: [0x00, 0x00, 0x90, 0x90, 0x70, 0x10, 0xe0, 0x00], // 'y'
+};
+function applyOverrides(font, overrides) {
+  for (const [enc, bytes] of Object.entries(overrides)) {
+    const off = (+enc - FIRST) * font.H * font.bpr;
+    if (off < 0 || off + bytes.length > font.data.length) continue;
+    for (let i = 0; i < bytes.length; i++) font.data[off + i] = bytes[i];
+  }
+  return font;
+}
+
 const fonts = [
-  parseBdf(await ensureBdf('5x8'), 'FONT_5x8'),
+  applyOverrides(parseBdf(await ensureBdf('5x8'), 'FONT_5x8'), FONT_5x8_OVERRIDES),
   parseBdf(await ensureBdf('8x16'), 'FONT_8x16'),
   await rasterizeFont('FONT_16x32', 32, "'Helvetica Neue', Helvetica, Arial, sans-serif", 30),
 ];

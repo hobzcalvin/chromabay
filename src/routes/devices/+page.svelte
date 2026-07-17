@@ -62,6 +62,10 @@
   // Device states - keyed by deviceId. $state is deeply reactive (proxied), so
   // mutating deviceSettings[id].foo updates the UI in place — no manual reassign.
   let deviceSettings: Record<string, {
+    // 'connecting' until the initial handshake (settings + device info) finishes; the full
+    // device card only renders when 'ready'. Until then the user sees a "connecting…" card —
+    // to the user a device is either connected (fully) or still connecting, never half-loaded.
+    phase: 'connecting' | 'ready';
     showSettings: boolean;
     ledConfig: LedConfiguration | null;
     ledConfigLoading: boolean;
@@ -188,6 +192,7 @@
         
         // Create fake device settings with all the data needed
         const fakeSettings = {
+          phase: 'ready' as const,
           showSettings: false,
           deviceInfo: {
             fw_ver: 'esp32-v0.0.13',
@@ -244,6 +249,7 @@
   function getDeviceSettings(deviceId: string) {
     if (!deviceSettings[deviceId]) {
       deviceSettings[deviceId] = {
+        phase: 'connecting',
         showSettings: false,
         ledConfig: null,
         ledConfigLoading: false,
@@ -392,6 +398,9 @@
       // can follow. (Sequential, not parallel — concurrent GATT reads can error.)
       await loadLedConfig(deviceId);
       await loadDeviceInfo(deviceId);
+      // Core handshake done (brightness + device info in hand) → reveal the full card. The
+      // remaining loads (button pin, notifications, update check) refine it in place.
+      settings.phase = 'ready';
       try { settings.buttonPin = await getButtonPin(deviceId); } catch (e) { console.error('getButtonPin failed', e); }
       try {
         await startButtonEventNotifications(deviceId, (ev) => {
@@ -863,6 +872,20 @@
   </div>
 {/snippet}
 
+<!-- Shown while a device is connected at the BLE level but still handshaking (reading its
+     settings/info). To the user this IS the connection process — no half-populated card. -->
+{#snippet connectingCard(device: any)}
+  <div class="device-card connected connecting">
+    <div class="device-header">
+      <h3 class="device-name">{device.name}</h3>
+      <div class="connecting-status"><span class="spinner" aria-hidden="true"></span> Connecting… reading settings</div>
+      <div class="device-actions">
+        <button class="btn danger small" onclick={() => handleDisconnect(device.deviceId)}>Cancel</button>
+      </div>
+    </div>
+  </div>
+{/snippet}
+
 <main>
   <header>
     <h1>ChromaBay</h1>
@@ -906,7 +929,7 @@
       {#if !isWeb}
         {#each connectedDevicesList as device (device.deviceId)}
           {@const settings = deviceSettings[device.deviceId]}
-          {#if settings}
+          {#if settings?.phase === 'ready'}
             <div class="device-card connected">
               <div class="device-header">
                 <h3 class="device-name">{device.name}</h3>
@@ -978,6 +1001,8 @@
               </div>
             {/if}
           </div>
+          {:else if settings}
+            {@render connectingCard(device)}
           {/if}
         {/each}
       {/if}
@@ -987,7 +1012,7 @@
         <!-- Web: Only show connected devices -->
         {#each connectedDevicesList as device (device.deviceId)}
           {@const settings = deviceSettings[device.deviceId]}
-          {#if settings}
+          {#if settings?.phase === 'ready'}
             <div class="device-card connected">
               <div class="device-header">
                 <h3 class="device-name">{device.name}</h3>
@@ -1059,6 +1084,8 @@
               </div>
             {/if}
           </div>
+          {:else if settings}
+            {@render connectingCard(device)}
           {/if}
         {/each}
       {:else}
@@ -1208,6 +1235,28 @@
   .device-card.available {
     border-color: rgba(59, 130, 246, 0.5);
   }
+
+  /* Handshaking state: connected at the BLE level, still reading settings. */
+  .device-card.connecting {
+    border-color: rgba(234, 179, 8, 0.5);
+    box-shadow: 0 0 10px rgba(234, 179, 8, 0.15);
+  }
+  .connecting-status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+    opacity: 0.8;
+  }
+  .spinner {
+    width: 0.9rem;
+    height: 0.9rem;
+    border: 2px solid rgba(255, 255, 255, 0.25);
+    border-top-color: rgba(234, 179, 8, 0.9);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
 
   .device-header {
     display: flex;

@@ -21,6 +21,7 @@ public:
         int start_y = getInt(parameters, 1, 4);
         int pixel_width = std::max(1, getInt(parameters, 2, 3));
         int pixel_height = std::max(1, getInt(parameters, 3, 5));
+        CRGB color = getColor(parameters, 4, CRGB(255, 255, 255)); // default white
 
         uint32_t totalPixels = width * height;
 
@@ -35,11 +36,11 @@ public:
         int end_x = std::min(start_x + pixel_width, (int)width);
         int end_y = std::min(start_y + pixel_height, (int)height);
         
-        // Draw white rectangle
+        // Draw the rectangle in the chosen color
         for (int py = start_y; py < end_y; py++) {
             for (int px = start_x; px < end_x; px++) {
                 uint32_t index = py * width + px;
-                outputBuffer[index] = CRGB(255, 255, 255);
+                outputBuffer[index] = color;
             }
         }
     }
@@ -57,7 +58,8 @@ public:
             ParameterInfo("x", "X (px)", ParameterInfo::INT, 2, 0, 500),
             ParameterInfo("y", "Y (px)", ParameterInfo::INT, 4, 0, 500),
             ParameterInfo("width", "Width (px)", ParameterInfo::INT, 3, 1, 500),
-            ParameterInfo("height", "Height (px)", ParameterInfo::INT, 5, 1, 500)
+            ParameterInfo("height", "Height (px)", ParameterInfo::INT, 5, 1, 500),
+            ParameterInfo("color", "Color", ParameterInfo::COLOR, ParameterValue(CRGB(255, 255, 255)))
         };
     }
 };

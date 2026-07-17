@@ -111,6 +111,12 @@ extern "C" {
                 } else if (param.type == ParameterInfo::BOOL) {
                     buffer += ",\"default\":";
                     buffer += (param.defaultValue.boolVal ? "true" : "false");
+                } else if (param.type == ParameterInfo::COLOR) {
+                    // Default travels as a "#rrggbb" hex string — what the app's <input type=color> expects.
+                    const CRGB& c = param.defaultValue.colorVal;
+                    char hex[8];
+                    snprintf(hex, sizeof(hex), "#%02x%02x%02x", c.r, c.g, c.b);
+                    buffer += std::string(",\"default\":\"") + hex + "\"";
                 } else if (param.type == ParameterInfo::SELECT) {
                     // A SELECT is an enum: its value travels as the integer option index.
                     // The default is that index (the label is display-only, in options[]).
