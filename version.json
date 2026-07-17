@@ -1,7 +1,7 @@
 {
-  "version": "0.1.227",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.227.zip",
-  "buildDate": "2026-07-17T23:36:35Z",
-  "commitHash": "8eb55f580e7e3c26edc1edf468328a8183eb1be7",
-  "commitMessage": "Pattern lifecycle phases 4 & 5; restore Interact knob grid; Cycle dims Edit/Interact nav"
+  "version": "0.1.228",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.228.zip",
+  "buildDate": "2026-07-17T23:55:18Z",
+  "commitHash": "97bba990471df278ab51a81afeb4670671942b07",
+  "commitMessage": "Patterns: drop Clear device patterns; Per-Device rows get previews + Trash"
 }
