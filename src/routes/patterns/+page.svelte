@@ -5,7 +5,8 @@
   import { patterns, loadPatterns, switchToPattern, currentPatternName, createEmptyPattern, saveAsPattern, patternNameExists } from '$lib/stores/patternsStore';
   import PatternPreview from '$lib/components/PatternPreview.svelte';
   import type { SerializedPattern } from '$lib/patternSerializer';
-  import { syncPatternToAllDevices, clearLibraryOnAllDevices, deletePatternOnAllDevices } from '$lib/ble';
+  import { syncPatternToAllDevices, clearLibraryOnAllDevices, deletePatternOnAllDevices, sendSinglePatternToDevice } from '$lib/ble';
+  import { deviceLibraries, refreshDeviceLibraries, syncedCountFor } from '$lib/stores/deviceLibraryStore';
   import { currentPattern } from '$lib/stores/patternsStore';
   import { connectedDevices, getConnectedDevicesList } from '$lib/stores/deviceStore';
   import GalleryModal from '$lib/components/GalleryModal.svelte';
@@ -30,6 +31,29 @@
   $: connectedList = getConnectedDevicesList($connectedDevices);
   // Cycle state is shared (cycleStore) so entering Edit/Interact auto-exits it — see below.
 
+  // Keep the per-device library snapshot fresh so the N-Synced counts are accurate: refresh
+  // whenever the set of connected devices changes (and once on mount).
+  let prevConnCount = -1;
+  $: if (connectedList.length !== prevConnCount) {
+    prevConnCount = connectedList.length;
+    refreshDeviceLibraries();
+  }
+
+  // Push a pattern into every connected device's library (and show it there). This is the
+  // "N synced" action — after it, the count reflects all devices.
+  async function handleSyncTap(pattern: SerializedPattern, event: Event) {
+    event.stopPropagation();
+    if (!pattern.meta?.name) return;
+    for (const device of connectedList) {
+      try {
+        await sendSinglePatternToDevice(device.deviceId, pattern);
+      } catch (e) {
+        console.error('Sync to device failed:', device.deviceId, e);
+      }
+    }
+    refreshDeviceLibraries();
+  }
+
   // Wipe the connected devices' stored pattern set (removes orphans that were sent before
   // delete-propagation existed). The devices keep showing their current pattern; they
   // repopulate as you view patterns while connected.
@@ -47,6 +71,7 @@
   
   onMount(async () => {
     await loadPatterns();
+    refreshDeviceLibraries(); // best-effort, non-blocking
   });
 
   // Bring the current pattern into view when landing on this page (it may be far down a
@@ -141,7 +166,7 @@
     const { deletePatternByName } = await import('$lib/stores/patternsStore');
     await deletePatternByName(name);
     // Propagate the delete to any connected devices so it leaves their cycle too.
-    deletePatternOnAllDevices(name).catch((e) => console.error('Device pattern delete failed:', e));
+    deletePatternOnAllDevices(name).then(() => refreshDeviceLibraries()).catch((e) => console.error('Device pattern delete failed:', e));
     // Hide swipe state after deletion
     if (swipeStates[pattern.meta.name]) {
       swipeStates[pattern.meta.name].isSwipeRevealed = false;
@@ -290,32 +315,38 @@
             </div>
             
             <div class="action-buttons">
-              <button
-                class="interact-button"
-                onclick={(e) => handleInteractTap(pattern, e)}
-                aria-label="Interact with {patternName}"
-                title="Interact"
-              >
-                🖐️
-              </button>
-
-              <button
-                class="edit-button"
-                onclick={(e) => handleEditTap(pattern, e)}
-                aria-label="Edit {patternName}"
-                title="Edit pattern"
-              >
-                ✏️
-              </button>
-              
-              <button 
-                class="delete-button-visible"
-                onclick={(e) => handleDeleteTap(pattern, e)}
-                aria-label="Delete {patternName}"
-                title="Delete pattern"
-              >
-                🗑️
-              </button>
+              {#if connectedList.length > 0}
+                {@const synced = syncedCountFor($deviceLibraries, patternName)}
+                <button
+                  class="sync-button"
+                  class:allsynced={synced === connectedList.length}
+                  onclick={(e) => handleSyncTap(pattern, e)}
+                  aria-label="Sync {patternName} to all connected devices"
+                  title="Sync to all connected devices"
+                >
+                  {synced === connectedList.length ? '✓ ' : ''}{synced}/{connectedList.length} synced
+                </button>
+              {/if}
+              <div class="icon-row">
+                <button
+                  class="interact-button"
+                  onclick={(e) => handleInteractTap(pattern, e)}
+                  aria-label="Interact with {patternName}"
+                  title="Interact"
+                >🖐️</button>
+                <button
+                  class="edit-button"
+                  onclick={(e) => handleEditTap(pattern, e)}
+                  aria-label="Edit {patternName}"
+                  title="Edit pattern"
+                >✏️</button>
+                <button
+                  class="delete-button-visible"
+                  onclick={(e) => handleDeleteTap(pattern, e)}
+                  aria-label="Delete {patternName}"
+                  title="Delete pattern"
+                >🗑️</button>
+              </div>
             </div>
           </div>
           
@@ -550,19 +581,48 @@
   
   /* Removed .pattern-info as we no longer show node counts */
   
+  /* Two rows: the N-Synced pill on top, the icon actions below. Tighter than before to
+     keep the (now busier) row compact. */
   .action-buttons {
     display: flex;
-    gap: 0.5rem;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.35rem;
     flex-shrink: 0;
   }
-  
+  .icon-row {
+    display: flex;
+    gap: 0.35rem;
+    justify-content: flex-end;
+  }
+
+  .sync-button {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    color: #e5e7eb;
+    padding: 0.25rem 0.5rem;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.72rem;
+    font-weight: 600;
+    white-space: nowrap;
+    transition: all 0.2s ease;
+  }
+  .sync-button:hover { background: rgba(255, 255, 255, 0.2); }
+  .sync-button.allsynced {
+    background: rgba(16, 185, 129, 0.2);
+    border-color: rgba(52, 211, 153, 0.5);
+    color: #6ee7b7;
+  }
+
   .interact-button, .edit-button, .delete-button-visible {
     background: rgba(255, 255, 255, 0.1);
     border: 1px solid rgba(255, 255, 255, 0.2);
-    padding: 0.5rem;
+    padding: 0.35rem;
     border-radius: 8px;
     cursor: pointer;
-    font-size: 1.1rem;
+    font-size: 1rem;
+    line-height: 1;
     transition: all 0.2s ease;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
     backdrop-filter: blur(8px);
