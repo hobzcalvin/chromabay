@@ -1,5 +1,5 @@
 <script lang="ts">
-import { onMount } from 'svelte';
+import { onMount, tick } from 'svelte';
 import PatternRenderer from '$lib/components/PatternRenderer.svelte';
 import RotaryKnob from '$lib/components/RotaryKnob.svelte';
 import ColorWheel from '$lib/components/ColorWheel.svelte';
@@ -33,43 +33,35 @@ import { get } from 'svelte/store';
   
   let dynamicKnobs: InteractiveKnob[] = [];
 
-  // --- Knob layouts (1-6) ---
-  // Deliberate, evenly-spaced positions as [left%, top%] of the screen. Tuned for a
-  // phone held vertically (single column when few; two columns + corners when many)
-  // but the percentages + responsive sizing below adapt to any aspect ratio.
-  //   1: center · 2-3: stacked vertically · 4: corners · 5: corners + center
-  //   6: two columns of three
-  const KNOB_LAYOUTS: Record<number, [number, number][]> = {
-    1: [[50, 50]],
-    2: [[50, 33], [50, 67]],
-    3: [[50, 22], [50, 50], [50, 78]],
-    4: [[28, 28], [72, 28], [28, 72], [72, 72]],
-    5: [[28, 27], [72, 27], [50, 50], [28, 73], [72, 73]],
-    6: [[30, 22], [70, 22], [30, 50], [70, 50], [30, 78], [70, 78]],
-  };
-  // Columns/rows each layout occupies, for sizing knobs so they never overlap.
-  const LAYOUT_COLS: Record<number, number> = { 1: 1, 2: 1, 3: 1, 4: 2, 5: 2, 6: 2 };
-  const LAYOUT_ROWS: Record<number, number> = { 1: 1, 2: 2, 3: 3, 4: 2, 5: 3, 6: 3 };
-
+  // Controls are stacked one-per-row in a flex column that fills the space between the
+  // pattern switcher and the bottom nav. CSS splits that band into `knobCount` equal rows;
+  // here we just measure the band and size each control to fit its row (minus label/padding),
+  // so 1–6 controls each get an equal, centered slice instead of arbitrary fixed positions.
   let innerWidth = 0;
   let innerHeight = 0;
-
-  // Vertical space the switcher pill occupies at the top. The knob overlay starts below
-  // it (see .knobs-overlay CSS), so knobs live entirely below the switcher — sizing must
-  // use the same reduced height or the top row would be too tall for its band.
-  const TOP_RESERVE = 100;
+  let overlayEl: HTMLDivElement | undefined;
+  let navInset = 88;   // px from the viewport bottom occupied by the bottom nav (measured)
+  let bandsH = 0;      // measured height of the knob band (switcher bottom -> nav top)
 
   $: knobCount = Math.min(dynamicKnobs.length, 6);
-  $: knobPositions = KNOB_LAYOUTS[knobCount] ?? [];
-  // Fit each knob inside its grid cell, reserving room for the label, then clamp.
+
+  function measureBand() {
+    if (typeof document === 'undefined') return;
+    const nav = document.querySelector('.bottom-nav');
+    if (nav && innerHeight > 0) navInset = Math.max(0, Math.round(innerHeight - nav.getBoundingClientRect().top));
+    bandsH = overlayEl ? overlayEl.clientHeight : 0;
+  }
+  // Re-measure whenever the band could have changed (count, viewport). tick() lets the DOM
+  // apply the new `bottom` inset first so overlayEl.clientHeight is correct.
+  $: { knobCount; innerHeight; innerWidth; tick().then(measureBand); }
+
   $: knobSize = (() => {
-    if (knobCount === 0 || innerWidth === 0 || innerHeight === 0) return 160;
-    const usableH = Math.max(120, innerHeight - TOP_RESERVE);
-    const cellW = innerWidth / LAYOUT_COLS[knobCount];
-    const cellH = usableH / LAYOUT_ROWS[knobCount];
-    const byWidth = cellW * 0.8;
-    const byHeight = cellH * 0.78 - 36; // ~36px reserved for the label
-    return Math.round(Math.max(88, Math.min(byWidth, byHeight, 240)));
+    if (knobCount === 0) return 160;
+    const band = bandsH > 0 ? bandsH : Math.max(160, innerHeight - 120 - navInset);
+    const rowH = band / knobCount;
+    const byHeight = rowH - 48;          // leave room for the label + padding within the row
+    const byWidth = (innerWidth || 360) * 0.78;
+    return Math.round(Math.max(80, Math.min(byHeight, byWidth, 260)));
   })();
   $: labelFontPx = Math.round(Math.max(11, Math.min(18, knobSize * 0.1)));
 
@@ -335,7 +327,7 @@ import { get } from 'svelte/store';
   });
 </script>
 
-<svelte:window bind:innerWidth bind:innerHeight />
+<svelte:window bind:innerWidth bind:innerHeight on:resize={measureBand} />
 
 <!-- Full-screen pattern renderer -->
 <PatternRenderer fullscreen={true} />
@@ -351,12 +343,9 @@ import { get } from 'svelte/store';
 
 <!-- Dynamic rotary knobs overlay -->
 {#if dynamicKnobs.length > 0}
-  <div class="knobs-overlay">
+  <div class="knobs-overlay" bind:this={overlayEl} style="bottom: {navInset}px;">
     {#each dynamicKnobs.slice(0, 6) as knob, i (knob.nodeId + '-' + knob.paramName + '-' + knob.kind + '-' + (knob.modField ?? ''))}
-      <div
-        class="knob-container"
-        style="left: {knobPositions[i]?.[0] ?? 50}%; top: {knobPositions[i]?.[1] ?? 50}%;"
-      >
+      <div class="knob-container">
         {#if knob.kind === 'color'}
           <ColorWheel
             hue={knob.value}
@@ -430,25 +419,34 @@ import { get } from 'svelte/store';
   /* Full-screen overlay; knobs are positioned absolutely from the layout table.
      The overlay itself ignores pointer events so taps in the gaps reach the
      pattern behind it; each knob re-enables them. */
+  /* The knob band = the space between the switcher pill and the bottom nav. It's a flex
+     column, so its children (one per control) split it into equal rows. `bottom` is set
+     inline to the measured nav height so nothing hides behind the nav. */
   .knobs-overlay {
     position: fixed;
-    /* Start below the switcher pill (its top offset + ~its height) so the knob band is
-       everything below the switcher and the top row never sits under it. */
     top: calc(max(1rem, env(safe-area-inset-top, 0px)) + 4.25rem);
     left: 0;
     right: 0;
-    bottom: 0;
+    bottom: 0; /* overridden inline with the measured nav inset */
     z-index: 10;
     pointer-events: none;
+    display: flex;
+    flex-direction: column;
   }
 
+  /* Each control gets an equal slice of the band and is centered within it, with padding
+     so it never butts against its neighbours, the switcher, or the nav. */
   .knob-container {
-    position: absolute;
-    transform: translate(-50%, -50%);
+    flex: 1 1 0;
+    min-height: 0;
+    width: 100%;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 10px;
+    justify-content: center;
+    gap: 8px;
+    padding: 6px 12px;
+    box-sizing: border-box;
     pointer-events: auto;
   }
 
