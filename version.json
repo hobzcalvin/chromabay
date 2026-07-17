@@ -1,7 +1,7 @@
 {
-  "version": "0.1.226",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.226.zip",
-  "buildDate": "2026-07-17T23:15:25Z",
-  "commitHash": "46982e3abd65f4389ea05c2e90b39d275c95089a",
-  "commitMessage": "Pattern lifecycle phase 3: N-Synced button + device-library layer"
+  "version": "0.1.227",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.227.zip",
+  "buildDate": "2026-07-17T23:36:35Z",
+  "commitHash": "8eb55f580e7e3c26edc1edf468328a8183eb1be7",
+  "commitMessage": "Pattern lifecycle phases 4 & 5; restore Interact knob grid; Cycle dims Edit/Interact nav"
 }
