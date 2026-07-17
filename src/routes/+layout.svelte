@@ -4,6 +4,7 @@
   import { onMount } from 'svelte';
   import { get } from 'svelte/store';
   import { connectedDevices } from '$lib/stores/deviceStore';
+  import { cycleEnabled } from '$lib/stores/cycleStore';
   import { loadPatterns, currentPattern } from '$lib/stores/patternsStore';
   import { loadSerializedPattern, initializeDefaultPattern } from '$lib/flowStore';
   import { SvelteFlowProvider } from '@xyflow/svelte';
@@ -76,11 +77,11 @@
         <span class="emoji">🌈</span>
         <span class="label">Patterns</span>
       </a>
-      <a href="{base}/interact" class:active={$page.url.pathname.startsWith(`${base}/interact`)}>
+      <a href="{base}/interact" class:active={$page.url.pathname.startsWith(`${base}/interact`)} class:cycle-dim={$cycleEnabled}>
         <span class="emoji">🖐️</span>
         <span class="label">Interact</span>
       </a>
-      <a href="{base}/editor" class:active={$page.url.pathname.startsWith(`${base}/editor`)}>
+      <a href="{base}/editor" class:active={$page.url.pathname.startsWith(`${base}/editor`)} class:cycle-dim={$cycleEnabled}>
         <span class="emoji">✏️</span>
         <span class="label">Edit</span>
       </a>
@@ -188,6 +189,10 @@
     position: relative;
   }
   
+  /* Dimmed while Cycle is on: Edit/Interact are Live actions that don't apply during a
+     cycle (tapping still works — it exits Cycle — matching the dimmed Patterns list). */
+  .bottom-nav a.cycle-dim { opacity: 0.4; }
+
   /* Navigation links */
   .bottom-nav a {
     color: rgba(255, 255, 255, 0.7);

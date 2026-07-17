@@ -2,15 +2,17 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { base } from '$app/paths';
-  import { patterns, loadPatterns, switchToPattern, currentPatternName, createEmptyPattern, saveAsPattern, patternNameExists } from '$lib/stores/patternsStore';
+  import { patterns, loadPatterns, switchToPattern, currentPatternName, createEmptyPattern, saveAsPattern, patternNameExists, importLibraryPattern } from '$lib/stores/patternsStore';
   import PatternPreview from '$lib/components/PatternPreview.svelte';
   import type { SerializedPattern } from '$lib/patternSerializer';
-  import { syncPatternToAllDevices, clearLibraryOnAllDevices, deletePatternOnAllDevices, sendSinglePatternToDevice } from '$lib/ble';
+  import { syncPatternToAllDevices, clearLibraryOnAllDevices, deletePatternOnAllDevices, sendSinglePatternToDevice, deletePatternOnDevice } from '$lib/ble';
   import { deviceLibraries, refreshDeviceLibraries, syncedCountFor } from '$lib/stores/deviceLibraryStore';
   import { currentPattern } from '$lib/stores/patternsStore';
   import { connectedDevices, getConnectedDevicesList } from '$lib/stores/deviceStore';
   import GalleryModal from '$lib/components/GalleryModal.svelte';
   import { cycleEnabled, cycleSeconds, applyCycle, exitCycle } from '$lib/stores/cycleStore';
+  import { browseGallery, importGalleryPattern, type GalleryPattern } from '$lib/gallery';
+  import { get } from 'svelte/store';
 
   let galleryOpen = false;
   let patternsList: SerializedPattern[] = [];
@@ -68,11 +70,62 @@
 
   // Swipe state
   let swipeStates: { [key: string]: { isSwipeRevealed: boolean, startX: number, currentX: number } } = {};
-  
+
+  // --- Sections: My Patterns / New From Devices / Per Device / Online ---
+  let onlinePatterns: GalleryPattern[] = [];
+  let perDeviceOpen = false;
+
+  // Names already in My Patterns (used to filter the other sections so they only show
+  // things you don't already have).
+  $: myNames = new Set(patternsList.map((p) => p.meta?.name).filter(Boolean) as string[]);
+
+  // Patterns present on some connected device but NOT in My Patterns (deduped by name).
+  $: newFromDevices = (() => {
+    const seen = new Set<string>(); const out: SerializedPattern[] = [];
+    for (const pats of Object.values($deviceLibraries)) {
+      for (const p of pats) {
+        const n = p.meta?.name;
+        if (!n || myNames.has(n) || seen.has(n)) continue;
+        seen.add(n); out.push(p);
+      }
+    }
+    return out;
+  })();
+
+  // Online patterns you don't already have, highest-voted first (browseGallery orders them).
+  $: onlineNew = onlinePatterns.filter((g) => !myNames.has(g.name));
+
   onMount(async () => {
     await loadPatterns();
     refreshDeviceLibraries(); // best-effort, non-blocking
+    try { onlinePatterns = await browseGallery({ limit: 30 }); } catch (e) { console.warn('gallery browse failed', e); }
   });
+
+  // Import a pattern (from a device or the gallery) into My Patterns, then select it as
+  // current + sync to all devices, so it lands where the user expects.
+  async function importAndSelect(getName: () => Promise<{ name: string }>) {
+    try {
+      const { name } = await getName();
+      await loadPatterns();
+      const imported = get(patterns).find((p) => p.meta?.name === name);
+      if (imported) await selectPattern(imported);
+      refreshDeviceLibraries();
+    } catch (e) {
+      console.error('Import failed:', e);
+    }
+  }
+  const handleImportDevicePattern = (p: SerializedPattern) => importAndSelect(() => importLibraryPattern(p));
+  const handleImportGallery = (g: GalleryPattern) => importAndSelect(() => importGalleryPattern(g));
+
+  // Remove a pattern from ONE device's library (not from My Patterns).
+  async function handleRemoveFromDevice(deviceId: string, name: string) {
+    try {
+      await deletePatternOnDevice(deviceId, name);
+    } catch (e) {
+      console.error('Remove from device failed:', e);
+    }
+    refreshDeviceLibraries();
+  }
 
   // Bring the current pattern into view when landing on this page (it may be far down a
   // long list). Fires once, when the item mounts as current or first becomes current.
@@ -278,14 +331,11 @@
     {/if}
   </div>
 
-  {#if patternsList.length === 0}
-    <div class="empty-state">
-      <div class="empty-icon">🎭</div>
-      <h2>No patterns yet</h2>
-      <p>Create your first pattern in the Editor</p>
-      <a href="{base}/editor" class="create-button">Create Pattern</a>
-    </div>
-  {:else}
+  <section class="pattern-section">
+    <h2 class="section-title">My Patterns</h2>
+    {#if patternsList.length === 0}
+      <p class="section-empty">No patterns yet — create one below, or import from your devices or online.</p>
+    {/if}
     <div class="patterns-grid" class:dimmed={$cycleEnabled}>
       {#each patternsList as pattern (pattern.meta?.id ?? pattern.meta?.name)}
         {@const patternName = pattern.meta?.name || 'Unnamed'}
@@ -361,12 +411,65 @@
           </div>
         </div>
       {/each}
-      
-      <!-- New Pattern Button -->
-      <button class="new-pattern-button" onclick={handleNewPattern}>
-        ➕ New Pattern
-      </button>
+
+      <button class="new-pattern-button" onclick={handleNewPattern}>➕ New Pattern</button>
     </div>
+  </section>
+
+  <!-- New From Devices: on a connected device but not in My Patterns. Import to adopt. -->
+  {#if newFromDevices.length > 0}
+    <section class="pattern-section">
+      <h2 class="section-title">New From Devices</h2>
+      {#each newFromDevices as p (p.meta?.name)}
+        <div class="simple-row">
+          <PatternPreview pattern={p} size={44} />
+          <span class="simple-name">{p.meta?.name || 'Unnamed'}</span>
+          <button class="import-btn" onclick={() => handleImportDevicePattern(p)}>Import</button>
+        </div>
+      {/each}
+    </section>
+  {/if}
+
+  <!-- Per Device: what's stored on each connected device; remove individually here. -->
+  {#if connectedList.length > 0}
+    <section class="pattern-section">
+      <details bind:open={perDeviceOpen}>
+        <summary class="section-title section-summary">Per Device</summary>
+        {#each connectedList as device (device.deviceId)}
+          <div class="device-group">
+            <h3 class="device-group-name">{device.name}</h3>
+            {#each ($deviceLibraries[device.deviceId] ?? []) as p (p.meta?.name)}
+              {@const nm = p.meta?.name ?? ''}
+              <div class="simple-row">
+                <span class="simple-name">{nm || 'Unnamed'}</span>
+                {#if nm && myNames.has(nm)}
+                  <button class="mini-btn" title="Remove from {device.name}" onclick={() => handleRemoveFromDevice(device.deviceId, nm)}>🗑️</button>
+                {:else}
+                  <button class="import-btn" onclick={() => handleImportDevicePattern(p)}>Import</button>
+                {/if}
+              </div>
+            {:else}
+              <p class="section-empty">No stored patterns.</p>
+            {/each}
+          </div>
+        {/each}
+      </details>
+    </section>
+  {/if}
+
+  <!-- Online: top gallery patterns you don't already have. -->
+  {#if onlineNew.length > 0}
+    <section class="pattern-section">
+      <h2 class="section-title">Online</h2>
+      {#each onlineNew as g (g.id)}
+        <div class="simple-row">
+          <PatternPreview pattern={g.blob} size={44} />
+          <span class="simple-name">{g.name}{g.handle ? ` · by ${g.handle}` : ''}</span>
+          <span class="upvotes">▲ {g.upvote_count}</span>
+          <button class="import-btn" onclick={() => handleImportGallery(g)}>Import</button>
+        </div>
+      {/each}
+    </section>
   {/if}
 </main>
 
@@ -410,42 +513,6 @@
     font-size: 0.9rem;
   }
   
-  .empty-state {
-    text-align: center;
-    padding: 4rem 2rem;
-    color: rgba(255, 255, 255, 0.9);
-  }
-  
-  .empty-icon {
-    font-size: 4rem;
-    margin-bottom: 1rem;
-  }
-  
-  .empty-state h2 {
-    margin: 0 0 1rem 0;
-    color: white;
-  }
-  
-  .empty-state p {
-    margin: 0 0 2rem 0;
-    color: rgba(255, 255, 255, 0.8);
-  }
-  
-  .create-button {
-    display: inline-block;
-    padding: 0.75rem 1.5rem;
-    background: #3b82f6;
-    color: white;
-    text-decoration: none;
-    border-radius: 0.5rem;
-    font-weight: 600;
-    transition: background 0.2s ease;
-  }
-  
-  .create-button:hover {
-    background: #2563eb;
-  }
-  
   .patterns-grid {
     display: flex;
     flex-direction: column;
@@ -456,6 +523,38 @@
      Still fully interactive — tapping any pattern just exits Cycle and selects it. */
   .patterns-grid.dimmed {
     opacity: 0.45;
+  }
+
+  /* Sections: My Patterns / New From Devices / Per Device / Online */
+  .pattern-section { margin: 0 0 1.5rem; }
+  .section-title {
+    margin: 0 0 0.6rem; font-size: 1.1rem; font-weight: 700; color: #fff;
+  }
+  .section-summary { cursor: pointer; user-select: none; }
+  .section-empty { color: rgba(255, 255, 255, 0.7); font-size: 0.9rem; margin: 0 0 0.75rem; }
+  .simple-row {
+    display: flex; align-items: center; gap: 0.75rem;
+    padding: 0.5rem 0.6rem; margin-bottom: 0.5rem;
+    background: rgba(0, 0, 0, 0.25); border-radius: 10px;
+  }
+  .simple-name {
+    flex: 1; min-width: 0; color: #f9fafb; font-size: 0.95rem;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .upvotes { color: #cbd5e1; font-size: 0.8rem; white-space: nowrap; }
+  .import-btn {
+    background: linear-gradient(135deg, #3b82f6, #1d4ed8); color: #fff; border: none;
+    padding: 0.35rem 0.8rem; border-radius: 8px; font-size: 0.85rem; font-weight: 600; cursor: pointer;
+    white-space: nowrap;
+  }
+  .import-btn:hover { filter: brightness(1.1); }
+  .mini-btn {
+    background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.4);
+    color: #fff; border-radius: 8px; padding: 0.3rem 0.5rem; cursor: pointer; font-size: 0.95rem;
+  }
+  .device-group { margin: 0.5rem 0 1rem; }
+  .device-group-name {
+    margin: 0.5rem 0 0.4rem; font-size: 0.95rem; font-weight: 600; color: rgba(255, 255, 255, 0.85);
   }
 
   .cycle-bar {

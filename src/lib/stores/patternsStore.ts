@@ -249,7 +249,11 @@ export async function saveCurrentPattern(serializedPattern: SerializedPattern, n
           output: serializedPattern.meta?.output ?? 1,
           name: name || current.meta?.name || 'Unnamed Pattern',
           id: current.meta?.id, // preserve identity across edits (savePattern mints if absent)
-          updatedAt: current.meta?.updatedAt
+          updatedAt: current.meta?.updatedAt,
+          // Preserve authorship across edits: tweaking an imported pattern's params does NOT
+          // make you the author (only Rename / Save-As does). sourceHash is intentionally
+          // dropped — an edited pattern is no longer the pristine version from the author.
+          author: current.meta?.author,
         }
       };
 
@@ -314,8 +318,12 @@ export async function renameCurrentPattern(newName: string) {
         meta: {
           output: current.meta?.output ?? 1,
           name: newName,
-          id: current.meta?.id ?? newId(),
+          // Rename = make it your own. If it was imported (has a foreign author), fork it: a
+          // NEW id + drop the author, so it's a distinct pattern you own (no id/author clash
+          // with the original). Renaming your OWN pattern keeps its id (same pattern, new name).
+          id: current.meta?.author ? newId() : (current.meta?.id ?? newId()),
           updatedAt: nowMs()
+          // author intentionally omitted → this is now yours.
         }
       };
 

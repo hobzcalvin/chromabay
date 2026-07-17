@@ -116,6 +116,12 @@ gallery backing); stable pattern id + author for sync/online.
 gating; global-name dedup; flag-deleted tombstone bookkeeping for the local case (recover a
 deleted pattern from a device via Import).
 
+**TODO (device ownership — revisit):** a device you don't own should still be **connectable**
+(you can see it / preview), but **all settings + pattern management must be blocked** (LED
+config, firmware update, library push/delete, cycle, rename, etc. — read-only for non-owners).
+Needs an ownership signal (see the dropped owner-*claim* idea — likely resurrected in a lighter
+form) + UI gating across the Devices and Patterns pages. Parked for now.
+
 ---
 
 ## 8. Suggested build phases

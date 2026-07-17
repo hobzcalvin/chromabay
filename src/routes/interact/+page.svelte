@@ -34,10 +34,20 @@ import { get } from 'svelte/store';
   
   let dynamicKnobs: InteractiveKnob[] = [];
 
-  // Controls are stacked one-per-row in a flex column that fills the space between the
-  // pattern switcher and the bottom nav. CSS splits that band into `knobCount` equal rows;
-  // here we just measure the band and size each control to fit its row (minus label/padding),
-  // so 1–6 controls each get an equal, centered slice instead of arbitrary fixed positions.
+  // --- Knob layouts (1-6): up to 3 rows of 1-2 knobs, positioned as [left%, top%] within
+  //   the band between the switcher and the bottom nav.
+  //   1: center · 2: stacked (top+bottom) · 3: stacked ×3 · 4: 2×2 · 5: corners+center · 6: 2×3
+  const KNOB_LAYOUTS: Record<number, [number, number][]> = {
+    1: [[50, 50]],
+    2: [[50, 30], [50, 70]],
+    3: [[50, 20], [50, 50], [50, 80]],
+    4: [[28, 28], [72, 28], [28, 72], [72, 72]],
+    5: [[28, 26], [72, 26], [50, 50], [28, 74], [72, 74]],
+    6: [[30, 20], [70, 20], [30, 50], [70, 50], [30, 80], [70, 80]],
+  };
+  const LAYOUT_COLS: Record<number, number> = { 1: 1, 2: 1, 3: 1, 4: 2, 5: 2, 6: 2 };
+  const LAYOUT_ROWS: Record<number, number> = { 1: 1, 2: 2, 3: 3, 4: 2, 5: 3, 6: 3 };
+
   let innerWidth = 0;
   let innerHeight = 0;
   let overlayEl: HTMLDivElement | undefined;
@@ -45,6 +55,7 @@ import { get } from 'svelte/store';
   let bandsH = 0;      // measured height of the knob band (switcher bottom -> nav top)
 
   $: knobCount = Math.min(dynamicKnobs.length, 6);
+  $: knobPositions = KNOB_LAYOUTS[knobCount] ?? [];
 
   function measureBand() {
     if (typeof document === 'undefined') return;
@@ -52,17 +63,20 @@ import { get } from 'svelte/store';
     if (nav && innerHeight > 0) navInset = Math.max(0, Math.round(innerHeight - nav.getBoundingClientRect().top));
     bandsH = overlayEl ? overlayEl.clientHeight : 0;
   }
-  // Re-measure whenever the band could have changed (count, viewport). tick() lets the DOM
-  // apply the new `bottom` inset first so overlayEl.clientHeight is correct.
+  // Re-measure when the band could have changed. tick() lets the DOM apply the new `bottom`
+  // inset first so overlayEl.clientHeight (the band we distribute knobs within) is correct.
   $: { knobCount; innerHeight; innerWidth; tick().then(measureBand); }
 
+  // Fit each knob inside its grid cell (band ÷ rows tall, width ÷ cols wide), leaving room
+  // for the label, then clamp. Uses the measured band so knobs never hide behind the nav.
   $: knobSize = (() => {
     if (knobCount === 0) return 160;
     const band = bandsH > 0 ? bandsH : Math.max(160, innerHeight - 120 - navInset);
-    const rowH = band / knobCount;
-    const byHeight = rowH - 48;          // leave room for the label + padding within the row
-    const byWidth = (innerWidth || 360) * 0.78;
-    return Math.round(Math.max(80, Math.min(byHeight, byWidth, 260)));
+    const cellW = (innerWidth || 360) / LAYOUT_COLS[knobCount];
+    const cellH = band / LAYOUT_ROWS[knobCount];
+    const byWidth = cellW * 0.82;
+    const byHeight = cellH * 0.82 - 38; // ~38px reserved for the label
+    return Math.round(Math.max(80, Math.min(byWidth, byHeight, 260)));
   })();
   $: labelFontPx = Math.round(Math.max(11, Math.min(18, knobSize * 0.1)));
 
@@ -348,7 +362,10 @@ import { get } from 'svelte/store';
 {#if dynamicKnobs.length > 0}
   <div class="knobs-overlay" bind:this={overlayEl} style="bottom: {navInset}px;">
     {#each dynamicKnobs.slice(0, 6) as knob, i (knob.nodeId + '-' + knob.paramName + '-' + knob.kind + '-' + (knob.modField ?? ''))}
-      <div class="knob-container">
+      <div
+        class="knob-container"
+        style="left: {knobPositions[i]?.[0] ?? 50}%; top: {knobPositions[i]?.[1] ?? 50}%;"
+      >
         {#if knob.kind === 'color'}
           <ColorWheel
             hue={knob.value}
@@ -422,9 +439,9 @@ import { get } from 'svelte/store';
   /* Full-screen overlay; knobs are positioned absolutely from the layout table.
      The overlay itself ignores pointer events so taps in the gaps reach the
      pattern behind it; each knob re-enables them. */
-  /* The knob band = the space between the switcher pill and the bottom nav. It's a flex
-     column, so its children (one per control) split it into equal rows. `bottom` is set
-     inline to the measured nav height so nothing hides behind the nav. */
+  /* The knob band = the space between the switcher pill and the bottom nav (bottom set
+     inline to the measured nav inset, so nothing hides behind the nav). Knobs are placed
+     within it by the [left%, top%] layout table. */
   .knobs-overlay {
     position: fixed;
     top: calc(max(1rem, env(safe-area-inset-top, 0px)) + 4.25rem);
@@ -433,23 +450,15 @@ import { get } from 'svelte/store';
     bottom: 0; /* overridden inline with the measured nav inset */
     z-index: 10;
     pointer-events: none;
-    display: flex;
-    flex-direction: column;
   }
 
-  /* Each control gets an equal slice of the band and is centered within it, with padding
-     so it never butts against its neighbours, the switcher, or the nav. */
   .knob-container {
-    flex: 1 1 0;
-    min-height: 0;
-    width: 100%;
+    position: absolute;
+    transform: translate(-50%, -50%);
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
     gap: 8px;
-    padding: 6px 12px;
-    box-sizing: border-box;
     pointer-events: auto;
   }
 
