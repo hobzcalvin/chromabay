@@ -183,3 +183,12 @@ A maker adds a library + one CI line, and when their ESP32 panics in the field i
 Sentry with a symbolicated backtrace, reset reason, and device context — over WiFi if they have it,
 or relayed through their phone app if they don't. Bonus: it drops into WLED as a usermod, opening a
 large ready-made audience.
+
+
+---
+
+## See Also
+
+https://github.com/DrozmotiX/ioBroker.wled
+
+https://github.com/pixel-heart/wledplus-releases
