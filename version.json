@@ -1,7 +1,7 @@
 {
-  "version": "0.1.220",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.220.zip",
-  "buildDate": "2026-07-17T14:34:19Z",
-  "commitHash": "fc64a6e6cd156cdad6d8297bb95722818fa24ce4",
-  "commitMessage": "Add missing FirmwareDownloads.svelte + firmwareVariants.ts (fix deploy build)"
+  "version": "0.1.221",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.221.zip",
+  "buildDate": "2026-07-17T17:26:56Z",
+  "commitHash": "ccaaf607e60a1b2d8e5d13197ee35e4b44a35658",
+  "commitMessage": "Single-core (C3/S2) WS2812 flicker mitigations"
 }
