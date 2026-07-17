@@ -132,11 +132,12 @@
       "navigation";
     height: 100%;
     width: 100%;
-    /* Handle safe areas properly */
+    /* Handle safe areas properly. NOTE: no bottom inset here — the bottom nav paints all
+       the way to the physical edge and absorbs the safe-area inset in its OWN padding
+       (below), so the fullscreen pattern canvas can't show through a gap under the nav. */
     padding-top: env(safe-area-inset-top, 0px);
     padding-left: env(safe-area-inset-left, 0px);
     padding-right: env(safe-area-inset-right, 0px);
-    padding-bottom: env(safe-area-inset-bottom, 0px);
     box-sizing: border-box;
     /* Ensure proper stacking on iOS */
     position: relative;
@@ -178,7 +179,9 @@
     background: rgba(0, 0, 0, 0.95);
     backdrop-filter: blur(20px);
     border-top: 1px solid rgba(255, 255, 255, 0.1);
-    padding: 0.75rem 0.5rem;
+    /* Extend the nav background to the physical bottom edge; keep its content (labels)
+       above the home indicator / curved corners by absorbing the safe-area inset here. */
+    padding: 0.75rem 0.5rem calc(0.75rem + env(safe-area-inset-bottom, 0px));
     box-sizing: border-box;
     min-height: 60px;
     /* Ensure it stays at bottom on all devices */
