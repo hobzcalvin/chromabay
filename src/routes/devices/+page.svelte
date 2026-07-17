@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, untrack } from 'svelte';
+  import { onMount, onDestroy, untrack } from 'svelte';
   import { get } from 'svelte/store';
   import { dev } from '$app/environment';
   import { patterns, currentPattern, switchToPattern } from '$lib/stores/patternsStore';
@@ -57,6 +57,22 @@
   let scanning = $state(false);
   let devices: any[] = $state([]);
   let statusMessage = $state('');
+  // deviceId -> last advertisement time (ms). Discovered devices are pruned from `devices`
+  // once they've gone quiet for STALE_DEVICE_MS, so a powered-off/out-of-range device stops
+  // lingering in the list. The window gives hysteresis so devices don't flicker in and out.
+  let lastSeen: Record<string, number> = {};
+  const STALE_DEVICE_MS = 10000;
+  let pruneTimer: any = null;
+
+  function pruneStaleDevices() {
+    const cutoff = Date.now() - STALE_DEVICE_MS;
+    // Keep a device if seen recently, OR if we're connected to it (connected devices may stop
+    // advertising, and they're shown from the store anyway — never prune those from view here).
+    const next = devices.filter(d =>
+      (lastSeen[d.deviceId] ?? 0) >= cutoff || $connectedDevices.has(d.deviceId)
+    );
+    if (next.length !== devices.length) devices = next;
+  }
   let isWeb = $state(false);
 
   // Device states - keyed by deviceId. $state is deeply reactive (proxied), so
@@ -140,6 +156,8 @@
 
   onMount(async () => {
     isWeb = Capacitor.getPlatform() === 'web';
+    // Periodically drop discovered devices that have gone quiet (see pruneStaleDevices).
+    pruneTimer = setInterval(pruneStaleDevices, 3000);
     try {
       await initBle();
       bleSupported = true;
@@ -285,9 +303,13 @@
 
     scanning = true;
     devices = [];
+    lastSeen = {};
     statusMessage = isWeb ? 'Opening device picker...' : 'Scanning for devices...';
-    
+
     startScan((result) => {
+      // Refresh the "last seen" time on every advertisement so pruneStaleDevices() keeps
+      // present devices and drops ones that have gone quiet (see allowDuplicates in startScan).
+      lastSeen[result.device.deviceId] = Date.now();
       const existingDevice = devices.find(d => d.deviceId === result.device.deviceId);
       if (!existingDevice) {
         devices = [...devices, result.device];
@@ -351,6 +373,10 @@
     try { const s = getRemembered(); s.delete(id); localStorage.setItem(REMEMBERED_KEY, JSON.stringify([...s])); } catch {}
   }
   const autoConnecting = new Set<string>();
+  onDestroy(() => {
+    if (pruneTimer) { clearInterval(pruneTimer); pruneTimer = null; }
+  });
+
   async function maybeAutoReconnect(device: any) {
     if (isWeb) return;
     const id = device?.deviceId;

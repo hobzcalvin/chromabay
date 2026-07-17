@@ -209,7 +209,11 @@ export async function startScan(
   } else {
     try {
       await BleClient.requestLEScan({
-        services: [LED_SERVICE_UUID] 
+        services: [LED_SERVICE_UUID],
+        // Report every advertisement, not just the first sighting, so the UI can tell a
+        // device is still present (refreshing a "last seen" time) and prune ones that have
+        // gone quiet. Auto-reconnect is idempotent, so the repeated callbacks are harmless.
+        allowDuplicates: true
       }, callback);
     } catch (error) {
       console.error('Error starting BLE scan:', error);

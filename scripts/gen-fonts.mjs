@@ -100,11 +100,19 @@ async function rasterizeFont(name, H, fontStack, fontSize) {
 }
 
 // Per-glyph overrides for the small Spleen font. On tiny displays (6px) TextOperator floors
-// to FONT_5x8 and vertically clips it, so descenders that live in the bottom row vanish.
-// Spleen's 'y' put its left-hook in row 7 (clipped at 6px → a lone 1px tail), so we raise the
-// hook to row 6 (top-row-first, MSB-left, top 5 bits). Keeps a proper left-pointing tail at 6px.
+// to FONT_5x8 and vertically CLIPS it (top row + bottom row lost), so any glyph whose
+// distinctive descender/tail sits in row 7 gets mangled — g/j/y lose their hook, Q loses its
+// tail (reads as O), '_' vanishes entirely, and ',' ';' lose their curl. These overrides raise
+// that feature into row 6 (lowest row still visible at 6px); row 7 left blank. p/q only lose a
+// 1px vertical stem and still read, so they're left alone. Bytes: row0..7, MSB-left, top 5 bits.
 const FONT_5x8_OVERRIDES = {
+  0x67: [0x00, 0x00, 0x70, 0x90, 0x90, 0x70, 0xe0, 0x00], // 'g'
+  0x6a: [0x00, 0x20, 0x00, 0x20, 0x20, 0x20, 0xc0, 0x00], // 'j'
   0x79: [0x00, 0x00, 0x90, 0x90, 0x70, 0x10, 0xe0, 0x00], // 'y'
+  0x51: [0x00, 0x60, 0x90, 0x90, 0x90, 0x60, 0x30, 0x00], // 'Q'
+  0x5f: [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xf0, 0x00], // '_'
+  0x2c: [0x00, 0x00, 0x00, 0x00, 0x20, 0x20, 0x40, 0x00], // ','
+  0x3b: [0x00, 0x00, 0x20, 0x00, 0x20, 0x20, 0x40, 0x00], // ';'
 };
 function applyOverrides(font, overrides) {
   for (const [enc, bytes] of Object.entries(overrides)) {
