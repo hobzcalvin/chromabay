@@ -8,6 +8,7 @@ import { loadSerializedPattern, initializeDefaultPattern, forceSyncCurrentPatter
          flowNodes, nodeParameters, getNodeDefinition, setNodeParameter, type Parameter } from '$lib/flowStore';
 import { interactiveParameters } from '$lib/stores/interactiveStore';
 import { modulators, getModulator, setModulator, SHAPES, type ModField } from '$lib/stores/modulatorStore';
+import { exitCycle } from '$lib/stores/cycleStore';
 import type { Node } from '@xyflow/svelte';
 import { get } from 'svelte/store';
 
@@ -299,6 +300,8 @@ import { get } from 'svelte/store';
     // Initialize patterns on mount (same as editor page)
     try {
       console.log('🎯 Starting interact page initialization...');
+      // Interacting is a Live action → devices must show the current pattern, not cycle.
+      await exitCycle();
       await loadPatterns();
       
       // Load the current pattern into the flow editor

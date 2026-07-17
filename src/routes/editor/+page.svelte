@@ -11,12 +11,15 @@
   import { patternBlobFromHash, decodeBlobToPattern } from '$lib/shareLink';
   import { goto } from '$app/navigation';
   import { base } from '$app/paths';
+  import { exitCycle } from '$lib/stores/cycleStore';
   // Hidden for now: import PatternSerializationPanel from '$lib/components/PatternSerializationPanel.svelte';
-  
+
   // Initialize patterns on mount
   onMount(() => {
     (async () => {
       try {
+        // Editing is a Live action → stop device cycling so they show the edited pattern.
+        await exitCycle();
         // A shared pattern link (chromabay.app/editor#p=…): decode it, import it into the library
         // as a new pattern, and open it. Strip the hash first so a refresh doesn't re-import.
         const blob = typeof location !== 'undefined' ? patternBlobFromHash(location.hash) : null;

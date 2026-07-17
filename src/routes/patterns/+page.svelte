@@ -5,11 +5,11 @@
   import { patterns, loadPatterns, switchToPattern, currentPatternName, createEmptyPattern, saveAsPattern, patternNameExists } from '$lib/stores/patternsStore';
   import PatternPreview from '$lib/components/PatternPreview.svelte';
   import type { SerializedPattern } from '$lib/patternSerializer';
-  import { syncPatternToAllDevices, setCycleOnDevice, sendSinglePatternToDevice, clearLibraryOnAllDevices, deletePatternOnAllDevices } from '$lib/ble';
+  import { syncPatternToAllDevices, clearLibraryOnAllDevices, deletePatternOnAllDevices } from '$lib/ble';
   import { currentPattern } from '$lib/stores/patternsStore';
   import { connectedDevices, getConnectedDevicesList } from '$lib/stores/deviceStore';
-  import { get } from 'svelte/store';
   import GalleryModal from '$lib/components/GalleryModal.svelte';
+  import { cycleEnabled, cycleSeconds, applyCycle, exitCycle } from '$lib/stores/cycleStore';
 
   let galleryOpen = false;
   let patternsList: SerializedPattern[] = [];
@@ -28,19 +28,7 @@
   // patterns switch together. This just toggles cycling on/off + sets the interval —
   // the device's stored patterns are untouched either way.
   $: connectedList = getConnectedDevicesList($connectedDevices);
-  let cycleEnabled = false;
-  let cycleSeconds = 30;
-
-  async function applyCycle() {
-    cycleSeconds = Math.max(1, Math.floor(Number(cycleSeconds) || 1));
-    for (const device of connectedList) {
-      try {
-        await setCycleOnDevice(device.deviceId, cycleEnabled, cycleSeconds);
-      } catch (e) {
-        console.error('Cycle update failed for', device.deviceId, e);
-      }
-    }
-  }
+  // Cycle state is shared (cycleStore) so entering Edit/Interact auto-exits it — see below.
 
   // Wipe the connected devices' stored pattern set (removes orphans that were sent before
   // delete-propagation existed). The devices keep showing their current pattern; they
@@ -81,6 +69,8 @@
     const patternName = pattern.meta?.name;
     if (!patternName) return;
     console.log('Setting pattern as current:', patternName);
+    // Selecting a single pattern is a Live action → leave Cycle so devices show it (WYSIWYG).
+    await exitCycle();
     await switchToPattern(patternName);
     const { loadSerializedPattern } = await import('$lib/flowStore');
     await loadSerializedPattern(pattern);
@@ -119,6 +109,7 @@
     // Set as current pattern and load into editor
     if (pattern.meta?.name) {
       console.log('Setting pattern as current for editing:', pattern.meta?.name);
+      await exitCycle();
       await switchToPattern(pattern.meta.name);
       // Load the pattern into the flow editor immediately
       const { loadSerializedPattern } = await import('$lib/flowStore');
@@ -243,15 +234,24 @@
 
   <GalleryModal open={galleryOpen} onClose={() => (galleryOpen = false)} />
 
-  {#if connectedList.length > 0}
-    <label class="cycle-control" style="display:flex;align-items:center;gap:8px;margin:0 0 16px;">
-      <input type="checkbox" bind:checked={cycleEnabled} onchange={applyCycle} />
-      cycle every
-      <input type="number" min="1" step="1" bind:value={cycleSeconds} disabled={!cycleEnabled} onchange={applyCycle} style="width:64px;" />
-      seconds
+  <!-- Cycle control: always shown. When ON, each connected device plays its own stored
+       library autonomously; the pattern list below dims because selecting/editing a single
+       pattern doesn't apply — but tapping one still works and just turns Cycle off. -->
+  <div class="cycle-bar" class:on={$cycleEnabled}>
+    <label class="cycle-control">
+      <input type="checkbox" bind:checked={$cycleEnabled} onchange={applyCycle} />
+      <span class="cycle-text">Cycle</span>
+      <span class="cycle-sub">every</span>
+      <input class="cycle-secs" type="number" min="1" step="1" bind:value={$cycleSeconds} disabled={!$cycleEnabled} onchange={applyCycle} />
+      <span class="cycle-sub">seconds</span>
     </label>
-    <button onclick={clearDevicePatterns} style="margin:0 0 16px;padding:6px 12px;font-size:0.85rem;border:1px solid rgba(255,255,255,0.3);border-radius:6px;background:rgba(255,255,255,0.08);color:inherit;cursor:pointer;">Clear device patterns</button>
-  {/if}
+    {#if $cycleEnabled}
+      <span class="cycle-hint">{connectedList.length > 0 ? `${connectedList.length} device${connectedList.length === 1 ? '' : 's'} playing` : 'no devices connected'}</span>
+    {/if}
+    {#if connectedList.length > 0}
+      <button class="clear-dev-btn" onclick={clearDevicePatterns} title="Empty the stored pattern set on connected devices">Clear device patterns</button>
+    {/if}
+  </div>
 
   {#if patternsList.length === 0}
     <div class="empty-state">
@@ -261,7 +261,7 @@
       <a href="{base}/editor" class="create-button">Create Pattern</a>
     </div>
   {:else}
-    <div class="patterns-grid">
+    <div class="patterns-grid" class:dimmed={$cycleEnabled}>
       {#each patternsList as pattern (pattern.meta?.id ?? pattern.meta?.name)}
         {@const patternName = pattern.meta?.name || 'Unnamed'}
         {@const isCurrentPattern = patternName === currentName}
@@ -419,6 +419,45 @@
     display: flex;
     flex-direction: column;
     gap: 0.75rem;
+    transition: opacity 0.2s ease;
+  }
+  /* While Cycle is on, the list is de-emphasized (selecting a single pattern doesn't apply).
+     Still fully interactive — tapping any pattern just exits Cycle and selects it. */
+  .patterns-grid.dimmed {
+    opacity: 0.45;
+  }
+
+  .cycle-bar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px 14px;
+    margin: 0 0 16px;
+    padding: 10px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.2);
+    color: #fff;
+  }
+  .cycle-bar.on {
+    border-color: rgba(52, 211, 153, 0.6);
+    background: rgba(16, 185, 129, 0.14);
+  }
+  .cycle-control { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+  .cycle-control input[type="checkbox"] { width: 18px; height: 18px; }
+  .cycle-text { font-weight: 600; }
+  .cycle-sub { opacity: 0.8; font-size: 0.9rem; }
+  .cycle-secs {
+    width: 56px; padding: 4px 6px; border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    background: rgba(255, 255, 255, 0.1); color: #fff;
+  }
+  .cycle-secs:disabled { opacity: 0.5; }
+  .cycle-hint { font-size: 0.85rem; opacity: 0.85; color: #6ee7b7; }
+  .clear-dev-btn {
+    margin-left: auto; padding: 6px 12px; font-size: 0.85rem;
+    border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 6px;
+    background: rgba(255, 255, 255, 0.08); color: inherit; cursor: pointer;
   }
   
   .pattern-item {
