@@ -1,7 +1,7 @@
 {
-  "version": "0.1.224",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.224.zip",
-  "buildDate": "2026-07-17T22:50:41Z",
-  "commitHash": "fa01bdd0182ab34ae93b55b3748a727c3d6071e4",
-  "commitMessage": "Interact page: evenly distribute controls in the switcher→nav band"
+  "version": "0.1.225",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.225.zip",
+  "buildDate": "2026-07-17T23:02:18Z",
+  "commitHash": "fd535c4f227b02041b4eb99eaf42a60b6ba0b75d",
+  "commitMessage": "Bottom nav paints to the physical edge (no canvas showing below it)"
 }
