@@ -5,7 +5,7 @@
   import { patterns, loadPatterns, switchToPattern, currentPatternName, createEmptyPattern, saveAsPattern, patternNameExists, importLibraryPattern } from '$lib/stores/patternsStore';
   import PatternPreview from '$lib/components/PatternPreview.svelte';
   import type { SerializedPattern } from '$lib/patternSerializer';
-  import { syncPatternToAllDevices, clearLibraryOnAllDevices, deletePatternOnAllDevices, sendSinglePatternToDevice, deletePatternOnDevice } from '$lib/ble';
+  import { syncPatternToAllDevices, deletePatternOnAllDevices, sendSinglePatternToDevice, deletePatternOnDevice } from '$lib/ble';
   import { deviceLibraries, refreshDeviceLibraries, syncedCountFor } from '$lib/stores/deviceLibraryStore';
   import { currentPattern } from '$lib/stores/patternsStore';
   import { connectedDevices, getConnectedDevicesList } from '$lib/stores/deviceStore';
@@ -54,18 +54,6 @@
       }
     }
     refreshDeviceLibraries();
-  }
-
-  // Wipe the connected devices' stored pattern set (removes orphans that were sent before
-  // delete-propagation existed). The devices keep showing their current pattern; they
-  // repopulate as you view patterns while connected.
-  async function clearDevicePatterns() {
-    if (!confirm('Clear all stored patterns from connected device(s)? Their live pattern keeps running; the cycle list is emptied.')) return;
-    try {
-      await clearLibraryOnAllDevices();
-    } catch (e) {
-      console.error('Clear device library failed:', e);
-    }
   }
 
   // Swipe state
@@ -326,9 +314,6 @@
     {#if $cycleEnabled}
       <span class="cycle-hint">{connectedList.length > 0 ? `${connectedList.length} device${connectedList.length === 1 ? '' : 's'} playing` : 'no devices connected'}</span>
     {/if}
-    {#if connectedList.length > 0}
-      <button class="clear-dev-btn" onclick={clearDevicePatterns} title="Empty the stored pattern set on connected devices">Clear device patterns</button>
-    {/if}
   </div>
 
   <section class="pattern-section">
@@ -441,12 +426,12 @@
             {#each ($deviceLibraries[device.deviceId] ?? []) as p (p.meta?.name)}
               {@const nm = p.meta?.name ?? ''}
               <div class="simple-row">
+                <PatternPreview pattern={p} size={44} />
                 <span class="simple-name">{nm || 'Unnamed'}</span>
-                {#if nm && myNames.has(nm)}
-                  <button class="mini-btn" title="Remove from {device.name}" onclick={() => handleRemoveFromDevice(device.deviceId, nm)}>🗑️</button>
-                {:else}
+                {#if nm && !myNames.has(nm)}
                   <button class="import-btn" onclick={() => handleImportDevicePattern(p)}>Import</button>
                 {/if}
+                <button class="mini-btn" title="Remove from {device.name}" onclick={() => handleRemoveFromDevice(device.deviceId, nm)}>🗑️</button>
               </div>
             {:else}
               <p class="section-empty">No stored patterns.</p>
@@ -584,11 +569,6 @@
   }
   .cycle-secs:disabled { opacity: 0.5; }
   .cycle-hint { font-size: 0.85rem; opacity: 0.85; color: #6ee7b7; }
-  .clear-dev-btn {
-    margin-left: auto; padding: 6px 12px; font-size: 0.85rem;
-    border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 6px;
-    background: rgba(255, 255, 255, 0.08); color: inherit; cursor: pointer;
-  }
   
   .pattern-item {
     position: relative;
