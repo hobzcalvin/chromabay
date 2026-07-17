@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { LedConfiguration, LedStripConfig } from '$lib/ble';
-  import { LedChipsets, ColorOrders, isFourWireChipset, uploadStripLayout, getStripLayout } from '$lib/ble';
+  import { LedChipsets, ColorOrders, isFourWireChipset, isSingleCoreChip, uploadStripLayout, getStripLayout } from '$lib/ble';
   import { getRotation, getFlipH, getSerpentine, setRotation, setFlipH, setSerpentine } from '$lib/ble';
   import LayoutPreview from './LayoutPreview.svelte';
   import AutoLayoutModal from './AutoLayoutModal.svelte';
@@ -179,6 +179,13 @@
                   </select>
                 </label>
               </div>
+              {#if isSingleCoreChip(settings.deviceInfo?.chip) && !isFourWireChipset(strip.chipset)}
+                <p class="chipset-warn">
+                  ⚠ This device is single-core, so Bluetooth can interrupt the LED signal and make
+                  one-wire chipsets (like WS2812) flicker. For steady output, choose a 4-wire
+                  chipset (<strong>APA102</strong> / <strong>SK9822</strong>) wired with clock + data.
+                </p>
+              {/if}
               <div class="control-row">
                 <label>
                   Color Order:
@@ -416,6 +423,17 @@
     gap: 0.75rem 1rem;
     margin-bottom: 0.75rem;
     align-items: end;
+  }
+
+  .chipset-warn {
+    margin: -0.25rem 0 0.75rem;
+    padding: 0.5rem 0.7rem;
+    font-size: 0.8rem;
+    line-height: 1.4;
+    color: #fbbf24;
+    background: rgba(234, 179, 8, 0.1);
+    border: 1px solid rgba(234, 179, 8, 0.3);
+    border-radius: 6px;
   }
 
   /* A field that should take the whole row (e.g. the long Chipset dropdown). */

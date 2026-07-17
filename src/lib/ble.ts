@@ -1281,6 +1281,15 @@ export function isFourWireChipset(chipset: number): boolean {
   return chipset === LedChipsets.APA102_SPI || chipset === LedChipsets.SK9822_SPI;
 }
 
+// Single-core ESP32 variants (from DeviceInfo.chip). On these the render loop shares a core
+// with Bluetooth, so timing-critical one-wire LEDs (WS2812 etc.) can flicker when BLE preempts
+// output — 4-wire clock+data LEDs (APA102/SK9822) are immune. Unknown/absent => treat as
+// dual-core (pre-multi-chip devices are all classic ESP32; don't warn spuriously).
+export function isSingleCoreChip(chip?: string): boolean {
+  return chip === 'esp32c3' || chip === 'esp32s2' || chip === 'esp32c2'
+      || chip === 'esp32c6' || chip === 'esp32h2';
+}
+
 // Color Order enum values (should match ESP32)
 export const ColorOrders = {
   RGB: 0,
