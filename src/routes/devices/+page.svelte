@@ -21,6 +21,7 @@
     fetchFirmwareRegistry,
     findLatestFirmware,
     performOTAUpdate,
+    performManualOTAUpdate,
     prefetchFirmware,
     startOTAStatusNotifications,
     stopOTAStatusNotifications,
@@ -547,6 +548,92 @@
   // shared device-settings object on every input event — the slider updates in place.
   let liveBrightness: Record<string, number> = $state({});
 
+  // Manual "install from a file" selections, keyed by deviceId. Kept out of
+  // deviceSettings (like liveBrightness) so picking a file doesn't churn the shared
+  // settings object. The .sig is optional — without it we flash unsigned.
+  type ManualFw = {
+    bin?: ArrayBuffer; binName?: string; binSize?: string;
+    sig?: ArrayBuffer; sigName?: string;
+    error?: string;
+  };
+  let manualFw: Record<string, ManualFw> = $state({});
+
+  // Read a user-picked firmware/signature file into memory. Works in the iOS WKWebView:
+  // a plain <input type="file"> opens the Files/iCloud document picker and we get the
+  // bytes via File.arrayBuffer(). We don't restrict `accept` because iOS maps unknown
+  // extensions (.bin/.sig) unreliably, which would grey out valid files in the picker.
+  async function pickManualFile(deviceId: string, kind: 'bin' | 'sig', event: Event) {
+    const input = event.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    // Read back through the store getter so `mf` is the reactive proxy, not a raw literal
+    // (`x ??= {}` evaluates to the RHS object, which Svelte hasn't proxied yet).
+    if (!manualFw[deviceId]) manualFw[deviceId] = {};
+    const mf = manualFw[deviceId];
+    mf.error = undefined;
+    if (!file) return;
+    try {
+      const buf = await file.arrayBuffer();
+      if (kind === 'bin') {
+        mf.bin = buf;
+        mf.binName = file.name;
+        mf.binSize = `${Math.round(buf.byteLength / 1024)} KB`;
+      } else {
+        if (buf.byteLength !== 64) {
+          mf.sig = undefined; mf.sigName = undefined;
+          mf.error = `Signature must be exactly 64 bytes (this file is ${buf.byteLength}). Pick the .sig that matches this build, or leave it empty to flash unsigned.`;
+          return;
+        }
+        mf.sig = buf;
+        mf.sigName = file.name;
+      }
+    } catch (e) {
+      mf.error = 'Could not read that file.';
+    }
+  }
+
+  async function handleManualOTAUpdate(deviceId: string) {
+    const settings = getDeviceSettings(deviceId);
+    const mf = manualFw[deviceId];
+    if (!mf?.bin) return;
+    const unsigned = !mf.sig;
+    if (unsigned && !confirm(
+      'Flash this firmware WITHOUT a signature check?\n\n' +
+      'The device will accept whatever you selected. A wrong, corrupt, or wrong-chip image ' +
+      'can leave it needing USB recovery. Only continue with firmware you trust.'
+    )) return;
+
+    settings.otaInProgress = true;
+    settings.otaSuccess = false;
+    settings.showUpdateConfirmation = false;
+    settings.otaStatus = { statusMessage: 'Starting manual update...', progress: 0 };
+
+    try {
+      await performManualOTAUpdate(
+        deviceId,
+        mf.bin,
+        mf.sig ?? null,
+        (status) => {
+          settings.otaStatus = status;
+          if (status.isError || status.isComplete) settings.otaInProgress = false;
+          if (status.isComplete && !status.isError) settings.otaSuccess = true;
+        }
+      );
+      statusMessage = 'Manual firmware update completed.';
+      // Clear the picked files, then return to a fresh-load state.
+      manualFw[deviceId] = {};
+      setTimeout(async () => {
+        settings.otaSuccess = false;
+        try { await loadDeviceInfo(deviceId); } catch (e) { /* device may still be rebooting */ }
+        await checkForUpdateSilently(deviceId);
+      }, 4000);
+    } catch (error: any) {
+      statusMessage = 'Manual firmware update failed';
+      console.error('Manual OTA update error:', error);
+      settings.otaInProgress = false;
+      settings.otaSuccess = false;
+    }
+  }
+
   function sendBrightnessThrottled(deviceId: string, value: number) {
     let t = brightnessThrottle[deviceId];
     if (!t) { t = brightnessThrottle[deviceId] = { last: 0, timer: null, pending: null }; }
@@ -592,7 +679,7 @@
 
       // Don't bail when device info is missing — if we can't read the current
       // version we should still surface the latest firmware and offer it.
-      settings.latestFirmware = findLatestFirmware(firmwareRegistry, settings.deviceInfo?.hw_ver);
+      settings.latestFirmware = findLatestFirmware(firmwareRegistry, settings.deviceInfo?.chip, settings.deviceInfo?.hw_ver);
       // Prefetch the latest image into the offline cache now (while presumably online),
       // so the actual OTA can run even if internet drops later. Best-effort, non-blocking.
       if (settings.latestFirmware) {
@@ -673,6 +760,7 @@
     const newStrip: LedStripConfig = {
       chipset: LedChipsets.WS2812_RGB,
       pin: 13,
+      clockPin: 0,     // only used by 4-wire SPI chipsets (APA102/SK9822)
       numLeds: null,   // blank until the user enters a count (width/height auto-fill)
       colorOrder: ColorOrders.GRB,
       rmtChannel: 0,
@@ -704,6 +792,76 @@
     }
   }
 </script>
+
+{#snippet firmwareSection(device: any, settings: any)}
+  {@const mf = manualFw[device.deviceId] ?? {}}
+  <!-- Firmware Update -->
+  <div class="settings-section">
+    <h4>Firmware Update</h4>
+    {#if settings.otaInProgress}
+      <div class="ota-progress">
+        <p>{settings.otaStatus?.statusMessage || 'Updating...'}</p>
+        <div class="progress-bar">
+          <div class="progress-fill" style="width: {settings.otaStatus?.progress ?? 0}%"></div>
+        </div>
+      </div>
+    {:else if settings.otaSuccess}
+      <p style="color: #4caf50; font-weight: 600;">✓ Update complete — device restarting…</p>
+    {:else}
+      {#if settings.latestFirmware && settings.deviceInfo?.fw_ver === settings.latestFirmware.version}
+        <p>Firmware is up to date - Current: {settings.deviceInfo.fw_ver}</p>
+      {:else if settings.latestFirmware}
+        <div class="update-available">
+          <p>Latest firmware: <strong>{settings.latestFirmware.version}</strong> (current: {settings.deviceInfo?.fw_ver || 'unknown'})</p>
+          <div class="update-actions">
+            <button class="btn success" onclick={() => handlePerformOTAUpdate(device.deviceId)}>
+              Update to {settings.latestFirmware.version}
+            </button>
+          </div>
+        </div>
+      {:else}
+        <p>No firmware available in the registry yet.</p>
+      {/if}
+
+      <!-- Manual "install from a file" — a specific ChromaBay build, or another firmware
+           (e.g. reverting to WLED). <input type="file"> opens the document picker on iOS. -->
+      <details class="manual-fw">
+        <summary>Install from a file…</summary>
+        <p class="manual-hint">
+          Flash a firmware image stored on this phone. Use a matching ChromaBay
+          <code>.bin</code> + <code>.sig</code> for a verified install, or just a
+          <code>.bin</code> to flash an unsigned image (e.g. going back to WLED). The image
+          must be built for this device's chip (ESP32).
+        </p>
+
+        <label class="file-row">
+          <span>Firmware <code>.bin</code></span>
+          <input type="file" onchange={(e) => pickManualFile(device.deviceId, 'bin', e)} />
+        </label>
+        {#if mf.binName}<p class="file-name">✓ {mf.binName} · {mf.binSize}</p>{/if}
+
+        <label class="file-row">
+          <span>Signature <code>.sig</code> <em>(optional)</em></span>
+          <input type="file" onchange={(e) => pickManualFile(device.deviceId, 'sig', e)} />
+        </label>
+        {#if mf.sigName}<p class="file-name">✓ {mf.sigName}</p>{/if}
+
+        {#if mf.error}<p class="fw-note err">{mf.error}</p>{/if}
+
+        {#if mf.bin}
+          {#if mf.sig}
+            <p class="fw-note ok">Signed install — the device verifies the signature before booting it.</p>
+          {:else}
+            <p class="fw-note warn">⚠ Unsigned — the signature check is skipped. Only flash firmware you trust; a wrong or corrupt image can require USB recovery.</p>
+          {/if}
+          <button class="btn success" onclick={() => handleManualOTAUpdate(device.deviceId)}>
+            Flash {mf.sig ? 'signed' : 'unsigned'} image
+          </button>
+        {/if}
+      </details>
+    {/if}
+  </div>
+{/snippet}
 
 <main>
   <header>
@@ -816,33 +974,7 @@
                   onSaveConfig={saveConfiguration}
                 />
 
-                <!-- Firmware Update -->
-                <div class="settings-section">
-                  <h4>Firmware Update</h4>
-                  {#if settings.otaInProgress}
-                    <div class="ota-progress">
-                      <p>{settings.otaStatus?.statusMessage || 'Updating...'}</p>
-                      <div class="progress-bar">
-                        <div class="progress-fill" style="width: {settings.otaStatus?.progress ?? 0}%"></div>
-                      </div>
-                    </div>
-                  {:else if settings.otaSuccess}
-                    <p style="color: #4caf50; font-weight: 600;">✓ Update complete — device restarting…</p>
-                  {:else if settings.latestFirmware && settings.deviceInfo?.fw_ver === settings.latestFirmware.version}
-                    <p>Firmware is up to date - Current: {settings.deviceInfo.fw_ver}</p>
-                  {:else if settings.latestFirmware}
-                    <div class="update-available">
-                      <p>Latest firmware: <strong>{settings.latestFirmware.version}</strong> (current: {settings.deviceInfo?.fw_ver || 'unknown'})</p>
-                      <div class="update-actions">
-                        <button class="btn success" onclick={() => handlePerformOTAUpdate(device.deviceId)}>
-                          Update to {settings.latestFirmware.version}
-                        </button>
-                      </div>
-                    </div>
-                  {:else}
-                    <p>No firmware available in the registry yet.</p>
-                  {/if}
-                </div>
+                {@render firmwareSection(device, settings)}
               </div>
             {/if}
           </div>
@@ -923,33 +1055,7 @@
                   onSaveConfig={saveConfiguration}
                 />
 
-                <!-- Firmware Update -->
-                <div class="settings-section">
-                  <h4>Firmware Update</h4>
-                  {#if settings.otaInProgress}
-                    <div class="ota-progress">
-                      <p>{settings.otaStatus?.statusMessage || 'Updating...'}</p>
-                      <div class="progress-bar">
-                        <div class="progress-fill" style="width: {settings.otaStatus?.progress ?? 0}%"></div>
-                      </div>
-                    </div>
-                  {:else if settings.otaSuccess}
-                    <p style="color: #4caf50; font-weight: 600;">✓ Update complete — device restarting…</p>
-                  {:else if settings.latestFirmware && settings.deviceInfo?.fw_ver === settings.latestFirmware.version}
-                    <p>Firmware is up to date - Current: {settings.deviceInfo.fw_ver}</p>
-                  {:else if settings.latestFirmware}
-                    <div class="update-available">
-                      <p>Latest firmware: <strong>{settings.latestFirmware.version}</strong> (current: {settings.deviceInfo?.fw_ver || 'unknown'})</p>
-                      <div class="update-actions">
-                        <button class="btn success" onclick={() => handlePerformOTAUpdate(device.deviceId)}>
-                          Update to {settings.latestFirmware.version}
-                        </button>
-                      </div>
-                    </div>
-                  {:else}
-                    <p>No firmware available in the registry yet.</p>
-                  {/if}
-                </div>
+                {@render firmwareSection(device, settings)}
               </div>
             {/if}
           </div>
@@ -987,10 +1093,7 @@
     <h2 class="install-title">Install on a device</h2>
     <p class="install-intro">Put ChromaBay on new hardware, or convert a device running WLED.</p>
     <UsbFlash />
-    <WledConvert
-      firmwareUrl={firmwareRegistry[0] ? `https://chromabay.app/${firmwareRegistry[0].path}` : ''}
-      firmwareVersion={firmwareRegistry[0]?.version ?? ''}
-    />
+    <WledConvert />
   </section>
 
   <!-- Status section moved to bottom and made smaller -->
@@ -1300,6 +1403,56 @@
     gap: 0.5rem;
     margin-top: 1rem;
   }
+
+  /* Manual "install from a file" */
+  .manual-fw {
+    margin-top: 1rem;
+    padding: 0.75rem 1rem;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+  }
+  .manual-fw summary {
+    cursor: pointer;
+    font-weight: 600;
+    opacity: 0.9;
+  }
+  .manual-hint {
+    font-size: 0.82rem;
+    opacity: 0.7;
+    line-height: 1.45;
+    margin: 0.6rem 0 0.9rem;
+  }
+  .manual-fw code {
+    background: rgba(255, 255, 255, 0.12);
+    padding: 0.02rem 0.28rem;
+    border-radius: 4px;
+    font-size: 0.9em;
+  }
+  .file-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    margin: 0.6rem 0;
+    font-size: 0.85rem;
+  }
+  .file-row span { opacity: 0.9; }
+  .file-row em { opacity: 0.6; font-style: normal; }
+  .file-row input[type="file"] { font-size: 0.8rem; }
+  .file-name {
+    font-size: 0.8rem;
+    color: #4ade80;
+    margin: 0.1rem 0 0.4rem;
+    word-break: break-all;
+  }
+  .fw-note {
+    font-size: 0.82rem;
+    line-height: 1.4;
+    margin: 0.5rem 0;
+  }
+  .fw-note.ok { color: #93c5fd; }
+  .fw-note.warn { color: #fbbf24; }
+  .fw-note.err { color: #f87171; }
 
   /* Compact status section */
   .status.compact {

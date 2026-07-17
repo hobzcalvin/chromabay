@@ -105,43 +105,60 @@ jobs:
         cd esp32
         pio run
 
-    - name: Build merged factory image (for USB / esp-web-tools)
+    - name: Build merged factory images and sign (all chips)
       run: |
-        # OTA (BLE) ships just the app image (firmware.bin @ 0x10000). USB flashing a
-        # blank board needs bootloader + partition table + boot_app0 + app in one image at
-        # offset 0. Merge them into ONE artifact from THIS build, so the USB flasher and
-        # OTA are always the same firmware — no separately-committed .bin anywhere.
+        # `pio run` above built every env. For each chip: merge a factory image (bootloader +
+        # partition table + boot_app0 + app @ offset 0) for USB flashing, and sign the app
+        # image (firmware.bin @ 0x10000) for BLE OTA. OTA and USB are always the same build.
+        # Classic ESP32's bootloader lives at 0x1000; ESP32-S3/C3 at 0x0.
         pip install --quiet esptool
-        B=esp32/.pio/build/esp32dev
-        BOOT_APP0=$(find ~/.platformio -name boot_app0.bin | head -1)
+        BOOT_APP0=$(find ~/.platformio -name boot_app0.bin | head -1)   # same for every variant
         echo "boot_app0: $BOOT_APP0"
-        esptool.py --chip esp32 merge_bin \
-          --flash_mode dio --flash_freq 40m --flash_size 4MB \
-          -o chromabay-factory.bin \
-          0x1000  "$B/bootloader.bin" \
-          0x8000  "$B/partitions.bin" \
-          0xe000  "$BOOT_APP0" \
-          0x10000 "$B/firmware.bin"
-        ls -l chromabay-factory.bin
+        # pio env | esptool --chip | bootloader offset
+        VARIANTS=(
+          "esp32dev|esp32|0x1000"
+          "esp32-s3|esp32s3|0x0"
+          "esp32-c3|esp32c3|0x0"
+        )
+        mkdir -p dist
+        for row in "${VARIANTS[@]}"; do
+          IFS='|' read -r ENV CHIP BOOTOFF <<< "$row"
+          B="esp32/.pio/build/$ENV"
+          echo "▶ $CHIP: merge factory image + sign app image"
+          esptool.py --chip "$CHIP" merge_bin \
+            --flash_mode dio --flash_freq 80m --flash_size 4MB \
+            -o "dist/chromabay-factory-$CHIP.bin" \
+            "$BOOTOFF" "$B/bootloader.bin" \
+            0x8000  "$B/partitions.bin" \
+            0xe000  "$BOOT_APP0" \
+            0x10000 "$B/firmware.bin"
+          ./psa_sign_firmware "$B/firmware.bin" private_key.raw "dist/firmware-$CHIP.sig"
+          cp "$B/firmware.bin" "dist/firmware-$CHIP.bin"
+          ls -l "dist/chromabay-factory-$CHIP.bin" "dist/firmware-$CHIP.sig"
+        done
 
-    - name: Sign firmware with PSA crypto
-      run: |
-        ./psa_sign_firmware esp32/.pio/build/esp32dev/firmware.bin private_key.raw firmware.sig
-          
     - name: Create release
       if: startsWith(github.ref, 'refs/tags/')  # GitHub Releases only for real fwv* tags, not every main build
       uses: softprops/action-gh-release@v2
       with:
         files: |
-          esp32/.pio/build/esp32dev/firmware.bin
-          firmware.sig
+          dist/firmware-esp32.bin
+          dist/firmware-esp32.sig
+          dist/firmware-esp32s3.bin
+          dist/firmware-esp32s3.sig
+          dist/firmware-esp32c3.bin
+          dist/firmware-esp32c3.sig
+          dist/chromabay-factory-esp32.bin
+          dist/chromabay-factory-esp32s3.bin
+          dist/chromabay-factory-esp32c3.bin
         body: |
           ## 🔵 ESP32 Firmware Release ${{ steps.version.outputs.VERSION }}
           
-          ### 📦 Files:
-          - **`firmware.bin`** - Main firmware binary for ESP32
-          - **`firmware.sig`** - ECDSA P-256 signature for secure OTA updates
-          
+          ### 📦 Files (one set per chip — esp32 / esp32s3 / esp32c3):
+          - **`firmware-<chip>.bin`** - app image (BLE OTA)
+          - **`firmware-<chip>.sig`** - ECDSA P-256 signature for secure OTA updates
+          - **`chromabay-factory-<chip>.bin`** - full merged image for USB flashing
+
           ### 🔐 Security Features:
           - ✅ Firmware is cryptographically signed with **PSA Crypto ECDSA P-256**
           - ✅ Signature verification enforced on device during OTA using **PSA Crypto**
@@ -163,7 +180,7 @@ jobs:
           5. Device verifies signature and reboots with new firmware
           
           ### 🛠 Technical Details:
-          - **Target:** ESP32 with 4MB flash
+          - **Targets:** ESP32 (classic), ESP32-S3, ESP32-C3 — 4MB partition layout
           - **Framework:** Arduino with PlatformIO
           - **Partition Scheme:** Dual OTA (app0/app1) with LittleFS
           - **BLE Stack:** NimBLE for efficient memory usage
@@ -198,44 +215,52 @@ jobs:
           echo "[]" > "$REGISTRY_FILE"
         fi
         
-        # Create new registry entry with new format
-        NEW_ENTRY=$(jq -n \
-          --arg ver "${{ steps.version.outputs.VERSION }}" \
-          --arg hwver "$HARDWARE_VERSION" \
-          --arg path "firmware/esp32/${{ steps.version.outputs.VERSION }}/firmware.bin" \
-          --arg sigpath "firmware/esp32/${{ steps.version.outputs.VERSION }}/firmware.sig" \
-          --arg date "$BUILD_DATE" \
-          '{version: $ver, hardwareVersion: $hwver, path: $path, signaturePath: $sigpath, date: $date}')
-        
-        echo "New registry entry: $NEW_ENTRY"
-        
-        # Add new entry to registry (prepend to keep newest first)
-        UPDATED_REGISTRY=$(cat "$REGISTRY_FILE" | jq --argjson new_entry "$NEW_ENTRY" '[$new_entry] + .')
-        echo "$UPDATED_REGISTRY" | jq '.' > "$REGISTRY_FILE"
-        
-        # Create firmware files directory and copy files
-        mkdir -p "gh_pages_temp/firmware/esp32/${{ steps.version.outputs.VERSION }}"
-        cp esp32/.pio/build/esp32dev/firmware.bin "gh_pages_temp/firmware/esp32/${{ steps.version.outputs.VERSION }}/"
-        cp firmware.sig "gh_pages_temp/firmware/esp32/${{ steps.version.outputs.VERSION }}/"
-        # Merged factory image for USB flashing, from THIS same build.
-        cp chromabay-factory.bin "gh_pages_temp/firmware/esp32/${{ steps.version.outputs.VERSION }}/"
+        VER="${{ steps.version.outputs.VERSION }}"
+        # Publish one set of files per chip under <version>/<chip>/, add one registry entry
+        # per chip (with a `chip` field so the app picks the matching architecture), and build
+        # a single esp-web-tools manifest listing all chip families (the USB flasher
+        # auto-detects and picks the right one). pio env | esptool --chip | chipFamily
+        VARIANTS=(
+          "esp32dev|esp32|ESP32"
+          "esp32-s3|esp32s3|ESP32-S3"
+          "esp32-c3|esp32c3|ESP32-C3"
+        )
+        BUILDS_JSON=""
+        for row in "${VARIANTS[@]}"; do
+          IFS='|' read -r ENV CHIP FAMILY <<< "$row"
+          DEST="gh_pages_temp/firmware/esp32/$VER/$CHIP"
+          mkdir -p "$DEST"
+          cp "dist/firmware-$CHIP.bin"          "$DEST/firmware.bin"
+          cp "dist/firmware-$CHIP.sig"          "$DEST/firmware.sig"
+          cp "dist/chromabay-factory-$CHIP.bin" "$DEST/chromabay-factory.bin"
 
-        # esp-web-tools manifest, always pointing at the newest factory image. This is the
-        # SINGLE source the USB flasher reads — no committed .bin in the app repo. Parts use
-        # an absolute URL so the manifest location doesn't matter.
+          NEW_ENTRY=$(jq -n \
+            --arg ver "$VER" \
+            --arg chip "$CHIP" \
+            --arg hwver "$HARDWARE_VERSION" \
+            --arg path "firmware/esp32/$VER/$CHIP/firmware.bin" \
+            --arg sigpath "firmware/esp32/$VER/$CHIP/firmware.sig" \
+            --arg date "$BUILD_DATE" \
+            '{version: $ver, chip: $chip, hardwareVersion: $hwver, path: $path, signaturePath: $sigpath, date: $date}')
+          echo "New registry entry: $NEW_ENTRY"
+          # Prepend to keep newest first.
+          UPDATED_REGISTRY=$(jq --argjson new_entry "$NEW_ENTRY" '[$new_entry] + .' "$REGISTRY_FILE")
+          echo "$UPDATED_REGISTRY" > "$REGISTRY_FILE"
+
+          BUILDS_JSON="${BUILDS_JSON}{ \"chipFamily\": \"$FAMILY\", \"parts\": [ { \"path\": \"https://chromabay.app/firmware/esp32/$VER/$CHIP/chromabay-factory.bin\", \"offset\": 0 } ] },"
+        done
+        jq '.' "$REGISTRY_FILE" > "$REGISTRY_FILE.tmp" && mv "$REGISTRY_FILE.tmp" "$REGISTRY_FILE"
+        BUILDS_JSON="${BUILDS_JSON%,}"   # strip trailing comma
+
+        # esp-web-tools manifest — the SINGLE source the USB flasher reads (no committed .bin).
+        # Absolute part URLs so the manifest location doesn't matter; the flasher matches the
+        # connected chip against chipFamily and refuses a mismatch.
         cat > "gh_pages_temp/firmware/esp32/chromabay-manifest.json" <<MANIFEST
         {
           "name": "ChromaBay",
-          "version": "${{ steps.version.outputs.VERSION }}",
+          "version": "$VER",
           "new_install_prompt_erase": true,
-          "builds": [
-            {
-              "chipFamily": "ESP32",
-              "parts": [
-                { "path": "https://chromabay.app/firmware/esp32/${{ steps.version.outputs.VERSION }}/chromabay-factory.bin", "offset": 0 }
-              ]
-            }
-          ]
+          "builds": [ $BUILDS_JSON ]
         }
         MANIFEST
 

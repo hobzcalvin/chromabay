@@ -1,7 +1,7 @@
 import { writable, get } from 'svelte/store';
 import type { Node, Edge, Connection } from '@xyflow/svelte';
 import { clearNodeInteractiveParameters } from './stores/interactiveStore';
-import { getModulator } from './stores/modulatorStore';
+import { getModulator, modulatorSeed } from './stores/modulatorStore';
 import { renderConfig, type RenderConfig } from './renderConfig';
 
 // Global start time for synchronized animations across all nodes
@@ -559,8 +559,9 @@ class WasmOperatorManager {
           // the WASM applies it over the base value each frame. Push/clear so edits take effect.
           const modCfg = (paramInfo.type === 0 || paramInfo.type === 1) ? getModulator(nodeId, paramInfo.name) : null;
           if (modCfg) {
-            this.wasmModule.ccall('setOperatorModulator', null, ['number', 'number', 'number', 'number', 'number', 'number'],
-              [instanceId, i, modCfg.shape, modCfg.min, modCfg.max, modCfg.period]);
+            // seed decorrelates Random/Perlin per automation instance; same value the device gets.
+            this.wasmModule.ccall('setOperatorModulator', null, ['number', 'number', 'number', 'number', 'number', 'number', 'number'],
+              [instanceId, i, modCfg.shape, modCfg.min, modCfg.max, modCfg.period, modulatorSeed(nodeId, paramInfo.name)]);
           } else {
             this.wasmModule.ccall('clearOperatorModulator', null, ['number', 'number'], [instanceId, i]);
           }
@@ -1226,6 +1227,9 @@ export function serializeCurrentPattern(patternName?: string): SerializedPattern
 // Automatic pattern sync when pattern changes
 let lastPatternHash: string | null = null;
 let syncInProgress = false;
+// Set when a graph change arrives while a sync is in flight; the in-flight sync's .finally
+// re-runs syncPatternIfChanged so the latest state is never dropped.
+let pendingSync = false;
 let patternLoading = false;
 
 function syncPatternIfChanged() {
@@ -1241,23 +1245,30 @@ function syncPatternIfChanged() {
     // Only sync if pattern changed and there are connected devices
     if ((!lastPatternHash || lastPatternHash !== currentHash) && getConnectedDeviceCount() > 0) {
       
-      // Skip if sync is already in progress
+      // A sync is already mid-flight (BLE is async). Don't drop this change — flag it and
+      // re-check once the in-flight sync resolves, so the LATEST graph always reaches the
+      // device. deleteNode() writes the stores twice (edges, then nodes); without this the
+      // second (correct) state was swallowed here, leaving the device stuck on the
+      // intermediate blank-terminal frame until an unrelated edit nudged a fresh sync.
+      // Leave lastPatternHash stale so the re-run still detects the change.
       if (syncInProgress) {
-        console.log('Sync already in progress, skipping...');
+        pendingSync = true;
         return;
       }
-      
+
       // Mark sync as in progress
       syncInProgress = true;
-      
+
       // Sync immediately
       syncPatternToAllDevices().catch(error => {
         console.error('Failed to sync pattern:', error);
       }).finally(() => {
         syncInProgress = false;
+        // Re-run if a change arrived while this sync was in flight (see above).
+        if (pendingSync) { pendingSync = false; syncPatternIfChanged(); }
       });
     }
-    
+
     lastPatternHash = currentHash;
   } catch (error) {
     console.error('Error in pattern sync check:', error);
@@ -1286,6 +1297,7 @@ export function forceSyncCurrentPattern(): void {
         console.error('Failed to force sync pattern:', error);
       }).finally(() => {
         syncInProgress = false;
+        if (pendingSync) { pendingSync = false; syncPatternIfChanged(); }
       });
     }
   } catch (error) {

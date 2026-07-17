@@ -49,6 +49,10 @@ using Esp32RmtTm1914RgbBus = NeoPixelBusLg<NeoRgbTm1914Feature, NeoEsp32RmtNTm19
 // NeoRgbwcSm16825eFeature expects Rgbww80Color(R,G,B,Ww,Cw) and outputs R,G,B,Ww,Cw
 using Esp32RmtSm16825RgbcwBus = NeoPixelBusLg<NeoRgbwcSm16825eFeature, NeoEsp32RmtNWs2812xMethod, NeoGammaNullMethod>;
 
+// 4-wire SPI APA102 / SK9822 (DotStar). Bit-bang two-wire method → works on any clock+data
+// GPIOs on esp32/s3/c3. Constructed with (count, clockPin, dataPin), not (count, pin, channel).
+using Esp32Apa102Bus = NeoPixelBusLg<DotStarBgrFeature, DotStarMethod, NeoGammaNullMethod>;
+
 
 // Helper for 16-bit color conversion
 inline uint16_t scale8to16(uint8_t val8) {
@@ -59,11 +63,13 @@ namespace LedConfig {
 
 class LedWrapper {
 public:
-    static void* create(InternalLedType busType, uint8_t pin, uint16_t len, uint8_t rmtChannel) {
+    // clockPin is only used by 4-wire SPI buses (APA102/SK9822); RMT buses ignore it.
+    static void* create(InternalLedType busType, uint8_t pin, uint16_t len, uint8_t rmtChannel, uint8_t clockPin = 255) {
         void* busPtr = nullptr;
         NeoBusChannel busChannel = static_cast<NeoBusChannel>(rmtChannel);
 
         switch (busType) {
+            case ITYPE_ESP32_APA102_BGR:        busPtr = new Esp32Apa102Bus(len, clockPin, pin); break; // (count, clock, data)
             case ITYPE_ESP32_RMT_WS2812_RGB:    busPtr = new Esp32RmtWs2812RgbBus(len, pin, busChannel); break;
             case ITYPE_ESP32_RMT_SK6812_RGBW:   busPtr = new Esp32RmtSk6812RgbwBus(len, pin, busChannel); break;
             case ITYPE_ESP32_RMT_TM1814_RGBW:   busPtr = new Esp32RmtTm1814RgbwBus(len, pin, busChannel); break;
@@ -86,6 +92,7 @@ public:
     static void begin(void* busPtr, InternalLedType busType) {
         if (!busPtr) return;
         switch (busType) {
+            case ITYPE_ESP32_APA102_BGR:        static_cast<Esp32Apa102Bus*>(busPtr)->Begin(); break;
             case ITYPE_ESP32_RMT_WS2812_RGB:    static_cast<Esp32RmtWs2812RgbBus*>(busPtr)->Begin(); break;
             case ITYPE_ESP32_RMT_SK6812_RGBW:   static_cast<Esp32RmtSk6812RgbwBus*>(busPtr)->Begin(); break;
             case ITYPE_ESP32_RMT_TM1814_RGBW:
@@ -115,6 +122,7 @@ public:
     static void show(void* busPtr, InternalLedType busType, bool consistent = false) { // WLED uses consistent=false for speed
         if (!busPtr) return;
         switch (busType) {
+            case ITYPE_ESP32_APA102_BGR:        static_cast<Esp32Apa102Bus*>(busPtr)->Show(consistent); break;
             case ITYPE_ESP32_RMT_WS2812_RGB:    static_cast<Esp32RmtWs2812RgbBus*>(busPtr)->Show(consistent); break;
             case ITYPE_ESP32_RMT_SK6812_RGBW:   static_cast<Esp32RmtSk6812RgbwBus*>(busPtr)->Show(consistent); break;
             case ITYPE_ESP32_RMT_TM1814_RGBW:   static_cast<Esp32RmtTm1814RgbwBus*>(busPtr)->Show(consistent); break;
@@ -136,6 +144,7 @@ public:
     static bool canShow(void* busPtr, InternalLedType busType) {
         if (!busPtr) return true; // No bus, so it "can show" (do nothing)
         switch (busType) {
+            case ITYPE_ESP32_APA102_BGR:        return static_cast<Esp32Apa102Bus*>(busPtr)->CanShow();
             case ITYPE_ESP32_RMT_WS2812_RGB:    return static_cast<Esp32RmtWs2812RgbBus*>(busPtr)->CanShow();
             case ITYPE_ESP32_RMT_SK6812_RGBW:   return static_cast<Esp32RmtSk6812RgbwBus*>(busPtr)->CanShow();
             case ITYPE_ESP32_RMT_TM1814_RGBW:   return static_cast<Esp32RmtTm1814RgbwBus*>(busPtr)->CanShow();
@@ -157,6 +166,7 @@ public:
     static void setBrightness(void* busPtr, InternalLedType busType, uint8_t b) {
         if (!busPtr) return;
         switch (busType) {
+            case ITYPE_ESP32_APA102_BGR:        static_cast<Esp32Apa102Bus*>(busPtr)->SetLuminance(b); break;
             case ITYPE_ESP32_RMT_WS2812_RGB:    static_cast<Esp32RmtWs2812RgbBus*>(busPtr)->SetLuminance(b); break;
             case ITYPE_ESP32_RMT_SK6812_RGBW:   static_cast<Esp32RmtSk6812RgbwBus*>(busPtr)->SetLuminance(b); break;
             case ITYPE_ESP32_RMT_TM1814_RGBW:   static_cast<Esp32RmtTm1814RgbwBus*>(busPtr)->SetLuminance(b); break;
@@ -213,6 +223,9 @@ public:
         }
 
         switch (busType) {
+            case ITYPE_ESP32_APA102_BGR:
+                static_cast<Esp32Apa102Bus*>(busPtr)->SetPixelColor(pix, RgbColor(ordered_r, ordered_g, ordered_b));
+                break;
             case ITYPE_ESP32_RMT_WS2812_RGB:
                 static_cast<Esp32RmtWs2812RgbBus*>(busPtr)->SetPixelColor(pix, RgbColor(ordered_r, ordered_g, ordered_b));
                 break;
@@ -260,6 +273,7 @@ public:
         RgbwColor rawColor(0); 
 
         switch (busType) {
+            case ITYPE_ESP32_APA102_BGR:        rawColor = static_cast<Esp32Apa102Bus*>(busPtr)->GetPixelColor(pix); break;
             case ITYPE_ESP32_RMT_WS2812_RGB:    rawColor = static_cast<Esp32RmtWs2812RgbBus*>(busPtr)->GetPixelColor(pix); break;
             case ITYPE_ESP32_RMT_SK6812_RGBW:   rawColor = static_cast<Esp32RmtSk6812RgbwBus*>(busPtr)->GetPixelColor(pix); break;
             case ITYPE_ESP32_RMT_TM1814_RGBW:   rawColor = static_cast<Esp32RmtTm1814RgbwBus*>(busPtr)->GetPixelColor(pix); break; 
@@ -307,6 +321,7 @@ public:
     static void cleanup(void* busPtr, InternalLedType busType) {
         if (!busPtr) return;
         switch (busType) {
+            case ITYPE_ESP32_APA102_BGR:        delete static_cast<Esp32Apa102Bus*>(busPtr); break;
             case ITYPE_ESP32_RMT_WS2812_RGB:    delete static_cast<Esp32RmtWs2812RgbBus*>(busPtr); break;
             case ITYPE_ESP32_RMT_SK6812_RGBW:   delete static_cast<Esp32RmtSk6812RgbwBus*>(busPtr); break;
             case ITYPE_ESP32_RMT_TM1814_RGBW:   delete static_cast<Esp32RmtTm1814RgbwBus*>(busPtr); break;
@@ -328,6 +343,7 @@ public:
     static size_t getDataSize(void* busPtr, InternalLedType busType) {
         if (!busPtr) return 0;
         switch (busType) {
+            case ITYPE_ESP32_APA102_BGR:        return static_cast<Esp32Apa102Bus*>(busPtr)->PixelsSize();
             case ITYPE_ESP32_RMT_WS2812_RGB:    return static_cast<Esp32RmtWs2812RgbBus*>(busPtr)->PixelsSize();
             case ITYPE_ESP32_RMT_SK6812_RGBW:   return static_cast<Esp32RmtSk6812RgbwBus*>(busPtr)->PixelsSize();
             case ITYPE_ESP32_RMT_TM1814_RGBW:   return static_cast<Esp32RmtTm1814RgbwBus*>(busPtr)->PixelsSize();

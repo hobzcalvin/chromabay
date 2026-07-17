@@ -16,7 +16,8 @@ namespace LedConfig {
 // Configuration for a single LED strip
 struct LedStripConfig {
     LedChipset chipset = LedChipset::NONE;
-    uint8_t pin = 0;
+    uint8_t pin = 0;         // data pin (all chipsets)
+    uint8_t clockPin = 0;    // clock pin — only used by 4-wire SPI chipsets (APA102/SK9822)
     uint16_t numLeds = 0;
     ColorOrderValue colorOrder = ColorOrderValue::CO_GRB; // Default to GRB
     uint8_t rmtChannel = 0; // ESP32 RMT channel (0-7 for NeoPixelBus default RMT method)
@@ -91,8 +92,9 @@ public:
         buildLut();
         _internalType = mapChipsetToInternalType(_config.chipset);
         if (_internalType != ITYPE_NONE && _config.numLeds > 0) {
-            // Note: RMT channel is passed to LedWrapper::create
-            _busPtr = LedWrapper::create(_internalType, _config.pin, _config.numLeds, _config.rmtChannel);
+            // Note: RMT channel is passed to LedWrapper::create; clockPin is used only by
+            // 4-wire SPI buses (APA102/SK9822) and ignored by the RMT ones.
+            _busPtr = LedWrapper::create(_internalType, _config.pin, _config.numLeds, _config.rmtChannel, _config.clockPin);
         }
     }
 
@@ -405,8 +407,8 @@ private:
             case LedChipset::WS2805_RGBCW:   return ITYPE_ESP32_RMT_WS2805_RGBCW;
             case LedChipset::TM1914_RGB:     return ITYPE_ESP32_RMT_TM1914_RGB;
             case LedChipset::SM16825_RGBCW:  return ITYPE_ESP32_RMT_SM16825_RGBCW;
-            // Add mappings for other chipsets as they are defined in LedTypes and LedWrapper
-            // case LedChipset::APA102_SPI: return ITYPE_ESP32_HSPI_APA102_RGB; // Example
+            case LedChipset::APA102_SPI:     return ITYPE_ESP32_APA102_BGR;
+            case LedChipset::SK9822_SPI:     return ITYPE_ESP32_APA102_BGR; // APA102-compatible
             case LedChipset::NONE:
             default:                    return ITYPE_NONE;
         }

@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { LedConfiguration, LedStripConfig } from '$lib/ble';
-  import { LedChipsets, ColorOrders, uploadStripLayout, getStripLayout } from '$lib/ble';
+  import { LedChipsets, ColorOrders, isFourWireChipset, uploadStripLayout, getStripLayout } from '$lib/ble';
   import { getRotation, getFlipH, getSerpentine, setRotation, setFlipH, setSerpentine } from '$lib/ble';
   import LayoutPreview from './LayoutPreview.svelte';
   import AutoLayoutModal from './AutoLayoutModal.svelte';
@@ -174,6 +174,8 @@
                     <option value={LedChipsets.WS2805_RGBCW}>WS2805 RGBCW</option>
                     <option value={LedChipsets.TM1914_RGB}>TM1914 RGB</option>
                     <option value={LedChipsets.SM16825_RGBCW}>SM16825 RGBCW</option>
+                    <option value={LedChipsets.APA102_SPI}>APA102 / DotStar (4-wire)</option>
+                    <option value={LedChipsets.SK9822_SPI}>SK9822 (4-wire)</option>
                   </select>
                 </label>
               </div>
@@ -190,9 +192,15 @@
                   </select>
                 </label>
                 <label>
-                  Pin:
+                  {isFourWireChipset(strip.chipset) ? 'Data Pin:' : 'Pin:'}
                   <input id={buildId('pin', index)} name="pin" type="number" min="0" max="39" bind:value={strip.pin} />
                 </label>
+                {#if isFourWireChipset(strip.chipset)}
+                  <label>
+                    Clock Pin:
+                    <input id={buildId('clockpin', index)} name="clockpin" type="number" min="0" max="39" bind:value={strip.clockPin} />
+                  </label>
+                {/if}
               </div>
               <div class="control-row">
                 <label>

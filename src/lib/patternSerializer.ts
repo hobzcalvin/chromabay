@@ -17,7 +17,7 @@ import {
   getNodeBuffer
 } from './flowStore';
 import { interactiveParameters, setParameterInteractive } from './stores/interactiveStore';
-import { modulators, setModulator } from './stores/modulatorStore';
+import { modulators, setModulator, modulatorSeed } from './stores/modulatorStore';
 import { get } from 'svelte/store';
 
 /**
@@ -43,9 +43,9 @@ export interface SerializedNode {
   /** Interactive parameters - parameter names that should have knobs on interact page */
   x?: Record<string, number>;
 
-  /** Automated parameters - paramName -> { s:shape, lo:min, hi:max, pr:period(sec),
+  /** Automated parameters - paramName -> { s:shape, lo:min, hi:max, pr:period(sec), sd:seed,
    *  iv?: interactive fields (subset of ['shape','min','max','period']; legacy: 1 === ['period']) } */
-  m?: Record<string, { s: number; lo: number; hi: number; pr: number; iv?: number | string[] }>;
+  m?: Record<string, { s: number; lo: number; hi: number; pr: number; sd?: number; iv?: number | string[] }>;
 }
 
 /**
@@ -492,9 +492,10 @@ export function serializePattern(
     // Add parameter automation if any
     const nodeMods = currentModulators.get(node.id);
     if (nodeMods && nodeMods.size > 0) {
-      const m: Record<string, { s: number; lo: number; hi: number; pr: number; iv?: string[] }> = {};
+      const m: Record<string, { s: number; lo: number; hi: number; pr: number; sd: number; iv?: string[] }> = {};
       for (const [paramName, cfg] of nodeMods.entries()) {
         m[paramName] = { s: cfg.shape, lo: cfg.min, hi: cfg.max, pr: cfg.period,
+          sd: modulatorSeed(node.id, paramName),
           ...(cfg.interactive && cfg.interactive.length ? { iv: cfg.interactive } : {}) };
       }
       serializedNode.m = m;

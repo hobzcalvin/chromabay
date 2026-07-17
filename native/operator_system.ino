@@ -25,7 +25,7 @@ std::vector<std::unique_ptr<BaseOperator>> activeOperators;
 std::vector<std::vector<ParameterValue>> operatorParameters;
 // Per-instance, per-parameter automation (LFO/noise/random). Applied over the base parameter
 // value each frame in renderOperator; the operator itself never sees the difference.
-struct OpModulator { bool active = false; int shape = 0; float mn = 0.0f, mx = 1.0f, period = 1.0f; Modulation::ModState st; };
+struct OpModulator { bool active = false; int shape = 0; float mn = 0.0f, mx = 1.0f, period = 1.0f; uint32_t seed = 0; Modulation::ModState st; };
 std::vector<std::vector<OpModulator>> operatorModulators;
 int nextOperatorId = 1;
 
@@ -259,7 +259,7 @@ extern "C" {
     // ========================================
 
     EMSCRIPTEN_KEEPALIVE
-    void setOperatorModulator(int operatorId, int paramIndex, int shape, float mn, float mx, float period) {
+    void setOperatorModulator(int operatorId, int paramIndex, int shape, float mn, float mx, float period, int seed) {
         if (operatorId < 0 || paramIndex < 0) return;
         if ((int)operatorModulators.size() <= operatorId) operatorModulators.resize(operatorId + 1);
         auto& mods = operatorModulators[operatorId];
@@ -267,7 +267,7 @@ extern "C" {
         // Update the config in place — keep the phase state (st) so frequent param re-syncs
         // don't reset the phase; modulate() shifts the offset when `period` actually changes.
         auto& m = mods[paramIndex];
-        m.active = true; m.shape = shape; m.mn = mn; m.mx = mx; m.period = period;
+        m.active = true; m.shape = shape; m.mn = mn; m.mx = mx; m.period = period; m.seed = (uint32_t)seed;
     }
 
     EMSCRIPTEN_KEEPALIVE
@@ -306,7 +306,8 @@ extern "C" {
                 emptyParams;
 
             // Apply any parameter automation over a COPY of the base values (never mutate the
-            // stored base). seed = paramIndex so two Random/Perlin params don't move in lockstep.
+            // stored base). Each modulator carries its own seed (from node id + param name) so
+            // simultaneous Random/Perlin automations decorrelate instead of moving in lockstep.
             static std::vector<ParameterValue> eff;
             eff = parameters;
             if (operatorId < (int)operatorModulators.size()) {
@@ -320,7 +321,7 @@ extern "C" {
                 }
                 for (int i = 0; i < (int)mods.size() && i < (int)eff.size(); i++) {
                     if (!mods[i].active) continue;
-                    float v = Modulation::modulate(mods[i].st, mods[i].shape, mods[i].mn, mods[i].mx, mods[i].period, timestampMs, (uint32_t)i);
+                    float v = Modulation::modulate(mods[i].st, mods[i].shape, mods[i].mn, mods[i].mx, mods[i].period, timestampMs, mods[i].seed);
                     if (i < (int)info.size() && info[i].type == ParameterInfo::INT) eff[i] = ParameterValue((int)lroundf(v));
                     else eff[i] = ParameterValue(v);
                 }

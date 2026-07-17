@@ -20,6 +20,7 @@ namespace ConfigKeys {
     // Strip Keys
     const char* const CHIPSET = "cs";
     const char* const PIN = "pin";
+    const char* const CLOCK_PIN = "clk"; // 4-wire SPI (APA102/SK9822) clock pin, optional
     const char* const NUM_LEDS = "num";
     const char* const COLOR_ORDER = "co";
     const char* const RMT_CHANNEL = "rmt";
@@ -231,6 +232,8 @@ public:
                             stripConfig.chipset = static_cast<LedChipset>(mpack_expect_u8(&reader));
                         } else if (strcmp(key_buffer, ConfigKeys::PIN) == 0) {
                             stripConfig.pin = mpack_expect_u8(&reader);
+                        } else if (strcmp(key_buffer, ConfigKeys::CLOCK_PIN) == 0) {
+                            stripConfig.clockPin = mpack_expect_u8(&reader);
                         } else if (strcmp(key_buffer, ConfigKeys::NUM_LEDS) == 0) {
                             stripConfig.numLeds = mpack_expect_u16(&reader);
                         } else if (strcmp(key_buffer, ConfigKeys::COLOR_ORDER) == 0) {
@@ -502,9 +505,10 @@ private:
         mpack_write_cstr(&writer, ConfigKeys::STRIPS);
         mpack_start_array(&writer, defaultConfigStruct.strips.size());
         for (const auto& stripCfg : defaultConfigStruct.strips) {
-            mpack_start_map(&writer, 11); // + gamma + white point + dither
+            mpack_start_map(&writer, 12); // + gamma + white point + dither + clock pin
             mpack_write_cstr(&writer, ConfigKeys::CHIPSET);     mpack_write_u8(&writer, static_cast<uint8_t>(stripCfg.chipset));
             mpack_write_cstr(&writer, ConfigKeys::PIN);         mpack_write_u8(&writer, stripCfg.pin);
+            mpack_write_cstr(&writer, ConfigKeys::CLOCK_PIN);   mpack_write_u8(&writer, stripCfg.clockPin);
             mpack_write_cstr(&writer, ConfigKeys::NUM_LEDS);    mpack_write_u16(&writer, stripCfg.numLeds);
             mpack_write_cstr(&writer, ConfigKeys::COLOR_ORDER); mpack_write_u8(&writer, static_cast<uint8_t>(stripCfg.colorOrder));
             mpack_write_cstr(&writer, ConfigKeys::RMT_CHANNEL); mpack_write_u8(&writer, stripCfg.rmtChannel);

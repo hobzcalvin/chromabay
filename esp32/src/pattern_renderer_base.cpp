@@ -326,16 +326,17 @@ void PatternRendererBase::renderGraphAt(uint16_t width, uint16_t height) {
         CRGB* renderOut = aliases ? getBufferPtr(SCRATCH_BUFFER) : outputBuffer;
         if (!renderOut) renderOut = outputBuffer; // scratch unavailable -> in-place fallback
 
-        // Apply parameter automation (LFO/noise/random) over a reused copy of the base values,
-        // seeded by param index so Random/Perlin params don't move in lockstep. Same math + clock
-        // as the WASM preview (native/Modulation.h), so device and app agree.
+        // Apply parameter automation (LFO/noise/random) over a reused copy of the base values.
+        // Each modulator carries a per-instance seed (from the app: node id + param name) so
+        // simultaneous Random/Perlin automations decorrelate. Same math + clock + seed as the
+        // WASM preview (native/Modulation.h), so device and app agree.
         const std::vector<ParameterValue>* params = &node.parameters;
         if (!node.modulators.empty()) {
             _effParams = node.parameters;
             for (size_t i = 0; i < node.modulators.size() && i < _effParams.size(); i++) {
                 const ParamModulator& md = node.modulators[i];
                 if (!md.active) continue;
-                float v = Modulation::modulate(md.st, md.shape, md.mn, md.mx, md.period, frameFloatTime, (uint32_t)i);
+                float v = Modulation::modulate(md.st, md.shape, md.mn, md.mx, md.period, frameFloatTime, md.seed);
                 _effParams[i] = md.isInt ? ParameterValue((int)lroundf(v)) : ParameterValue(v);
             }
             params = &_effParams;
@@ -697,6 +698,7 @@ bool PatternRendererBase::loadPatternFromMessagePack(const uint8_t* data, unsign
                             mod.mn     = mpack_node_map_contains_cstr(v, "lo") ? numOf(mpack_node_map_cstr(v, "lo")) : 0.0f;
                             mod.mx     = mpack_node_map_contains_cstr(v, "hi") ? numOf(mpack_node_map_cstr(v, "hi")) : 1.0f;
                             mod.period = mpack_node_map_contains_cstr(v, "pr") ? numOf(mpack_node_map_cstr(v, "pr")) : 1.0f;
+                            mod.seed   = mpack_node_map_contains_cstr(v, "sd") ? (uint32_t)numOf(mpack_node_map_cstr(v, "sd")) : 0u;
                             node.modulators[pi] = mod;
                         }
                     }

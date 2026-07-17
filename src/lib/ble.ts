@@ -89,12 +89,14 @@ const MAX_BLE_CHUNK_SIZE = 500; // Should match ESP32's definition
 export interface DeviceInfo {
   fw_ver: string;
   hw_ver: string;
+  chip?: string;            // esp32 | esp32s3 | esp32c3 (absent on pre-multi-chip firmware)
   name?: string;
   heap?: number;
 }
 
 export interface FirmwareRegistryEntry {
   version: string;          // e.g., "esp32-v1.0.1"
+  chip?: string;            // esp32 | esp32s3 | esp32c3 (absent on entries predating multi-chip)
   hardwareVersion: string;  // e.g., "esp32-hw-v1.0"
   path: string;             // Relative path to firmware.bin on gh-pages
   signaturePath: string;    // Relative path to firmware.sig on gh-pages
@@ -652,29 +654,42 @@ export async function fetchFirmwareRegistry(registryUrl: string = "/firmware/esp
   }
 }
 
-export function findLatestFirmware(registry: FirmwareRegistryEntry[], currentHwVersion?: string): FirmwareRegistryEntry | null {
+export function findLatestFirmware(
+  registry: FirmwareRegistryEntry[],
+  chip?: string,
+  currentHwVersion?: string
+): FirmwareRegistryEntry | null {
   if (registry.length === 0) {
     console.log('[OTA] Firmware registry is empty');
     return null;
   }
+  // Chip must match: cross-flashing architectures (e.g. an ESP32-S3 image onto a classic
+  // ESP32) bricks the device. Pre-multi-chip firmware doesn't report a chip and every
+  // device in the field then was a classic ESP32, so treat missing/unknown as 'esp32';
+  // registry entries predating the chip field are likewise classic ESP32.
+  const wantChip = chip && chip !== 'unknown' ? chip : 'esp32';
+  const forChip = registry.filter(e => (e.chip ?? 'esp32') === wantChip);
+  if (forChip.length === 0) {
+    console.warn(`[OTA] No firmware in registry for chip "${wantChip}" — not offering an update (won't cross-flash architectures).`);
+    return null;
+  }
   // Newest entry by build date (don't rely on registry ordering).
-  const byDateDesc = [...registry].sort((a, b) => b.date.localeCompare(a.date));
-  // Prefer firmware matching the device's hardware version, but never let a
-  // hardware mismatch hide an available update — fall back to newest overall.
-  // (All targets are generic ESP32s, so this is belt-and-suspenders.)
+  const byDateDesc = [...forChip].sort((a, b) => b.date.localeCompare(a.date));
+  // Prefer firmware matching the device's hardware version, but never let a hardware
+  // mismatch hide an available update — fall back to newest for the same chip.
   const compatible = currentHwVersion
     ? byDateDesc.filter(e => e.hardwareVersion === currentHwVersion)
     : [];
   const latest = compatible[0] ?? byDateDesc[0];
   if (currentHwVersion && compatible.length === 0) {
-    console.log(`[OTA] No firmware tagged for HW ${currentHwVersion}; falling back to newest overall: ${latest.version} (${latest.date})`);
+    console.log(`[OTA] No firmware tagged for HW ${currentHwVersion} (chip ${wantChip}); falling back to newest for that chip: ${latest.version} (${latest.date})`);
   } else {
-    console.log(`[OTA] Latest firmware: ${latest.version} (${latest.date})`);
+    console.log(`[OTA] Latest firmware for chip ${wantChip}: ${latest.version} (${latest.date})`);
   }
   return latest;
 }
 
-export async function sendOTAControlCommand(deviceId: string, command: 'END_OTA' | 'ABORT_OTA'): Promise<void> {
+export async function sendOTAControlCommand(deviceId: string, command: 'END_OTA' | 'END_OTA_UNSIGNED' | 'ABORT_OTA'): Promise<void> {
   console.log(`[OTA] Sending control command: ${command} to ${deviceId}`);
   await writeCharacteristic(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_OTA_CONTROL, command);
 }
@@ -769,16 +784,12 @@ export async function performOTAUpdate(
   console.log(`[OTA] Starting OTA update for ${deviceId} from ${firmwareUrl}`);
   progressCallback({ statusMessage: 'Starting OTA...' });
 
-  let otaDataNotificationsStartedForAck = false;
-  // Declared at function scope so the finally block can detach it. Assigned in step 3.
-  let onAck: () => void = () => {};
-
+  // 1. Resolve firmware + signature — cache-first, so an OTA can run with NO internet
+  //    if the image was prefetched earlier (see prefetchFirmware). On a cache miss we
+  //    fetch from the registry and store the result for next time.
+  let firmwareBuffer: ArrayBuffer;
+  let signatureBuffer: ArrayBuffer;
   try {
-    // 1. Resolve firmware + signature — cache-first, so an OTA can run with NO internet
-    //    if the image was prefetched earlier (see prefetchFirmware). On a cache miss we
-    //    fetch from the registry and store the result for next time.
-    let firmwareBuffer: ArrayBuffer;
-    let signatureBuffer: ArrayBuffer;
     const cached = version ? await getFirmware(version) : null;
     if (cached) {
       firmwareBuffer = cached.bin;
@@ -810,7 +821,56 @@ export async function performOTAUpdate(
     if (signatureBuffer.byteLength !== 64) { // FIRMWARE_SIGNATURE_LENGTH from C++
         throw new Error(`Invalid signature length: ${signatureBuffer.byteLength}. Expected 64.`);
     }
+  } catch (error: any) {
+    console.error('[OTA] OTA Update Failed (resolving firmware):', error);
+    progressCallback({ statusMessage: `OTA Failed: ${error.message}`, error: error.message, isError: true, isComplete: true });
+    throw error;
+  }
 
+  // 2. Stream the resolved (always-signed) image over BLE and finalize.
+  await streamFirmwareOverBle(deviceId, firmwareBuffer, signatureBuffer, progressCallback);
+}
+
+/**
+ * Flash a firmware image the caller already holds in memory (e.g. a user-picked file),
+ * rather than one resolved from the registry/cache. When `signatureBuffer` is provided it
+ * takes the signed path (device verifies it); when null the device is asked to finalize
+ * WITHOUT verification (END_OTA_UNSIGNED) — the escape hatch for flashing arbitrary images
+ * such as reverting a device to stock WLED. Unsigned flashing can brick a device that then
+ * needs USB recovery, so callers must gate it behind an explicit user confirmation.
+ */
+export async function performManualOTAUpdate(
+  deviceId: string,
+  firmwareBuffer: ArrayBuffer,
+  signatureBuffer: ArrayBuffer | null,
+  progressCallback: (status: OTAUpdateStatus) => void
+): Promise<void> {
+  console.log(`[OTA] Starting manual OTA for ${deviceId} (${firmwareBuffer.byteLength} bytes, ${signatureBuffer ? 'signed' : 'UNSIGNED'})`);
+  progressCallback({ statusMessage: signatureBuffer ? 'Starting signed update…' : 'Starting unsigned update…' });
+  if (firmwareBuffer.byteLength === 0) throw new Error('Firmware file is empty.');
+  if (signatureBuffer && signatureBuffer.byteLength !== 64) {
+    throw new Error(`Invalid signature length: ${signatureBuffer.byteLength}. Expected 64 bytes.`);
+  }
+  await streamFirmwareOverBle(deviceId, firmwareBuffer, signatureBuffer, progressCallback);
+}
+
+/**
+ * Send an in-memory firmware image to a connected device over BLE and finalize it. Shared
+ * by performOTAUpdate (signed, registry-sourced) and performManualOTAUpdate (file-sourced,
+ * optionally unsigned). A non-null `signatureBuffer` is sent and the device verifies it via
+ * END_OTA; a null one finalizes via END_OTA_UNSIGNED (no verification).
+ */
+async function streamFirmwareOverBle(
+  deviceId: string,
+  firmwareBuffer: ArrayBuffer,
+  signatureBuffer: ArrayBuffer | null,
+  progressCallback: (status: OTAUpdateStatus) => void
+): Promise<void> {
+  let otaDataNotificationsStartedForAck = false;
+  // Declared at function scope so the finally block can detach it. Assigned in step 3.
+  let onAck: () => void = () => {};
+
+  try {
     // 2. (Optional) Send START_OTA or total size via OTA_CONTROL if ESP32 expects it.
     //    Our ESP32 code starts OTA on first data chunk.
     // await sendOTAControlCommand(deviceId, 'START_OTA'); // Or send total size
@@ -871,25 +931,31 @@ export async function performOTAUpdate(
     }
 
     // Drain remaining ACKs so we know the device wrote everything. If a tail ACK
-    // notification is lost the wait times out — we proceed anyway, since signature
-    // verification on END_OTA is the real integrity gate (a true drop fails safely).
+    // notification is lost the wait times out — we proceed anyway: the device's
+    // esp_ota_end image check (and, on the signed path, signature verification) is the
+    // real integrity gate, so a truly dropped chunk fails the finalize rather than booting
+    // corrupt firmware.
     while (ackedChunks < totalChunks) {
       try { await waitForAck(15000); } catch { break; }
     }
     progressCallback({ statusMessage: 'All firmware chunks sent.', progress: 100 });
 
-    // 5. Send signature AFTER firmware data
-    progressCallback({ statusMessage: 'Sending signature...' });
-    await sendFirmwareSignature(deviceId, signatureBuffer);
-    progressCallback({ statusMessage: 'Signature sent.' });
+    // 5. Send signature AFTER firmware data (signed path only).
+    if (signatureBuffer) {
+      progressCallback({ statusMessage: 'Sending signature...' });
+      await sendFirmwareSignature(deviceId, signatureBuffer);
+      progressCallback({ statusMessage: 'Signature sent.' });
+    }
 
-    // 6. Send END_OTA command to trigger signature verification and reboot
+    // 6. Finalize: END_OTA verifies the signature then reboots; END_OTA_UNSIGNED skips
+    //    verification (unsigned manual upload) and reboots directly.
+    const endCommand = signatureBuffer ? 'END_OTA' : 'END_OTA_UNSIGNED';
     progressCallback({ statusMessage: 'Finalizing update...' });
     try {
-      await sendOTAControlCommand(deviceId, 'END_OTA');
+      await sendOTAControlCommand(deviceId, endCommand);
       progressCallback({ statusMessage: 'Update finalized. Device should be rebooting...', isComplete: true });
     } catch (error: any) {
-      // If END_OTA fails, it's likely because ESP32 rebooted during signature verification
+      // If the finalize write fails, it's likely because ESP32 rebooted during finalize
       if (error.message.includes('GATT') || error.message.includes('disconnected') || error.message.includes('timeout')) {
         console.log('[OTA] END_OTA failed due to disconnection/timeout - ESP32 likely rebooted during signature verification');
         progressCallback({ statusMessage: 'Update completed successfully. Device rebooted with new firmware.', isComplete: true });
@@ -1140,7 +1206,8 @@ async function writeCharacteristicBinary(deviceId: string, serviceUuid: string, 
 
 export interface LedStripConfig {
   chipset: number;
-  pin: number;
+  pin: number;          // data pin (all chipsets)
+  clockPin?: number;    // clock pin — only used by 4-wire SPI chipsets (APA102/SK9822)
   // numLeds/width/height are null while a new strip is being entered (blank fields);
   // they're filled/derived before saving. Loaded-from-device configs always have numbers.
   numLeds: number | null;
@@ -1198,8 +1265,17 @@ export const LedChipsets = {
   FW1906_RGBCW: 62,
   WS2805_RGBCW: 63,
   TM1914_RGB: 64,
-  SM16825_RGBCW: 65
+  SM16825_RGBCW: 65,
+  // 4-wire SPI (clock + data) — these expose a clock-pin input in the UI.
+  APA102_SPI: 25,
+  SK9822_SPI: 26
 } as const;
+
+// Chipsets that need a clock pin in addition to the data pin (4-wire SPI). Must mirror
+// led_types.h isFourWire().
+export function isFourWireChipset(chipset: number): boolean {
+  return chipset === LedChipsets.APA102_SPI || chipset === LedChipsets.SK9822_SPI;
+}
 
 // Color Order enum values (should match ESP32)
 export const ColorOrders = {
@@ -1265,6 +1341,7 @@ export async function getLedConfiguration(deviceId: string): Promise<LedConfigur
         return {
           chipset: strip.cs ?? LedChipsets.WS2812_RGB,
           pin: strip.pin ?? 13,
+          clockPin: strip.clk ?? 0,
           numLeds,
           colorOrder: strip.co ?? ColorOrders.GRB,
           rmtChannel: strip.rmt ?? 0,
@@ -1301,6 +1378,7 @@ export async function setLedConfiguration(deviceId: string, config: LedConfigura
       strips: config.strips.map(strip => ({
         cs: strip.chipset,
         pin: strip.pin,
+        clk: strip.clockPin ?? 0,
         num: strip.numLeds ?? 0,
         co: strip.colorOrder,
         rmt: strip.rmtChannel,

@@ -8,6 +8,7 @@
 #include <NimBLEServer.h>
 #include <NimBLEUtils.h>
 #include "esp_ota_ops.h" // For OTA updates
+#include "esp_chip_info.h" // Report which ESP32 variant we're running on (device-info JSON)
 
 // PSA Crypto API includes for signature verification
 #include "psa/crypto.h"
@@ -18,7 +19,13 @@
 #include "pattern_renderer_base.h" // Include pattern renderer
 
 // LED Configuration (some of these are now defaults for LedManager config)
-#define LED_PIN     13
+// Default LED data pin. Overridable per chip from platformio.ini (each board's onboard
+// LED sits on a different GPIO — e.g. 13 on classic ESP32, 35 on AtomS3, 2 on XIAO C3).
+// It's only a first-boot default; the app can reassign the pin at runtime.
+#ifndef CHROMABAY_DEFAULT_LED_PIN
+#define CHROMABAY_DEFAULT_LED_PIN 13
+#endif
+#define LED_PIN     CHROMABAY_DEFAULT_LED_PIN
 #define NUM_LEDS    64  // 5x5 LED matrix (DISPLAY_WIDTH * DISPLAY_HEIGHT)
 #define BRIGHTNESS  20      // Applied to LedManager
 
@@ -283,6 +290,12 @@ volatile bool signature_verification_result = false;
 volatile bool ota_finalizing = false;
 unsigned long ota_finalize_start_ms = 0;
 
+// When true, the pending finalize skips ECDSA signature verification entirely. Set ONLY
+// by the explicit END_OTA_UNSIGNED control command (the app's "install from file" path,
+// e.g. reverting to WLED); registry/OTA updates use signed END_OTA and never touch this.
+// Reset at the start of every OTA and after each finalize so it can't leak between updates.
+volatile bool ota_skip_signature = false;
+
 // Structure to pass data to signature verification task
 struct SignatureVerificationData {
     uint8_t signature[FIRMWARE_SIGNATURE_LENGTH];
@@ -454,6 +467,21 @@ void signatureVerificationTask(void* parameter) {
 
 // Function to update the Device Info characteristic
 // This should be called periodically or when relevant info changes (e.g., heap on connect)
+// The ESP32 variant this firmware is running on. Matches the app's registry `chip` field
+// and esptool's --chip name, so the app can pick the right OTA image and never push a
+// wrong-architecture build to a device.
+static const char* chipModelName() {
+    esp_chip_info_t ci;
+    esp_chip_info(&ci);
+    switch (ci.model) {
+        case CHIP_ESP32:   return "esp32";
+        case CHIP_ESP32S2: return "esp32s2";
+        case CHIP_ESP32S3: return "esp32s3";
+        case CHIP_ESP32C3: return "esp32c3";
+        default:           return "unknown";
+    }
+}
+
 void updateDeviceInfoCharacteristic() {
     if (!pDeviceInfoCharacteristic) {
         // This should not happen if BLE setup is correct
@@ -463,6 +491,7 @@ void updateDeviceInfoCharacteristic() {
     String deviceInfoJson = "{";
     deviceInfoJson += "\"fw_ver\":\"" + String(FIRMWARE_VERSION) + "\",";
     deviceInfoJson += "\"hw_ver\":\"" + String(HARDWARE_VERSION) + "\",";
+    deviceInfoJson += "\"chip\":\"" + String(chipModelName()) + "\",";
     deviceInfoJson += "\"name\":\"" + deviceName + "\",";
     deviceInfoJson += "\"heap\":" + String(ESP.getFreeHeap());
     deviceInfoJson += "}";
@@ -508,6 +537,7 @@ class ServerCallbacks: public NimBLEServerCallbacks {
             ota_in_progress = false;
             ota_handle = 0;
             signature_received = false; // Reset signature status
+            ota_skip_signature = false;
             if (pOTAStatusCharacteristic) {
                 const char* msg = "OTA_ERR_DISCONNECTED";
                 pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
@@ -677,6 +707,36 @@ class OTAControlCallbacks : public NimBLECharacteristicCallbacks {
                 ota_finalize_start_ms = millis();
                 return;
 
+            } else if (strcmp(value, "END_OTA_UNSIGNED") == 0) {
+                // Finalize WITHOUT signature verification. Only ever sent by the app's
+                // explicit "install from file" path (arbitrary/unsigned images, e.g.
+                // reverting to WLED). Signed END_OTA above stays the path for registry
+                // updates. Requires an active OTA just like END_OTA; no signature needed.
+                if (!ota_in_progress || ota_handle == 0) {
+                    Serial.println("OTA Error: END_OTA_UNSIGNED received but no OTA process was active or handle invalid.");
+                    if (pOTAStatusCharacteristic) {
+                        const char* msg = "OTA_ERR_NO_ACTIVE_OTA";
+                        pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
+                        pOTAStatusCharacteristic->notify();
+                    }
+                    signature_received = false;
+                    ota_skip_signature = false;
+                    return;
+                }
+
+                Serial.println("OTA: END_OTA_UNSIGNED received — finalizing without signature verification.");
+                if (pOTAStatusCharacteristic) {
+                    const char* msg = "OTA_UNSIGNED_ACCEPTED";
+                    pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
+                    pOTAStatusCharacteristic->notify();
+                }
+                // Defer the finalize to loop() (same as END_OTA) but flagged to skip
+                // signature verification — see finalizeOtaIfReady().
+                ota_skip_signature = true;
+                ota_finalizing = true;
+                ota_finalize_start_ms = millis();
+                return;
+
             } else if (strcmp(value, "ABORT_OTA") == 0) {
                 if (ota_in_progress) {
                     Serial.println("OTA Abort command received. Cleaning up.");
@@ -687,6 +747,7 @@ class OTAControlCallbacks : public NimBLECharacteristicCallbacks {
                     ota_handle = 0;
                     ota_received_size = 0;
                     signature_received = false;
+                    ota_skip_signature = false;
                     if (pOTAStatusCharacteristic) {
                         const char* msg = "OTA_ABORTED_CMD";
                         pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
@@ -722,6 +783,7 @@ class OTADataCallbacks : public NimBLECharacteristicCallbacks {
         if (!ota_in_progress) {
             Serial.println("First OTA data packet received. Starting OTA process...");
             signature_received = false; // Reset signature status for new OTA
+            ota_skip_signature = false; // Default to signed; only END_OTA_UNSIGNED opts out
             ota_received_size = 0;      // Reset received size
 
             update_partition = esp_ota_get_next_update_partition(NULL);
@@ -828,9 +890,10 @@ class LedConfigGetCallbacks : public NimBLECharacteristicCallbacks {
         mpack_start_array(&writer, currentConfig.strips.size());
         
         for (const auto& strip : currentConfig.strips) {
-            mpack_start_map(&writer, 8);
+            mpack_start_map(&writer, 9);
             mpack_write_cstr(&writer, "cs"); mpack_write_u8(&writer, static_cast<uint8_t>(strip.chipset));
             mpack_write_cstr(&writer, "pin"); mpack_write_u8(&writer, strip.pin);
+            mpack_write_cstr(&writer, "clk"); mpack_write_u8(&writer, strip.clockPin);
             mpack_write_cstr(&writer, "num"); mpack_write_u16(&writer, strip.numLeds);
             mpack_write_cstr(&writer, "co"); mpack_write_u8(&writer, static_cast<uint8_t>(strip.colorOrder));
             mpack_write_cstr(&writer, "rmt"); mpack_write_u8(&writer, strip.rmtChannel);
@@ -1603,6 +1666,8 @@ void processReceivedLedConfig() {
                             stripConfig.chipset = static_cast<LedConfig::LedChipset>(mpack_expect_u8(&reader));
                         } else if (strcmp(strip_key, "pin") == 0) {
                             stripConfig.pin = mpack_expect_u8(&reader);
+                        } else if (strcmp(strip_key, "clk") == 0) {
+                            stripConfig.clockPin = mpack_expect_u8(&reader);
                         } else if (strcmp(strip_key, "num") == 0) {
                             stripConfig.numLeds = mpack_expect_u16(&reader);
                         } else if (strcmp(strip_key, "co") == 0) {
@@ -1852,8 +1917,9 @@ void renderCalibrationFrame() {
 void finalizeOtaIfReady() {
     if (!ota_finalizing) return;
 
-    // Still verifying: enforce the 30s timeout, otherwise keep waiting.
-    if (!signature_verification_complete) {
+    // Still verifying: enforce the 30s timeout, otherwise keep waiting. An unsigned
+    // finalize has no verification task, so there's nothing to wait on — fall straight through.
+    if (!ota_skip_signature && !signature_verification_complete) {
         if (millis() - ota_finalize_start_ms >= 30000) {
             Serial.println("OTA Error: Signature verification timed out!");
             if (pOTAStatusCharacteristic) {
@@ -1871,10 +1937,10 @@ void finalizeOtaIfReady() {
         return;
     }
 
-    // Verification finished — we own the finalize from here.
+    // Verification finished (or skipped) — we own the finalize from here.
     ota_finalizing = false;
 
-    if (!signature_verification_result) {
+    if (!ota_skip_signature && !signature_verification_result) {
         Serial.println("OTA Error: Firmware signature verification FAILED!");
         if (pOTAStatusCharacteristic) {
             const char* msg = "OTA_ERR_SIG_INVALID";
@@ -1886,10 +1952,15 @@ void finalizeOtaIfReady() {
         ota_handle = 0;
         ota_received_size = 0;
         signature_received = false;
+        ota_skip_signature = false;
         return;
     }
 
-    Serial.println("OTA: Firmware signature verification PASSED.");
+    if (ota_skip_signature) {
+        Serial.println("OTA: Finalizing WITHOUT signature verification (unsigned upload).");
+    } else {
+        Serial.println("OTA: Firmware signature verification PASSED.");
+    }
     Serial.printf("OTA End command received. Finalizing update... (Total received: %d bytes)\n", ota_received_size);
 
     esp_err_t err = esp_ota_end(ota_handle);
@@ -1936,6 +2007,7 @@ void finalizeOtaIfReady() {
     ota_handle = 0;
     ota_received_size = 0;
     signature_received = false;
+    ota_skip_signature = false;
 }
 
 // pushCRGBToStrip function removed - pattern renderer handles LED output directly

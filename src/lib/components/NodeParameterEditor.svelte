@@ -2,7 +2,7 @@
   import { onMount, onDestroy, tick } from 'svelte';
   import { getNodeDefinition, setNodeParameter, getNodeParameter, deleteNode, nodeParameters, type Parameter } from '../flowStore';
   import { getParameterInteractive, setParameterInteractive, MAX_INTERACTIVE_PARAMS, interactiveParameters } from '../stores/interactiveStore';
-  import { modulators, getModulator, setModulator, clearModulator, SHAPES, type ModulatorConfig, type ModField } from '../stores/modulatorStore';
+  import { modulators, getModulator, setModulator, clearModulator, modulatorSeed, SHAPES, type ModulatorConfig, type ModField } from '../stores/modulatorStore';
   import { flattenSvgPath, encodedToPath, PRESETS } from '../svgFlatten';
   import ColorWheel from './ColorWheel.svelte';
   import type { Node } from '@xyflow/svelte';
@@ -365,12 +365,11 @@
     const nodeMods = $modulators.get(node.id);
     if (m && nodeMods && nodeMods.size && nodeDefinition) {
       const t = Math.floor(performance.now()) % 1000000;
-      let i = 0;
       for (const p of nodeDefinition.params) {
         const cfg = nodeMods.get(p.name);
+        // Same per-instance seed the preview + device use, so the thumb readout matches.
         if (cfg) liveValues[p.name] = m.ccall('evalModulator', 'number',
-          ['number','number','number','number','number','number'], [cfg.shape, cfg.min, cfg.max, cfg.period, t, i]);
-        i++;
+          ['number','number','number','number','number','number'], [cfg.shape, cfg.min, cfg.max, cfg.period, t, modulatorSeed(node.id, p.name)]);
       }
       liveValues = liveValues; // reactivity
     }

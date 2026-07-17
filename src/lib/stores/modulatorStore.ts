@@ -28,6 +28,22 @@ export function getModulator(nodeId: string, paramName: string): ModulatorConfig
   return get(modulators).get(nodeId)?.get(paramName) ?? null;
 }
 
+// A stable per-automation seed so two Random/Perlin automations running at the same time
+// (even the same param on different nodes) decorrelate instead of moving in lockstep. Derived
+// deterministically from the node id + param name (FNV-1a), so it's identical every load and
+// — since the app hands this same value to BOTH the WASM preview and the firmware — the device
+// and browser stay bit-identical. Capped at 24 bits so it survives the mpack wire (read as a
+// float on-device) with no precision loss. Feeds native/Modulation.h's `seed` argument.
+export function modulatorSeed(nodeId: string, paramName: string): number {
+  const s = `${nodeId}:${paramName}`;
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0) & 0xffffff; // 24-bit, exactly representable as float32 on the device
+}
+
 // `silent` skips the autosave side-effect. Deserialize (global load AND isolated
 // previews) registers modulators in bulk — that is not a user "set automation"
 // action, so it must not schedule a save. Left unguarded, preview deserializes on

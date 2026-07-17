@@ -23,11 +23,16 @@ enum class LedChipset : uint8_t {
     TM1914_RGB = 64,    // For TM1914 (RGB) (NeoRgbTm1914Feature)
     SM16825_RGBCW = 65, // For SM16825 (16-bit RGBCW) (NeoRgbwcSm16825eFeature) - 5 channels
 
-    // Add other digital 1-wire or 2-wire (SPI) types here as needed
-    // Example for SPI:
-    // APA102_SPI = 25, // For APA102, SK9822 (DotStarBgrFeature)
-    // WS2801_SPI = 23, // For WS2801 (NeoRbgFeature with Ws2801SpiHzMethod)
+    // 4-wire SPI (clock + data). These need a SECOND pin (clockPin) alongside the data pin.
+    APA102_SPI = 25,    // For APA102 / DotStar (DotStarBgrFeature, two-wire bit-bang)
+    SK9822_SPI = 26,    // For SK9822 (APA102-compatible protocol; same DotStar driver)
+    // WS2801_SPI = 23, // (future) WS2801 (NeoRbgFeature with Ws2801 SPI method)
 };
+
+// True for chipsets that need a clock pin in addition to the data pin (4-wire SPI LEDs).
+inline bool isFourWire(LedChipset cs) {
+    return cs == LedChipset::APA102_SPI || cs == LedChipset::SK9822_SPI;
+}
 
 // Color Orders
 // Lower 4 bits: RGB sequence (defines the order of Red, Green, Blue components)
@@ -90,10 +95,9 @@ enum InternalLedType : uint8_t {
     ITYPE_ESP32_RMT_TM1914_RGB = 11,   // NeoRgbTm1914Feature + NeoEsp32RmtNTm1914Method (3ch: RGB)
     ITYPE_ESP32_RMT_SM16825_RGBCW = 12,// NeoRgbwcSm16825eFeature + NeoEsp32RmtNWs2812xMethod (5ch: RGBCW, 16-bit)
 
-    // Future expansion for I2S methods or SPI-based LEDs for ESP32
-    // ITYPE_ESP32_I2S_WS2812_RGB = 50,
-    // ITYPE_ESP32_HSPI_APA102_RGB = 100,
-    // ITYPE_ESP32_VSPI_APA102_RGB = 101,
+    // 4-wire SPI (clock + data). Bit-bang two-wire so it runs on ANY two GPIOs across
+    // esp32 / s3 / c3 (hardware SPI would pin us to specific pads).
+    ITYPE_ESP32_APA102_BGR = 100,      // DotStarBgrFeature + DotStarMethod (APA102 / SK9822)
 };
 
 } // namespace LedConfig

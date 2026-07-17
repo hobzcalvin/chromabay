@@ -5,12 +5,12 @@
   //  - Manual (EVERYWHERE): download the .bin and upload it in WLED's own web UI.
   // Both use the same firmware everyone else gets (the automated path from the offline
   // cache so it works with no internet; the manual path via a direct download link).
+  // Also documents the REVERSE (ChromaBay -> WLED): grab WLED's own firmware and flash it
+  // over USB, or via the app's in-app "Install from a file" (unsigned) OTA — text only.
   import { Capacitor } from '@capacitor/core';
   import { listCachedFirmware, getFirmware } from '$lib/firmwareCache';
   import { flashFirmwareViaWledHttp, WLED_AP_SSID, WLED_AP_PASS } from '$lib/wledOta';
-
-  // Latest firmware download URL + version, passed from the Devices page (from the registry).
-  let { firmwareUrl = '', firmwareVersion = '' }: { firmwareUrl?: string; firmwareVersion?: string } = $props();
+  import FirmwareDownloads from './FirmwareDownloads.svelte';
 
   const isNative = Capacitor.getPlatform() !== 'web';
 
@@ -81,16 +81,36 @@
       <div class="path">
         <h5>Or do it yourself</h5>
         <ol>
-          <li>Download the ChromaBay firmware:
-            {#if firmwareUrl}
-              <a class="dl" href={firmwareUrl} download>firmware .bin{firmwareVersion ? ` (${firmwareVersion})` : ''}</a>
-            {:else}
-              <span class="warn">(unavailable — open this page with internet first)</span>
-            {/if}
-          </li>
+          <li>Download the ChromaBay <strong>firmware .bin</strong> for your board's chip (below).</li>
           <li>Open the device's WLED web UI (e.g. <code>http://4.3.2.1</code> on its AP, or its IP on your network).</li>
           <li>Go to <strong>Config → Security &amp; Updates</strong>, and under <strong>Manual OTA update</strong> choose the file and upload. WLED reboots into ChromaBay.</li>
         </ol>
+        <FirmwareDownloads kind="app" />
+      </div>
+
+      <!-- Reverse: ChromaBay → WLED -->
+      <div class="path">
+        <h5>Going back to WLED</h5>
+        <p class="lead">ChromaBay doesn't run a web server, so there's no captive-portal upload to
+          reverse. Instead, get WLED's own firmware and flash it — over USB, or with ChromaBay's
+          in-app manual update.</p>
+        <ol>
+          <li><strong>Get WLED firmware for your board.</strong> Easiest is
+            <a class="dl" href="https://install.wled.me" target="_blank" rel="noopener">install.wled.me</a>
+            (their official web installer). To flash it yourself, download the matching
+            <code>.bin</code> from
+            <a class="dl" href="https://github.com/wled/WLED/releases" target="_blank" rel="noopener">WLED's releases</a>
+            — pick the build for your chip (e.g. <code>ESP32</code>).</li>
+          <li><strong>Flash over USB (most reliable).</strong> Plug the board into a computer and use
+            install.wled.me, or the <em>Flash a new board over USB</em> option above. This works
+            for any chip and can always recover a device.</li>
+          <li><strong>Or flash in-app, no cable.</strong> On a connected device open
+            <strong>Show Settings → Firmware Update → Install from a file</strong>, pick the WLED
+            <code>.bin</code>, leave the signature empty, and flash the <em>unsigned</em> image.</li>
+        </ol>
+        <p class="fineprint">The image must be built for this device's chip (ESP32) — a mismatched
+          image is rejected, and a bad flash may need USB recovery. WLED is unsigned, so the in-app
+          update will warn that it's skipping the signature check; that's expected here.</p>
       </div>
     </div>
   {/if}
