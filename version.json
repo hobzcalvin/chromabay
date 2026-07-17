@@ -1,7 +1,7 @@
 {
-  "version": "0.1.222",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.222.zip",
-  "buildDate": "2026-07-17T20:06:53Z",
-  "commitHash": "2d9a600be18a93207bc18b46cf56de9ccb357819",
-  "commitMessage": "Dev flash script (auto-detect connected board) + single-core one-wire chipset warning"
+  "version": "0.1.223",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.223.zip",
+  "buildDate": "2026-07-17T22:29:21Z",
+  "commitHash": "a3f0816530f0999ba1ddcd3ed9f9bc9d10012ba4",
+  "commitMessage": "Restore Interact nav tab + 🖐️ (was 🎛️), Editor→Edit; rewrite pattern-lifecycle plan"
 }
