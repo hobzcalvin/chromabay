@@ -46,3 +46,5 @@ keys/
 # App Store Connect API key identifiers (local only)
 ios/.asc.env
 *.p8
+
+scratchpad
