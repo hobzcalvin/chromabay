@@ -495,7 +495,7 @@
   <div class="header">
     <h1>Pattern Editor</h1>
 
-    <button class="interact-btn" title="Interact with this pattern" aria-label="Interact" onclick={() => goto(`${base}/interact`)}>🎛️</button>
+    <button class="interact-btn" title="Interact with this pattern" aria-label="Interact" onclick={() => goto(`${base}/interact`)}>🖐️</button>
 
     <PatternActions
       bind:showAddNodeDropdown 
@@ -600,7 +600,7 @@
     text-shadow: 0 2px 4px rgba(0,0,0,0.3);
   }
 
-  /* Jump to the Interact page for the current pattern (mirrors the 🎛️ on Patterns). */
+  /* Jump to the Interact page for the current pattern (mirrors the 🖐️ on Patterns). */
   .interact-btn {
     position: absolute;
     left: 0;

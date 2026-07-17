@@ -238,7 +238,7 @@
   <div class="header">
     <h1>Patterns</h1>
     <button class="online-btn" onclick={() => (galleryOpen = true)} title="Browse & publish online patterns">🌐 Online</button>
-    <p class="subtitle">Tap to select • 🎛️ to interact • ✏️ to edit • 🗑️ to delete</p>
+    <p class="subtitle">Tap to select • 🖐️ to interact • ✏️ to edit • 🗑️ to delete</p>
   </div>
 
   <GalleryModal open={galleryOpen} onClose={() => (galleryOpen = false)} />
@@ -296,7 +296,7 @@
                 aria-label="Interact with {patternName}"
                 title="Interact"
               >
-                🎛️
+                🖐️
               </button>
 
               <button

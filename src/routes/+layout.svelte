@@ -59,7 +59,7 @@
       <slot />
     </div>
     
-    <nav class="bottom-nav" class:hidden={$page.url.pathname.startsWith(`${base}/interact`)}>
+    <nav class="bottom-nav">
       <a href="{base}/devices" class:active={$page.url.pathname.startsWith(`${base}/devices`)}>
         <span class="emoji-wrap">
           <span class="emoji">💡</span>
@@ -76,9 +76,13 @@
         <span class="emoji">🌈</span>
         <span class="label">Patterns</span>
       </a>
+      <a href="{base}/interact" class:active={$page.url.pathname.startsWith(`${base}/interact`)}>
+        <span class="emoji">🖐️</span>
+        <span class="label">Interact</span>
+      </a>
       <a href="{base}/editor" class:active={$page.url.pathname.startsWith(`${base}/editor`)}>
         <span class="emoji">✏️</span>
-        <span class="label">Editor</span>
+        <span class="label">Edit</span>
       </a>
       <a href="{base}/account" class:active={$page.url.pathname.startsWith(`${base}/account`)}>
         <span class="emoji">👤</span>
@@ -306,9 +310,6 @@
     box-shadow: 0 0 8px rgba(220, 38, 38, 0.4);
   }
 
-  .hidden {
-    display: none !important;
-  }
 
   /* Remove all global main styling since we now have proper layout */
   :global(main) {
