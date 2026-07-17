@@ -264,9 +264,24 @@ bool deviceConnected = false;
 bool oldDeviceConnected = false;
 String receivedData = "";
 
+// Single-core targets (ESP32-C3, -S2) run the render loop, the NimBLE host, AND the BT
+// controller ISRs on one core, so Bluetooth activity preempts LED output. For timing-critical
+// one-wire LEDs (WS2812) that shows up as flicker when a refill is delayed past the reset
+// window. We can't reprioritize the BT controller ISR from here, but we CAN cut how often the
+// vulnerable show() runs — see the single-core mitigations below. (Dual-core boards run the
+// loop on core 1 and BLE on core 0, so they don't need this.) Clock+data LEDs (APA102) are
+// immune to the timing hit and are the robust choice on single-core hardware.
+#if defined(CONFIG_FREERTOS_UNICORE)
+static const bool SINGLE_CORE = true;
+#else
+static const bool SINGLE_CORE = false;
+#endif
+
 // Pattern rendering variables
 unsigned long lastUpdate = 0;
-const unsigned long updateInterval = 20; // Update every 20ms for smooth animation
+// Base animation cadence. On single-core we back off a touch (fewer show()s = fewer windows
+// for a BLE ISR to glitch WS2812 timing); the difference is imperceptible in the animation.
+const unsigned long updateInterval = SINGLE_CORE ? 30 : 20;
 unsigned long fpsLastReport = 0;          // serial FPS report timer
 uint32_t fpsFrames = 0;                   // rendered frames since last report
 
@@ -2281,6 +2296,9 @@ void setup() {
         }
     }
 
+    Serial.printf("Cores: %d (%s). ", ESP.getChipCores(),
+                  SINGLE_CORE ? "single — WS2812 flicker mitigations ON: dithering off, slower frame cadence; prefer APA102"
+                              : "multi — render on core 1, BLE on core 0");
     Serial.println("Setup complete");
 }
 
@@ -2359,7 +2377,11 @@ void loop() {
     // Temporal dithering: between animation frames, emit high-rate sub-frames for any
     // strips small/fast enough to dither (no-op otherwise). This is what makes low
     // brightness smooth instead of banded.
-    if (!ota_in_progress) {
+    // Skipped on single-core: dithering fires 100+ extra show()s/sec, and on a single core
+    // each is a fresh window for a BLE ISR to jitter WS2812 timing → the dithering meant to
+    // smooth output was itself a top flicker source. (Trade-off: low brightness may band a
+    // little on single-core one-wire strips; use APA102 to get both smooth AND flicker-free.)
+    if (!ota_in_progress && !SINGLE_CORE) {
         ledMgr.ditherTick();
     }
 
