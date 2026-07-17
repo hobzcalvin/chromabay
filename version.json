@@ -1,7 +1,7 @@
 {
-  "version": "0.1.221",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.221.zip",
-  "buildDate": "2026-07-17T17:26:56Z",
-  "commitHash": "ccaaf607e60a1b2d8e5d13197ee35e4b44a35658",
-  "commitMessage": "Single-core (C3/S2) WS2812 flicker mitigations"
+  "version": "0.1.222",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.222.zip",
+  "buildDate": "2026-07-17T20:06:53Z",
+  "commitHash": "2d9a600be18a93207bc18b46cf56de9ccb357819",
+  "commitMessage": "Dev flash script (auto-detect connected board) + single-core one-wire chipset warning"
 }
