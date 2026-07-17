@@ -1,7 +1,7 @@
 {
-  "version": "0.1.223",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.223.zip",
-  "buildDate": "2026-07-17T22:29:21Z",
-  "commitHash": "a3f0816530f0999ba1ddcd3ed9f9bc9d10012ba4",
-  "commitMessage": "Restore Interact nav tab + 🖐️ (was 🎛️), Editor→Edit; rewrite pattern-lifecycle plan"
+  "version": "0.1.224",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.224.zip",
+  "buildDate": "2026-07-17T22:50:41Z",
+  "commitHash": "fa01bdd0182ab34ae93b55b3748a727c3d6071e4",
+  "commitMessage": "Interact page: evenly distribute controls in the switcher→nav band"
 }
