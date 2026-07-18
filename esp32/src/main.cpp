@@ -8,6 +8,7 @@
 #include <NimBLEServer.h>
 #include <NimBLEUtils.h>
 #include <WiFi.h>       // WiFi/TCP transport (alternative to BLE, chosen per comm mode)
+#include <WiFiUdp.h>    // Art-Net / sACN realtime pixel streaming (UDP)
 #include <ESPmDNS.h>    // advertise the TCP endpoint as _chromabay._tcp for app discovery
 #include "esp_ota_ops.h" // For OTA updates
 #include "esp_chip_info.h" // Report which ESP32 variant we're running on (device-info JSON)
@@ -124,6 +125,10 @@ static volatile bool newCommCfgAvailable = false;
 static bool gAsleep = false;
 static uint32_t gLastActivityMs = 0;
 static void noteActivity();              // defined below; resets the sleep countdown / wakes
+
+// Realtime streaming (Art-Net/sACN): while millis() < gRealtimeUntilMs the render loop
+// yields to streamed pixels; it lapses back to the pattern/cycle after rtTimeout of silence.
+static uint32_t gRealtimeUntilMs = 0;
 
 NimBLEServer* pServer = nullptr;
 // Handle of the current central connection (captured in onConnect), so we can request a
@@ -2142,6 +2147,10 @@ static String commSettingsJson() {
     j += "\"fallback\":" + String(gSettings.wifiFallback) + ",";
     j += "\"sleep\":" + String(gSettings.sleepMinutes) + ",";
     j += "\"rgbtest\":" + String(gSettings.rgbTest ? 1 : 0) + ",";
+    j += "\"rtproto\":" + String(gSettings.rtProto) + ",";
+    j += "\"rtuni\":" + String(gSettings.rtUniverse) + ",";
+    j += "\"rtto\":" + String(gSettings.rtTimeoutSec) + ",";
+    j += "\"rtlayout\":" + String(gSettings.rtLayout ? 1 : 0) + ",";
     j += "\"mode_active\":\"" + String(gWifiMode ? "wifi" : "ble") + "\"";
     if (gWifiMode) j += ",\"ip\":\"" + WiFi.localIP().toString() + "\"";
     j += "}";
@@ -2199,6 +2208,14 @@ void processCommConfig() {
                 gSettings.sleepMinutes = (uint16_t)mpack_node_u16(v);
             } else if (strcmp(key, "rgbtest") == 0) {
                 gSettings.rgbTest = mpack_node_bool(v);
+            } else if (strcmp(key, "rtproto") == 0) {
+                gSettings.rtProto = (uint8_t)mpack_node_u8(v);
+            } else if (strcmp(key, "rtuni") == 0) {
+                gSettings.rtUniverse = (uint16_t)mpack_node_u16(v);
+            } else if (strcmp(key, "rtto") == 0) {
+                gSettings.rtTimeoutSec = (uint16_t)mpack_node_u16(v);
+            } else if (strcmp(key, "rtlayout") == 0) {
+                gSettings.rtLayout = mpack_node_bool(v);
             }
         }
     } else {
@@ -2386,8 +2403,18 @@ namespace WifiLink {
         }
         server.begin();
         server.setNoDelay(true);
-        // mDNS: advertise _chromabay._tcp so the app can discover us without a fixed IP.
-        String host = deviceName; host.replace(' ', '-');
+        // mDNS: advertise _chromabay._tcp so the app can discover us without a fixed IP,
+        // and resolve <host>.local. Sanitize the name to a valid DNS label (lowercase,
+        // [a-z0-9-], no leading/trailing hyphen) so e.g. "ChromaBay ED30" → chromabay-ed30.local.
+        String host;
+        for (size_t i = 0; i < deviceName.length(); i++) {
+            char c = deviceName[i];
+            if (c >= 'A' && c <= 'Z') c = c - 'A' + 'a';
+            if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) host += c;
+            else if (c == ' ' || c == '_' || c == '-') { if (host.length() && host[host.length()-1] != '-') host += '-'; }
+        }
+        while (host.length() && host[host.length()-1] == '-') host.remove(host.length()-1);
+        if (host.length() == 0) host = "chromabay";
         if (MDNS.begin(host.c_str())) {
             MDNS.addService("chromabay", "tcp", CHROMABAY_TCP_PORT);
             MDNS.addServiceTxt("chromabay", "tcp", "name", deviceName.c_str());
@@ -2435,6 +2462,96 @@ namespace WifiLink {
         if (pos > 0) rx.erase(rx.begin(), rx.begin() + pos);
     }
 } // namespace WifiLink
+
+// ---- Art-Net / sACN realtime pixel streaming ------------------------------------------
+// Listens for DMX-over-Ethernet and drives pixels directly, taking over from the pattern
+// renderer while packets arrive and reverting after gSettings.rtTimeoutSec of silence.
+// Opt-in (rtProto != RT_OFF) and WiFi-only, so it's completely inert by default.
+namespace RtStream {
+    static WiFiUDP artnet, sacn;
+    static bool started = false;
+    static uint8_t buf[640]; // sACN max ≈ 126 + 512; Art-Net ≈ 18 + 512
+    static const uint32_t PX_PER_UNIVERSE = 170; // 512 DMX channels / 3 (RGB)
+
+    // sACN multicast group for a 1-based universe: 239.255.<hi>.<lo>.
+    static IPAddress sacnGroup(uint16_t universe) { return IPAddress(239, 255, (universe >> 8) & 0xFF, universe & 0xFF); }
+
+    static void begin() {
+        uint8_t proto = gSettings.rtProto;
+        if (proto == DeviceSettings::RT_ARTNET || proto == DeviceSettings::RT_BOTH) artnet.begin(6454);
+        if (proto == DeviceSettings::RT_SACN   || proto == DeviceSettings::RT_BOTH) {
+            // Join a small window of universes starting at rtUniverse so multi-universe rigs work.
+            uint16_t u0 = gSettings.rtUniverse == 0 ? 1 : gSettings.rtUniverse;
+            for (uint16_t u = u0; u < u0 + 8; u++) sacn.beginMulticast(sacnGroup(u), 5568);
+        }
+        started = true;
+        Serial.printf("[RtStream] started proto=%u universe=%u timeout=%us layout=%u\n",
+                      proto, gSettings.rtUniverse, gSettings.rtTimeoutSec, gSettings.rtLayout);
+    }
+
+    // Set one streamed pixel (global index across strips), honoring physical-vs-layout mode.
+    static inline void setGlobalPixel(uint32_t g, uint8_t r, uint8_t gc, uint8_t b) {
+        for (size_t s = 0; s < ledMgr.getNumStrips(); s++) {
+            LedConfig::LedBus* strip = ledMgr.getStrip((uint8_t)s);
+            if (!strip) continue;
+            bool useLayout = gSettings.rtLayout && strip->hasLayout();
+            uint32_t span = useLayout ? (uint32_t)strip->layoutWidth() * strip->layoutHeight() : strip->getLength();
+            if (g < span) {
+                int phys = useLayout ? strip->layoutLedAt(g) : (int)g;
+                if (phys >= 0) ledMgr.setPixelColor((uint8_t)s, (uint16_t)phys, CRGB(r, gc, b));
+                return;
+            }
+            g -= span;
+        }
+    }
+
+    static void applyDmx(uint16_t universe, const uint8_t* dmx, uint16_t len) {
+        if (universe < gSettings.rtUniverse) return;
+        uint32_t base = (uint32_t)(universe - gSettings.rtUniverse) * PX_PER_UNIVERSE;
+        uint16_t px = len / 3;
+        for (uint16_t p = 0; p < px; p++) setGlobalPixel(base + p, dmx[p*3], dmx[p*3+1], dmx[p*3+2]);
+    }
+
+    // Poll from loop() (WiFi mode). Lazily opens sockets so enabling streaming via settings
+    // takes effect without a reboot. Returns having applied any packets + refreshed the timeout.
+    static void tick() {
+        if (gSettings.rtProto == DeviceSettings::RT_OFF) return;
+        if (!started) begin();
+        bool got = false;
+        int n;
+        while ((n = artnet.parsePacket()) > 0) {
+            int r = artnet.read(buf, sizeof(buf));
+            if (r >= 18 && memcmp(buf, "Art-Net", 7) == 0) {
+                uint16_t op = (uint16_t)buf[8] | ((uint16_t)buf[9] << 8);
+                if (op == 0x5000) { // OpDmx
+                    uint16_t uni  = (uint16_t)buf[14] | ((uint16_t)buf[15] << 8);
+                    uint16_t dlen = ((uint16_t)buf[16] << 8) | buf[17]; // big-endian
+                    if (dlen > (uint16_t)(r - 18)) dlen = r - 18;
+                    applyDmx(uni, buf + 18, dlen);
+                    got = true;
+                }
+            }
+        }
+        while ((n = sacn.parsePacket()) > 0) {
+            int r = sacn.read(buf, sizeof(buf));
+            // E1.31: ACN PID at offset 4; universe at 113-114; DMP property count at 123-124
+            // (includes the 1-byte DMX start code at 125); channel data at 126.
+            if (r >= 126 && memcmp(buf + 4, "ASC-E1.17", 9) == 0) {
+                uint16_t uni  = ((uint16_t)buf[113] << 8) | buf[114];
+                uint16_t pcnt = ((uint16_t)buf[123] << 8) | buf[124];
+                uint16_t dlen = pcnt > 0 ? pcnt - 1 : 0;
+                if (dlen > (uint16_t)(r - 126)) dlen = r - 126;
+                applyDmx(uni, buf + 126, dlen);
+                got = true;
+            }
+        }
+        if (got) {
+            ledMgr.show();
+            gRealtimeUntilMs = millis() + (uint32_t)gSettings.rtTimeoutSec * 1000u;
+            noteActivity();
+        }
+    }
+} // namespace RtStream
 
 void setup() {
     Serial.begin(115200);
@@ -2769,7 +2886,11 @@ void loop() {
             } else {
                 renderCalibrationFrame(); // structured-light flash for camera auto-layout
             }
-        } else if (patternRenderer != nullptr && !ota_in_progress && !gAsleep) {
+        } else if (patternRenderer != nullptr && !ota_in_progress && !gAsleep
+                   && (uint32_t)(currentTime) >= gRealtimeUntilMs) {
+            // Not streaming (or the stream lapsed) → run the pattern/cycle. While realtime
+            // packets are arriving (gRealtimeUntilMs in the future) we hold the streamed
+            // frame and skip this, reverting automatically once packets stop.
             updateCycle();   // pick the synced playlist pattern before rendering
             patternRenderer->update();
             patternRenderer->render();
@@ -2802,7 +2923,7 @@ void loop() {
     processCommConfig();
 
     // WiFi/TCP transport: accept + read + dispatch framed messages (no-op in BLE mode).
-    if (gWifiMode) WifiLink::tick();
+    if (gWifiMode) { WifiLink::tick(); RtStream::tick(); }
 
     // Sleep timer: after gSettings.sleepMinutes of no activity, blank the output and pause
     // rendering. Any inbound command / button press calls noteActivity() → wakes. 0 = off.
