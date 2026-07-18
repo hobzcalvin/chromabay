@@ -937,6 +937,12 @@
           </button>
         {/if}
       </details>
+
+      <!-- USB flashing + raw image downloads, kept here with the other firmware actions.
+           USB flashing needs no BLE connection (it's for blank/other boards) so it also
+           lives in the "Install on a device" section below; on the app this shows the
+           download links + a "use desktop" note (Web Serial is desktop-Chromium only). -->
+      <UsbFlash />
     {/if}
   </div>
 {/snippet}
