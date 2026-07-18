@@ -1,7 +1,7 @@
 {
-  "version": "0.1.242",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.242.zip",
-  "buildDate": "2026-07-18T16:44:45Z",
-  "commitHash": "ff62fedeeeff0d1ab6cedccbbeac5587e4112350",
-  "commitMessage": "Gate OTA on partition fit; ship WiFi + no-WiFi firmware variants"
+  "version": "0.1.243",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.243.zip",
+  "buildDate": "2026-07-18T17:14:48Z",
+  "commitHash": "0877f1dff35002f80f97542c66b4690ef5abbf47",
+  "commitMessage": "Devices: surface USB flash + firmware downloads in the per-device firmware section"
 }
