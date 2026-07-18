@@ -109,6 +109,10 @@ export interface DeviceSettings {
   fallback: number;         // 0 = revert to BLE if WiFi fails, 1 = SoftAP
   sleep: number;            // minutes, 0 = off
   rgbtest: number;          // 1 = on
+  rtproto: number;          // realtime stream: 0 off, 1 Art-Net, 2 sACN, 3 both
+  rtuni: number;            // first DMX universe consumed
+  rtto: number;             // realtime revert timeout (seconds)
+  rtlayout: number;         // 1 = stream into custom layout, 0 = physical order
   mode_active?: 'ble' | 'wifi';
   ip?: string;
 }
@@ -120,6 +124,10 @@ export interface DeviceSettingsPatch {
   fallback?: number;
   sleep?: number;
   rgbtest?: boolean;
+  rtproto?: number;
+  rtuni?: number;
+  rtto?: number;
+  rtlayout?: boolean;
 }
 
 export interface FirmwareRegistryEntry {

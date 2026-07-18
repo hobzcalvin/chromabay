@@ -920,7 +920,10 @@ class CentralizedRenderer {
     // Feed the real wall clock (Unix seconds) to time-aware operators (Clock node). The
     // 32-bit animation timestamp above wraps and can't represent absolute time-of-day, so
     // the clock reads this instead. Cheap; ignore if the export is missing (older wasm).
-    try { this.wasmModule?.ccall('setWallClock', null, ['number'], [Math.floor(Date.now() / 1000)]); } catch { /* older wasm */ }
+    try {
+      const wm = (globalThis as any).getWasmModule?.();
+      wm?.ccall('setWallClock', null, ['number'], [Math.floor(Date.now() / 1000)]);
+    } catch { /* older wasm */ }
 
     for (const node of executionOrder) {
       const nodeDefinition = getNodeDefinition(node.data.type as string);

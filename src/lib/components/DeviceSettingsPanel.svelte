@@ -22,6 +22,11 @@
   let fallback = $state(0); // 0 = revert to BLE, 1 = SoftAP
   let sleepMin = $state(0);
   let rgbTest = $state(true);
+  // Realtime streaming (Art-Net / sACN)
+  let rtProto = $state(0);   // 0 off, 1 artnet, 2 sacn, 3 both
+  let rtUni = $state(0);
+  let rtTimeout = $state(10);
+  let rtLayout = $state(false);
 
   async function load() {
     if (!supported || loading || loadedFor === deviceId) return;
@@ -34,6 +39,10 @@
         fallback = s.fallback ?? 0;
         sleepMin = s.sleep ?? 0;
         rgbTest = (s.rgbtest ?? 1) === 1;
+        rtProto = s.rtproto ?? 0;
+        rtUni = s.rtuni ?? 0;
+        rtTimeout = s.rtto ?? 10;
+        rtLayout = (s.rtlayout ?? 0) === 1;
         loadedFor = deviceId;
       }
     } finally {
@@ -74,6 +83,19 @@
     try {
       await writeDeviceSettings(deviceId, { sleep: Math.max(0, Math.floor(sleepMin)), rgbtest: rgbTest });
       msg = 'Saved.';
+    } catch (e: any) {
+      msg = 'Failed to save: ' + (e?.message ?? e);
+    }
+  }
+
+  async function saveStreaming() {
+    msg = '';
+    try {
+      await writeDeviceSettings(deviceId, {
+        rtproto: rtProto, rtuni: Math.max(0, Math.floor(rtUni)),
+        rtto: Math.max(1, Math.floor(rtTimeout)), rtlayout: rtLayout,
+      });
+      msg = activeMode === 'wifi' ? 'Streaming settings saved.' : 'Saved — takes effect on Wi-Fi.';
     } catch (e: any) {
       msg = 'Failed to save: ' + (e?.message ?? e);
     }
@@ -138,6 +160,41 @@
       </label>
       <div class="btn-row">
         <button class="btn secondary small" onclick={savePower}>Save power settings</button>
+      </div>
+    </div>
+
+    <!-- Realtime streaming (Art-Net / sACN) -->
+    <div class="power-form">
+      <div class="row"><span class="lbl">Realtime streaming (Art-Net / sACN)</span></div>
+      <label class="inline">
+        <span>Protocol</span>
+        <select bind:value={rtProto}>
+          <option value={0}>Off</option>
+          <option value={1}>Art-Net</option>
+          <option value={2}>sACN (E1.31)</option>
+          <option value={3}>Both</option>
+        </select>
+      </label>
+      {#if rtProto !== 0}
+        <label class="inline">
+          <span>Start universe</span>
+          <input type="number" min="0" max="63999" bind:value={rtUni} />
+        </label>
+        <label class="inline">
+          <span>Revert after (s)</span>
+          <input type="number" min="1" max="120" bind:value={rtTimeout} />
+        </label>
+        <label class="inline">
+          <span>Pixel mapping</span>
+          <select bind:value={rtLayout}>
+            <option value={false}>True pixels (physical order)</option>
+            <option value={true}>Custom layout (reorder/skip)</option>
+          </select>
+        </label>
+        <p class="hint">Stream DMX to this device's IP{settings?.ip ? ` (${settings.ip})` : ''}. It takes over live and returns to its pattern/cycle {rtTimeout}s after the stream stops. Only active on Wi-Fi.</p>
+      {/if}
+      <div class="btn-row">
+        <button class="btn secondary small" onclick={saveStreaming}>Save streaming settings</button>
       </div>
     </div>
   {/if}
