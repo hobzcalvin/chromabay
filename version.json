@@ -1,7 +1,7 @@
 {
-  "version": "0.1.228",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.228.zip",
-  "buildDate": "2026-07-17T23:55:18Z",
-  "commitHash": "97bba990471df278ab51a81afeb4670671942b07",
-  "commitMessage": "Patterns: drop Clear device patterns; Per-Device rows get previews + Trash"
+  "version": "0.1.229",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.229.zip",
+  "buildDate": "2026-07-18T00:04:55Z",
+  "commitHash": "e2598bf67601aebc7553df481976c7e8a2756830",
+  "commitMessage": "Device libraries survive reconnect blips (no re-dump, no 0 synced)"
 }
