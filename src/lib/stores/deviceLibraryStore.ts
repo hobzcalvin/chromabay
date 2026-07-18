@@ -17,6 +17,19 @@ export const deviceLibrariesLoading = writable(false);
 
 let inFlight = false;
 
+// A brief reconnect blip can't have changed a device's library, but a LONGER absence might
+// (someone re-synced it, it was cleared, etc.). Track when each device dropped so refresh
+// re-dumps only after it's been gone longer than this; a quick blip keeps the cache.
+const STALE_RECONNECT_MS = 30_000;
+const disconnectedAt: Record<string, number> = {};
+let prevConnected = new Set<string>();
+connectedDevices.subscribe((map) => {
+  const cur = new Set(map.keys());
+  const now = Date.now();
+  for (const id of prevConnected) if (!cur.has(id)) disconnectedAt[id] = now; // just dropped
+  prevConnected = cur;
+});
+
 async function pullWithRetry(deviceId: string, fallback: SerializedPattern[]): Promise<SerializedPattern[]> {
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
@@ -50,7 +63,12 @@ export async function refreshDeviceLibraries(opts: { force?: boolean } = {}): Pr
     const next: Record<string, SerializedPattern[]> = { ...prev }; // keep snapshots across blips
     for (const d of list) {
       const have = prev[d.deviceId];
-      if (!opts.force && have && have.length > 0) continue; // already known — don't re-dump
+      const away = disconnectedAt[d.deviceId];
+      const staleReconnect = away != null && Date.now() - away > STALE_RECONNECT_MS;
+      delete disconnectedAt[d.deviceId]; // consume — it's connected now
+      // Keep the cache for a device we already know, UNLESS forced or it was gone long enough
+      // that its library might have changed.
+      if (!opts.force && have && have.length > 0 && !staleReconnect) continue;
       next[d.deviceId] = await pullWithRetry(d.deviceId, have ?? []);
     }
     deviceLibraries.set(next);

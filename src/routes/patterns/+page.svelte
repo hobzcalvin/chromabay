@@ -420,11 +420,7 @@
   {#if connectedList.length > 0}
     <section class="pattern-section">
       <details bind:open={perDeviceOpen}>
-        <summary class="section-title section-summary">
-          Per Device
-          <button class="refresh-btn" title="Re-read what's on the devices"
-            onclick={(e) => { e.preventDefault(); e.stopPropagation(); refreshDeviceLibraries({ force: true }); }}>↻</button>
-        </summary>
+        <summary class="section-title section-summary">Per Device</summary>
         {#each connectedList as device (device.deviceId)}
           <div class="device-group">
             <h3 class="device-group-name">{device.name}</h3>
@@ -521,11 +517,6 @@
     margin: 0 0 0.6rem; font-size: 1.1rem; font-weight: 700; color: #fff;
   }
   .section-summary { cursor: pointer; user-select: none; }
-  .refresh-btn {
-    margin-left: 0.5rem; background: rgba(255, 255, 255, 0.12);
-    border: 1px solid rgba(255, 255, 255, 0.25); color: #fff;
-    border-radius: 6px; padding: 0 0.4rem; font-size: 0.9rem; cursor: pointer;
-  }
   .section-empty { color: rgba(255, 255, 255, 0.7); font-size: 0.9rem; margin: 0 0 0.75rem; }
   .simple-row {
     display: flex; align-items: center; gap: 0.75rem;
