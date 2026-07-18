@@ -1,0 +1,13 @@
+# ChromaBay 4MB flash (classic ESP32, ESP32-C3).
+# Big dual-OTA app slots (1.75 MB each) to leave headroom for WiFi + future growth on top
+# of the current ~0.95 MB BLE build; a 64 KB ELF coredump partition so a field panic can be
+# turned into a symbolicated backtrace (esp_core_dump_get_summary); a deliberately small
+# 384 KB LittleFS — patterns are ~250 B each, so this still holds far more than anyone tracks.
+# app partition offsets/sizes must stay 64 KB (0x10000) aligned.
+# Name,   Type, SubType,  Offset,   Size,     Flags
+nvs,      data, nvs,      0x9000,   0x5000,
+otadata,  data, ota,      0xe000,   0x2000,
+app0,     app,  ota_0,    0x10000,  0x1C0000,
+app1,     app,  ota_1,    0x1D0000, 0x1C0000,
+coredump, data, coredump, 0x390000, 0x10000,
+spiffs,   data, 0x82,     0x3A0000, 0x60000,

@@ -1,0 +1,11 @@
+# ChromaBay 16MB flash (large S3 modules, some WROVER boards).
+# Same 2.5 MB dual-OTA app slots + 64 KB coredump as the 8MB layout; everything else
+# (~10.9 MB) is LittleFS. Slots are kept at 2.5 MB deliberately — hard to imagine a single
+# ChromaBay build needing more app than that; the extra flash is far more useful as storage.
+# Name,   Type, SubType,  Offset,    Size,      Flags
+nvs,      data, nvs,      0x9000,    0x5000,
+otadata,  data, ota,      0xe000,    0x2000,
+app0,     app,  ota_0,    0x10000,   0x280000,
+app1,     app,  ota_1,    0x290000,  0x280000,
+coredump, data, coredump, 0x510000,  0x10000,
+spiffs,   data, 0x82,     0x520000,  0xAE0000,

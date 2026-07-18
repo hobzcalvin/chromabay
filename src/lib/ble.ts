@@ -50,6 +50,7 @@ const CHARACTERISTIC_UUID_TX = 'a0be83e6-8dc9-47f0-ab40-b19721d20ed1';
 
 // New OTA Characteristics (within the same LED_SERVICE_UUID)
 const CHARACTERISTIC_UUID_DEVICE_INFO = "a0be83e7-8dc9-47f0-ab40-b19721d20ed1";
+const CHARACTERISTIC_UUID_COMM_CONFIG = "a0be83fa-8dc9-47f0-ab40-b19721d20ed1"; // device settings (feat>=2)
 const CHARACTERISTIC_UUID_OTA_CONTROL = "a0be83e8-8dc9-47f0-ab40-b19721d20ed1";
 const CHARACTERISTIC_UUID_OTA_DATA    = "a0be83e9-8dc9-47f0-ab40-b19721d20ed1";
 const CHARACTERISTIC_UUID_OTA_STATUS  = "a0be83ea-8dc9-47f0-ab40-b19721d20ed1";
@@ -89,9 +90,36 @@ const MAX_BLE_CHUNK_SIZE = 500; // Should match ESP32's definition
 export interface DeviceInfo {
   fw_ver: string;
   hw_ver: string;
+  feat?: number;            // firmware capability level (absent = 1/legacy). Gate features on this.
   chip?: string;            // esp32 | esp32s3 | esp32c3 (absent on pre-multi-chip firmware)
   name?: string;
+  mode?: 'ble' | 'wifi';    // active transport (feat>=2)
+  ip?: string;              // device IP when on WiFi
+  sleep?: number;           // sleep-timer minutes (0 = off)
+  rgbtest?: number;         // 1 = boot RGB test on
   heap?: number;
+}
+
+// Device settings (comm mode / WiFi creds / sleep timer / rgb-test), read as JSON from the
+// COMM_CONFIG characteristic; password is never returned (hasPass indicates whether one is set).
+export interface DeviceSettings {
+  mode: 'ble' | 'wifi';
+  ssid: string;
+  hasPass: boolean;
+  fallback: number;         // 0 = revert to BLE if WiFi fails, 1 = SoftAP
+  sleep: number;            // minutes, 0 = off
+  rgbtest: number;          // 1 = on
+  mode_active?: 'ble' | 'wifi';
+  ip?: string;
+}
+// A patch written to COMM_CONFIG (msgpack). All fields optional; changing mode/ssid/pass reboots the device.
+export interface DeviceSettingsPatch {
+  mode?: 'ble' | 'wifi';
+  ssid?: string;
+  pass?: string;
+  fallback?: number;
+  sleep?: number;
+  rgbtest?: boolean;
 }
 
 export interface FirmwareRegistryEntry {
@@ -632,6 +660,28 @@ export async function getDeviceInfo(deviceId: string): Promise<DeviceInfo> {
   }
 }
 
+// Read device settings (comm mode / WiFi / sleep / rgb-test) from the COMM_CONFIG
+// characteristic. Requires firmware feat>=2; returns null on older firmware (char absent).
+export async function readDeviceSettings(deviceId: string): Promise<DeviceSettings | null> {
+  try {
+    const json = await readCharacteristic(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_COMM_CONFIG);
+    const s = JSON.parse(json);
+    return { ...s, hasPass: !!s.hasPass } as DeviceSettings;
+  } catch (e) {
+    console.warn('[settings] COMM_CONFIG unavailable (older firmware?):', e);
+    return null;
+  }
+}
+
+// Write a settings patch (msgpack) to COMM_CONFIG. Changing mode/ssid/pass reboots the
+// device into the new transport — the caller should expect the BLE link to drop after this.
+export async function writeDeviceSettings(deviceId: string, patch: DeviceSettingsPatch): Promise<void> {
+  const bytes = msgpackEncode(patch) as Uint8Array;
+  await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_COMM_CONFIG,
+    new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength));
+  console.log('[settings] wrote patch', patch);
+}
+
 export async function fetchFirmwareRegistry(registryUrl: string = "/firmware/esp32/esp32_firmware_registry.json"): Promise<FirmwareRegistryEntry[]> {
   console.log(`[OTA] Fetching firmware registry from: ${registryUrl}`);
   try {
@@ -738,6 +788,14 @@ async function writeChunkNoWait(deviceId: string, chunk: ArrayBuffer): Promise<v
 // overrun the controller's write-without-response buffer (which would drop chunks — a
 // failed, not bricked, update thanks to signature verification + rollback).
 const OTA_WINDOW = 8;
+
+// Size of a single OTA app slot (app0/app1) in the device's partition table — the hard
+// ceiling for any image we stream. Conservative floor = the 4MB layout's 1.75 MB slot
+// (esp32/partitions-4mb.csv); 8MB chips actually have 2 MB slots, so this only ever
+// under-refuses, never over-accepts. Used to reject an over-large image (e.g. a big WLED
+// build) up front instead of failing ~90% through a slow BLE transfer. TODO: have the
+// device report update_partition->size in device-info so this isn't hard-coded.
+const OTA_APP_SLOT_BYTES = 0x1c0000; // 1,835,008 (1.75 MB)
 
 export async function startOTAStatusNotifications(deviceId: string, callback: (status: OTAUpdateStatus) => void): Promise<void> {
   console.log(`[OTA] Starting status notifications for ${deviceId}`);
@@ -854,6 +912,19 @@ export async function performManualOTAUpdate(
   if (firmwareBuffer.byteLength === 0) throw new Error('Firmware file is empty.');
   if (signatureBuffer && signatureBuffer.byteLength !== 64) {
     throw new Error(`Invalid signature length: ${signatureBuffer.byteLength}. Expected 64 bytes.`);
+  }
+  // Refuse up front if the image can't fit the OTA slot. Without this the device would
+  // erase the target partition, accept chunks, and only fail near the end when esp_ota_write
+  // runs past the partition bound — wasting a multi-minute BLE transfer. Common trigger: a
+  // large WLED build (audioreactive/usermods) when reverting to stock. Tell the user to use
+  // USB instead (esptool writes a fresh partition table + app; over-the-air can't).
+  if (firmwareBuffer.byteLength > OTA_APP_SLOT_BYTES) {
+    const mb = (n: number) => (n / (1024 * 1024)).toFixed(2);
+    throw new Error(
+      `This firmware is ${mb(firmwareBuffer.byteLength)} MB, larger than the device's ` +
+      `${mb(OTA_APP_SLOT_BYTES)} MB over-the-air slot, so it can't be flashed wirelessly. ` +
+      `Use a USB cable to flash it instead (e.g. install.wled.me or esptool).`
+    );
   }
   await streamFirmwareOverBle(deviceId, firmwareBuffer, signatureBuffer, progressCallback);
 }

@@ -52,6 +52,7 @@
   import LedConfigurationComponent from '$lib/components/LedConfiguration.svelte';
   import UsbFlash from '$lib/components/UsbFlash.svelte';
   import WledConvert from '$lib/components/WledConvert.svelte';
+  import DeviceSettingsPanel from '$lib/components/DeviceSettingsPanel.svelte';
 
   let bleSupported = $state(false);
   let bleEnabled = $state(false);
@@ -855,6 +856,8 @@
 
 {#snippet firmwareSection(device: any, settings: any)}
   {@const mf = manualFw[device.deviceId] ?? {}}
+  <!-- Connection (BLE/WiFi), sleep timer, startup-test toggle (firmware feat>=2) -->
+  <DeviceSettingsPanel deviceId={device.deviceId} deviceInfo={settings.deviceInfo} />
   <!-- Firmware Update -->
   <div class="settings-section">
     <h4>Firmware Update</h4>

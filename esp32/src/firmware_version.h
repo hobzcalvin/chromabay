@@ -21,6 +21,13 @@
 // Format: hwvX.Y.Z
 #define HARDWARE_VERSION "hwv0.0.1"
 
+// Feature/capability level — a monotonically increasing integer reported in device-info so
+// the app can gate features and prompt firmware upgrades without parsing the version string.
+// Bump when adding a wire-visible capability. History:
+//   1  baseline (BLE control, OTA, library, cycle, layouts, calibration)
+//   2  WiFi/TCP transport + comm-mode switching, sleep timer, RGB-test toggle, time node
+#define FIRMWARE_FEATURES 2
+
 // --- Firmware Signature Verification ---
 // ECDSA P-256 Public Key (Raw 64-byte format: 32-byte X + 32-byte Y coordinates)
 // This will be populated when keys are generated

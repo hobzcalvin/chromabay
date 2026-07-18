@@ -7,8 +7,11 @@
 #include <NimBLEDevice.h>
 #include <NimBLEServer.h>
 #include <NimBLEUtils.h>
+#include <WiFi.h>       // WiFi/TCP transport (alternative to BLE, chosen per comm mode)
+#include <ESPmDNS.h>    // advertise the TCP endpoint as _chromabay._tcp for app discovery
 #include "esp_ota_ops.h" // For OTA updates
 #include "esp_chip_info.h" // Report which ESP32 variant we're running on (device-info JSON)
+#include "device_settings.h" // NVS-backed comm mode / WiFi creds / sleep timer / rgb-test
 
 // PSA Crypto API includes for signature verification
 #include "psa/crypto.h"
@@ -91,13 +94,42 @@ PatternRendererBase* patternRenderer = nullptr;
 // MessagePack framed [u8 idx][u16 totalLen LE][u16 offset LE][bytes], then a done sentinel idx=0xFF.
 #define CHARACTERISTIC_UUID_LIBRARY_DUMP "a0be83f9-8dc9-47f0-ab40-b19721d20ed1"
 
+// Comm/Device settings characteristic - read returns a JSON of the device settings
+// (comm mode, wifi ssid, sleep timer, rgb-test, wifi ip); write is a JSON patch. Used to
+// provision WiFi over BLE and to flip settings; a mode/ssid change triggers a reboot.
+#define CHARACTERISTIC_UUID_COMM_CONFIG "a0be83fa-8dc9-47f0-ab40-b19721d20ed1"
+
+// TCP transport: port the device listens on in WiFi mode, and the framed-message protocol
+// version. Each frame is [u8 channel][u32 len LE][payload]. Channels mirror the BLE
+// characteristics (see TcpChannel below). mDNS service: _chromabay._tcp.
+#define CHROMABAY_TCP_PORT 8080
+
 // OTA Constants
 #define MAX_BLE_CHUNK_SIZE 500 
+
+// --- Device settings + transport selection -----------------------------------------
+// Loaded from NVS at boot. gWifiMode is true when this boot is running the WiFi/TCP
+// transport (STA connected); false = BLE. Exactly one transport is active per boot; the
+// app flips the mode (over whichever transport is live) and the device reboots into it.
+DeviceSettings::Settings gSettings;
+static bool gWifiMode = false;           // this boot is serving over WiFi/TCP
+// A COMM_CONFIG (settings) write, staged for the loop task (which saves to NVS and, if the
+// mode/creds changed, reboots into the new transport — never from a BLE/TCP callback).
+static uint8_t* commCfgBuf = nullptr;
+static size_t   commCfgLen = 0;
+static volatile bool newCommCfgAvailable = false;
+
+// Sleep timer: after gSettings.sleepMinutes of no app activity + no button, blank the
+// output and pause rendering until any activity wakes it. 0 = disabled.
+static bool gAsleep = false;
+static uint32_t gLastActivityMs = 0;
+static void noteActivity();              // defined below; resets the sleep countdown / wakes
 
 NimBLEServer* pServer = nullptr;
 // Handle of the current central connection (captured in onConnect), so we can request a
 // faster connection interval during OTA. 0xFFFF = none.
 static uint16_t currentConnHandle = 0xFFFF;
+NimBLECharacteristic* pCommConfigCharacteristic = nullptr;
 // Original RX/TX Characteristics
 NimBLECharacteristic* pTxCharacteristic = nullptr;
 // OTA Characteristics
@@ -501,28 +533,105 @@ static const char* chipModelName() {
     }
 }
 
-void updateDeviceInfoCharacteristic() {
-    if (!pDeviceInfoCharacteristic) {
-        // This should not happen if BLE setup is correct
-        return;
-    }
+// Build the device-info JSON. Shared by the BLE characteristic and the WiFi/TCP transport.
+// `feat` lets the app gate features/prompt upgrades; `mode`/`ip` tell it which transport is
+// live and where to reach the device on WiFi.
+String buildDeviceInfoJson() {
+    String j = "{";
+    j += "\"fw_ver\":\"" + String(FIRMWARE_VERSION) + "\",";
+    j += "\"hw_ver\":\"" + String(HARDWARE_VERSION) + "\",";
+    j += "\"feat\":" + String(FIRMWARE_FEATURES) + ",";
+    j += "\"chip\":\"" + String(chipModelName()) + "\",";
+    j += "\"name\":\"" + deviceName + "\",";
+    j += "\"mode\":\"" + String(gWifiMode ? "wifi" : "ble") + "\",";
+    if (gWifiMode) j += "\"ip\":\"" + WiFi.localIP().toString() + "\",";
+    j += "\"sleep\":" + String(gSettings.sleepMinutes) + ",";
+    j += "\"rgbtest\":" + String(gSettings.rgbTest ? 1 : 0) + ",";
+    j += "\"heap\":" + String(ESP.getFreeHeap());
+    j += "}";
+    return j;
+}
 
-    String deviceInfoJson = "{";
-    deviceInfoJson += "\"fw_ver\":\"" + String(FIRMWARE_VERSION) + "\",";
-    deviceInfoJson += "\"hw_ver\":\"" + String(HARDWARE_VERSION) + "\",";
-    deviceInfoJson += "\"chip\":\"" + String(chipModelName()) + "\",";
-    deviceInfoJson += "\"name\":\"" + deviceName + "\",";
-    deviceInfoJson += "\"heap\":" + String(ESP.getFreeHeap());
-    deviceInfoJson += "}";
-    
+void updateDeviceInfoCharacteristic() {
+    if (!pDeviceInfoCharacteristic) return; // BLE not running (WiFi mode) — nothing to update
+    String deviceInfoJson = buildDeviceInfoJson();
     // IMPORTANT: Always use setValue with explicit length for strings with NimBLE
     // to avoid issues with strlen or incomplete data transmission.
     // The NimBLE setValue(const char*) overload has proven unreliable.
     pDeviceInfoCharacteristic->setValue((uint8_t*)deviceInfoJson.c_str(), deviceInfoJson.length());
-    
-    // Optionally notify if the characteristic supports it and clients are subscribed,
-    // though for device info, a read-on-demand is usually sufficient.
-    // if (deviceConnected) { pDeviceInfoCharacteristic->notify(); }
+}
+
+// --- Shared staging/serialization helpers (used by BOTH the BLE callbacks and the WiFi
+// --- TCP transport, so a command behaves identically over either link) -----------------
+
+// Any inbound command or button press counts as activity: reset the sleep countdown and,
+// if we were asleep, wake (rendering resumes in loop()).
+static void noteActivity() {
+    gLastActivityMs = millis();
+    if (gAsleep) { gAsleep = false; Serial.println("[Sleep] woke on activity"); }
+}
+
+// Hand a fully-reassembled pattern msgpack buffer to the render loop. Takes ownership of
+// `full` (frees it or the buffer it replaces). Safe to call from either task — the swap is
+// under patternMux.
+void stageCompletePattern(uint8_t* full, size_t fullLen) {
+    if (!full) return;
+    noteActivity();
+    uint8_t* old = nullptr;
+    portENTER_CRITICAL(&patternMux);
+    old = patternBuffer;
+    patternBuffer = full;
+    patternBufferSize = fullLen;
+    newPatternAvailable = true;
+    portEXIT_CRITICAL(&patternMux);
+    if (old != nullptr) free(old);
+}
+
+// Stage raw LED-config msgpack for processReceivedLedConfig() to apply on the loop task.
+void stageLedConfigBytes(const uint8_t* data, size_t len) {
+    if (!data || len == 0) return;
+    noteActivity();
+    if (ledConfigBuffer != nullptr) { free(ledConfigBuffer); ledConfigBuffer = nullptr; ledConfigBufferSize = 0; }
+    ledConfigBuffer = (uint8_t*)malloc(len);
+    if (ledConfigBuffer != nullptr) {
+        memcpy(ledConfigBuffer, data, len);
+        ledConfigBufferSize = len;
+        newLedConfigAvailable = true;
+    } else {
+        Serial.println("LED Config: alloc failed");
+        ledConfigBufferSize = 0;
+    }
+}
+
+// Serialize the current LED configuration to MessagePack (same shape the BLE LED_CONFIG_GET
+// read returns). Caller owns the returned buffer (free it); returns nullptr on failure.
+uint8_t* serializeLedConfigMpack(size_t* outLen) {
+    LedConfig::FullLedConfiguration cfg = configMgr.getCurrentConfigurationFromManager();
+    mpack_writer_t writer;
+    char* buf = nullptr; size_t sz = 0;
+    mpack_writer_init_growable(&writer, &buf, &sz);
+    mpack_start_map(&writer, 2);
+    mpack_write_cstr(&writer, "gb"); mpack_write_u8(&writer, cfg.globalBrightness);
+    mpack_write_cstr(&writer, "strips");
+    mpack_start_array(&writer, cfg.strips.size());
+    for (const auto& strip : cfg.strips) {
+        mpack_start_map(&writer, 9);
+        mpack_write_cstr(&writer, "cs");  mpack_write_u8(&writer, static_cast<uint8_t>(strip.chipset));
+        mpack_write_cstr(&writer, "pin"); mpack_write_u8(&writer, strip.pin);
+        mpack_write_cstr(&writer, "clk"); mpack_write_u8(&writer, strip.clockPin);
+        mpack_write_cstr(&writer, "num"); mpack_write_u16(&writer, strip.numLeds);
+        mpack_write_cstr(&writer, "co");  mpack_write_u8(&writer, static_cast<uint8_t>(strip.colorOrder));
+        mpack_write_cstr(&writer, "rmt"); mpack_write_u8(&writer, strip.rmtChannel);
+        mpack_write_cstr(&writer, "w");   mpack_write_u16(&writer, strip.width);
+        mpack_write_cstr(&writer, "h");   mpack_write_u16(&writer, strip.height);
+        mpack_write_cstr(&writer, "ort"); mpack_write_u8(&writer, strip.orientation);
+        mpack_finish_map(&writer);
+    }
+    mpack_finish_array(&writer);
+    mpack_finish_map(&writer);
+    if (mpack_writer_destroy(&writer) != mpack_ok || !buf) { if (buf) free(buf); return nullptr; }
+    if (outLen) *outLen = sz;
+    return (uint8_t*)buf;
 }
 
 // NimBLE Server Callbacks
@@ -535,6 +644,7 @@ class ServerCallbacks: public NimBLEServerCallbacks {
     void onConnect(NimBLEServer* pServer, ble_gap_conn_desc* desc) {
         deviceConnected = true;
         currentConnHandle = desc ? desc->conn_handle : 0xFFFF;
+        noteActivity();
         Serial.println("BLE Client Connected");
         logPatternState("connect");
         // Update device info characteristic as heap might have changed or client needs fresh info
@@ -890,48 +1000,14 @@ class OTADataCallbacks : public NimBLECharacteristicCallbacks {
 // LED Config Get Callbacks - for reading LED strip configuration
 class LedConfigGetCallbacks : public NimBLECharacteristicCallbacks {
     void onRead(NimBLECharacteristic* pCharacteristic) {
-        Serial.println("LED Config requested via BLE");
-        
-        // Get current configuration as MessagePack
-        LedConfig::FullLedConfiguration currentConfig = configMgr.getCurrentConfigurationFromManager();
-        
-        // Serialize to MessagePack
-        mpack_writer_t writer;
-        char* mpack_buffer = nullptr;
-        size_t mpack_size = 0;
-        mpack_writer_init_growable(&writer, &mpack_buffer, &mpack_size);
-        
-        // Serialize the configuration
-        mpack_start_map(&writer, 2); // globalBrightness, strips
-        mpack_write_cstr(&writer, "gb");
-        mpack_write_u8(&writer, currentConfig.globalBrightness);
-        mpack_write_cstr(&writer, "strips");
-        mpack_start_array(&writer, currentConfig.strips.size());
-        
-        for (const auto& strip : currentConfig.strips) {
-            mpack_start_map(&writer, 9);
-            mpack_write_cstr(&writer, "cs"); mpack_write_u8(&writer, static_cast<uint8_t>(strip.chipset));
-            mpack_write_cstr(&writer, "pin"); mpack_write_u8(&writer, strip.pin);
-            mpack_write_cstr(&writer, "clk"); mpack_write_u8(&writer, strip.clockPin);
-            mpack_write_cstr(&writer, "num"); mpack_write_u16(&writer, strip.numLeds);
-            mpack_write_cstr(&writer, "co"); mpack_write_u8(&writer, static_cast<uint8_t>(strip.colorOrder));
-            mpack_write_cstr(&writer, "rmt"); mpack_write_u8(&writer, strip.rmtChannel);
-            mpack_write_cstr(&writer, "w"); mpack_write_u16(&writer, strip.width);
-            mpack_write_cstr(&writer, "h"); mpack_write_u16(&writer, strip.height);
-            mpack_write_cstr(&writer, "ort"); mpack_write_u8(&writer, strip.orientation);
-            mpack_finish_map(&writer);
-        }
-        mpack_finish_array(&writer);
-        mpack_finish_map(&writer);
-        
-        if (mpack_writer_destroy(&writer) == mpack_ok && mpack_buffer) {
-            // Set the characteristic value
-            pCharacteristic->setValue((uint8_t*)mpack_buffer, mpack_size);
-            Serial.printf("LED Config sent: %d bytes\n", mpack_size);
-            free(mpack_buffer);
+        size_t sz = 0;
+        uint8_t* buf = serializeLedConfigMpack(&sz);
+        if (buf) {
+            pCharacteristic->setValue(buf, sz);
+            Serial.printf("LED Config sent: %d bytes\n", (int)sz);
+            free(buf);
         } else {
             Serial.println("Failed to serialize LED config");
-            if (mpack_buffer) free(mpack_buffer);
         }
     }
 };
@@ -939,33 +1015,12 @@ class LedConfigGetCallbacks : public NimBLECharacteristicCallbacks {
 // LED Config Set Callbacks - for writing LED strip configuration
 class LedConfigSetCallbacks : public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic* pCharacteristic) {
+        // Stage the raw MessagePack for the render loop to apply (never apply here — this
+        // runs on the BLE host task and would race update()/render()). See stageLedConfigBytes.
         std::string value = pCharacteristic->getValue();
         if (value.length() > 0) {
-            Serial.printf("LED Config update received: %d bytes\n", value.length());
-
-            // Stage the raw MessagePack for the render loop to apply. We must NOT
-            // apply it here: this callback runs on the BLE host task, while the
-            // render loop runs on the Arduino task. Applying the config frees and
-            // reallocates the renderer's pixel buffers and destroys/recreates the
-            // LED strips, which races with update()/render() and corrupts the
-            // output buffers. processReceivedLedConfig() applies it safely from
-            // loop(), mirroring how patterns are handled.
-            if (ledConfigBuffer != nullptr) {
-                free(ledConfigBuffer);
-                ledConfigBuffer = nullptr;
-                ledConfigBufferSize = 0;
-            }
-
-            ledConfigBufferSize = value.length();
-            ledConfigBuffer = (uint8_t*)malloc(ledConfigBufferSize);
-
-            if (ledConfigBuffer != nullptr) {
-                memcpy(ledConfigBuffer, value.data(), ledConfigBufferSize);
-                newLedConfigAvailable = true;
-            } else {
-                Serial.println("LED Config: Failed to allocate memory for config");
-                ledConfigBufferSize = 0;
-            }
+            Serial.printf("LED Config update received: %d bytes\n", (int)value.length());
+            stageLedConfigBytes((const uint8_t*)value.data(), value.length());
         }
     }
 };
@@ -1072,21 +1127,11 @@ class PatternSyncCallbacks : public NimBLECharacteristicCallbacks {
         patternRxAccum = (size_t)offset + dataLen; // writes are serialized + in order
         if (patternRxAccum < patternRxSize) return; // more chunks still coming
 
-        // Complete pattern reassembled — hand the buffer to the loop task (which takes
-        // ownership and frees it). We only swap pointers under the lock; the previous
-        // unconsumed buffer is freed afterwards, outside the lock.
+        // Complete pattern reassembled — hand the buffer to the loop task.
         uint8_t* full = patternRxBuf;
         size_t fullLen = patternRxSize;
         patternRxBuf = nullptr; patternRxSize = 0; patternRxAccum = 0;
-
-        uint8_t* old = nullptr;
-        portENTER_CRITICAL(&patternMux);
-        old = patternBuffer;
-        patternBuffer = full;
-        patternBufferSize = fullLen;
-        newPatternAvailable = true;
-        portEXIT_CRITICAL(&patternMux);
-        if (old != nullptr) free(old);
+        stageCompletePattern(full, fullLen);
     }
 };
 
@@ -1101,6 +1146,7 @@ class CycleControlCallbacks : public NimBLECharacteristicCallbacks {
         pendingCycleIntervalMs = iv;
         pendingCycleEnabled = ((uint8_t)v[4] != 0);
         newCycleControlAvailable = true;
+        noteActivity();
     }
 };
 
@@ -1142,6 +1188,7 @@ class BrightnessCallbacks : public NimBLECharacteristicCallbacks {
         if (value.length() >= 1) {
             pendingBrightness = (uint8_t)value[0];
             newBrightnessAvailable = true;
+            noteActivity();
         }
     }
 };
@@ -2082,13 +2129,327 @@ void finalizeOtaIfReady() {
 
 // pushCRGBToStrip function removed - pattern renderer handles LED output directly
 
+// ===================================================================================
+// Device settings (COMM_CONFIG) + WiFi/TCP transport
+// ===================================================================================
+
+// Current settings as JSON (for a COMM_CONFIG read). Password is intentionally omitted.
+static String commSettingsJson() {
+    String j = "{";
+    j += "\"mode\":\"" + String(gSettings.commMode == DeviceSettings::COMM_WIFI ? "wifi" : "ble") + "\",";
+    j += "\"ssid\":\"" + gSettings.wifiSsid + "\",";
+    j += "\"hasPass\":" + String(gSettings.wifiPass.length() > 0 ? 1 : 0) + ",";
+    j += "\"fallback\":" + String(gSettings.wifiFallback) + ",";
+    j += "\"sleep\":" + String(gSettings.sleepMinutes) + ",";
+    j += "\"rgbtest\":" + String(gSettings.rgbTest ? 1 : 0) + ",";
+    j += "\"mode_active\":\"" + String(gWifiMode ? "wifi" : "ble") + "\"";
+    if (gWifiMode) j += ",\"ip\":\"" + WiFi.localIP().toString() + "\"";
+    j += "}";
+    return j;
+}
+
+// Stage a COMM_CONFIG write (msgpack map, keys optional: mode/ssid/pass/fallback/sleep/
+// rgbtest) for the loop task. Copies the bytes; loop drains via processCommConfig().
+static void stageCommConfig(const uint8_t* data, size_t len) {
+    if (!data || len == 0 || len > 512) return;
+    noteActivity();
+    if (commCfgBuf) { free(commCfgBuf); commCfgBuf = nullptr; commCfgLen = 0; }
+    commCfgBuf = (uint8_t*)malloc(len);
+    if (!commCfgBuf) return;
+    memcpy(commCfgBuf, data, len);
+    commCfgLen = len;
+    newCommCfgAvailable = true;
+}
+
+// Apply a staged COMM_CONFIG patch on the loop task. Updates gSettings, persists to NVS,
+// and reboots if the active transport must change (mode or WiFi creds). Live-applies
+// sleep/rgbtest without a reboot.
+void processCommConfig() {
+    if (!newCommCfgAvailable) return;
+    newCommCfgAvailable = false;
+    uint8_t* buf = commCfgBuf; size_t len = commCfgLen;
+    commCfgBuf = nullptr; commCfgLen = 0;
+    if (!buf) return;
+
+    uint8_t  oldMode = gSettings.commMode;
+    String   oldSsid = gSettings.wifiSsid;
+    String   oldPass = gSettings.wifiPass;
+
+    mpack_tree_t tree;
+    mpack_tree_init_data(&tree, (const char*)buf, len);
+    mpack_tree_parse(&tree);
+    mpack_node_t root = mpack_tree_root(&tree);
+    if (mpack_tree_error(&tree) == mpack_ok && mpack_node_type(root) == mpack_type_map) {
+        size_t n = mpack_node_map_count(root);
+        for (size_t i = 0; i < n; i++) {
+            char key[16];
+            mpack_node_copy_cstr(mpack_node_map_key_at(root, i), key, sizeof(key));
+            mpack_node_t v = mpack_node_map_value_at(root, i);
+            if (mpack_tree_error(&tree) != mpack_ok) break;
+            if (strcmp(key, "mode") == 0) {
+                char m[8] = {0}; mpack_node_copy_cstr(v, m, sizeof(m));
+                gSettings.commMode = (strcmp(m, "wifi") == 0) ? DeviceSettings::COMM_WIFI : DeviceSettings::COMM_BLE;
+            } else if (strcmp(key, "ssid") == 0) {
+                char s[48] = {0}; mpack_node_copy_cstr(v, s, sizeof(s)); gSettings.wifiSsid = String(s);
+            } else if (strcmp(key, "pass") == 0) {
+                char s[72] = {0}; mpack_node_copy_cstr(v, s, sizeof(s)); gSettings.wifiPass = String(s);
+            } else if (strcmp(key, "fallback") == 0) {
+                gSettings.wifiFallback = (uint8_t)mpack_node_u8(v);
+            } else if (strcmp(key, "sleep") == 0) {
+                gSettings.sleepMinutes = (uint16_t)mpack_node_u16(v);
+            } else if (strcmp(key, "rgbtest") == 0) {
+                gSettings.rgbTest = mpack_node_bool(v);
+            }
+        }
+    } else {
+        Serial.println("[CommConfig] bad msgpack patch");
+    }
+    mpack_tree_destroy(&tree);
+    free(buf);
+
+    DeviceSettings::save(gSettings);
+    noteActivity(); // settings change wakes/refreshes the sleep timer too
+
+    bool transportChanged = (gSettings.commMode != oldMode) ||
+                            (gSettings.commMode == DeviceSettings::COMM_WIFI &&
+                             (gSettings.wifiSsid != oldSsid || gSettings.wifiPass != oldPass));
+    if (transportChanged) {
+        Serial.println("[CommConfig] transport change → rebooting in 400ms");
+        delay(400); // give the BLE/TCP ack a moment to flush
+        ESP.restart();
+    }
+}
+
+// COMM_CONFIG BLE characteristic: read returns settings JSON; write stages an msgpack patch.
+class CommConfigCallbacks : public NimBLECharacteristicCallbacks {
+    void onRead(NimBLECharacteristic* pCharacteristic) {
+        String j = commSettingsJson();
+        pCharacteristic->setValue((uint8_t*)j.c_str(), j.length());
+    }
+    void onWrite(NimBLECharacteristic* pCharacteristic) {
+        std::string v = pCharacteristic->getValue();
+        if (!v.empty()) stageCommConfig((const uint8_t*)v.data(), v.length());
+    }
+};
+
+// ---- TCP transport --------------------------------------------------------------------
+// Framed protocol: [u8 channel][u32 len LE][payload]. Channels mirror BLE characteristics.
+enum TcpChannel : uint8_t {
+    CH_DEVICE_INFO    = 1,  // req(empty) → JSON reply
+    CH_LED_CONFIG_GET = 2,  // req(empty) → mpack reply
+    CH_LED_CONFIG_SET = 3,  // mpack payload
+    CH_BRIGHTNESS     = 4,  // 1 byte (write); empty req → 1-byte reply
+    CH_PATTERN_SYNC   = 5,  // full pattern msgpack (no chunk header over TCP)
+    CH_PLAYLIST_SYNC  = 6,  // [u32 intervalMs LE][u8 enabled]
+    CH_TIMESTAMP_SYNC = 7,  // [u64 ms LE]
+    CH_LIBRARY_CMD    = 8,  // [op][payload]
+    CH_LIBRARY_DUMP   = 9,  // req(empty) → one frame per pattern: [name\0][mpack]; then empty frame = done
+    CH_DEVICE_NAME    = 10, // write utf8 name; empty req → name reply
+    CH_COMM_CONFIG    = 11, // write mpack patch; empty req → settings JSON reply
+};
+
+namespace WifiLink {
+    static WiFiServer server(CHROMABAY_TCP_PORT);
+    static WiFiClient client;
+    // Inbound frame accumulator for the single active client.
+    static std::vector<uint8_t> rx;
+    static const size_t MAX_FRAME = 64 * 1024;
+
+    static void sendFrame(uint8_t channel, const uint8_t* data, uint32_t len) {
+        if (!client || !client.connected()) return;
+        uint8_t hdr[5] = { channel, (uint8_t)(len), (uint8_t)(len >> 8), (uint8_t)(len >> 16), (uint8_t)(len >> 24) };
+        client.write(hdr, 5);
+        if (len && data) client.write(data, len);
+    }
+    static void sendStr(uint8_t channel, const String& s) {
+        sendFrame(channel, (const uint8_t*)s.c_str(), s.length());
+    }
+
+    // Stream the stored library: one frame per pattern on CH_LIBRARY_DUMP, payload =
+    // NUL-terminated name followed by the raw pattern msgpack; an empty frame signals done.
+    static void dumpLibrary() {
+        for (size_t i = 0; i < libNames.size() && i < 255; i++) {
+            File f = LittleFS.open(libPath((int)i), FILE_READ);
+            if (!f) continue;
+            if (f.available() < 2) { f.close(); continue; }
+            uint8_t lo = (uint8_t)f.read(), hi = (uint8_t)f.read();
+            uint16_t nameLen = (uint16_t)lo | ((uint16_t)hi << 8);
+            size_t total = f.size();
+            if (total <= (size_t)(2 + nameLen)) { f.close(); continue; }
+            size_t mpLen = total - (2 + nameLen);
+            if (mpLen > MAX_FRAME) { f.close(); continue; }
+            // name
+            char nameBuf[64]; size_t nb = nameLen < sizeof(nameBuf) - 1 ? nameLen : sizeof(nameBuf) - 1;
+            f.readBytes(nameBuf, nb); nameBuf[nb] = 0;
+            if (nameLen > nb) f.seek(2 + nameLen); // skip any overflow
+            uint8_t* mp = (uint8_t*)malloc(mpLen);
+            if (!mp) { f.close(); continue; }
+            bool ok = (f.readBytes((char*)mp, mpLen) == mpLen);
+            f.close();
+            if (!ok) { free(mp); continue; }
+            // frame = name + '\0' + mpack
+            size_t frameLen = nb + 1 + mpLen;
+            uint8_t* frame = (uint8_t*)malloc(frameLen);
+            if (frame) {
+                memcpy(frame, nameBuf, nb); frame[nb] = 0; memcpy(frame + nb + 1, mp, mpLen);
+                sendFrame(CH_LIBRARY_DUMP, frame, frameLen);
+                free(frame);
+            }
+            free(mp);
+        }
+        sendFrame(CH_LIBRARY_DUMP, nullptr, 0); // done
+    }
+
+    static void dispatch(uint8_t ch, const uint8_t* p, uint32_t len) {
+        noteActivity();
+        switch (ch) {
+            case CH_DEVICE_INFO: sendStr(CH_DEVICE_INFO, buildDeviceInfoJson()); break;
+            case CH_LED_CONFIG_GET: {
+                size_t sz = 0; uint8_t* b = serializeLedConfigMpack(&sz);
+                if (b) { sendFrame(CH_LED_CONFIG_GET, b, sz); free(b); }
+                break;
+            }
+            case CH_LED_CONFIG_SET: stageLedConfigBytes(p, len); break;
+            case CH_BRIGHTNESS:
+                if (len >= 1) { pendingBrightness = p[0]; newBrightnessAvailable = true; }
+                else { uint8_t b = ledMgr.getGlobalBrightness(); sendFrame(CH_BRIGHTNESS, &b, 1); }
+                break;
+            case CH_PATTERN_SYNC: {
+                if (len == 0 || len > MAX_FRAME) break;
+                uint8_t* full = (uint8_t*)malloc(len);
+                if (full) { memcpy(full, p, len); stageCompletePattern(full, len); }
+                break;
+            }
+            case CH_PLAYLIST_SYNC:
+                if (len >= 5) { memcpy(&pendingCycleIntervalMs, p, 4); pendingCycleEnabled = (p[4] != 0); newCycleControlAvailable = true; }
+                break;
+            case CH_TIMESTAMP_SYNC:
+                if (len == 8) {
+                    uint64_t ts = 0; memcpy(&ts, p, 8);
+                    syncedTimestampMs = (unsigned long)ts; syncedLocalTime = millis(); timestampSynced = true;
+                    if (patternRenderer) patternRenderer->setSynchronizedTime(syncedTimestampMs, syncedLocalTime);
+                }
+                break;
+            case CH_LIBRARY_CMD: {
+                size_t n = len > sizeof(libCmdBuf) ? sizeof(libCmdBuf) : len;
+                memcpy(libCmdBuf, p, n); libCmdLen = n; newLibCmdAvailable = true;
+                break;
+            }
+            case CH_LIBRARY_DUMP: dumpLibrary(); break;
+            case CH_DEVICE_NAME:
+                if (len > 0) { pendingDeviceName = String(); for (uint32_t i = 0; i < len; i++) pendingDeviceName += (char)p[i]; deviceNamePending = true; }
+                else sendStr(CH_DEVICE_NAME, deviceName);
+                break;
+            case CH_COMM_CONFIG:
+                if (len > 0) stageCommConfig(p, len);
+                else sendStr(CH_COMM_CONFIG, commSettingsJson());
+                break;
+            default: Serial.printf("[TCP] unknown channel %u\n", ch); break;
+        }
+    }
+
+    // Connect STA (or fall back to SoftAP) and start the TCP server + mDNS. Returns true if
+    // we are serving over WiFi. On STA failure with FB_BLE, returns false so the caller
+    // starts BLE for this boot instead (so the user can always get back in and fix creds).
+    static bool startAp() {
+        String ap = deviceName.length() ? deviceName : String("ChromaBay");
+        Serial.printf("[WiFi] SoftAP '%s' (join it, then reach 192.168.4.1:%d)\n", ap.c_str(), CHROMABAY_TCP_PORT);
+        WiFi.mode(WIFI_AP);
+        return WiFi.softAP(ap.c_str()); // open network
+    }
+
+    static bool begin() {
+        // No SSID: only useful as an AP (else fall back to BLE so the user can provision).
+        if (gSettings.wifiSsid.length() == 0) {
+            if (gSettings.wifiFallback == DeviceSettings::FB_AP) { if (!startAp()) return false; }
+            else { Serial.println("[WiFi] no SSID set → BLE fallback"); return false; }
+        } else {
+            Serial.printf("[WiFi] connecting to '%s' ...\n", gSettings.wifiSsid.c_str());
+            WiFi.mode(WIFI_STA);
+            WiFi.setSleep(false); // lower latency / fewer stalls for the control link
+            WiFi.begin(gSettings.wifiSsid.c_str(), gSettings.wifiPass.c_str());
+            uint32_t start = millis();
+            while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) { delay(200); Serial.print('.'); }
+            Serial.println();
+            if (WiFi.status() != WL_CONNECTED) {
+                if (gSettings.wifiFallback == DeviceSettings::FB_AP) {
+                    Serial.println("[WiFi] STA failed → SoftAP");
+                    if (!startAp()) return false;
+                } else {
+                    Serial.println("[WiFi] STA failed → reverting to BLE this boot");
+                    WiFi.mode(WIFI_OFF);
+                    return false;
+                }
+            } else {
+                Serial.printf("[WiFi] connected: %s\n", WiFi.localIP().toString().c_str());
+            }
+        }
+        server.begin();
+        server.setNoDelay(true);
+        // mDNS: advertise _chromabay._tcp so the app can discover us without a fixed IP.
+        String host = deviceName; host.replace(' ', '-');
+        if (MDNS.begin(host.c_str())) {
+            MDNS.addService("chromabay", "tcp", CHROMABAY_TCP_PORT);
+            MDNS.addServiceTxt("chromabay", "tcp", "name", deviceName.c_str());
+            MDNS.addServiceTxt("chromabay", "tcp", "chip", chipModelName());
+            Serial.printf("[WiFi] mDNS: %s.local  service _chromabay._tcp:%d\n", host.c_str(), CHROMABAY_TCP_PORT);
+        }
+        return true;
+    }
+
+    // Poll from loop(): accept a client, read available bytes, dispatch whole frames.
+    static void tick() {
+        WiFiClient nc = server.accept();   // new connection, or falsy if none (non-blocking)
+        if (nc) {
+            if (client && client.connected()) {
+                nc.stop(); // one client at a time — reject the extra
+            } else {
+                client = nc;
+                client.setNoDelay(true);
+                rx.clear();
+                Serial.printf("[TCP] client %s\n", client.remoteIP().toString().c_str());
+                deviceConnected = true;
+            }
+        }
+        if (!client || !client.connected()) {
+            if (deviceConnected && gWifiMode) { deviceConnected = false; Serial.println("[TCP] client gone"); }
+            return;
+        }
+        while (client.available()) {
+            uint8_t b[256];
+            int n = client.read(b, sizeof(b));
+            if (n <= 0) break;
+            rx.insert(rx.end(), b, b + n);
+            if (rx.size() > MAX_FRAME + 5) { Serial.println("[TCP] frame too big — dropping client"); client.stop(); rx.clear(); return; }
+        }
+        // Parse as many complete frames as we have.
+        size_t pos = 0;
+        while (rx.size() - pos >= 5) {
+            uint8_t ch = rx[pos];
+            uint32_t len = (uint32_t)rx[pos+1] | ((uint32_t)rx[pos+2] << 8) | ((uint32_t)rx[pos+3] << 16) | ((uint32_t)rx[pos+4] << 24);
+            if (len > MAX_FRAME) { client.stop(); rx.clear(); return; }
+            if (rx.size() - pos - 5 < len) break; // wait for the rest
+            dispatch(ch, rx.data() + pos + 5, len);
+            pos += 5 + len;
+        }
+        if (pos > 0) rx.erase(rx.begin(), rx.begin() + pos);
+    }
+} // namespace WifiLink
+
 void setup() {
     Serial.begin(115200);
-    delay(1000); 
+    delay(1000);
     Serial.println("ESP32 LedManager + OTA Demo Starting...");
 
+    // Load device settings (comm mode / WiFi creds / sleep timer / rgb-test) from NVS.
+    gSettings = DeviceSettings::load();
+    gLastActivityMs = millis();
+    Serial.printf("Settings: mode=%s ssid='%s' sleep=%umin rgbtest=%u\n",
+                  gSettings.commMode == DeviceSettings::COMM_WIFI ? "wifi" : "ble",
+                  gSettings.wifiSsid.c_str(), gSettings.sleepMinutes, gSettings.rgbTest);
+
     // --- Boot-time firmware state check ---
-    Serial.printf("Firmware version: %s\n", FIRMWARE_VERSION);
+    Serial.printf("Firmware version: %s (feat %d)\n", FIRMWARE_VERSION, FIRMWARE_FEATURES);
 
     const esp_partition_t *running_partition = esp_ota_get_running_partition();
     esp_ota_img_states_t ota_state;
@@ -2195,40 +2556,59 @@ void setup() {
     // Power-on test: Red, Green, Blue for 0.5s each before the saved pattern
     // starts (verifies the LEDs work AND that colour order is correct — if these
     // don't show as R/G/B in order, the strip's colorOrder config is wrong).
+    // The R/G/B flash is toggleable per device (gSettings.rgbTest) — some installs
+    // don't want it — but a total absence of strips is still a fatal error.
     if (ledMgr.getNumStrips() > 0) {
-        const CRGB testColors[3] = { CRGB::Red, CRGB::Green, CRGB::Blue };
-        for (int c = 0; c < 3; c++) {
-            // Drive EVERY LED on EVERY strip for this color.
+        if (gSettings.rgbTest) {
+            const CRGB testColors[3] = { CRGB::Red, CRGB::Green, CRGB::Blue };
+            for (int c = 0; c < 3; c++) {
+                // Drive EVERY LED on EVERY strip for this color.
+                for (size_t s = 0; s < ledMgr.getNumStrips(); s++) {
+                    const LedConfig::LedBus* strip = ledMgr.getStrip(s);
+                    if (!strip) continue;
+                    int len = strip->getLength();
+                    for (int i = 0; i < len; i++) {
+                        ledMgr.setPixelColor(s, i, testColors[c]);
+                    }
+                }
+                ledMgr.show();
+                delay(500);
+            }
+            // Clear all strips.
             for (size_t s = 0; s < ledMgr.getNumStrips(); s++) {
                 const LedConfig::LedBus* strip = ledMgr.getStrip(s);
                 if (!strip) continue;
                 int len = strip->getLength();
                 for (int i = 0; i < len; i++) {
-                    ledMgr.setPixelColor(s, i, testColors[c]);
+                    ledMgr.setPixelColor(s, i, CRGB::Black);
                 }
             }
             ledMgr.show();
-            delay(500);
         }
-        // Clear all strips.
-        for (size_t s = 0; s < ledMgr.getNumStrips(); s++) {
-            const LedConfig::LedBus* strip = ledMgr.getStrip(s);
-            if (!strip) continue;
-            int len = strip->getLength();
-            for (int i = 0; i < len; i++) {
-                ledMgr.setPixelColor(s, i, CRGB::Black);
-            }
-        }
-        ledMgr.show();
     } else {
         Serial.println("ERROR: Cannot test LED functionality!");
         criticalSystemsOK = false;
     }
     
-    // Initialize BLE with the saved/default device name (LittleFS is mounted above).
+    // Load identity + button regardless of transport (used by both BLE and WiFi/mDNS).
     loadDeviceName();
     Serial.printf("Device name: %s\n", deviceName.c_str());
     loadButtonPin(); // configure the physical button GPIO (if any)
+
+    // --- Transport selection -----------------------------------------------------------
+    // WiFi mode: try to bring up the TCP transport. If it succeeds we run WiFi-only (BLE
+    // stays off to avoid sharing the radio and to save RAM). If STA connect fails with the
+    // revert-to-BLE fallback, WifiLink::begin() returns false and we start BLE below so the
+    // user can always reconnect and fix credentials.
+    if (gSettings.commMode == DeviceSettings::COMM_WIFI) {
+        gWifiMode = WifiLink::begin();
+        Serial.println(gWifiMode ? "Transport: WiFi/TCP (BLE disabled this boot)"
+                                 : "Transport: BLE (WiFi requested but unavailable)");
+    }
+
+    // Initialize BLE unless we're serving over WiFi (mutually exclusive per boot). The
+    // health-check / OTA-validate block after this runs for BOTH transports.
+    if (!gWifiMode) {
     NimBLEDevice::init(deviceName.c_str());
     // Transmit at max power (+9dBm). NimBLE's default is much lower, which showed up as a
     // weak RSSI (~-80dBm) even at close range and made the link drop-prone. Applies to the
@@ -2318,6 +2698,10 @@ void setup() {
             pButtonEventCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_BUTTON_EVENT, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY);
             pButtonEventCharacteristic->setValue((uint8_t*)"", 0);
 
+            // Comm/Device settings (read JSON / write msgpack patch) — WiFi provisioning + mode switch.
+            pCommConfigCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_COMM_CONFIG, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE);
+            pCommConfigCharacteristic->setCallbacks(new CommConfigCallbacks());
+
             pService->start();
             updateDeviceInfoCharacteristic();
             
@@ -2330,6 +2714,7 @@ void setup() {
             Serial.println("BLE services started");
         }
     }
+    } // end if (!gWifiMode)
 
     // --- Critical Systems Health Check and Rollback Decision ---
     if (!criticalSystemsOK) {
@@ -2384,7 +2769,7 @@ void loop() {
             } else {
                 renderCalibrationFrame(); // structured-light flash for camera auto-layout
             }
-        } else if (patternRenderer != nullptr && !ota_in_progress) {
+        } else if (patternRenderer != nullptr && !ota_in_progress && !gAsleep) {
             updateCycle();   // pick the synced playlist pattern before rendering
             patternRenderer->update();
             patternRenderer->render();
@@ -2414,6 +2799,26 @@ void loop() {
     processButton();
     processDeviceName();
     processButtonPinUpdate();
+    processCommConfig();
+
+    // WiFi/TCP transport: accept + read + dispatch framed messages (no-op in BLE mode).
+    if (gWifiMode) WifiLink::tick();
+
+    // Sleep timer: after gSettings.sleepMinutes of no activity, blank the output and pause
+    // rendering. Any inbound command / button press calls noteActivity() → wakes. 0 = off.
+    if (gSettings.sleepMinutes > 0) {
+        uint32_t idleMs = currentTime - gLastActivityMs;
+        if (!gAsleep && idleMs >= (uint32_t)gSettings.sleepMinutes * 60000UL) {
+            gAsleep = true;
+            Serial.printf("[Sleep] idle %us → sleeping (LEDs off)\n", (unsigned)(idleMs / 1000));
+            for (size_t s = 0; s < ledMgr.getNumStrips(); s++) {
+                const LedConfig::LedBus* strip = ledMgr.getStrip(s);
+                if (!strip) continue;
+                for (int i = 0; i < strip->getLength(); i++) ledMgr.setPixelColor(s, i, CRGB::Black);
+            }
+            ledMgr.show();
+        }
+    }
 
     // Finalize a pending OTA off the BLE host task (verify result, end, reboot)
     finalizeOtaIfReady();
