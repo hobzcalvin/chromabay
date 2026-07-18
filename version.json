@@ -1,7 +1,7 @@
 {
-  "version": "0.1.235",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.235.zip",
-  "buildDate": "2026-07-18T02:50:36Z",
-  "commitHash": "555c55fd341e574cced2bfc67ed4e1e7a854c20f",
-  "commitMessage": "Firmware+app: Live push is current-only (persisted, not cycled); sync = add to library"
+  "version": "0.1.236",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.236.zip",
+  "buildDate": "2026-07-18T04:32:10Z",
+  "commitHash": "c3885e03fc676133a179bd6dbdb852ff3e9d0fc0",
+  "commitMessage": "Fix brightness vanishing on return to Devices: persist per-device state + retry reads"
 }
