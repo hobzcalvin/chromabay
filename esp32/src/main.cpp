@@ -207,6 +207,10 @@ static String patternSaveName;   // pattern name captured at receive, used to ke
 static bool patternSaveDirty = false;
 static uint32_t patternSaveChangedAtMs = 0;
 static const uint32_t PATTERN_SAVE_DEBOUNCE_MS = 2000;
+// true  = "add to library" (a deliberate sync — becomes a cycle member);
+// false = "current only" (a Live push — persisted as the boot pattern but NOT cycled).
+// The app sends a top-level `lib` bool in the pattern; absent (old app) defaults to library.
+static bool patternSaveIsLib = true;
 
 // Live global brightness: the app sends a single byte on each slider tick. We stage
 // it here (BLE task) and apply it from loop() via ledMgr.setGlobalBrightness() — the
@@ -1352,6 +1356,10 @@ void processButtonPinUpdate() {
 static const char* LIB_DIR = "/lib";
 static const char* LIB_CURRENT_FILE = "/lib_current.txt";
 static const char* CYCLE_FILE = "/cycle.bin"; // [u32 intervalMs][u8 enabled]
+// The last pattern SHOWN (raw msgpack), regardless of whether it's a library/cycle member.
+// A Live ("current only") pattern lands here so the device resumes it on power-on without it
+// joining the cycle. Written on every applied pattern; read at boot when not cycling.
+static const char* BOOT_CURRENT_FILE = "/current.mpack";
 static const size_t LIB_SCAN_MAX = 256;         // upper bound on stored patterns
 static const size_t LIB_MIN_FREE_BYTES = 32768; // headroom so the FS never fills
 
@@ -1495,6 +1503,46 @@ static String libReadCurrentName() {
     return s;
 }
 
+// Persist the raw msgpack of the last-shown pattern as the power-on pattern (see
+// BOOT_CURRENT_FILE). Not part of the library/cycle.
+static void saveBootCurrent(const uint8_t* msgpack, size_t size) {
+    if (msgpack == nullptr || size == 0) return;
+    File f = LittleFS.open(BOOT_CURRENT_FILE, FILE_WRITE);
+    if (!f) return;
+    f.write(msgpack, size);
+    f.close();
+}
+static bool loadBootCurrent() {
+    if (patternRenderer == nullptr || !LittleFS.exists(BOOT_CURRENT_FILE)) return false;
+    File f = LittleFS.open(BOOT_CURRENT_FILE, FILE_READ);
+    if (!f) return false;
+    size_t total = f.size();
+    if (total == 0) { f.close(); return false; }
+    uint8_t* buf = (uint8_t*)malloc(total);
+    if (!buf) { f.close(); return false; }
+    size_t r = f.read(buf, total);
+    f.close();
+    bool ok = (r == total) && patternRenderer->loadPatternFromMessagePack(buf, total);
+    free(buf);
+    return ok;
+}
+
+// Read the top-level `lib` bool from a pattern msgpack (true = add-to-library/cycle,
+// false = current-only). Absent (old app) → defaultVal.
+static bool readPatternLibFlag(const uint8_t* buf, size_t size, bool defaultVal) {
+    mpack_tree_t tree;
+    mpack_tree_init_data(&tree, (const char*)buf, size);
+    mpack_tree_parse(&tree);
+    bool result = defaultVal;
+    mpack_node_t root = mpack_tree_root(&tree);
+    if (mpack_tree_error(&tree) == mpack_ok && mpack_node_map_contains_cstr(root, "lib")) {
+        mpack_node_t n = mpack_node_map_cstr(root, "lib");
+        if (mpack_node_type(n) == mpack_type_bool) result = mpack_node_bool(n);
+    }
+    mpack_tree_destroy(&tree);
+    return result;
+}
+
 // Make the pattern at sorted position `pos` (wraps) the live + remembered one.
 static bool libSetActiveByOrderPos(int pos) {
     size_t count = libOrder.size();
@@ -1598,6 +1646,7 @@ void processReceivedPattern() {
             // Don't let the next tick instantly override the manual pick.
             lastCycleIndex = (int)((getSynchronizedTime() / cycleIntervalMs) % (unsigned long)libOrder.size());
         }
+        patternSaveIsLib = readPatternLibFlag(buf, size, true); // read before ownership transfer
         if (patternSaveBuf) free(patternSaveBuf);
         patternSaveBuf = buf;
         patternSaveSize = size;
@@ -1618,10 +1667,16 @@ void processReceivedPattern() {
 void processPatternFlashSave() {
     if (patternSaveDirty && (millis() - patternSaveChangedAtMs > PATTERN_SAVE_DEBOUNCE_MS)) {
         patternSaveDirty = false;
-        if (patternSaveBuf && patternSaveSize > 0 && patternSaveName.length() > 0) {
-            // Upsert by name into the library, and mark it the active pattern.
-            if (libUpsert(patternSaveName, patternSaveBuf, patternSaveSize)) {
-                libSaveCurrentName(patternSaveName);
+        if (patternSaveBuf && patternSaveSize > 0) {
+            // Always persist the last-shown pattern as the boot/current pattern (survives
+            // power-off), whether or not it's cycled.
+            saveBootCurrent(patternSaveBuf, patternSaveSize);
+            // Only a deliberate "sync" (lib=true) adds it to the cycled library. A Live push
+            // (lib=false) stays current-only, so trying a pattern never pollutes the cycle.
+            if (patternSaveIsLib && patternSaveName.length() > 0) {
+                if (libUpsert(patternSaveName, patternSaveBuf, patternSaveSize)) {
+                    libSaveCurrentName(patternSaveName);
+                }
             }
         }
     }
@@ -2115,14 +2170,20 @@ void setup() {
             libScan();
             restoreCycleState();
             {
-                String cur = libReadCurrentName();
                 bool loaded = false;
-                if (cur.length() > 0) {
-                    for (size_t p = 0; p < libOrder.size(); p++) {
-                        if (libNames[libOrder[p]] == cur) { loaded = libSetActiveByOrderPos((int)p); break; }
+                // Not cycling → resume EXACTLY the last-shown pattern (which may be a Live /
+                // current-only pattern that isn't a cycle member). Cycling → fall through to
+                // the library; updateCycle() then drives the playlist off the synced clock.
+                if (!cyclingActive) loaded = loadBootCurrent();
+                if (!loaded) {
+                    String cur = libReadCurrentName();
+                    if (cur.length() > 0) {
+                        for (size_t p = 0; p < libOrder.size(); p++) {
+                            if (libNames[libOrder[p]] == cur) { loaded = libSetActiveByOrderPos((int)p); break; }
+                        }
                     }
+                    if (!loaded && !libOrder.empty()) libSetActiveByOrderPos(0);
                 }
-                if (!loaded && !libOrder.empty()) libSetActiveByOrderPos(0);
             }
             logPatternState("boot");
         } else {

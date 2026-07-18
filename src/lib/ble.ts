@@ -1009,12 +1009,13 @@ export async function syncPatternToAllDevices(): Promise<void> {
   }
 
   try {
-    // Serialize the current pattern
+    // Serialize the current pattern. lib:false → this is a Live push (preview/current): the
+    // device shows it + persists it as the boot pattern, but does NOT add it to the cycle.
     const serializedPattern = serializeCurrentPattern();
     console.log('Serialized pattern:', serializedPattern);
-    
+
     // Encode as MessagePack
-    const msgpackData = msgpackEncode(serializedPattern) as Uint8Array;
+    const msgpackData = msgpackEncode({ ...serializedPattern, lib: false }) as Uint8Array;
 
     console.log(`Pattern serialized: ${msgpackData.byteLength} bytes`);
 
@@ -1062,7 +1063,8 @@ export async function setCycleOnDevice(deviceId: string, enabled: boolean, inter
  */
 export async function sendSinglePatternToDevice(deviceId: string, pattern: any): Promise<void> {
   // Strip app/cloud-sync metadata (id/updatedAt/deleted) — the device wire is name+output only.
-  const clean = { ...pattern, meta: { name: pattern?.meta?.name, output: pattern?.meta?.output ?? 1 } };
+  // lib:true → this is a deliberate "sync": the device adds it to its cycled library.
+  const clean = { ...pattern, meta: { name: pattern?.meta?.name, output: pattern?.meta?.output ?? 1 }, lib: true };
   const msgpackData = msgpackEncode(clean) as Uint8Array;
   await sendPatternChunked(deviceId, msgpackData);
 }
