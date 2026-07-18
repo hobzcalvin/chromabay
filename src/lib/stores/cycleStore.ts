@@ -32,3 +32,22 @@ export async function exitCycle() {
   cycleEnabled.set(false);
   await applyCycle();
 }
+
+// Keep devices consistent with the app's Cycle state BOTH ways: when a device (re)connects it
+// may still be cycling from before while the UI shows Cycle off (or vice-versa), so push the
+// current state to any freshly-connected device. Small delay so the link is ready first.
+let cyclePrevConnected = new Set<string>();
+connectedDevices.subscribe((map) => {
+  const cur = new Set(map.keys());
+  const fresh = [...cur].filter((id) => !cyclePrevConnected.has(id));
+  cyclePrevConnected = cur;
+  if (fresh.length === 0) return;
+  setTimeout(() => {
+    const on = get(cycleEnabled);
+    const secs = Math.max(1, Math.floor(get(cycleSeconds) || 1));
+    for (const id of fresh) {
+      if (!get(connectedDevices).has(id)) continue; // dropped again before we applied
+      setCycleOnDevice(id, on, secs).catch((e) => console.error('[cycle] apply-on-connect failed', id, e));
+    }
+  }, 1500);
+});
