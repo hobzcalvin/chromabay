@@ -917,6 +917,11 @@ class CentralizedRenderer {
     const globalTimestamp = Date.now() & 0xFFFFFFFF; // Truncate to 32-bit to match ESP32 behavior
     const deltaTime = (currentTime - this.lastFrameTime) / 1000;
 
+    // Feed the real wall clock (Unix seconds) to time-aware operators (Clock node). The
+    // 32-bit animation timestamp above wraps and can't represent absolute time-of-day, so
+    // the clock reads this instead. Cheap; ignore if the export is missing (older wasm).
+    try { this.wasmModule?.ccall('setWallClock', null, ['number'], [Math.floor(Date.now() / 1000)]); } catch { /* older wasm */ }
+
     for (const node of executionOrder) {
       const nodeDefinition = getNodeDefinition(node.data.type as string);
       if (!nodeDefinition) continue;

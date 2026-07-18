@@ -53,6 +53,7 @@
 #include "FeedbackOperator.h"
 #include "VennOperator.h"
 #include "BandsOperator.h"
+#include "TimeOperator.h"
 
 // Add your new operators here:
 // #include "RainbowOperator.h"

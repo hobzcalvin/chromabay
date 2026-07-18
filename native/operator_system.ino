@@ -38,6 +38,13 @@ extern "C" {
     int getOperatorCount() {
         return OperatorRegistry::getInstance().getOperatorCount();
     }
+
+    // Current wall-clock time (Unix seconds) for time-aware operators (Clock). The app calls
+    // this each frame with Math.floor(Date.now()/1000); 0 = unknown.
+    EMSCRIPTEN_KEEPALIVE
+    void setWallClock(unsigned int epochSec) {
+        WallClock::set((uint32_t)epochSec);
+    }
     
     EMSCRIPTEN_KEEPALIVE
     const char* getOperatorName(int index) {

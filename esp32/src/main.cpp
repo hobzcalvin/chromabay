@@ -363,6 +363,11 @@ struct SignatureVerificationData {
 unsigned long syncedTimestampMs = 0;    // The synchronized timestamp from mobile app
 unsigned long syncedLocalTime = 0;      // Local millis() when the sync was received
 bool timestampSynced = false;           // Whether we have received a sync
+// Full-precision wall clock (the 32-bit syncedTimestampMs above wraps ~every 49 days, fine
+// for animation phase but not absolute time). Captured from the same 64-bit sync; feeds the
+// Clock node via WallClock::set() in loop().
+uint64_t syncedEpochMs = 0;
+uint32_t syncedEpochLocalMs = 0;
 
 // Function to get the current synchronized timestamp
 unsigned long getSynchronizedTime() {
@@ -1169,6 +1174,8 @@ class TimestampSyncCallbacks : public NimBLECharacteristicCallbacks {
             // Store sync point
             syncedTimestampMs = (unsigned long)timestamp;
             syncedLocalTime = localTime;
+            syncedEpochMs = timestamp;          // full 64-bit epoch ms for the wall clock
+            syncedEpochLocalMs = (uint32_t)localTime;
             timestampSynced = true;
             
             // Update pattern renderer with synchronized time
@@ -2344,6 +2351,7 @@ namespace WifiLink {
                 if (len == 8) {
                     uint64_t ts = 0; memcpy(&ts, p, 8);
                     syncedTimestampMs = (unsigned long)ts; syncedLocalTime = millis(); timestampSynced = true;
+                    syncedEpochMs = ts; syncedEpochLocalMs = (uint32_t)syncedLocalTime;
                     if (patternRenderer) patternRenderer->setSynchronizedTime(syncedTimestampMs, syncedLocalTime);
                 }
                 break;
@@ -2870,7 +2878,11 @@ const unsigned long heapUpdateInterval = 5000; // Update heap in device info eve
 
 void loop() {
     unsigned long currentTime = millis();
-    
+
+    // Keep the wall clock current for the Clock node (Unix seconds), derived from the
+    // app-synced 64-bit epoch. No-op until a timestamp sync arrives.
+    if (syncedEpochMs) WallClock::set((uint32_t)((syncedEpochMs + (uint64_t)(currentTime - syncedEpochLocalMs)) / 1000ULL));
+
     // Update pattern rendering
     if (currentTime - lastUpdate >= updateInterval) {
         lastUpdate = currentTime;

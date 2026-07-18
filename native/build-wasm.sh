@@ -37,7 +37,7 @@ DEFINES="-DFASTLED_STUB_IMPL=1 -DFASTLED_FORCE_NAMESPACE=1 -DFASTLED_USE_PROGMEM
 # (~500ms/render -> ~2fps). -O3 inlines/vectorizes them.
 CFLAGS="-std=c++20 -fpermissive -fno-exceptions -fno-threadsafe-statics -O3 -I$FASTLED_SRC -I$HERE"
 
-EXPORTS="['_getOperatorCount','_getOperatorName','_getOperatorDisplayName','_getOperatorParameterCount','_getOperatorParameterInfo','_createOperatorInstance','_destroyOperatorInstance','_setOperatorFloatParameter','_setOperatorIntParameter','_setOperatorBoolParameter','_setOperatorColorParameter','_setOperatorStringParameter','_setOperatorModulator','_clearOperatorModulator','_evalModulator','_renderOperator','_clearBuffer','_malloc','_free']"
+EXPORTS="['_getOperatorCount','_getOperatorName','_getOperatorDisplayName','_getOperatorParameterCount','_getOperatorParameterInfo','_createOperatorInstance','_destroyOperatorInstance','_setOperatorFloatParameter','_setOperatorIntParameter','_setOperatorBoolParameter','_setOperatorColorParameter','_setOperatorStringParameter','_setOperatorModulator','_clearOperatorModulator','_evalModulator','_renderOperator','_setWallClock','_clearBuffer','_malloc','_free']"
 RUNTIME="['ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8','HEAPU8','getValue']"
 
 # FastLED unity bundles. Start with the minimum and add as the linker demands.
