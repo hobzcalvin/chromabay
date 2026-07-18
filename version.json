@@ -1,7 +1,7 @@
 {
-  "version": "0.1.233",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.233.zip",
-  "buildDate": "2026-07-18T02:39:23Z",
-  "commitHash": "0f9dc06d417ebcb78daed2d7c090bd9308e93928",
-  "commitMessage": "Patterns: 'Sync all My Patterns' button + per-device 'Delete all'"
+  "version": "0.1.234",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.234.zip",
+  "buildDate": "2026-07-18T02:43:21Z",
+  "commitHash": "f916ae2665063d712894d85fcff32897136d5a67",
+  "commitMessage": "Devices: instant connecting/disconnected states + tolerate transient drops"
 }
