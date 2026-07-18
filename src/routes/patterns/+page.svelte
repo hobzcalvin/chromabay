@@ -307,7 +307,7 @@
   <div class="cycle-bar" class:on={$cycleEnabled}>
     <label class="cycle-control">
       <input type="checkbox" bind:checked={$cycleEnabled} onchange={applyCycle} />
-      <span class="cycle-text">Cycle</span>
+      <span class="cycle-text">Cycle synced patterns</span>
       <span class="cycle-sub">every</span>
       <input class="cycle-secs" type="number" min="1" step="1" bind:value={$cycleSeconds} disabled={!$cycleEnabled} onchange={applyCycle} />
       <span class="cycle-sub">seconds</span>
