@@ -114,27 +114,32 @@ jobs:
         pip install --quiet esptool
         BOOT_APP0=$(find ~/.platformio -name boot_app0.bin | head -1)   # same for every variant
         echo "boot_app0: $BOOT_APP0"
-        # pio env | esptool --chip | bootloader offset
+        # pio env | esptool --chip | bootloader offset | flash size (S3 is N8 = 8MB)
         VARIANTS=(
-          "esp32dev|esp32|0x1000"
-          "esp32-s3|esp32s3|0x0"
-          "esp32-c3|esp32c3|0x0"
+          "esp32dev|esp32|0x1000|4MB"
+          "esp32-s3|esp32s3|0x0|8MB"
+          "esp32-c3|esp32c3|0x0|4MB"
         )
         mkdir -p dist
         for row in "${VARIANTS[@]}"; do
-          IFS='|' read -r ENV CHIP BOOTOFF <<< "$row"
-          B="esp32/.pio/build/$ENV"
-          echo "▶ $CHIP: merge factory image + sign app image"
+          IFS='|' read -r ENV CHIP BOOTOFF FLASHSZ <<< "$row"
+          B="esp32/.pio/build/$ENV"            # WiFi build (factory + OTA)
+          BN="esp32/.pio/build/$ENV-nowifi"    # no-WiFi build (OTA-only, fits legacy slots)
+          echo "▶ $CHIP: merge factory image (WiFi) + sign both OTA variants"
+          # Factory USB image = the WiFi build (new partition, full features).
           esptool.py --chip "$CHIP" merge_bin \
-            --flash_mode dio --flash_freq 80m --flash_size 4MB \
+            --flash_mode dio --flash_freq 80m --flash_size "$FLASHSZ" \
             -o "dist/chromabay-factory-$CHIP.bin" \
             "$BOOTOFF" "$B/bootloader.bin" \
             0x8000  "$B/partitions.bin" \
             0xe000  "$BOOT_APP0" \
             0x10000 "$B/firmware.bin"
-          ./psa_sign_firmware "$B/firmware.bin" private_key.raw "dist/firmware-$CHIP.sig"
-          cp "$B/firmware.bin" "dist/firmware-$CHIP.bin"
-          ls -l "dist/chromabay-factory-$CHIP.bin" "dist/firmware-$CHIP.sig"
+          # Sign + stage both OTA app images.
+          ./psa_sign_firmware "$B/firmware.bin"  private_key.raw "dist/firmware-$CHIP.sig"
+          cp "$B/firmware.bin"  "dist/firmware-$CHIP.bin"
+          ./psa_sign_firmware "$BN/firmware.bin" private_key.raw "dist/firmware-$CHIP-nowifi.sig"
+          cp "$BN/firmware.bin" "dist/firmware-$CHIP-nowifi.bin"
+          ls -l "dist/chromabay-factory-$CHIP.bin" "dist/firmware-$CHIP.bin" "dist/firmware-$CHIP-nowifi.bin"
         done
 
     - name: Create release
@@ -232,19 +237,29 @@ jobs:
           mkdir -p "$DEST"
           cp "dist/firmware-$CHIP.bin"          "$DEST/firmware.bin"
           cp "dist/firmware-$CHIP.sig"          "$DEST/firmware.sig"
+          cp "dist/firmware-$CHIP-nowifi.bin"   "$DEST/firmware-nowifi.bin"
+          cp "dist/firmware-$CHIP-nowifi.sig"   "$DEST/firmware-nowifi.sig"
           cp "dist/chromabay-factory-$CHIP.bin" "$DEST/chromabay-factory.bin"
 
-          NEW_ENTRY=$(jq -n \
-            --arg ver "$VER" \
-            --arg chip "$CHIP" \
-            --arg hwver "$HARDWARE_VERSION" \
+          WIFI_SIZE=$(stat -c%s "dist/firmware-$CHIP.bin")
+          NOWIFI_SIZE=$(stat -c%s "dist/firmware-$CHIP-nowifi.bin")
+          # Two entries per chip: WiFi (needs the larger partition) and no-WiFi (fits legacy
+          # 1.375MB slots). The app compares `size` to the device's OTA slot to pick one.
+          WIFI_ENTRY=$(jq -n \
+            --arg ver "$VER" --arg chip "$CHIP" --arg hwver "$HARDWARE_VERSION" \
             --arg path "firmware/esp32/$VER/$CHIP/firmware.bin" \
             --arg sigpath "firmware/esp32/$VER/$CHIP/firmware.sig" \
-            --arg date "$BUILD_DATE" \
-            '{version: $ver, chip: $chip, hardwareVersion: $hwver, path: $path, signaturePath: $sigpath, date: $date}')
-          echo "New registry entry: $NEW_ENTRY"
-          # Prepend to keep newest first.
-          UPDATED_REGISTRY=$(jq --argjson new_entry "$NEW_ENTRY" '[$new_entry] + .' "$REGISTRY_FILE")
+            --arg date "$BUILD_DATE" --argjson size "$WIFI_SIZE" \
+            '{version: $ver, chip: $chip, wifi: true, size: $size, hardwareVersion: $hwver, path: $path, signaturePath: $sigpath, date: $date}')
+          NOWIFI_ENTRY=$(jq -n \
+            --arg ver "$VER" --arg chip "$CHIP" --arg hwver "$HARDWARE_VERSION" \
+            --arg path "firmware/esp32/$VER/$CHIP/firmware-nowifi.bin" \
+            --arg sigpath "firmware/esp32/$VER/$CHIP/firmware-nowifi.sig" \
+            --arg date "$BUILD_DATE" --argjson size "$NOWIFI_SIZE" \
+            '{version: $ver, chip: $chip, wifi: false, size: $size, hardwareVersion: $hwver, path: $path, signaturePath: $sigpath, date: $date}')
+          echo "New entries: $WIFI_ENTRY / $NOWIFI_ENTRY"
+          # Prepend both, newest first.
+          UPDATED_REGISTRY=$(jq --argjson w "$WIFI_ENTRY" --argjson n "$NOWIFI_ENTRY" '[$w, $n] + .' "$REGISTRY_FILE")
           echo "$UPDATED_REGISTRY" > "$REGISTRY_FILE"
 
           BUILDS_JSON="${BUILDS_JSON}{ \"chipFamily\": \"$FAMILY\", \"parts\": [ { \"path\": \"https://chromabay.app/firmware/esp32/$VER/$CHIP/chromabay-factory.bin\", \"offset\": 0 } ] },"

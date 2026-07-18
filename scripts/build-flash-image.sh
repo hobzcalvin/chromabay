@@ -17,17 +17,18 @@ echo "▶ building firmware (all chips)…"
 
 mkdir -p "$OUT"
 
-# One row per chip:  pio env | esptool --chip | esp-web-tools chipFamily | bootloader offset
+# One row per chip:  pio env | esptool --chip | esp-web-tools chipFamily | bootloader offset | flash size
 # Classic ESP32 keeps its bootloader at 0x1000; ESP32-S3/C3 (and other newer parts) at 0x0.
+# S3 boards here are N8 (8MB) and use the 8MB partition table — the merged image must match.
 VARIANTS=(
-  "esp32dev|esp32|ESP32|0x1000"
-  "esp32-s3|esp32s3|ESP32-S3|0x0"
-  "esp32-c3|esp32c3|ESP32-C3|0x0"
+  "esp32dev|esp32|ESP32|0x1000|4MB"
+  "esp32-s3|esp32s3|ESP32-S3|0x0|8MB"
+  "esp32-c3|esp32c3|ESP32-C3|0x0|4MB"
 )
 
 BUILDS_JSON=""
 for row in "${VARIANTS[@]}"; do
-  IFS='|' read -r ENV CHIP FAMILY BOOTOFF <<< "$row"
+  IFS='|' read -r ENV CHIP FAMILY BOOTOFF FLASHSZ <<< "$row"
   B="esp32/.pio/build/$ENV"
   IMG="chromabay-$CHIP.bin"
   echo "▶ merging $FAMILY image ($IMG)…"
@@ -35,7 +36,7 @@ for row in "${VARIANTS[@]}"; do
   # image at offset 0. Merge them from THIS build so the USB flasher and OTA are always the
   # same firmware — no separately-committed .bin anywhere.
   "$PIOPY" "$ESPTOOL" --chip "$CHIP" merge_bin -o "$OUT/$IMG" \
-    --flash_mode dio --flash_freq 80m --flash_size 4MB \
+    --flash_mode dio --flash_freq 80m --flash_size "$FLASHSZ" \
     "$BOOTOFF" "$B/bootloader.bin" \
     0x8000 "$B/partitions.bin" \
     0xe000 "$BOOT_APP0" \

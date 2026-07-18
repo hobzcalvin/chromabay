@@ -7,9 +7,19 @@
 #include <NimBLEDevice.h>
 #include <NimBLEServer.h>
 #include <NimBLEUtils.h>
+// Compile-time transport selection. Default build (CHROMABAY_WIFI=1) includes the WiFi/TCP
+// transport + Art-Net/sACN streaming; it needs the new (>=1.75MB) OTA partition. The nowifi
+// build (=0) drops all of that so the image is small enough to OTA onto legacy 1.375MB-slot
+// devices (WiFi on those requires a USB reflash to repartition). BLE control, patterns,
+// sleep timer, RGB test and the Clock node work in both.
+#ifndef CHROMABAY_WIFI
+#define CHROMABAY_WIFI 1
+#endif
+#if CHROMABAY_WIFI
 #include <WiFi.h>       // WiFi/TCP transport (alternative to BLE, chosen per comm mode)
 #include <WiFiUdp.h>    // Art-Net / sACN realtime pixel streaming (UDP)
 #include <ESPmDNS.h>    // advertise the TCP endpoint as _chromabay._tcp for app discovery
+#endif
 #include "esp_ota_ops.h" // For OTA updates
 #include "esp_chip_info.h" // Report which ESP32 variant we're running on (device-info JSON)
 #include "device_settings.h" // NVS-backed comm mode / WiFi creds / sleep timer / rgb-test
@@ -551,10 +561,20 @@ String buildDeviceInfoJson() {
     j += "\"fw_ver\":\"" + String(FIRMWARE_VERSION) + "\",";
     j += "\"hw_ver\":\"" + String(HARDWARE_VERSION) + "\",";
     j += "\"feat\":" + String(FIRMWARE_FEATURES) + ",";
+    // Does THIS image support WiFi, and how big is the OTA slot the app can flash into? The
+    // app compares `slot` (the size of the partition the NEXT OTA writes to — the inactive
+    // app slot, read from the live partition table, so it's correct even on devices we only
+    // ever reached over OTA / WLED-conversion) against a variant's image size to pick the
+    // WiFi vs no-WiFi build that actually fits.
+    j += "\"wifi\":" + String(CHROMABAY_WIFI ? 1 : 0) + ",";
+    { const esp_partition_t* up = esp_ota_get_next_update_partition(NULL);
+      if (up) j += "\"slot\":" + String((uint32_t)up->size) + ","; }
     j += "\"chip\":\"" + String(chipModelName()) + "\",";
     j += "\"name\":\"" + deviceName + "\",";
     j += "\"mode\":\"" + String(gWifiMode ? "wifi" : "ble") + "\",";
+#if CHROMABAY_WIFI
     if (gWifiMode) j += "\"ip\":\"" + WiFi.localIP().toString() + "\",";
+#endif
     j += "\"sleep\":" + String(gSettings.sleepMinutes) + ",";
     j += "\"rgbtest\":" + String(gSettings.rgbTest ? 1 : 0) + ",";
     j += "\"heap\":" + String(ESP.getFreeHeap());
@@ -2159,7 +2179,9 @@ static String commSettingsJson() {
     j += "\"rtto\":" + String(gSettings.rtTimeoutSec) + ",";
     j += "\"rtlayout\":" + String(gSettings.rtLayout ? 1 : 0) + ",";
     j += "\"mode_active\":\"" + String(gWifiMode ? "wifi" : "ble") + "\"";
+#if CHROMABAY_WIFI
     if (gWifiMode) j += ",\"ip\":\"" + WiFi.localIP().toString() + "\"";
+#endif
     j += "}";
     return j;
 }
@@ -2237,11 +2259,15 @@ void processCommConfig() {
     bool transportChanged = (gSettings.commMode != oldMode) ||
                             (gSettings.commMode == DeviceSettings::COMM_WIFI &&
                              (gSettings.wifiSsid != oldSsid || gSettings.wifiPass != oldPass));
+#if CHROMABAY_WIFI
     if (transportChanged) {
         Serial.println("[CommConfig] transport change → rebooting in 400ms");
         delay(400); // give the BLE/TCP ack a moment to flush
         ESP.restart();
     }
+#else
+    (void)transportChanged; // no WiFi in this build — mode/creds saved but not acted on
+#endif
 }
 
 // COMM_CONFIG BLE characteristic: read returns settings JSON; write stages an msgpack patch.
@@ -2256,6 +2282,7 @@ class CommConfigCallbacks : public NimBLECharacteristicCallbacks {
     }
 };
 
+#if CHROMABAY_WIFI
 // ---- TCP transport --------------------------------------------------------------------
 // Framed protocol: [u8 channel][u32 len LE][payload]. Channels mirror BLE characteristics.
 enum TcpChannel : uint8_t {
@@ -2560,6 +2587,7 @@ namespace RtStream {
         }
     }
 } // namespace RtStream
+#endif // CHROMABAY_WIFI
 
 void setup() {
     Serial.begin(115200);
@@ -2725,11 +2753,13 @@ void setup() {
     // stays off to avoid sharing the radio and to save RAM). If STA connect fails with the
     // revert-to-BLE fallback, WifiLink::begin() returns false and we start BLE below so the
     // user can always reconnect and fix credentials.
+#if CHROMABAY_WIFI
     if (gSettings.commMode == DeviceSettings::COMM_WIFI) {
         gWifiMode = WifiLink::begin();
         Serial.println(gWifiMode ? "Transport: WiFi/TCP (BLE disabled this boot)"
                                  : "Transport: BLE (WiFi requested but unavailable)");
     }
+#endif
 
     // Initialize BLE unless we're serving over WiFi (mutually exclusive per boot). The
     // health-check / OTA-validate block after this runs for BOTH transports.
@@ -2935,7 +2965,9 @@ void loop() {
     processCommConfig();
 
     // WiFi/TCP transport: accept + read + dispatch framed messages (no-op in BLE mode).
+#if CHROMABAY_WIFI
     if (gWifiMode) { WifiLink::tick(); RtStream::tick(); }
+#endif
 
     // Sleep timer: after gSettings.sleepMinutes of no activity, blank the output and pause
     // rendering. Any inbound command / button press calls noteActivity() → wakes. 0 = off.

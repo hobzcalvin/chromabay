@@ -91,6 +91,8 @@ export interface DeviceInfo {
   fw_ver: string;
   hw_ver: string;
   feat?: number;            // firmware capability level (absent = 1/legacy). Gate features on this.
+  wifi?: number;            // 1 = the running image has the WiFi transport (feat>=2)
+  slot?: number;            // OTA app-slot size in bytes (feat>=2) — which fw variant fits
   chip?: string;            // esp32 | esp32s3 | esp32c3 (absent on pre-multi-chip firmware)
   name?: string;
   mode?: 'ble' | 'wifi';    // active transport (feat>=2)
@@ -133,11 +135,18 @@ export interface DeviceSettingsPatch {
 export interface FirmwareRegistryEntry {
   version: string;          // e.g., "esp32-v1.0.1"
   chip?: string;            // esp32 | esp32s3 | esp32c3 (absent on entries predating multi-chip)
+  wifi?: boolean;           // variant: true = WiFi build (needs the larger partition), false = no-WiFi.
+                            //          absent on entries predating the split (treat as the only variant).
+  size?: number;            // app image size in bytes — compared against the device's OTA slot to pick a variant.
   hardwareVersion: string;  // e.g., "esp32-hw-v1.0"
   path: string;             // Relative path to firmware.bin on gh-pages
   signaturePath: string;    // Relative path to firmware.sig on gh-pages
   date: string;             // ISO 8601 date string
 }
+
+// Legacy OTA slot size assumed for devices that don't report one (pre-feat-2 firmware on the
+// old 1.375MB-slot partition). The WiFi image doesn't fit here → the app offers no-WiFi.
+export const LEGACY_OTA_SLOT_BYTES = 0x150000; // 1,376,256
 
 export interface OTAUpdateStatus {
   progress?: number; // 0-100
@@ -716,11 +725,59 @@ export async function fetchFirmwareRegistry(registryUrl: string = "/firmware/esp
   }
 }
 
+// Result of resolving the newest firmware for a device: the recommended entry (the WiFi
+// variant if it fits the device's OTA slot, else the no-WiFi one), plus both variants and a
+// flag so the UI can let the user switch and can say "USB-flash to unlock WiFi" when the
+// WiFi build is too big for the current partition.
+export interface FirmwareChoice {
+  recommended: FirmwareRegistryEntry | null;
+  wifi: FirmwareRegistryEntry | null;
+  nowifi: FirmwareRegistryEntry | null;
+  wifiFits: boolean;        // does the WiFi variant fit the device's OTA slot?
+  slotBytes: number;        // slot used for the decision (device-reported or legacy assumption)
+}
+
+// Resolve the newest firmware for a device, variant-aware. `slot` = the device's OTA slot
+// size (DeviceInfo.slot); when absent we assume the legacy 1.375MB slot so we never offer a
+// WiFi image that would fail the OTA on an un-repartitioned device.
+export function resolveFirmware(
+  registry: FirmwareRegistryEntry[],
+  chip?: string,
+  currentHwVersion?: string,
+  slot?: number
+): FirmwareChoice {
+  const empty: FirmwareChoice = { recommended: null, wifi: null, nowifi: null, wifiFits: false, slotBytes: slot || LEGACY_OTA_SLOT_BYTES };
+  if (!registry.length) return empty;
+  const wantChip = chip && chip !== 'unknown' ? chip : 'esp32';
+  const forChip = registry.filter(e => (e.chip ?? 'esp32') === wantChip);
+  if (!forChip.length) return empty;
+  const byDateDesc = [...forChip].sort((a, b) => b.date.localeCompare(a.date));
+  const compatible = currentHwVersion ? byDateDesc.filter(e => e.hardwareVersion === currentHwVersion) : [];
+  const pool = compatible.length ? compatible : byDateDesc;
+  const newestVersion = pool[0].version;
+  const sameVersion = pool.filter(e => e.version === newestVersion);
+  const wifi = sameVersion.find(e => e.wifi === true) ?? null;
+  const nowifi = sameVersion.find(e => e.wifi === false) ?? null;
+  const slotBytes = slot && slot > 0 ? slot : LEGACY_OTA_SLOT_BYTES;
+  // Legacy single-variant version (no wifi field): just return it.
+  if (!wifi && !nowifi) return { recommended: sameVersion[0], wifi: null, nowifi: null, wifiFits: false, slotBytes };
+  // WiFi fits if we have it and either its size is known-and-fits, or size is unknown but the
+  // slot is clearly the new large partition (> legacy).
+  const wifiFits = !!wifi && (wifi.size != null ? wifi.size <= slotBytes : slotBytes > LEGACY_OTA_SLOT_BYTES);
+  const recommended = wifiFits ? wifi : (nowifi ?? wifi);
+  return { recommended, wifi, nowifi, wifiFits, slotBytes };
+}
+
 export function findLatestFirmware(
   registry: FirmwareRegistryEntry[],
   chip?: string,
-  currentHwVersion?: string
+  currentHwVersion?: string,
+  slot?: number
 ): FirmwareRegistryEntry | null {
+  // Variant-aware since the WiFi/no-WiFi split; keeps the old signature working (slot optional).
+  if (arguments.length >= 4 || registry.some(e => e.wifi !== undefined)) {
+    return resolveFirmware(registry, chip, currentHwVersion, slot).recommended;
+  }
   if (registry.length === 0) {
     console.log('[OTA] Firmware registry is empty');
     return null;

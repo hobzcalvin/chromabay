@@ -4,7 +4,7 @@
 // left with a stuck "Loading…" and no brightness. Keeping it here means a device that already
 // loaded stays loaded; we only (re)read genuinely new connections. Reactivity works because
 // these are $state proxies exported from a .svelte.ts module.
-import type { LedConfiguration, DeviceInfo, OTAUpdateStatus, FirmwareRegistryEntry } from '$lib/ble';
+import type { LedConfiguration, DeviceInfo, OTAUpdateStatus, FirmwareRegistryEntry, FirmwareChoice } from '$lib/ble';
 
 export type DeviceSettings = {
   // 'connecting' until the initial handshake (LED config + device info) succeeds; the full
@@ -20,6 +20,7 @@ export type DeviceSettings = {
   checkingForUpdate: boolean;
   showUpdateConfirmation: boolean;
   latestFirmware: FirmwareRegistryEntry | null;
+  firmwareChoice: FirmwareChoice | null; // variant resolution (wifi/no-wifi + fit) for the UI
   buttonPin: number | null;
 };
 

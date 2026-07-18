@@ -20,6 +20,7 @@
     getDeviceInfo,
     fetchFirmwareRegistry,
     findLatestFirmware,
+    resolveFirmware,
     performOTAUpdate,
     performManualOTAUpdate,
     prefetchFirmware,
@@ -249,6 +250,7 @@
           },
           ledConfigLoading: false,
           latestFirmware: null,
+          firmwareChoice: null,
           showUpdateConfirmation: false,
           checkingForUpdate: false,
           otaInProgress: false,
@@ -295,6 +297,7 @@
         checkingForUpdate: false,
         showUpdateConfirmation: false,
         latestFirmware: null,
+          firmwareChoice: null,
         buttonPin: null
       };
     }
@@ -739,8 +742,11 @@
       if (firmwareRegistry.length === 0) return;
 
       // Don't bail when device info is missing — if we can't read the current
-      // version we should still surface the latest firmware and offer it.
-      settings.latestFirmware = findLatestFirmware(firmwareRegistry, settings.deviceInfo?.chip, settings.deviceInfo?.hw_ver);
+      // version we should still surface the latest firmware and offer it. Variant-aware:
+      // pass the device's OTA slot so we pick the WiFi build only where it fits, else no-WiFi.
+      const choice = resolveFirmware(firmwareRegistry, settings.deviceInfo?.chip, settings.deviceInfo?.hw_ver, settings.deviceInfo?.slot);
+      settings.firmwareChoice = choice;
+      settings.latestFirmware = choice.recommended;
       // Prefetch the latest image into the offline cache now (while presumably online),
       // so the actual OTA can run even if internet drops later. Best-effort, non-blocking.
       if (settings.latestFirmware) {
@@ -872,10 +878,14 @@
       <p style="color: #4caf50; font-weight: 600;">✓ Update complete — device restarting…</p>
     {:else}
       {#if settings.latestFirmware && settings.deviceInfo?.fw_ver === settings.latestFirmware.version}
-        <p>Firmware is up to date - Current: {settings.deviceInfo.fw_ver}</p>
+        <p>Firmware is up to date - Current: {settings.deviceInfo.fw_ver}
+          {#if settings.firmwareChoice?.recommended?.wifi === false}<span class="fw-variant">(no-Wi-Fi build)</span>{/if}
+        </p>
       {:else if settings.latestFirmware}
         <div class="update-available">
-          <p>Latest firmware: <strong>{settings.latestFirmware.version}</strong> (current: {settings.deviceInfo?.fw_ver || 'unknown'})</p>
+          <p>Latest firmware: <strong>{settings.latestFirmware.version}</strong>
+            {#if settings.latestFirmware.wifi !== undefined}<span class="fw-variant">{settings.latestFirmware.wifi ? 'Wi-Fi build' : 'no-Wi-Fi build'}</span>{/if}
+            (current: {settings.deviceInfo?.fw_ver || 'unknown'})</p>
           <div class="update-actions">
             <button class="btn success" onclick={() => handlePerformOTAUpdate(device.deviceId)}>
               Update to {settings.latestFirmware.version}
@@ -884,6 +894,11 @@
         </div>
       {:else}
         <p>No firmware available in the registry yet.</p>
+      {/if}
+      {#if settings.firmwareChoice?.wifi && !settings.firmwareChoice.wifiFits}
+        <p class="fw-note">📶 A Wi-Fi build is available but is larger than this device's current
+          partition, so it can't be installed over the air. Flash it via USB (repartitions the
+          device) to enable Wi-Fi / streaming.</p>
       {/if}
 
       <!-- Manual "install from a file" — a specific ChromaBay build, or another firmware
