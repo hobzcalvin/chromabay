@@ -1,7 +1,7 @@
 {
-  "version": "0.1.234",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.234.zip",
-  "buildDate": "2026-07-18T02:43:21Z",
-  "commitHash": "f916ae2665063d712894d85fcff32897136d5a67",
-  "commitMessage": "Devices: instant connecting/disconnected states + tolerate transient drops"
+  "version": "0.1.235",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.235.zip",
+  "buildDate": "2026-07-18T02:50:36Z",
+  "commitHash": "555c55fd341e574cced2bfc67ed4e1e7a854c20f",
+  "commitMessage": "Firmware+app: Live push is current-only (persisted, not cycled); sync = add to library"
 }
