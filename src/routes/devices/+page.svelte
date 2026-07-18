@@ -48,6 +48,7 @@
   } from '$lib/ble';
   import { Capacitor } from '@capacitor/core';
   import { connectedDevices, getConnectedDevicesList, type ConnectedDevice } from '$lib/stores/deviceStore';
+  import { deviceSettings, liveBrightness, initializedDevices } from '$lib/stores/deviceUiStore.svelte';
   import LedConfigurationComponent from '$lib/components/LedConfiguration.svelte';
   import UsbFlash from '$lib/components/UsbFlash.svelte';
   import WledConvert from '$lib/components/WledConvert.svelte';
@@ -75,25 +76,10 @@
   }
   let isWeb = $state(false);
 
-  // Device states - keyed by deviceId. $state is deeply reactive (proxied), so
-  // mutating deviceSettings[id].foo updates the UI in place — no manual reassign.
-  let deviceSettings: Record<string, {
-    // 'connecting' until the initial handshake (settings + device info) finishes; the full
-    // device card only renders when 'ready'. Until then the user sees a "connecting…" card —
-    // to the user a device is either connected (fully) or still connecting, never half-loaded.
-    phase: 'connecting' | 'ready';
-    showSettings: boolean;
-    ledConfig: LedConfiguration | null;
-    ledConfigLoading: boolean;
-    deviceInfo: DeviceInfo | null;
-    otaStatus: OTAUpdateStatus | null;
-    otaInProgress: boolean;
-    otaSuccess: boolean;
-    checkingForUpdate: boolean;
-    showUpdateConfirmation: boolean;
-    latestFirmware: FirmwareRegistryEntry | null;
-    buttonPin: number | null;
-  }> = $state({});
+  // Per-device UI state (phase/ledConfig/deviceInfo/brightness/…) lives in a MODULE store so
+  // it survives navigating away from and back to this page — otherwise remount wiped it and
+  // forced a fresh (sometimes-failing) BLE re-read, which is what dropped the brightness.
+  // See deviceUiStore. `deviceSettings` is deeply-reactive $state; mutate in place.
 
   // Connected devices from store
   const connectedDevicesList = $derived(getConnectedDevicesList($connectedDevices));
@@ -102,8 +88,6 @@
   // HOW it connected (native button, web auto-connect, or reconnect after reboot).
   // Previously each connect path initialized state differently, so e.g. web
   // auto-connected devices never loaded their LED config until Settings was opened.
-  let initializedDevices = new Set<string>();
-
   // Devices to RENDER as connected/connecting, keyed by id — decoupled from the raw BLE store
   // so the UI can: (a) show "connecting" the instant Connect is tapped (before the store adds
   // it), (b) show disconnected instantly on Disconnect, and (c) tolerate TRANSIENT drops — a
@@ -456,34 +440,43 @@
     settings.otaInProgress = false;
     settings.otaStatus = null;
     settings.otaSuccess = false;
-    try {
-      // Load the LED config FIRST: the always-visible brightness slider depends only
-      // on it, so this is what gates the slider appearing. Device info / update check
-      // can follow. (Sequential, not parallel — concurrent GATT reads can error.)
-      await loadLedConfig(deviceId);
-      await loadDeviceInfo(deviceId);
-      // Core handshake done (brightness + device info in hand) → reveal the full card. The
-      // remaining loads (button pin, notifications, update check) refine it in place.
-      settings.phase = 'ready';
-      try { settings.buttonPin = await getButtonPin(deviceId); } catch (e) { console.error('getButtonPin failed', e); }
+
+    // Core handshake: LED config (the brightness slider gates on it) + device info. A
+    // just-connected link can NAK the first reads, so retry a few times before giving up.
+    let ok = false;
+    for (let attempt = 0; attempt < 3 && !ok; attempt++) {
       try {
-        await startButtonEventNotifications(deviceId, (ev) => {
-          // The device advances through its OWN stored library locally on a
-          // double-click now, so we don't push a pattern back (that would override
-          // each device's local choice). This is just for UI awareness.
-          if (ev === 'next') statusMessage = 'Device → next pattern';
-        });
-      } catch (e) { console.error('button event subscribe failed', e); }
-      await checkForUpdateSilently(deviceId);
+        ok = await loadLedConfig(deviceId);
+        await loadDeviceInfo(deviceId);
+      } catch (e) {
+        console.error(`[devices] init read failed for ${deviceId} (attempt ${attempt + 1}):`, e);
+      }
+      if (!ok && attempt < 2) await new Promise((r) => setTimeout(r, 1200));
+    }
+    if (!ok) {
+      // Couldn't read the device yet — leave it "connecting" (honest) and allow a retry,
+      // rather than showing a broken "ready" card with no brightness. Dropping the init
+      // marker lets a later reconnect re-run this.
+      console.warn(`[devices] ${deviceId} not readable yet — staying 'connecting'`);
+      initializedDevices.delete(deviceId);
+      return;
+    }
+
+    // Core loaded → reveal the full card. Remaining loads refine it in place (best-effort).
+    settings.phase = 'ready';
+    try { settings.buttonPin = await getButtonPin(deviceId); } catch (e) { console.error('getButtonPin failed', e); }
+    try {
+      await startButtonEventNotifications(deviceId, (ev) => {
+        if (ev === 'next') statusMessage = 'Device → next pattern';
+      });
+    } catch (e) { console.error('button event subscribe failed', e); }
+    try { await checkForUpdateSilently(deviceId); } catch (e) { console.error('update check failed', e); }
+    try {
       await startOTAStatusNotifications(deviceId, (status) => {
         settings.otaStatus = status;
-        if (status.isError || status.isComplete) {
-          settings.otaInProgress = false;
-        }
+        if (status.isError || status.isComplete) settings.otaInProgress = false;
       });
-    } catch (error: any) {
-      console.error(`Failed to initialize connected device ${deviceId}:`, error);
-    }
+    } catch (e) { console.error('OTA status subscribe failed', e); }
   }
 
   async function handleDisconnect(deviceId: string) {
@@ -589,7 +582,7 @@
     }
   }
 
-  async function loadLedConfig(deviceId: string) {
+  async function loadLedConfig(deviceId: string): Promise<boolean> {
     const settings = getDeviceSettings(deviceId);
     settings.ledConfigLoading = true;
     console.log(`[devices] loadLedConfig → ${deviceId}`);
@@ -597,9 +590,11 @@
       settings.ledConfig = await getLedConfiguration(deviceId);
       liveBrightness[deviceId] = settings.ledConfig.globalBrightness;
       console.log(`[devices] ✅ config loaded for ${deviceId}: ${settings.ledConfig.strips.length} strip(s), brightness ${settings.ledConfig.globalBrightness}`);
+      return true;
     } catch (error: any) {
       console.error(`[devices] ❌ config load FAILED for ${deviceId}:`, error);
       settings.ledConfig = null;
+      return false;
     } finally {
       settings.ledConfigLoading = false;
     }
@@ -611,9 +606,7 @@
   // instantly and persists once the slider settles.
   const BRIGHTNESS_MIN_INTERVAL_MS = 40;
   let brightnessThrottle: Record<string, { last: number; timer: any; pending: number | null }> = {};
-  // Slider value lives here, NOT in deviceSettings, so dragging it doesn't churn the
-  // shared device-settings object on every input event — the slider updates in place.
-  let liveBrightness: Record<string, number> = $state({});
+  // liveBrightness is imported from deviceUiStore (module scope, survives navigation).
 
   // Manual "install from a file" selections, keyed by deviceId. Kept out of
   // deviceSettings (like liveBrightness) so picking a file doesn't churn the shared
