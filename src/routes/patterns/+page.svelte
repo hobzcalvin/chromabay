@@ -53,7 +53,7 @@
         console.error('Sync to device failed:', device.deviceId, e);
       }
     }
-    refreshDeviceLibraries();
+    refreshDeviceLibraries({ force: true }); // we changed the libraries → re-dump
   }
 
   // Swipe state
@@ -66,12 +66,13 @@
   // Names already in My Patterns (used to filter the other sections so they only show
   // things you don't already have).
   $: myNames = new Set(patternsList.map((p) => p.meta?.name).filter(Boolean) as string[]);
+  $: connectedIds = connectedList.map((d) => d.deviceId);
 
-  // Patterns present on some connected device but NOT in My Patterns (deduped by name).
+  // Patterns present on a CONNECTED device but NOT in My Patterns (deduped by name).
   $: newFromDevices = (() => {
     const seen = new Set<string>(); const out: SerializedPattern[] = [];
-    for (const pats of Object.values($deviceLibraries)) {
-      for (const p of pats) {
+    for (const id of connectedIds) {
+      for (const p of ($deviceLibraries[id] ?? [])) {
         const n = p.meta?.name;
         if (!n || myNames.has(n) || seen.has(n)) continue;
         seen.add(n); out.push(p);
@@ -97,7 +98,7 @@
       await loadPatterns();
       const imported = get(patterns).find((p) => p.meta?.name === name);
       if (imported) await selectPattern(imported);
-      refreshDeviceLibraries();
+      refreshDeviceLibraries({ force: true }); // import synced it to devices → re-dump
     } catch (e) {
       console.error('Import failed:', e);
     }
@@ -112,7 +113,7 @@
     } catch (e) {
       console.error('Remove from device failed:', e);
     }
-    refreshDeviceLibraries();
+    refreshDeviceLibraries({ force: true }); // we changed this device's library → re-dump
   }
 
   // Bring the current pattern into view when landing on this page (it may be far down a
@@ -207,7 +208,7 @@
     const { deletePatternByName } = await import('$lib/stores/patternsStore');
     await deletePatternByName(name);
     // Propagate the delete to any connected devices so it leaves their cycle too.
-    deletePatternOnAllDevices(name).then(() => refreshDeviceLibraries()).catch((e) => console.error('Device pattern delete failed:', e));
+    deletePatternOnAllDevices(name).then(() => refreshDeviceLibraries({ force: true })).catch((e) => console.error('Device pattern delete failed:', e));
     // Hide swipe state after deletion
     if (swipeStates[pattern.meta.name]) {
       swipeStates[pattern.meta.name].isSwipeRevealed = false;
@@ -351,7 +352,7 @@
             
             <div class="action-buttons">
               {#if connectedList.length > 0}
-                {@const synced = syncedCountFor($deviceLibraries, patternName)}
+                {@const synced = syncedCountFor($deviceLibraries, patternName, connectedIds)}
                 <button
                   class="sync-button"
                   class:allsynced={synced === connectedList.length}
@@ -419,7 +420,11 @@
   {#if connectedList.length > 0}
     <section class="pattern-section">
       <details bind:open={perDeviceOpen}>
-        <summary class="section-title section-summary">Per Device</summary>
+        <summary class="section-title section-summary">
+          Per Device
+          <button class="refresh-btn" title="Re-read what's on the devices"
+            onclick={(e) => { e.preventDefault(); e.stopPropagation(); refreshDeviceLibraries({ force: true }); }}>↻</button>
+        </summary>
         {#each connectedList as device (device.deviceId)}
           <div class="device-group">
             <h3 class="device-group-name">{device.name}</h3>
@@ -516,6 +521,11 @@
     margin: 0 0 0.6rem; font-size: 1.1rem; font-weight: 700; color: #fff;
   }
   .section-summary { cursor: pointer; user-select: none; }
+  .refresh-btn {
+    margin-left: 0.5rem; background: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.25); color: #fff;
+    border-radius: 6px; padding: 0 0.4rem; font-size: 0.9rem; cursor: pointer;
+  }
   .section-empty { color: rgba(255, 255, 255, 0.7); font-size: 0.9rem; margin: 0 0 0.75rem; }
   .simple-row {
     display: flex; align-items: center; gap: 0.75rem;
