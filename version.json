@@ -1,7 +1,7 @@
 {
-  "version": "0.1.236",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.236.zip",
-  "buildDate": "2026-07-18T04:32:10Z",
-  "commitHash": "c3885e03fc676133a179bd6dbdb852ff3e9d0fc0",
-  "commitMessage": "Fix brightness vanishing on return to Devices: persist per-device state + retry reads"
+  "version": "0.1.237",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.237.zip",
+  "buildDate": "2026-07-18T15:55:59Z",
+  "commitHash": "721a23cb45f57125dbe6d96179a65751cc838156",
+  "commitMessage": "WiFi/TCP transport, repartition, sleep timer, RGB-test toggle"
 }
