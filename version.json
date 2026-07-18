@@ -1,7 +1,7 @@
 {
-  "version": "0.1.229",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.229.zip",
-  "buildDate": "2026-07-18T00:04:55Z",
-  "commitHash": "e2598bf67601aebc7553df481976c7e8a2756830",
-  "commitMessage": "Device libraries survive reconnect blips (no re-dump, no 0 synced)"
+  "version": "0.1.230",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.230.zip",
+  "buildDate": "2026-07-18T00:08:59Z",
+  "commitHash": "32825c55eaaf7c785bdbcf848d6ae8ff50ff71dd",
+  "commitMessage": "Re-dump a device only after a >30s absence; remove the refresh button"
 }
