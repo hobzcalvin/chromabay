@@ -1,7 +1,7 @@
 {
-  "version": "0.1.240",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.240.zip",
-  "buildDate": "2026-07-18T16:14:31Z",
-  "commitHash": "af089222a4726cc0c4641386a4298d8be938126e",
-  "commitMessage": "App: Art-Net/sACN streaming settings + fix clock wall-clock feed"
+  "version": "0.1.241",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.241.zip",
+  "buildDate": "2026-07-18T16:16:31Z",
+  "commitHash": "e54021f4b23c5134cf2ab79c9d03b1ba543de6c4",
+  "commitMessage": "Add one-command WiFi/TCP round-trip test (BLE-provision → STA → framed protocol)"
 }
