@@ -103,17 +103,49 @@
   // Previously each connect path initialized state differently, so e.g. web
   // auto-connected devices never loaded their LED config until Settings was opened.
   let initializedDevices = new Set<string>();
-  $effect(() => {
-    console.log(`[devices] connected list changed → ${connectedDevicesList.length} device(s):`, connectedDevicesList.map(d => d.deviceId));
-    for (const d of connectedDevicesList) {
+
+  // Devices to RENDER as connected/connecting, keyed by id — decoupled from the raw BLE store
+  // so the UI can: (a) show "connecting" the instant Connect is tapped (before the store adds
+  // it), (b) show disconnected instantly on Disconnect, and (c) tolerate TRANSIENT drops — a
+  // device that briefly leaves the store isn't yanked from the list; it lingers for a grace
+  // period (like the pattern-library hysteresis) so a quick blip doesn't flash the card away.
+  // Per-device state (connecting vs ready) still lives in deviceSettings[id].phase.
+  let shown = $state<Record<string, any>>({});
+  let dropTimers: Record<string, any> = {};
+  let intentionalDisconnect = new Set<string>(); // user tapped Disconnect → drop now, no grace
+  const CONNECT_GRACE_MS = 8000;
+  const shownList = $derived(Object.values(shown));
+
+  function removeShown(id: string) {
+    if (dropTimers[id]) { clearTimeout(dropTimers[id]); delete dropTimers[id]; }
+    delete shown[id];
+    delete deviceSettings[id];
+    initializedDevices.delete(id);
+  }
+
+  function reconcileShown(list: ConnectedDevice[]) {
+    const storeIds = new Set(list.map((d) => d.deviceId));
+    for (const d of list) {
+      if (dropTimers[d.deviceId]) { clearTimeout(dropTimers[d.deviceId]); delete dropTimers[d.deviceId]; }
+      shown[d.deviceId] = d; // (re)appeared → keep/refresh, cancelling any pending drop
       if (!initializedDevices.has(d.deviceId)) {
         initializedDevices.add(d.deviceId);
-        console.log(`[devices] initializing ${d.deviceId}`);
-        // untrack: initConnectedDevice reads/writes deviceSettings; we only want this
-        // effect to re-run on connectedDevicesList changes, not on every state edit.
-        untrack(() => initConnectedDevice(d.deviceId));
+        initConnectedDevice(d.deviceId);
       }
     }
+    // Shown but no longer in the store → grace timer, unless the user explicitly disconnected.
+    for (const id of Object.keys(shown)) {
+      if (storeIds.has(id) || intentionalDisconnect.has(id) || dropTimers[id]) continue;
+      dropTimers[id] = setTimeout(() => {
+        delete dropTimers[id];
+        if (!get(connectedDevices).has(id)) removeShown(id); // still gone after grace → drop
+      }, CONNECT_GRACE_MS);
+    }
+  }
+
+  $effect(() => {
+    const list = connectedDevicesList; // re-run only when the connected set changes
+    untrack(() => reconcileShown(list));
   });
 
   let firmwareRegistry: FirmwareRegistryEntry[] = $state([]);
@@ -375,6 +407,7 @@
   const autoConnecting = new Set<string>();
   onDestroy(() => {
     if (pruneTimer) { clearInterval(pruneTimer); pruneTimer = null; }
+    for (const id of Object.keys(dropTimers)) clearTimeout(dropTimers[id]);
   });
 
   async function maybeAutoReconnect(device: any) {
@@ -396,16 +429,21 @@
   }
 
   async function handleConnect(device: any) {
+    // Show the "connecting" card immediately — before the BLE store adds the device.
+    intentionalDisconnect.delete(device.deviceId);
+    getDeviceSettings(device.deviceId).phase = 'connecting';
+    shown[device.deviceId] = device;
     try {
       statusMessage = `Connecting to ${device.name}...`;
       await connectToDevice(device);
       rememberDevice(device.deviceId);
       statusMessage = `Connected to ${device.name}!`;
-      // Data loading happens in initConnectedDevice, triggered reactively once the
+      // Data loading happens in initConnectedDevice, triggered by reconcileShown once the
       // device lands in the connectedDevices store — same path web auto-connect uses.
     } catch (error: any) {
       statusMessage = `Failed to connect to ${device.name}`;
       console.error('Connect error:', error);
+      if (!get(connectedDevices).has(device.deviceId)) removeShown(device.deviceId); // failed → drop card
     }
   }
 
@@ -449,23 +487,17 @@
   }
 
   async function handleDisconnect(deviceId: string) {
-    const device = $connectedDevices.get(deviceId);
-    if (!device) return;
-    
+    const name = ($connectedDevices.get(deviceId)?.name) ?? shown[deviceId]?.name ?? 'device';
+    const wasOta = deviceSettings[deviceId]?.otaInProgress;
+    // Reflect disconnected state IMMEDIATELY (no grace period for an intentional disconnect),
+    // and stop auto-reconnect from bringing it back.
+    intentionalDisconnect.add(deviceId);
+    removeShown(deviceId);
     try {
-      const settings = getDeviceSettings(deviceId);
-      if (settings.otaInProgress) {
-        await stopOTAStatusNotifications(deviceId);
-      }
+      if (wasOta) await stopOTAStatusNotifications(deviceId);
       await disconnectFromDevice(deviceId);
-      // Manual disconnect = stop auto-reconnecting to this device until the user
-      // explicitly taps Connect again.
       forgetDevice(deviceId);
-      statusMessage = `Disconnected from ${device.name}`;
-
-      // Clear device settings + init marker so a future reconnect re-initializes.
-      delete deviceSettings[deviceId];
-      initializedDevices.delete(deviceId);
+      statusMessage = `Disconnected from ${name}`;
     } catch (error: any) {
       statusMessage = 'Failed to disconnect';
       console.error('Disconnect error:', error);
@@ -939,11 +971,11 @@
   <!-- Devices List -->
   <section class="devices">
     {#if isWeb}
-      <h2>Connected Devices ({connectedDevicesList.length})</h2>
+      <h2>Connected Devices ({shownList.length})</h2>
     {:else}
       <h2>
-        {#if connectedDevicesList.length > 0}
-          Devices ({devices.length} found, {connectedDevicesList.length} connected)
+        {#if shownList.length > 0}
+          Devices ({devices.length} found, {shownList.length} connected)
         {:else}
           Found Devices ({devices.length})
         {/if}
@@ -953,7 +985,7 @@
     <div class="device-list">
       <!-- Show connected devices first on mobile -->
       {#if !isWeb}
-        {#each connectedDevicesList as device (device.deviceId)}
+        {#each shownList as device (device.deviceId)}
           {@const settings = deviceSettings[device.deviceId]}
           {#if settings?.phase === 'ready'}
             <div class="device-card connected">
@@ -1036,7 +1068,7 @@
       <!-- Available/Found devices -->
       {#if isWeb}
         <!-- Web: Only show connected devices -->
-        {#each connectedDevicesList as device (device.deviceId)}
+        {#each shownList as device (device.deviceId)}
           {@const settings = deviceSettings[device.deviceId]}
           {#if settings?.phase === 'ready'}
             <div class="device-card connected">
@@ -1117,7 +1149,7 @@
       {:else}
         <!-- Mobile: Show available devices to connect to -->
         {#each devices as device}
-          {@const isConnected = $connectedDevices.has(device.deviceId)}
+          {@const isConnected = !!shown[device.deviceId] || $connectedDevices.has(device.deviceId)}
           
           {#if !isConnected}
             <div class="device-card available">
@@ -1164,9 +1196,9 @@
         <span class="icon">🔍</span>
         <span>Scanning</span>
       </div>
-      <div class="indicator" class:active={connectedDevicesList.length > 0}>
+      <div class="indicator" class:active={shownList.length > 0}>
         <span class="icon">🔗</span>
-        <span>Connected ({connectedDevicesList.length})</span>
+        <span>Connected ({shownList.length})</span>
       </div>
     </div>
     
