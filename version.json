@@ -1,7 +1,7 @@
 {
-  "version": "0.1.232",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.232.zip",
-  "buildDate": "2026-07-18T02:23:56Z",
-  "commitHash": "2cd061151b7bbe83882da43ec157458f4799472e",
-  "commitMessage": "Patterns: label the Cycle control 'Cycle synced patterns' (only synced patterns cycle)"
+  "version": "0.1.233",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.233.zip",
+  "buildDate": "2026-07-18T02:39:23Z",
+  "commitHash": "0f9dc06d417ebcb78daed2d7c090bd9308e93928",
+  "commitMessage": "Patterns: 'Sync all My Patterns' button + per-device 'Delete all'"
 }
