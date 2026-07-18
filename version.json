@@ -1,7 +1,7 @@
 {
-  "version": "0.1.239",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.239.zip",
-  "buildDate": "2026-07-18T16:13:15Z",
-  "commitHash": "e11ef726f5ff41f18e0846bd17e8bd7b622ae8d2",
-  "commitMessage": "Clock node (timezone-aware) + shared wall-clock source"
+  "version": "0.1.240",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.240.zip",
+  "buildDate": "2026-07-18T16:14:31Z",
+  "commitHash": "af089222a4726cc0c4641386a4298d8be938126e",
+  "commitMessage": "App: Art-Net/sACN streaming settings + fix clock wall-clock feed"
 }
