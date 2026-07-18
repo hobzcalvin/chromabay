@@ -5,7 +5,7 @@
   import { patterns, loadPatterns, switchToPattern, currentPatternName, createEmptyPattern, saveAsPattern, patternNameExists, importLibraryPattern } from '$lib/stores/patternsStore';
   import PatternPreview from '$lib/components/PatternPreview.svelte';
   import type { SerializedPattern } from '$lib/patternSerializer';
-  import { syncPatternToAllDevices, deletePatternOnAllDevices, sendSinglePatternToDevice, deletePatternOnDevice } from '$lib/ble';
+  import { syncPatternToAllDevices, deletePatternOnAllDevices, sendSinglePatternToDevice, deletePatternOnDevice, clearDeviceLibrary } from '$lib/ble';
   import { deviceLibraries, refreshDeviceLibraries, syncedCountFor } from '$lib/stores/deviceLibraryStore';
   import { currentPattern } from '$lib/stores/patternsStore';
   import { connectedDevices, getConnectedDevicesList } from '$lib/stores/deviceStore';
@@ -54,6 +54,29 @@
       }
     }
     refreshDeviceLibraries({ force: true }); // we changed the libraries → re-dump
+  }
+
+  // Sync every My Pattern into every connected device's library (so they all cycle).
+  let syncingAll = false;
+  async function handleSyncAll() {
+    if (syncingAll) return;
+    syncingAll = true;
+    try {
+      for (const device of connectedList) {
+        for (const pattern of patternsList) {
+          try { await sendSinglePatternToDevice(device.deviceId, pattern); }
+          catch (e) { console.error('Sync-all failed for', device.deviceId, pattern.meta?.name, e); }
+        }
+      }
+      refreshDeviceLibraries({ force: true });
+    } finally { syncingAll = false; }
+  }
+
+  // Wipe one device's entire stored library (empties its cycle).
+  async function handleClearDevice(deviceId: string, name: string) {
+    if (!confirm(`Delete all patterns stored on ${name}? This empties its cycle. (Your own library isn't touched.)`)) return;
+    try { await clearDeviceLibrary(deviceId); } catch (e) { console.error('Clear device failed:', e); }
+    refreshDeviceLibraries({ force: true });
   }
 
   // Swipe state
@@ -317,6 +340,12 @@
     {/if}
   </div>
 
+  {#if connectedList.length > 0 && patternsList.length > 0}
+    <button class="sync-all-btn" onclick={handleSyncAll} disabled={syncingAll}>
+      {syncingAll ? 'Syncing…' : `Sync all ${patternsList.length} patterns to ${connectedList.length} device${connectedList.length === 1 ? '' : 's'}`}
+    </button>
+  {/if}
+
   <section class="pattern-section">
     <h2 class="section-title">My Patterns</h2>
     {#if patternsList.length === 0}
@@ -423,7 +452,12 @@
         <summary class="section-title section-summary">Per Device</summary>
         {#each connectedList as device (device.deviceId)}
           <div class="device-group">
-            <h3 class="device-group-name">{device.name}</h3>
+            <div class="device-group-head">
+              <h3 class="device-group-name">{device.name}</h3>
+              {#if ($deviceLibraries[device.deviceId] ?? []).length > 0}
+                <button class="del-all-btn" onclick={() => handleClearDevice(device.deviceId, device.name)}>Delete all</button>
+              {/if}
+            </div>
             {#each ($deviceLibraries[device.deviceId] ?? []) as p (p.meta?.name)}
               {@const nm = p.meta?.name ?? ''}
               <div class="simple-row">
@@ -539,9 +573,21 @@
     color: #fff; border-radius: 8px; padding: 0.3rem 0.5rem; cursor: pointer; font-size: 0.95rem;
   }
   .device-group { margin: 0.5rem 0 1rem; }
+  .device-group-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin: 0.5rem 0 0.4rem; }
   .device-group-name {
-    margin: 0.5rem 0 0.4rem; font-size: 0.95rem; font-weight: 600; color: rgba(255, 255, 255, 0.85);
+    margin: 0; font-size: 0.95rem; font-weight: 600; color: rgba(255, 255, 255, 0.85);
   }
+  .del-all-btn {
+    background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.4);
+    color: #fecaca; border-radius: 6px; padding: 0.25rem 0.6rem; font-size: 0.78rem; cursor: pointer;
+  }
+  .sync-all-btn {
+    width: 100%; margin: 0 0 16px; padding: 0.6rem 1rem;
+    background: rgba(59, 130, 246, 0.25); border: 1px solid rgba(59, 130, 246, 0.5);
+    color: #dbeafe; border-radius: 10px; font-size: 0.9rem; font-weight: 600; cursor: pointer;
+  }
+  .sync-all-btn:hover { background: rgba(59, 130, 246, 0.35); }
+  .sync-all-btn:disabled { opacity: 0.6; cursor: default; }
 
   .cycle-bar {
     display: flex;
