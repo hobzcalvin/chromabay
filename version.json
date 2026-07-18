@@ -1,7 +1,7 @@
 {
-  "version": "0.1.238",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.238.zip",
-  "buildDate": "2026-07-18T16:05:02Z",
-  "commitHash": "6c091724e48f888a1c0c6122cd78a9a1d285bec0",
-  "commitMessage": "Art-Net / sACN realtime pixel streaming over WiFi"
+  "version": "0.1.239",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.239.zip",
+  "buildDate": "2026-07-18T16:13:15Z",
+  "commitHash": "e11ef726f5ff41f18e0846bd17e8bd7b622ae8d2",
+  "commitMessage": "Clock node (timezone-aware) + shared wall-clock source"
 }
