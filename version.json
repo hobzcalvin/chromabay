@@ -1,7 +1,7 @@
 {
-  "version": "0.1.231",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.231.zip",
-  "buildDate": "2026-07-18T00:47:12Z",
-  "commitHash": "cf5e84aeb64fec091715ccb02f4994d2bdc54fd6",
-  "commitMessage": "Apply Cycle state to devices on (re)connect (consistent both ways)"
+  "version": "0.1.232",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.232.zip",
+  "buildDate": "2026-07-18T02:23:56Z",
+  "commitHash": "2cd061151b7bbe83882da43ec157458f4799472e",
+  "commitMessage": "Patterns: label the Cycle control 'Cycle synced patterns' (only synced patterns cycle)"
 }
