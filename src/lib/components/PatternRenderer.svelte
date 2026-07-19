@@ -45,6 +45,7 @@
   }
 
   function setupCanvas() {
+    if (!canvasElement) return;
     if (fullscreen) {
       canvasElement.width = window.innerWidth;
       canvasElement.height = window.innerHeight;
@@ -58,22 +59,25 @@
     }
   }
 
+  let resizeHandler: (() => void) | null = null;
+
   onMount(() => {
     ctx = canvasElement.getContext('2d');
     setupCanvas();
     
     if (fullscreen) {
-      const resize = () => setupCanvas();
-      window.addEventListener('resize', resize);
-      onDestroy(() => {
-        window.removeEventListener('resize', resize);
-      });
+      resizeHandler = () => setupCanvas();
+      window.addEventListener('resize', resizeHandler);
     }
     
     animate();
   });
 
   onDestroy(() => {
+    if (resizeHandler) {
+      window.removeEventListener('resize', resizeHandler);
+      resizeHandler = null;
+    }
     if (animationFrame) cancelAnimationFrame(animationFrame);
     // Reset render config when component is destroyed
     resetToDefaultDimensions();
@@ -130,4 +134,4 @@
     touch-action: none;
     border-radius: 0;
   }
-</style> 
+</style>     
