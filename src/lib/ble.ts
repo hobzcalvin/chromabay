@@ -1562,9 +1562,10 @@ export async function setLedConfiguration(deviceId: string, config: LedConfigura
  * Upload an arbitrary pixel layout (WLED ledmap) for one strip, or clear it.
  * `map[cell]` = the physical LED index that lights grid cell `cell` (row-major over
  * width×height), or -1 for a gap. Pass an empty map (or width/height 0) to clear.
- * Wire format: [u8 stripIndex][u16 W][u16 H][u16 count][count × i16 ledIndex] (LE).
- * Sent in one write, so it's limited by the BLE long-write size (~512 B ≈ up to ~250
- * cells); larger layouts will need a chunked path (see ARBITRARY_LAYOUTS.md).
+ * Wire format: [u8 stripIndex][u16 W][u16 H][u16 count][count × i16 ledIndex] (LE),
+ * sent CHUNKED as [u16 totalLen][u16 offset][bytes] so large maps work (firmware feat>=2
+ * reassembles up to a 16 KB / ~8000-cell buffer). Older firmware (no feat) only handles a
+ * single ~250-cell write — callers gate on DeviceInfo.feat before sending a bigger map.
  */
 export async function uploadStripLayout(
   deviceId: string,
@@ -1638,6 +1639,7 @@ export async function getStripLayout(
 ): Promise<{ width: number; height: number; map: number[] } | null> {
   let total = -1, received = 0;
   let buf: Uint8Array | null = null;
+  const seenOffsets = new Set<number>(); // dedupe chunks + count real bytes (not max-offset)
   let settle: ((v: any) => void) | null = null;
   let cleanedUp = false;
 
@@ -1662,7 +1664,11 @@ export async function getStripLayout(
     if (total < 0) { total = totalLen; buf = new Uint8Array(total); received = 0; }
     const dataLen = dv.byteLength - 4;
     for (let i = 0; i < dataLen && offset + i < total; i++) buf![offset + i] = dv.getUint8(4 + i);
-    received = Math.max(received, offset + dataLen);
+    // Count REAL bytes received (dedup by offset), not the max offset seen. BLE notifications
+    // can arrive out of order or drop; completing on max-offset would finish early with
+    // zero-filled holes → cells read as LED 0 (lit) → a corrupt "reloaded" layout. This way
+    // a missing chunk keeps us waiting (then times out to null) instead of showing garbage.
+    if (!seenOffsets.has(offset)) { seenOffsets.add(offset); received += Math.min(dataLen, total - offset); }
     if (received >= total && buf) {
       const p = new DataView(buf.buffer);
       const W = p.getUint16(0, true), H = p.getUint16(2, true), count = p.getUint16(4, true);

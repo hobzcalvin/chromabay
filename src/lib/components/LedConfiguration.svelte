@@ -47,6 +47,12 @@
       const width = parsed.width || strip?.width || 0;
       const height = parsed.height || strip?.height || 0;
       if (!width || !height) throw new Error('Provide width and height');
+      // Chunked upload needs firmware feat>=2; older firmware only takes a single ~250-cell
+      // write and would silently corrupt a larger map. Refuse with a clear pointer instead.
+      const feat = settings.deviceInfo?.feat ?? 0;
+      if (feat < 2 && parsed.map.length > 250) {
+        throw new Error(`This layout has ${parsed.map.length} cells, but this device's firmware only supports ~250. Update its firmware (Firmware Update above) to use larger layouts.`);
+      }
       await uploadStripLayout(deviceId, index, { width, height, map: parsed.map });
       layoutMsg[index] = `Applied ${width}×${height} (${parsed.map.length} cells)`;
     } catch (e: any) {
@@ -276,7 +282,10 @@
                 <summary>Custom Layout</summary>
                 <p class="layout-hint">
                   Paste a layout map: <code>{'{ "width": W, "height": H, "map": [ledIndex per cell, -1 = gap] }'}</code>.
-                  (width/height fall back to this strip's matrix size if omitted.) Sent live; max ~250 cells for now.
+                  (width/height fall back to this strip's matrix size if omitted.) Applied immediately and saved to the device — no need to Save Configuration.
+                  {#if (settings.deviceInfo?.feat ?? 0) < 2}
+                    <strong>This device's firmware supports only ~250 cells; update it (Firmware Update above) for larger layouts.</strong>
+                  {/if}
                 </p>
                 <textarea
                   class="layout-json"
