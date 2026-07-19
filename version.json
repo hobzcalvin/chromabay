@@ -1,7 +1,7 @@
 {
-  "version": "0.1.244",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.244.zip",
-  "buildDate": "2026-07-19T01:36:41Z",
-  "commitHash": "64166741aeb215a9e411daf045e41e08e91db744",
-  "commitMessage": "WledConvert: auto-prepare firmware; fix confusing copy"
+  "version": "0.1.245",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.245.zip",
+  "buildDate": "2026-07-19T23:15:22Z",
+  "commitHash": "478c2a75382075ba23a1ee9e66f5d4badf70bc0c",
+  "commitMessage": "Layout: fix read-back corruption + clarify UI (chunked layouts work on feat>=2)"
 }
