@@ -1,7 +1,7 @@
 {
-  "version": "0.1.243",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.243.zip",
-  "buildDate": "2026-07-18T17:14:48Z",
-  "commitHash": "0877f1dff35002f80f97542c66b4690ef5abbf47",
-  "commitMessage": "Devices: surface USB flash + firmware downloads in the per-device firmware section"
+  "version": "0.1.244",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.244.zip",
+  "buildDate": "2026-07-19T01:36:41Z",
+  "commitHash": "64166741aeb215a9e411daf045e41e08e91db744",
+  "commitMessage": "WledConvert: auto-prepare firmware; fix confusing copy"
 }
