@@ -10,26 +10,49 @@
   import { Capacitor } from '@capacitor/core';
   import { listCachedFirmware, getFirmware } from '$lib/firmwareCache';
   import { flashFirmwareViaWledHttp, WLED_AP_SSID, WLED_AP_PASS } from '$lib/wledOta';
+  import { fetchFirmwareRegistry, resolveFirmware, prefetchFirmware } from '$lib/ble';
   import FirmwareDownloads from './FirmwareDownloads.svelte';
 
   const isNative = Capacitor.getPlatform() !== 'web';
+  const REGISTRY_URL = 'https://chromabay.app/firmware/esp32/esp32_firmware_registry.json';
 
   let open = $state(false);
   let cached = $state<{ version: string; date: string; cachedAt: number }[]>([]);
+  let preparing = $state(false);
+  let ready = $derived(cached.length > 0);
   let busy = $state(false);
   let message = $state('');
   let result = $state<'idle' | 'sent' | 'confirmed' | 'error'>('idle');
 
   async function toggle() {
     open = !open;
-    if (open && isNative) cached = await listCachedFirmware();
+    if (open && isNative) prepare();
+  }
+
+  // Fetch the ChromaBay firmware and stash it locally so the conversion works once we're
+  // joined to the WLED device's Wi-Fi (which has no internet). Needs internet, so we do it
+  // the moment this section opens. WLED boards are classic ESP32 with ≥1.4MB app slots, so
+  // the no-WiFi build always fits; once it's ChromaBay it can upgrade to the WiFi build OTA.
+  async function prepare() {
+    preparing = true;
+    try {
+      cached = await listCachedFirmware();
+      const reg = await fetchFirmwareRegistry(REGISTRY_URL);
+      const entry = resolveFirmware(reg, 'esp32').recommended;
+      if (entry) {
+        const base = 'https://chromabay.app';
+        await prefetchFirmware(entry.version, entry.date, `${base}/${entry.path}`, `${base}/${entry.signaturePath}`);
+      }
+      cached = await listCachedFirmware();
+    } catch { /* offline / registry unreachable — the readiness note tells the user */ }
+    finally { preparing = false; }
   }
 
   async function convert() {
     const latest = cached[0]; // newest by cachedAt
-    if (!latest) { message = 'No cached firmware yet — see step 1.'; result = 'error'; return; }
+    if (!latest) { message = 'Firmware not ready. Connect to the internet and reopen this section.'; result = 'error'; return; }
     const fw = await getFirmware(latest.version);
-    if (!fw) { message = 'Cached image could not be read. Re-cache it while online.'; result = 'error'; return; }
+    if (!fw) { message = 'Firmware could not be read. Connect to the internet and reopen this section.'; result = 'error'; return; }
 
     busy = true; result = 'idle'; message = '';
     try {
@@ -57,23 +80,28 @@
         <!-- Automated path (native app only) -->
         <div class="path">
           <h5>Let the app do it</h5>
+          <p class="lead">Flash ChromaBay onto a WLED board over its Wi-Fi — no cable.</p>
           <ol>
-            <li>First, <strong>while on internet</strong>, open a connected ChromaBay device's update section once (it caches the firmware automatically).</li>
-            <li>In <strong>Settings → Wi-Fi</strong>, join <code>{WLED_AP_SSID}</code> (password <code>{WLED_AP_PASS}</code>), then come back.</li>
-            <li>Tap Convert. The device reboots into ChromaBay when done.</li>
+            <li>In <strong>Settings → Wi-Fi</strong>, join the WLED device's network
+              <code>{WLED_AP_SSID}</code> (password <code>{WLED_AP_PASS}</code>), then come back here.</li>
+            <li>Tap <strong>Convert</strong>. The device reboots into ChromaBay when it's done.</li>
           </ol>
-          {#if cached.length === 0}
-            <p class="warn">No firmware cached yet — do step 1 first.</p>
+          {#if preparing}
+            <p class="cached">Getting firmware ready…</p>
+          {:else if !ready}
+            <p class="warn">Couldn't get the firmware — connect to the internet and reopen this section (it's needed before you join the WLED Wi-Fi).</p>
           {:else}
-            <p class="cached">Will flash cached <strong>{cached[0].version}</strong>.</p>
+            <p class="cached">✓ Firmware ready.</p>
           {/if}
-          <button class="btn primary" onclick={convert} disabled={busy || cached.length === 0}>
+          <button class="btn primary" onclick={convert} disabled={busy || !ready}>
             {busy ? 'Uploading…' : 'Convert this device'}
           </button>
           {#if message}
             <p class="msg" class:ok={result === 'confirmed'} class:sent={result === 'sent'} class:err={result === 'error'}>{message}</p>
           {/if}
-          <p class="fineprint">Confirmation is best-effort — WLED reboots mid-reply. If the device restarts and its LEDs change, it worked. (New; unverified on hardware.)</p>
+          <p class="fineprint">Best for classic ESP32 boards; for ESP32-S3/C3 use the manual method below.
+            Confirmation is best-effort — WLED reboots mid-reply, so if the board restarts and its
+            LEDs change, it worked. (New; unverified on hardware.)</p>
         </div>
       {/if}
 
