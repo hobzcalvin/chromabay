@@ -1,7 +1,7 @@
 // Auth state backed by Supabase. Optional + local-first: when Supabase isn't configured,
 // `isConfigured` is false and the app works exactly as before. Logging in is what unlocks the
 // gallery + the synced owner-key keyring (see PATTERN_LIFECYCLE.md); it is never required.
-import { writable } from 'svelte/store';
+import { writable, get } from 'svelte/store';
 import { browser } from '$app/environment';
 import { base } from '$app/paths';
 import { supabase } from '../supabase';
@@ -95,4 +95,25 @@ export async function resendConfirmation(email: string): Promise<void> {
     options: { emailRedirectTo: redirectTo() },
   });
   if (error) throw error;
+}
+
+// --- Public profile (the display name shown next to patterns you publish) -----------------
+
+/** Read the signed-in user's current display name (falls back to handle). '' if none/signed out. */
+export async function getDisplayName(): Promise<string> {
+  if (!supabase) return '';
+  const uid = get(authUser)?.id;
+  if (!uid) return '';
+  const { data } = await supabase.from('profiles').select('display_name,handle').eq('id', uid).single();
+  return data?.display_name || data?.handle || '';
+}
+
+/** Set the display name shown with published patterns. Empty clears it (reverts to "anon"). */
+export async function updateDisplayName(name: string): Promise<{ ok: boolean; error?: string }> {
+  if (!supabase) return { ok: false, error: 'Cloud sync is not configured' };
+  const uid = get(authUser)?.id;
+  if (!uid) return { ok: false, error: 'Not signed in' };
+  const trimmed = name.trim();
+  const { error } = await supabase.from('profiles').update({ display_name: trimmed || null }).eq('id', uid);
+  return error ? { ok: false, error: error.message } : { ok: true };
 }

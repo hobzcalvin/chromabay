@@ -2,6 +2,7 @@
   import {
     authUser, authReady, isConfigured, recoveryMode,
     signIn, signUp, signOut, sendPasswordReset, updatePassword, resendConfirmation,
+    getDisplayName, updateDisplayName,
   } from '$lib/stores/authStore';
 
   type Mode = 'in' | 'up' | 'reset';
@@ -13,6 +14,23 @@
   let error = '';
   let notice = '';
   let showResend = false; // offer "resend confirmation" after a genuinely-new signup
+
+  // Public display name (shown next to patterns you publish). Loaded when signed in.
+  let displayName = '';
+  let displayNameLoadedFor = '';
+  let savingName = false;
+  let nameMsg = '';
+  $: if ($authUser && $authUser.id !== displayNameLoadedFor) {
+    displayNameLoadedFor = $authUser.id;
+    getDisplayName().then((n) => { displayName = n; });
+  }
+  async function saveDisplayName() {
+    savingName = true; nameMsg = '';
+    try {
+      const res = await updateDisplayName(displayName);
+      nameMsg = res.ok ? 'Saved.' : 'Error: ' + (res.error ?? 'failed');
+    } finally { savingName = false; }
+  }
 
   function setMode(m: Mode) { mode = m; error = ''; notice = ''; showResend = false; }
 
@@ -91,6 +109,14 @@
     <div class="card">
       <p class="signed-in">Signed in as <strong>{$authUser.email ?? $authUser.id}</strong></p>
       <p class="muted">Your account carries your pattern library and device owner-keys across devices, and lets you publish to the gallery.</p>
+
+      <label class="dn-label">Display name <span class="muted">— shown with patterns you publish</span></label>
+      <div class="dn-row">
+        <input class="dn-input" type="text" maxlength="40" placeholder="anon" bind:value={displayName} />
+        <button class="btn primary" on:click={saveDisplayName} disabled={savingName}>{savingName ? '…' : 'Save'}</button>
+      </div>
+      {#if nameMsg}<p class="muted">{nameMsg}</p>{/if}
+
       <button class="btn" on:click={signOut}>Sign out</button>
     </div>
   {:else}
@@ -145,6 +171,9 @@
   form { display: flex; flex-direction: column; gap: 0.75rem; }
   label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.85rem; color: rgba(255,255,255,0.85); }
   input { padding: 0.6rem; border-radius: 8px; border: 1px solid rgba(255,255,255,0.15); background: rgba(0,0,0,0.3); color: #fff; font-size: 1rem; }
+  .dn-label { display: block; margin: 0.75rem 0 0.35rem; font-weight: 600; }
+  .dn-row { display: flex; gap: 0.5rem; align-items: center; }
+  .dn-input { flex: 1; }
   .btn { padding: 0.6rem 1rem; border-radius: 8px; border: 1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.08); color: #fff; cursor: pointer; font-weight: 600; }
   .btn.primary { background: rgba(102,126,234,0.5); border-color: rgba(102,126,234,0.7); }
   .btn:disabled { opacity: 0.6; cursor: default; }
