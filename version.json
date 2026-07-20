@@ -1,7 +1,7 @@
 {
-  "version": "0.1.250",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.250.zip",
-  "buildDate": "2026-07-20T05:25:53Z",
-  "commitHash": "a505d24c9ef079667b03a45d9f70184f7479dcf9",
-  "commitMessage": "Automation min/max as range sliders; color param last; share UI"
+  "version": "0.1.251",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.251.zip",
+  "buildDate": "2026-07-20T05:40:59Z",
+  "commitHash": "7bb4b61a71ecb6bc7a1c117ee8f5ddf15c53b44a",
+  "commitMessage": "Patterns: preserve sourceHash across edits (fix imports reappearing in Online)"
 }
