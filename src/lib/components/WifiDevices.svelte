@@ -4,9 +4,34 @@
   // the current pattern / cycle — the WiFi equivalent of the BLE device cards. Only works
   // where cleartext ws:// to a LAN device is allowed: the native app + local dev (not the
   // deployed https site — mixed content).
+  import { onMount } from 'svelte';
   import { get } from 'svelte/store';
+  import { Capacitor } from '@capacitor/core';
   import { knownWifi, wifiConns, connectWifi, disconnectWifi, forgetWifiDevice, rememberWifiDevice, hostForName } from '$lib/stores/wifiDeviceStore';
   import { currentPattern } from '$lib/stores/patternsStore';
+
+  // First native build that carries the Local Network Privacy keys (NSLocalNetworkUsage-
+  // Description + NSBonjourServices). Older installed builds can't reach LAN devices — iOS
+  // silently blocks it — so we hide the whole WiFi section on them. On web we only show it in
+  // local dev (http); the deployed https site can't do cleartext ws:// (mixed content).
+  const WIFI_MIN_VERSION = '0.1.0';
+  let available = $state(false);
+  function cmpVer(a: string, b: string) {
+    const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
+    for (let i = 0; i < 3; i++) { const d = (pa[i] || 0) - (pb[i] || 0); if (d) return d; }
+    return 0;
+  }
+  onMount(async () => {
+    if (Capacitor.getPlatform() === 'web') {
+      available = typeof location !== 'undefined' && location.protocol === 'http:'; // local dev only
+      return;
+    }
+    try {
+      const { App } = await import('@capacitor/app');
+      const info = await App.getInfo();
+      available = cmpVer(info.version, WIFI_MIN_VERSION) >= 0;
+    } catch { available = false; }
+  });
 
   let manualHost = $state('');
   let bri = $state<Record<string, number>>({});
@@ -36,6 +61,7 @@
   }
 </script>
 
+{#if available}
 <section class="wifi-section">
   <h2 class="wifi-title">WiFi devices</h2>
   <p class="wifi-intro">Devices switched to WiFi. Control them over your network (works in the app + local dev).</p>
@@ -91,6 +117,7 @@
     <button class="btn small" onclick={addManual}>Add / connect</button>
   </div>
 </section>
+{/if}
 
 <style>
   .wifi-section { margin-top: 1.5rem; }
