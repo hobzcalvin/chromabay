@@ -4,6 +4,18 @@
 		<meta charset="utf-8" />
 		<link rel="icon" href="%sveltekit.assets%/favicon.png" />
 		<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+		<!-- iOS Smart App Banner: on mobile Safari this shows the drawer offering to install
+		     (App Store) or open the native app. Only appears once the app is live on the App
+		     Store; ignored inside the app's own WKWebView. app-id is ChromaBay's App Store ID. -->
+		<meta name="apple-itunes-app" content="app-id=6781765952" />
+		<script>
+			// Point the banner's "Open" at the current page so the native app deep-links to it
+			// (via the universal-link handler) instead of just launching to the home screen.
+			try {
+				var __banner = document.querySelector('meta[name=apple-itunes-app]');
+				if (__banner) __banner.content = 'app-id=6781765952, app-argument=' + location.href;
+			} catch (e) {}
+		</script>
 		<!-- FastLED WASM Operator System -->
 		<script>
 			// Global WASM module initialization
