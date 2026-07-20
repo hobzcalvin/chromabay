@@ -1,7 +1,7 @@
 {
-  "version": "0.1.256",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.256.zip",
-  "buildDate": "2026-07-20T17:25:20Z",
-  "commitHash": "04781192596643e4b84801d3f160296f867faf7b",
-  "commitMessage": "Add scripts/asc-submit.mjs: submit an uploaded build to App Store review via the ASC API"
+  "version": "0.1.257",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.257.zip",
+  "buildDate": "2026-07-20T18:26:45Z",
+  "commitHash": "c4e9ae859961400de093d3cabb0aa5c8602181d9",
+  "commitMessage": "Deep links: open ALL chromabay.app links in the app + add iOS Smart App Banner"
 }

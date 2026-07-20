@@ -4,8 +4,8 @@
       {
         "appIDs": ["68683H96V7.com.revoltlabs.chromabay"],
         "components": [
-          { "/": "/account*", "comment": "auth confirm / redirect returns into the app" },
-          { "/": "/auth*" }
+          { "/": "/.well-known/*", "exclude": true, "comment": "leave Apple/well-known files on the web" },
+          { "/": "*", "comment": "open every chromabay.app link in the app (auth, patterns, anything)" }
         ]
       }
     ]

@@ -4,6 +4,18 @@
 		<meta charset="utf-8" />
 		<link rel="icon" href="/favicon.png" />
 		<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+		<!-- iOS Smart App Banner: on mobile Safari this shows the drawer offering to install
+		     (App Store) or open the native app. Only appears once the app is live on the App
+		     Store; ignored inside the app's own WKWebView. app-id is ChromaBay's App Store ID. -->
+		<meta name="apple-itunes-app" content="app-id=6781765952" />
+		<script>
+			// Point the banner's "Open" at the current page so the native app deep-links to it
+			// (via the universal-link handler) instead of just launching to the home screen.
+			try {
+				var __banner = document.querySelector('meta[name=apple-itunes-app]');
+				if (__banner) __banner.content = 'app-id=6781765952, app-argument=' + location.href;
+			} catch (e) {}
+		</script>
 		<!-- FastLED WASM Operator System -->
 		<script>
 			// Global WASM module initialization
@@ -87,15 +99,15 @@
 		</script>
 		
 		
-		<link rel="modulepreload" href="/_app/immutable/entry/start.BjNpeVnl.js">
-		<link rel="modulepreload" href="/_app/immutable/chunks/DRAP0y4B.js">
+		<link rel="modulepreload" href="/_app/immutable/entry/start.BalgfySL.js">
+		<link rel="modulepreload" href="/_app/immutable/chunks/Wx21Gemz.js">
 		<link rel="modulepreload" href="/_app/immutable/chunks/CAbTBGes.js">
-		<link rel="modulepreload" href="/_app/immutable/chunks/FZRG7ftc.js">
+		<link rel="modulepreload" href="/_app/immutable/chunks/CZIZFTaj.js">
 		<link rel="modulepreload" href="/_app/immutable/chunks/BMTucQVK.js">
-		<link rel="modulepreload" href="/_app/immutable/entry/app.CPyyHPBe.js">
+		<link rel="modulepreload" href="/_app/immutable/entry/app.Dbc59ymS.js">
 		<link rel="modulepreload" href="/_app/immutable/chunks/DCWmBVzW.js">
 		<link rel="modulepreload" href="/_app/immutable/chunks/-PH7zS0h.js">
-		<link rel="modulepreload" href="/_app/immutable/chunks/C_-6pK9I.js">
+		<link rel="modulepreload" href="/_app/immutable/chunks/Dq9JD1x2.js">
 		<link rel="modulepreload" href="/_app/immutable/chunks/C5Z761SZ.js">
 		<link rel="modulepreload" href="/_app/immutable/chunks/C2B5u-lk.js">
 		<link rel="modulepreload" href="/_app/immutable/chunks/CrcAIyMD.js">
@@ -105,15 +117,15 @@
 		<div style="display: contents">
 			<script>
 				{
-					__sveltekit_1pti59w = {
+					__sveltekit_5dojx8 = {
 						base: ""
 					};
 
 					const element = document.currentScript.parentElement;
 
 					Promise.all([
-						import("/_app/immutable/entry/start.BjNpeVnl.js"),
-						import("/_app/immutable/entry/app.CPyyHPBe.js")
+						import("/_app/immutable/entry/start.BalgfySL.js"),
+						import("/_app/immutable/entry/app.Dbc59ymS.js")
 					]).then(([kit, app]) => {
 						kit.start(app, element);
 					});
