@@ -1,7 +1,7 @@
 {
-  "version": "0.1.248",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.248.zip",
-  "buildDate": "2026-07-20T04:57:20Z",
-  "commitHash": "7efbefef3d3146ba133c8efa9500f692122e7f78",
-  "commitMessage": "Patterns: wire per-pattern Publish/Copy + content-addressed Online (impl)"
+  "version": "0.1.249",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.249.zip",
+  "buildDate": "2026-07-20T05:01:17Z",
+  "commitHash": "6513cb9d11f817b2cc2cac6e90e48471c0ec2535",
+  "commitMessage": "Account: editable display name (shown with published patterns)"
 }
