@@ -1,7 +1,7 @@
 {
-  "version": "0.1.249",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.249.zip",
-  "buildDate": "2026-07-20T05:01:17Z",
-  "commitHash": "6513cb9d11f817b2cc2cac6e90e48471c0ec2535",
-  "commitMessage": "Account: editable display name (shown with published patterns)"
+  "version": "0.1.250",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.250.zip",
+  "buildDate": "2026-07-20T05:25:53Z",
+  "commitHash": "a505d24c9ef079667b03a45d9f70184f7479dcf9",
+  "commitMessage": "Automation min/max as range sliders; color param last; share UI"
 }
