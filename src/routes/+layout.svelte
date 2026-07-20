@@ -9,6 +9,7 @@
   import { loadSerializedPattern, initializeDefaultPattern } from '$lib/flowStore';
   import { SvelteFlowProvider } from '@xyflow/svelte';
   import '$lib/patternSync'; // activates cloud library sync (inert unless signed in)
+  import { initDeepLinks } from '$lib/deepLinks';
 
   $: connected = $connectedDevices.size;
 
@@ -30,6 +31,7 @@
 
   onMount(() => {
     loadCurrentPatternIntoFlow();
+    initDeepLinks(); // auth emails open the app via universal links (native only)
 
     // iOS Safari viewport height fix
     function setVHProperty() {
