@@ -1,7 +1,7 @@
 {
-  "version": "0.1.254",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.254.zip",
-  "buildDate": "2026-07-20T17:01:27Z",
-  "commitHash": "19e75b588d7a1ce34e0076ee8d07c8ed5aa8fa97",
-  "commitMessage": "iOS 1.1.0: bump build number + cap sync web bundle for submission"
+  "version": "0.1.255",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.255.zip",
+  "buildDate": "2026-07-20T17:12:28Z",
+  "commitHash": "8b1e0e6c47a2db29abd110b487002ca81fa99296",
+  "commitMessage": "Universal Links: auth emails open the app (Associated Domains + deep-link routing)"
 }
