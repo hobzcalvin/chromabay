@@ -1,7 +1,7 @@
 {
-  "version": "0.1.251",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.251.zip",
-  "buildDate": "2026-07-20T05:40:59Z",
-  "commitHash": "7bb4b61a71ecb6bc7a1c117ee8f5ddf15c53b44a",
-  "commitMessage": "Patterns: preserve sourceHash across edits (fix imports reappearing in Online)"
+  "version": "0.1.252",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.252.zip",
+  "buildDate": "2026-07-20T16:52:43Z",
+  "commitHash": "0062c1a5b550bb11f1892c955f09ca0265dc08b5",
+  "commitMessage": "Merge feat/app-wifi: WiFi/WebSocket device control"
 }
