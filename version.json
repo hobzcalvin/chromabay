@@ -1,7 +1,7 @@
 {
-  "version": "0.1.255",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.255.zip",
-  "buildDate": "2026-07-20T17:12:28Z",
-  "commitHash": "8b1e0e6c47a2db29abd110b487002ca81fa99296",
-  "commitMessage": "Universal Links: auth emails open the app (Associated Domains + deep-link routing)"
+  "version": "0.1.256",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.256.zip",
+  "buildDate": "2026-07-20T17:25:20Z",
+  "commitHash": "04781192596643e4b84801d3f160296f867faf7b",
+  "commitMessage": "Add scripts/asc-submit.mjs: submit an uploaded build to App Store review via the ASC API"
 }
