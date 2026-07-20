@@ -1,7 +1,7 @@
 {
-  "version": "0.1.246",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.246.zip",
-  "buildDate": "2026-07-20T00:18:53Z",
-  "commitHash": "3d6c341b9753d310462faa351aa271d70873e18c",
-  "commitMessage": "Patterns: make the per-pattern Sync button responsive"
+  "version": "0.1.248",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.248.zip",
+  "buildDate": "2026-07-20T04:57:20Z",
+  "commitHash": "7efbefef3d3146ba133c8efa9500f692122e7f78",
+  "commitMessage": "Patterns: wire per-pattern Publish/Copy + content-addressed Online (impl)"
 }
