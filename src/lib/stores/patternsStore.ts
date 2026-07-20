@@ -250,10 +250,14 @@ export async function saveCurrentPattern(serializedPattern: SerializedPattern, n
           name: name || current.meta?.name || 'Unnamed Pattern',
           id: current.meta?.id, // preserve identity across edits (savePattern mints if absent)
           updatedAt: current.meta?.updatedAt,
-          // Preserve authorship across edits: tweaking an imported pattern's params does NOT
-          // make you the author (only Rename / Save-As does). sourceHash is intentionally
-          // dropped — an edited pattern is no longer the pristine version from the author.
+          // Preserve authorship AND sourceHash across edits: tweaking an imported pattern's
+          // params does NOT make you the author (only Rename / Copy does), and it must NOT
+          // un-pin the online version you checked out. sourceHash is the pinned remote hash
+          // (git/lockfile-style) — the Online list re-offers a pattern only when the AUTHOR
+          // re-publishes (remote hash != this pin), never because you edited your own copy.
+          // Dropping it here made imported patterns reappear in Online after just selecting them.
           author: current.meta?.author,
+          sourceHash: current.meta?.sourceHash,
         }
       };
 
