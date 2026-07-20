@@ -14,7 +14,7 @@
   // Description + NSBonjourServices). Older installed builds can't reach LAN devices — iOS
   // silently blocks it — so we hide the whole WiFi section on them. On web we only show it in
   // local dev (http); the deployed https site can't do cleartext ws:// (mixed content).
-  const WIFI_MIN_VERSION = '0.1.0';
+  const WIFI_MIN_VERSION = '1.1.0';
   let available = $state(false);
   function cmpVer(a: string, b: string) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
