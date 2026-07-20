@@ -2,19 +2,17 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { base } from '$app/paths';
-  import { patterns, loadPatterns, switchToPattern, currentPatternName, createEmptyPattern, saveAsPattern, patternNameExists, importLibraryPattern } from '$lib/stores/patternsStore';
+  import { patterns, loadPatterns, switchToPattern, currentPatternName, createEmptyPattern, saveAsPattern, patternNameExists, importLibraryPattern, forkToLibrary } from '$lib/stores/patternsStore';
   import PatternPreview from '$lib/components/PatternPreview.svelte';
   import type { SerializedPattern } from '$lib/patternSerializer';
   import { syncPatternToAllDevices, deletePatternOnAllDevices, sendSinglePatternToDevice, deletePatternOnDevice, clearDeviceLibrary } from '$lib/ble';
   import { deviceLibraries, refreshDeviceLibraries, syncedCountFor, markSyncedLocally } from '$lib/stores/deviceLibraryStore';
   import { currentPattern } from '$lib/stores/patternsStore';
   import { connectedDevices, getConnectedDevicesList } from '$lib/stores/deviceStore';
-  import GalleryModal from '$lib/components/GalleryModal.svelte';
+  import { authUser } from '$lib/stores/authStore';
   import { cycleEnabled, cycleSeconds, applyCycle, exitCycle } from '$lib/stores/cycleStore';
-  import { browseGallery, importGalleryPattern, type GalleryPattern } from '$lib/gallery';
+  import { browseGallery, importGalleryPattern, publishPattern, type GalleryPattern } from '$lib/gallery';
   import { get } from 'svelte/store';
-
-  let galleryOpen = false;
   let patternsList: SerializedPattern[] = [];
   let currentName = '';
   
@@ -83,6 +81,41 @@
     } finally { syncingAll = false; }
   }
 
+  // 📤 Publish an OWNED pattern to the public gallery (upsert by author+name). Needs sign-in.
+  // Re-publishing confirms (it overwrites your existing online version). No unpublish.
+  let publishing: Record<string, boolean> = {};
+  async function handlePublish(pattern: SerializedPattern, event: Event) {
+    event.stopPropagation();
+    const name = pattern.meta?.name;
+    if (!name || publishing[name]) return;
+    if (!get(authUser)) { alert('Sign in on the Account tab to publish patterns.'); return; }
+    const already = publishedNames.has(name);
+    const ok = confirm(already
+      ? `Re-publish “${name}” over your existing online version?`
+      : `Publish “${name}” to the public gallery?`);
+    if (!ok) return;
+    publishing = { ...publishing, [name]: true };
+    try {
+      const res = await publishPattern(pattern);
+      if (res.ok) onlinePatterns = await browseGallery({ limit: 30 }); // refresh so it shows ✓ published
+      else alert('Publish failed: ' + (res.error ?? 'unknown error'));
+    } finally {
+      const p = { ...publishing }; delete p[name]; publishing = p;
+    }
+  }
+
+  // 📋 Copy an IMPORTED/foreign pattern to make it your own (fork: fresh id, no author), so
+  // you can then Publish it. Local, no sign-in needed.
+  async function handleCopy(pattern: SerializedPattern, event: Event) {
+    event.stopPropagation();
+    try {
+      const { name } = await forkToLibrary(pattern);
+      await loadPatterns();
+      const forked = get(patterns).find((p) => p.meta?.name === name);
+      if (forked) await selectPattern(forked);
+    } catch (e) { console.error('Copy failed:', e); }
+  }
+
   // Wipe one device's entire stored library (empties its cycle).
   async function handleClearDevice(deviceId: string, name: string) {
     if (!confirm(`Delete all patterns stored on ${name}? This empties its cycle. (Your own library isn't touched.)`)) return;
@@ -115,8 +148,21 @@
     return out;
   })();
 
-  // Online patterns you don't already have, highest-voted first (browseGallery orders them).
-  $: onlineNew = onlinePatterns.filter((g) => !myNames.has(g.name));
+  // Online, content-addressed (git/lockfile-style): show a gallery pattern unless it's mine
+  // or I already hold that EXACT version. `meta.sourceHash` is the remote hash pinned when I
+  // checked it out; adopting sets it to the current remote hash. So a brand-new pattern shows
+  // (never adopted), and an author's re-publish shows again (its new content_hash isn't among
+  // my pinned hashes) — but my own param tweaks never do (they don't change sourceHash).
+  $: myUid = $authUser?.id ?? null;
+  $: adoptedHashes = new Set(patternsList.map((p) => p.meta?.sourceHash).filter(Boolean) as string[]);
+  $: onlineNew = onlinePatterns.filter(
+    (g) => g.author !== myUid && !(g.content_hash && adoptedHashes.has(g.content_hash)),
+  );
+  // Names I've published (gallery entries under my uid). Reactive so the button's ✅ state
+  // updates as soon as onlinePatterns refreshes after a publish.
+  $: publishedNames = new Set(
+    myUid ? onlinePatterns.filter((g) => g.author === myUid).map((g) => g.name) : [],
+  );
 
   onMount(async () => {
     await loadPatterns();
@@ -329,11 +375,8 @@
 <main class="patterns-page" onclick={handleDocumentClick}>
   <div class="header">
     <h1>Patterns</h1>
-    <button class="online-btn" onclick={() => (galleryOpen = true)} title="Browse & publish online patterns">🌐 Online</button>
-    <p class="subtitle">Tap to select • 🖐️ to interact • ✏️ to edit • 🗑️ to delete</p>
+    <p class="subtitle">Tap to select • 🖐️ interact • ✏️ edit • 📤 publish • 🗑️ delete</p>
   </div>
-
-  <GalleryModal open={galleryOpen} onClose={() => (galleryOpen = false)} />
 
   <!-- Cycle control: always shown. When ON, each connected device plays its own stored
        library autonomously; the pattern list below dims because selecting/editing a single
@@ -418,6 +461,25 @@
                   aria-label="Edit {patternName}"
                   title="Edit pattern"
                 >✏️</button>
+                {#if pattern.meta?.author}
+                  <!-- Imported/foreign pattern → Copy to make it yours (then it can be published). -->
+                  <button
+                    class="edit-button"
+                    onclick={(e) => handleCopy(pattern, e)}
+                    aria-label="Copy {patternName} to make it yours"
+                    title="Copy to make it yours"
+                  >📋</button>
+                {:else}
+                  <!-- Owned pattern → Publish (or re-publish) to the online gallery. -->
+                  <button
+                    class="edit-button"
+                    class:published={publishedNames.has(patternName)}
+                    disabled={publishing[patternName]}
+                    onclick={(e) => handlePublish(pattern, e)}
+                    aria-label="Publish {patternName} online"
+                    title={publishedNames.has(patternName) ? "Published — tap to re-publish" : "Publish online"}
+                  >{publishing[patternName] ? "⏳" : (publishedNames.has(patternName) ? "✅" : "📤")}</button>
+                {/if}
                 <button
                   class="delete-button-visible"
                   onclick={(e) => handleDeleteTap(pattern, e)}
@@ -519,20 +581,6 @@
     margin-bottom: 2rem;
     position: relative;
   }
-  .online-btn {
-    position: absolute;
-    top: 0;
-    right: 0;
-    background: rgba(0, 0, 0, 0.3);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    color: #fff;
-    border-radius: 10px;
-    padding: 8px 12px;
-    cursor: pointer;
-    font-size: 0.9rem;
-  }
-  .online-btn:hover { background: rgba(0, 0, 0, 0.5); }
-
   .header h1 {
     margin: 0 0 0.5rem 0;
     font-size: 2rem;

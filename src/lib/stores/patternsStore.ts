@@ -456,6 +456,27 @@ export async function deletePatternByName(patternName: string) {
  * attribution so an unchanged import stays "by <author>" (editing rebuilds meta without author
  * → it becomes yours). Auto-suffixes the name on a collision and reports it (dupe warning).
  */
+/**
+ * Fork a pattern into your library as YOUR OWN copy: same nodes/name (auto-suffixed on
+ * collision) but a fresh id and NO author/sourceHash — so it's a distinct pattern you own
+ * and can publish. This is the "Copy" action on an imported/foreign pattern (rename/copy per
+ * the identity model). Does not change the current selection.
+ */
+export async function forkToLibrary(incoming: SerializedPattern): Promise<{ name: string }> {
+  const list = await readStored();
+  let name = incoming.meta?.name || 'Copy';
+  if (list.some((p) => p.meta?.name === name)) { let i = 2; while (list.some((p) => p.meta?.name === `${name} ${i}`)) i++; name = `${name} ${i}`; }
+  const p: SerializedPattern = {
+    nodes: incoming.nodes ?? [],
+    meta: { output: incoming.meta?.output ?? 1, name, id: newId(), updatedAt: nowMs() }, // no author/sourceHash → yours
+  };
+  list.push(p);
+  await writeStored(list);
+  patterns.set(list);
+  onLibraryChanged();
+  return { name };
+}
+
 export async function importLibraryPattern(incoming: SerializedPattern): Promise<{ name: string; collided: boolean }> {
   const list = await readStored();
   let name = incoming.meta?.name || 'Imported';
