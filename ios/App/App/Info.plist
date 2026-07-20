@@ -20,6 +20,15 @@
 			</dict>
 		</dict>
 	</dict>
+	<!-- Local Network Privacy (iOS 14+): required to reach ChromaBay devices over WiFi
+	     (WebSocket control to <name>.local / private IPs) and to resolve/browse them via
+	     Bonjour. Info.plist is native, so adding these needs a new build — not a live update. -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>ChromaBay finds and controls your LED devices on your local Wi-Fi network.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_chromabay._tcp</string>
+	</array>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
