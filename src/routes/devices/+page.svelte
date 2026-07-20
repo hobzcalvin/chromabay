@@ -54,6 +54,7 @@
   import UsbFlash from '$lib/components/UsbFlash.svelte';
   import WledConvert from '$lib/components/WledConvert.svelte';
   import DeviceSettingsPanel from '$lib/components/DeviceSettingsPanel.svelte';
+  import WifiDevices from '$lib/components/WifiDevices.svelte';
 
   let bleSupported = $state(false);
   let bleEnabled = $state(false);
@@ -1189,6 +1190,9 @@
     </div>
 
   </section>
+
+  <!-- Control devices over WiFi (WebSocket). Only functional on native + local dev. -->
+  <WifiDevices />
 
   <!-- Install / add a device — one compact section; each method expands only when engaged. -->
   <section class="install-section">
