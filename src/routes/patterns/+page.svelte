@@ -6,7 +6,7 @@
   import PatternPreview from '$lib/components/PatternPreview.svelte';
   import type { SerializedPattern } from '$lib/patternSerializer';
   import { syncPatternToAllDevices, deletePatternOnAllDevices, sendSinglePatternToDevice, deletePatternOnDevice, clearDeviceLibrary } from '$lib/ble';
-  import { deviceLibraries, refreshDeviceLibraries, syncedCountFor } from '$lib/stores/deviceLibraryStore';
+  import { deviceLibraries, refreshDeviceLibraries, syncedCountFor, markSyncedLocally } from '$lib/stores/deviceLibraryStore';
   import { currentPattern } from '$lib/stores/patternsStore';
   import { connectedDevices, getConnectedDevicesList } from '$lib/stores/deviceStore';
   import GalleryModal from '$lib/components/GalleryModal.svelte';
@@ -41,19 +41,29 @@
     refreshDeviceLibraries();
   }
 
+  // Which patterns are mid-sync (by name) — drives the button's spinner/disabled state so a
+  // tap feels instant instead of dead while the BLE push runs. Plain let (this file is in
+  // legacy/`$:` mode); reassigning the object triggers reactivity.
+  let syncing: Record<string, boolean> = {};
+
   // Push a pattern into every connected device's library (and show it there). This is the
-  // "N synced" action — after it, the count reflects all devices.
+  // "N synced" action. Pushes to all devices in PARALLEL and updates the count OPTIMISTICALLY
+  // (for devices that succeeded) instead of re-dumping every device's whole library, which is
+  // what made this slow/unresponsive.
   async function handleSyncTap(pattern: SerializedPattern, event: Event) {
     event.stopPropagation();
-    if (!pattern.meta?.name) return;
-    for (const device of connectedList) {
-      try {
-        await sendSinglePatternToDevice(device.deviceId, pattern);
-      } catch (e) {
-        console.error('Sync to device failed:', device.deviceId, e);
-      }
+    const name = pattern.meta?.name;
+    if (!name || syncing[name]) return;
+    syncing = { ...syncing, [name]: true };
+    try {
+      const ids = connectedList.map((d) => d.deviceId);
+      const results = await Promise.allSettled(ids.map((id) => sendSinglePatternToDevice(id, pattern)));
+      const okIds = ids.filter((_, i) => results[i].status === 'fulfilled');
+      results.forEach((r, i) => { if (r.status === 'rejected') console.error('Sync to device failed:', ids[i], r.reason); });
+      markSyncedLocally(okIds, pattern); // count updates instantly; no full re-dump
+    } finally {
+      const s = { ...syncing }; delete s[name]; syncing = s;
     }
-    refreshDeviceLibraries({ force: true }); // we changed the libraries → re-dump
   }
 
   // Sync every My Pattern into every connected device's library (so they all cycle).
@@ -64,11 +74,12 @@
     try {
       for (const device of connectedList) {
         for (const pattern of patternsList) {
-          try { await sendSinglePatternToDevice(device.deviceId, pattern); }
-          catch (e) { console.error('Sync-all failed for', device.deviceId, pattern.meta?.name, e); }
+          try {
+            await sendSinglePatternToDevice(device.deviceId, pattern);
+            markSyncedLocally([device.deviceId], pattern); // optimistic, per push
+          } catch (e) { console.error('Sync-all failed for', device.deviceId, pattern.meta?.name, e); }
         }
       }
-      refreshDeviceLibraries({ force: true });
     } finally { syncingAll = false; }
   }
 
@@ -385,11 +396,13 @@
                 <button
                   class="sync-button"
                   class:allsynced={synced === connectedList.length}
+                  class:syncing={syncing[patternName]}
+                  disabled={syncing[patternName]}
                   onclick={(e) => handleSyncTap(pattern, e)}
                   aria-label="Sync {patternName} to all connected devices"
                   title="Sync to all connected devices"
                 >
-                  {synced === connectedList.length ? '✓ ' : ''}{synced}/{connectedList.length} synced
+                  {#if syncing[patternName]}Syncing…{:else}{synced === connectedList.length ? '✓ ' : ''}{synced}/{connectedList.length} synced{/if}
                 </button>
               {/if}
               <div class="icon-row">
@@ -740,6 +753,8 @@
     border-color: rgba(52, 211, 153, 0.5);
     color: #6ee7b7;
   }
+  .sync-button.syncing { opacity: 0.6; cursor: default; }
+  .sync-button:disabled { cursor: default; }
 
   .interact-button, .edit-button, .delete-button-visible {
     background: rgba(255, 255, 255, 0.1);

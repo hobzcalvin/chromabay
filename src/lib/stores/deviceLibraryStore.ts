@@ -79,6 +79,33 @@ export async function refreshDeviceLibraries(opts: { force?: boolean } = {}): Pr
 }
 
 /** How many of the given (connected) devices hold a pattern with this name. */
+// Optimistically record that `pattern` was just pushed into these devices' libraries, so the
+// "N synced" counts update INSTANTLY without a full LIBRARY_DUMP re-pull (which is slow and
+// made the sync button feel unresponsive). Only call for devices whose push actually
+// succeeded. Adds by name if not already present; a real re-dump later reconciles.
+export function markSyncedLocally(deviceIds: Iterable<string>, pattern: SerializedPattern): void {
+  const name = pattern.meta?.name;
+  if (!name) return;
+  deviceLibraries.update((libs) => {
+    const next = { ...libs };
+    for (const id of deviceIds) {
+      const lib = next[id] ?? [];
+      if (!lib.some((p) => p.meta?.name === name)) next[id] = [...lib, pattern];
+    }
+    return next;
+  });
+}
+
+// Optimistically drop a pattern (by name) from every device's cached library — mirror of the
+// above for deletes, so counts fall to 0 immediately.
+export function markUnsyncedLocally(name: string): void {
+  deviceLibraries.update((libs) => {
+    const next: Record<string, SerializedPattern[]> = {};
+    for (const [id, lib] of Object.entries(libs)) next[id] = lib.filter((p) => p.meta?.name !== name);
+    return next;
+  });
+}
+
 export function syncedCountFor(
   libs: Record<string, SerializedPattern[]>,
   name: string,
