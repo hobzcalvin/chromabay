@@ -5,6 +5,7 @@
   // whatever transport the device is currently on. Switching mode (or changing WiFi creds)
   // reboots the device, so we warn and expect the link to drop.
   import { readDeviceSettings, writeDeviceSettings, type DeviceSettings, type DeviceInfo } from '$lib/ble';
+  import { rememberWifiDevice } from '$lib/stores/wifiDeviceStore';
 
   let { deviceId, deviceInfo }: { deviceId: string; deviceInfo: DeviceInfo | null } = $props();
 
@@ -61,7 +62,9 @@
       await writeDeviceSettings(deviceId, {
         mode: 'wifi', ssid: ssid.trim(), pass: pass, fallback,
       });
-      msg = 'Sent. The device is restarting on Wi-Fi; reconnect from the device list once it appears.';
+      // Remember it as a WiFi device so it shows up under "WiFi devices" to reconnect to.
+      if (deviceInfo?.name) rememberWifiDevice(deviceInfo.name);
+      msg = 'Sent. The device is restarting on Wi-Fi; reconnect from the WiFi devices list once it appears.';
     } catch (e: any) {
       // A dropped link right after the write is expected (device rebooted) — treat as success.
       msg = 'Device is restarting on Wi-Fi. Reconnect from the device list once it appears.';

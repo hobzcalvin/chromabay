@@ -16,9 +16,11 @@
 #define CHROMABAY_WIFI 1
 #endif
 #if CHROMABAY_WIFI
-#include <WiFi.h>       // WiFi/TCP transport (alternative to BLE, chosen per comm mode)
+#include <WiFi.h>       // WiFi transport (alternative to BLE, chosen per comm mode)
 #include <WiFiUdp.h>    // Art-Net / sACN realtime pixel streaming (UDP)
-#include <ESPmDNS.h>    // advertise the TCP endpoint as _chromabay._tcp for app discovery
+#include <ESPmDNS.h>    // advertise the endpoint as _chromabay._tcp for app discovery
+#include <mbedtls/sha1.h>    // WebSocket handshake (Sec-WebSocket-Accept = base64(sha1(key+GUID)))
+#include <mbedtls/base64.h>
 #endif
 #include "esp_ota_ops.h" // For OTA updates
 #include "esp_chip_info.h" // Report which ESP32 variant we're running on (device-info JSON)
@@ -2299,18 +2301,36 @@ enum TcpChannel : uint8_t {
     CH_COMM_CONFIG    = 11, // write mpack patch; empty req → settings JSON reply
 };
 
+// WebSocket control transport (hand-rolled over WiFiServer — the browser can only speak
+// WebSocket, and iOS's webview does too with no native plugin). Each WS binary message is
+// [u8 channel][payload]; WS gives message boundaries so there's no length prefix. The channel
+// dispatch is identical to the old raw-TCP version.
 namespace WifiLink {
     static WiFiServer server(CHROMABAY_TCP_PORT);
     static WiFiClient client;
-    // Inbound frame accumulator for the single active client.
-    static std::vector<uint8_t> rx;
+    static bool wsReady = false;               // HTTP→WS handshake done for `client`
+    static std::vector<uint8_t> rx;            // raw inbound bytes (handshake text, then WS frames)
+    static std::vector<uint8_t> msg;           // reassembled WS message payload (across fragments)
     static const size_t MAX_FRAME = 64 * 1024;
 
-    static void sendFrame(uint8_t channel, const uint8_t* data, uint32_t len) {
+    // Send a WS binary frame (server→client: unmasked, opcode 0x2).
+    static void wsSendBinary(const uint8_t* data, size_t len) {
         if (!client || !client.connected()) return;
-        uint8_t hdr[5] = { channel, (uint8_t)(len), (uint8_t)(len >> 8), (uint8_t)(len >> 16), (uint8_t)(len >> 24) };
-        client.write(hdr, 5);
+        uint8_t hdr[10]; size_t h = 0;
+        hdr[0] = 0x82; // FIN + binary
+        if (len < 126) { hdr[1] = (uint8_t)len; h = 2; }
+        else if (len <= 0xFFFF) { hdr[1] = 126; hdr[2] = (len >> 8) & 0xFF; hdr[3] = len & 0xFF; h = 4; }
+        else { hdr[1] = 127; for (int i = 0; i < 8; i++) hdr[2 + i] = (uint8_t)((uint64_t)len >> (8 * (7 - i))); h = 10; }
+        client.write(hdr, h);
         if (len && data) client.write(data, len);
+    }
+    // A control message is [u8 channel][payload]; wrap it in one WS binary frame.
+    static void sendFrame(uint8_t channel, const uint8_t* data, uint32_t len) {
+        static std::vector<uint8_t> buf;
+        buf.clear(); buf.reserve(1 + len);
+        buf.push_back(channel);
+        if (len && data) buf.insert(buf.end(), data, data + len);
+        wsSendBinary(buf.data(), buf.size());
     }
     static void sendStr(uint8_t channel, const String& s) {
         sendFrame(channel, (const uint8_t*)s.c_str(), s.length());
@@ -2400,8 +2420,62 @@ namespace WifiLink {
         }
     }
 
-    // Connect STA (or fall back to SoftAP) and start the TCP server + mDNS. Returns true if
-    // we are serving over WiFi. On STA failure with FB_BLE, returns false so the caller
+    // Complete the HTTP→WebSocket upgrade once the request headers are fully buffered in `rx`.
+    static void doHandshake() {
+        // Find end of headers. (The request is small text; rx has no binary yet.)
+        int end = -1;
+        for (size_t i = 0; i + 3 < rx.size(); i++)
+            if (rx[i]=='\r' && rx[i+1]=='\n' && rx[i+2]=='\r' && rx[i+3]=='\n') { end = (int)i; break; }
+        if (end < 0) { if (rx.size() > 4096) { client.stop(); rx.clear(); } return; } // wait / cap
+        String req((const char*)rx.data(), end);
+        int ki = req.indexOf("Sec-WebSocket-Key:");
+        if (ki < 0) ki = req.indexOf("sec-websocket-key:"); // header names are case-insensitive
+        if (ki < 0) { Serial.println("[WS] no Sec-WebSocket-Key; closing"); client.stop(); rx.clear(); return; }
+        ki += 18; while (ki < (int)req.length() && (req[ki]==' ')) ki++;
+        int ke = req.indexOf("\r\n", ki); if (ke < 0) ke = req.length();
+        String key = req.substring(ki, ke); key.trim();
+        String magic = key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+        uint8_t sha[20];
+        mbedtls_sha1((const uint8_t*)magic.c_str(), magic.length(), sha);
+        unsigned char b64[32]; size_t olen = 0;
+        mbedtls_base64_encode(b64, sizeof(b64), &olen, sha, 20);
+        String accept = String((const char*)b64).substring(0, olen);
+        String resp = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " + accept + "\r\n\r\n";
+        client.write((const uint8_t*)resp.c_str(), resp.length());
+        rx.erase(rx.begin(), rx.begin() + end + 4); // keep any WS bytes already after the headers
+        msg.clear(); wsReady = true; deviceConnected = true; noteActivity();
+        Serial.printf("[WS] handshake OK: %s\n", client.remoteIP().toString().c_str());
+    }
+
+    // Parse buffered WS frames; dispatch each complete (FIN) data message. Client→server
+    // frames are always masked; we unmask into `msg` and handle continuation/ping/close.
+    static void parseFrames() {
+        size_t pos = 0;
+        while (rx.size() - pos >= 2) {
+            uint8_t b0 = rx[pos], b1 = rx[pos + 1];
+            bool fin = b0 & 0x80; uint8_t op = b0 & 0x0F; bool masked = b1 & 0x80;
+            uint64_t len = b1 & 0x7F; size_t hp = pos + 2;
+            if (len == 126) { if (rx.size() - pos < 4) break; len = ((uint64_t)rx[hp] << 8) | rx[hp+1]; hp += 2; }
+            else if (len == 127) { if (rx.size() - pos < 10) break; len = 0; for (int i = 0; i < 8; i++) len = (len << 8) | rx[hp+i]; hp += 8; }
+            uint8_t mask[4] = {0,0,0,0};
+            if (masked) { if (rx.size() < hp + 4) break; for (int i = 0; i < 4; i++) mask[i] = rx[hp+i]; hp += 4; }
+            if (len > MAX_FRAME) { client.stop(); rx.clear(); msg.clear(); return; }
+            if (rx.size() - hp < len) break; // wait for full payload
+            if (op == 0x8) { client.stop(); return; } // close
+            if (op == 0x9) { // ping → pong (echo payload, unmasked)
+                std::vector<uint8_t> p; for (uint64_t i = 0; i < len; i++) p.push_back(masked ? (rx[hp+i]^mask[i&3]) : rx[hp+i]);
+                uint8_t ph[2] = { 0x8A, (uint8_t)p.size() }; client.write(ph, 2); if (p.size()) client.write(p.data(), p.size());
+            } else if (op == 0x0 || op == 0x1 || op == 0x2) { // continuation / text / binary
+                for (uint64_t i = 0; i < len; i++) msg.push_back(masked ? (rx[hp+i]^mask[i&3]) : rx[hp+i]);
+                if (fin) { if (msg.size() >= 1) dispatch(msg[0], msg.data()+1, (uint32_t)(msg.size()-1)); msg.clear(); }
+            }
+            pos = hp + len;
+        }
+        if (pos > 0) rx.erase(rx.begin(), rx.begin() + pos);
+    }
+
+    // Connect STA (or fall back to SoftAP) and start the WebSocket server + mDNS. Returns true
+    // if we are serving over WiFi. On STA failure with FB_BLE, returns false so the caller
     // starts BLE for this boot instead (so the user can always get back in and fix creds).
     static bool startAp() {
         String ap = deviceName.length() ? deviceName : String("ChromaBay");
@@ -2459,42 +2533,31 @@ namespace WifiLink {
         return true;
     }
 
-    // Poll from loop(): accept a client, read available bytes, dispatch whole frames.
+    // Poll from loop(): accept one client, buffer inbound bytes, then run the WS handshake
+    // (once) and dispatch any complete frames.
     static void tick() {
-        WiFiClient nc = server.accept();   // new connection, or falsy if none (non-blocking)
-        if (nc) {
-            if (client && client.connected()) {
-                nc.stop(); // one client at a time — reject the extra
-            } else {
-                client = nc;
-                client.setNoDelay(true);
-                rx.clear();
-                Serial.printf("[TCP] client %s\n", client.remoteIP().toString().c_str());
-                deviceConnected = true;
+        if (server.hasClient()) {
+            WiFiClient nc = server.available();
+            if (nc) {
+                if (client && client.connected()) { nc.stop(); } // one client at a time
+                else { client = nc; client.setNoDelay(true); rx.clear(); msg.clear(); wsReady = false;
+                       Serial.printf("[WS] TCP client %s\n", client.remoteIP().toString().c_str()); }
             }
         }
         if (!client || !client.connected()) {
-            if (deviceConnected && gWifiMode) { deviceConnected = false; Serial.println("[TCP] client gone"); }
+            if (deviceConnected && gWifiMode) { deviceConnected = false; wsReady = false; }
             return;
         }
-        while (client.available()) {
-            uint8_t b[256];
-            int n = client.read(b, sizeof(b));
+        int av = client.available();
+        while (av > 0) {
+            uint8_t b[512]; int n = client.read(b, sizeof(b));
             if (n <= 0) break;
             rx.insert(rx.end(), b, b + n);
-            if (rx.size() > MAX_FRAME + 5) { Serial.println("[TCP] frame too big — dropping client"); client.stop(); rx.clear(); return; }
+            if (rx.size() > MAX_FRAME + 64) { client.stop(); rx.clear(); msg.clear(); return; }
+            av = client.available();
         }
-        // Parse as many complete frames as we have.
-        size_t pos = 0;
-        while (rx.size() - pos >= 5) {
-            uint8_t ch = rx[pos];
-            uint32_t len = (uint32_t)rx[pos+1] | ((uint32_t)rx[pos+2] << 8) | ((uint32_t)rx[pos+3] << 16) | ((uint32_t)rx[pos+4] << 24);
-            if (len > MAX_FRAME) { client.stop(); rx.clear(); return; }
-            if (rx.size() - pos - 5 < len) break; // wait for the rest
-            dispatch(ch, rx.data() + pos + 5, len);
-            pos += 5 + len;
-        }
-        if (pos > 0) rx.erase(rx.begin(), rx.begin() + pos);
+        if (!wsReady) doHandshake();
+        if (wsReady) parseFrames();
     }
 } // namespace WifiLink
 
