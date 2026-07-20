@@ -1,7 +1,7 @@
 {
-  "version": "0.1.253",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.253.zip",
-  "buildDate": "2026-07-20T16:59:48Z",
-  "commitHash": "0ffec717d8cdc0f3924a07c5b945053c81771dc0",
-  "commitMessage": "Set iOS build to 1.1.0; gate WiFi section at >=1.1.0"
+  "version": "0.1.254",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.254.zip",
+  "buildDate": "2026-07-20T17:01:27Z",
+  "commitHash": "19e75b588d7a1ce34e0076ee8d07c8ed5aa8fa97",
+  "commitMessage": "iOS 1.1.0: bump build number + cap sync web bundle for submission"
 }
