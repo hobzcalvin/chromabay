@@ -1,7 +1,7 @@
 {
-  "version": "0.1.252",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.252.zip",
-  "buildDate": "2026-07-20T16:52:43Z",
-  "commitHash": "0062c1a5b550bb11f1892c955f09ca0265dc08b5",
-  "commitMessage": "Merge feat/app-wifi: WiFi/WebSocket device control"
+  "version": "0.1.253",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.253.zip",
+  "buildDate": "2026-07-20T16:59:48Z",
+  "commitHash": "0ffec717d8cdc0f3924a07c5b945053c81771dc0",
+  "commitMessage": "Set iOS build to 1.1.0; gate WiFi section at >=1.1.0"
 }
