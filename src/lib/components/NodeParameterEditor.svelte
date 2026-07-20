@@ -309,12 +309,18 @@
   $: convolveCustom = isConvolve && presetParam
     ? String($nodeParameters.get(node.id)?.get('preset') ?? presetParam.default ?? 1) === '0'
     : false;
+  // Params to show, with the colour control forced to the BOTTOM — otherwise a param defined
+  // after `hue` (e.g. an "Angle") ends up hidden below the tall colour wheel.
+  $: isColorParam = (p: Parameter) => (colorPair && p.name === 'hue') || p.type === 'color';
   $: visibleParams = nodeDefinition
-    ? nodeDefinition.params.filter((p) => {
-        if (colorPair && p.name === 'saturation') return false;      // shown in the color wheel
-        if (isConvolve && /^k[1-9]$/.test(p.name)) return false;     // shown in the kernel grid
-        return true;
-      })
+    ? (() => {
+        const shown = nodeDefinition.params.filter((p) => {
+          if (colorPair && p.name === 'saturation') return false;    // shown in the color wheel
+          if (isConvolve && /^k[1-9]$/.test(p.name)) return false;   // shown in the kernel grid
+          return true;
+        });
+        return [...shown.filter((p) => !isColorParam(p)), ...shown.filter(isColorParam)];
+      })()
     : [];
   // Reactive modulator lookup (subscribes to the store).
   $: getModReactive = (paramName: string): ModulatorConfig | null => $modulators.get(node.id)?.get(paramName) ?? null;
@@ -438,8 +444,19 @@
               </button>
             {/each}
           </div>
-          <div class="mod-field"><span class="mod-label">Min {@render handBtn('min')}</span> <input type="number" step="any" value={cfg.min} oninput={(e) => updateMod(p, { min: parseFloat(e.currentTarget.value) })} /></div>
-          <div class="mod-field"><span class="mod-label">Max {@render handBtn('max')}</span> <input type="number" step="any" value={cfg.max} oninput={(e) => updateMod(p, { max: parseFloat(e.currentTarget.value) })} /></div>
+          <!-- Min/Max are sliders over the SAME range as the parameter being automated (so you
+               can't type an invalid/blank value or a stray "-", which used to NaN-break the
+               operator). For a hue param this is just a 0–255 hue range. -->
+          {@const rng = paramRange(p)}
+          {@const mstep = Math.max((rng.hi - rng.lo) / 100, 1e-6)}
+          <div class="mod-field"><span class="mod-label">Min {@render handBtn('min')}</span>
+            <input type="range" min={rng.lo} max={rng.hi} step={mstep} value={cfg.min}
+              oninput={(e) => updateMod(p, { min: parseFloat(e.currentTarget.value) })} />
+            <span class="mod-val">{(+cfg.min).toFixed(2)}</span></div>
+          <div class="mod-field"><span class="mod-label">Max {@render handBtn('max')}</span>
+            <input type="range" min={rng.lo} max={rng.hi} step={mstep} value={cfg.max}
+              oninput={(e) => updateMod(p, { max: parseFloat(e.currentTarget.value) })} />
+            <span class="mod-val">{(+cfg.max).toFixed(2)}</span></div>
           <div class="mod-field"><span class="mod-label">Period (s) {@render handBtn('period')}</span> <input type="number" min="0.1" step="0.1" value={cfg.period} oninput={(e) => updateMod(p, { period: Math.max(0.1, parseFloat(e.currentTarget.value) || 0.1) })} /></div>
           <button type="button" class="stop-btn" onclick={() => stopAutomation(p)}>Stop automating</button>
         {/if}
@@ -1062,8 +1079,10 @@
   }
   .shape-btn.sel { border-color: #22d3ee; color: #22d3ee; background: #0e2a30; }
   .mod-field { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 0.8rem; color: #d1d5db; }
-  .mod-label { display: inline-flex; align-items: center; gap: 6px; }
+  .mod-label { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
   .mod-field input { width: 90px; background: #111827; border: 1px solid #374151; border-radius: 4px; color: #e5e7eb; padding: 4px 6px; }
+  .mod-field input[type="range"] { flex: 1; min-width: 0; padding: 0; }
+  .mod-val { min-width: 44px; text-align: right; font-variant-numeric: tabular-nums; color: #9ca3af; }
   .stop-btn { margin-top: 4px; background: #3f1d1d; border: 1px solid #7f1d1d; color: #fca5a5; border-radius: 6px; padding: 6px; cursor: pointer; font-size: 0.8rem; }
   .svg-input { display: flex; flex-direction: column; gap: 6px; }
   .svg-preset { background: #111827; border: 1px solid #374151; border-radius: 4px; color: #e5e7eb; padding: 4px 6px; font-size: 0.8rem; }

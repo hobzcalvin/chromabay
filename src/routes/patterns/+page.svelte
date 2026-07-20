@@ -88,17 +88,17 @@
     event.stopPropagation();
     const name = pattern.meta?.name;
     if (!name || publishing[name]) return;
-    if (!get(authUser)) { alert('Sign in on the Account tab to publish patterns.'); return; }
+    if (!get(authUser)) { alert('Sign in on the Account tab to share patterns online.'); return; }
     const already = publishedNames.has(name);
     const ok = confirm(already
-      ? `Re-publish “${name}” over your existing online version?`
-      : `Publish “${name}” to the public gallery?`);
+      ? `Update the shared version of “${name}”?`
+      : `Share “${name}” to the public gallery?`);
     if (!ok) return;
     publishing = { ...publishing, [name]: true };
     try {
       const res = await publishPattern(pattern);
-      if (res.ok) onlinePatterns = await browseGallery({ limit: 30 }); // refresh so it shows ✓ published
-      else alert('Publish failed: ' + (res.error ?? 'unknown error'));
+      if (res.ok) onlinePatterns = await browseGallery({ limit: 30 }); // refresh so it shows ✅ shared
+      else alert('Share failed: ' + (res.error ?? 'unknown error'));
     } finally {
       const p = { ...publishing }; delete p[name]; publishing = p;
     }
@@ -375,7 +375,8 @@
 <main class="patterns-page" onclick={handleDocumentClick}>
   <div class="header">
     <h1>Patterns</h1>
-    <p class="subtitle">Tap to select • 🖐️ interact • ✏️ edit • 📤 publish • 🗑️ delete</p>
+    <p class="subtitle">Tap to select • 🖐️ interact • ✏️ edit • 🔗 share • 🗑️ delete</p>
+    <p class="subtitle">Import patterns from the “New From Devices” and “Online” sections below.</p>
   </div>
 
   <!-- Cycle control: always shown. When ON, each connected device plays its own stored
@@ -476,9 +477,9 @@
                     class:published={publishedNames.has(patternName)}
                     disabled={publishing[patternName]}
                     onclick={(e) => handlePublish(pattern, e)}
-                    aria-label="Publish {patternName} online"
-                    title={publishedNames.has(patternName) ? "Published — tap to re-publish" : "Publish online"}
-                  >{publishing[patternName] ? "⏳" : (publishedNames.has(patternName) ? "✅" : "📤")}</button>
+                    aria-label="Share {patternName} online"
+                    title={publishedNames.has(patternName) ? "Shared online — tap to update" : "Share online"}
+                  >{publishing[patternName] ? "⏳" : (publishedNames.has(patternName) ? "✅" : "🔗")}</button>
                 {/if}
                 <button
                   class="delete-button-visible"
@@ -821,7 +822,11 @@
     background: rgba(255, 255, 255, 0.2);
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
   }
-  
+  .edit-button.published {
+    background: rgba(16, 185, 129, 0.25);
+    border-color: rgba(52, 211, 153, 0.5);
+  }
+
   .delete-button-visible {
     background: rgba(239, 68, 68, 0.2);
     border-color: rgba(239, 68, 68, 0.4);
