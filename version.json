@@ -1,7 +1,7 @@
 {
-  "version": "0.1.258",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.258.zip",
-  "buildDate": "2026-07-21T05:53:39Z",
-  "commitHash": "2e9288e58c3dfc9063c5c3c16ddce7c4e629e8f1",
-  "commitMessage": "Firmware: RGBW auto-white (accurate) — actually drive the white LED"
+  "version": "0.1.259",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.259.zip",
+  "buildDate": "2026-07-21T06:10:48Z",
+  "commitHash": "fb348c9b3655e19ddf09d717df76703e5f56d1bd",
+  "commitMessage": "Scheduled on/off + NTP + boot-brightness floor"
 }
