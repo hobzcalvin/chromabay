@@ -1,7 +1,7 @@
 {
-  "version": "0.1.259",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.259.zip",
-  "buildDate": "2026-07-21T06:10:48Z",
-  "commitHash": "fb348c9b3655e19ddf09d717df76703e5f56d1bd",
-  "commitMessage": "Scheduled on/off + NTP + boot-brightness floor"
+  "version": "0.1.260",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.260.zip",
+  "buildDate": "2026-07-21T14:02:26Z",
+  "commitHash": "e9d256a44cb0661e99611bb06106800f52d305e6",
+  "commitMessage": "Schedule: per-day-of-week toggles (connected square buttons)"
 }
