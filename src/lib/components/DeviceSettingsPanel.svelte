@@ -28,6 +28,18 @@
   let rtUni = $state(0);
   let rtTimeout = $state(10);
   let rtLayout = $state(false);
+  // Daily on/off schedule
+  let schedEnable = $state(false);
+  let schedOnStr = $state('20:00');
+  let schedOffStr = $state('06:00');
+  const minToStr = (m: number) => {
+    const h = Math.floor(m / 60) % 24, mm = m % 60;
+    return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+  };
+  const strToMin = (s: string) => {
+    const [h, m] = s.split(':').map(Number);
+    return (((h || 0) * 60 + (m || 0)) % 1440 + 1440) % 1440;
+  };
 
   async function load() {
     if (!supported || loading || loadedFor === deviceId) return;
@@ -44,6 +56,9 @@
         rtUni = s.rtuni ?? 0;
         rtTimeout = s.rtto ?? 10;
         rtLayout = (s.rtlayout ?? 0) === 1;
+        schedEnable = (s.sen ?? 0) === 1;
+        if (s.son != null) schedOnStr = minToStr(s.son);
+        if (s.sof != null) schedOffStr = minToStr(s.sof);
         loadedFor = deviceId;
       }
     } finally {
@@ -86,6 +101,21 @@
     try {
       await writeDeviceSettings(deviceId, { sleep: Math.max(0, Math.floor(sleepMin)), rgbtest: rgbTest });
       msg = 'Saved.';
+    } catch (e: any) {
+      msg = 'Failed to save: ' + (e?.message ?? e);
+    }
+  }
+
+  async function saveSchedule() {
+    msg = '';
+    try {
+      // Send the phone's current UTC offset so the device can compute local time. (DST at
+      // sync time is baked in; re-saving or reconnecting the app corrects it after a shift.)
+      await writeDeviceSettings(deviceId, {
+        sen: schedEnable, son: strToMin(schedOnStr), sof: strToMin(schedOffStr),
+        tz: -new Date().getTimezoneOffset(),
+      });
+      msg = 'Schedule saved.';
     } catch (e: any) {
       msg = 'Failed to save: ' + (e?.message ?? e);
     }
@@ -166,6 +196,32 @@
       </div>
     </div>
 
+    <!-- Daily on/off schedule -->
+    <div class="power-form">
+      <div class="row"><span class="lbl">Daily on/off schedule</span></div>
+      <label class="check">
+        <input type="checkbox" bind:checked={schedEnable} />
+        <span>Turn the lights on/off automatically</span>
+      </label>
+      {#if schedEnable}
+        <label class="inline">
+          <span>Turn on at</span>
+          <input type="time" bind:value={schedOnStr} />
+        </label>
+        <label class="inline">
+          <span>Turn off at</span>
+          <input type="time" bind:value={schedOffStr} />
+        </label>
+        {#if settings && settings.clk === 0}
+          <p class="hint warn">This device doesn't know the current time yet, so the schedule can't run. It learns the time from the app when you connect, or from the internet when it's on Wi-Fi.</p>
+        {/if}
+        <p class="hint">Uses your phone's time zone. If the device loses power it forgets the time and the schedule pauses until the app connects again — or automatically if it's on Wi-Fi (it fetches the time itself). Note: "off" just blanks the LEDs; it can't cut their power.</p>
+      {/if}
+      <div class="btn-row">
+        <button class="btn secondary small" onclick={saveSchedule}>Save schedule</button>
+      </div>
+    </div>
+
     <!-- Realtime streaming (Art-Net / sACN) -->
     <div class="power-form">
       <div class="row"><span class="lbl">Realtime streaming (Art-Net / sACN)</span></div>
@@ -224,5 +280,6 @@
   input[type=number] { max-width: 6rem; }
   .btn-row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
   .hint { font-size: 0.82rem; opacity: 0.7; }
+  .hint.warn { color: #fca5a5; opacity: 0.95; }
   .msg { font-size: 0.82rem; opacity: 0.9; margin-top: 0.4rem; }
 </style>

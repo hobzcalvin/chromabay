@@ -25,6 +25,8 @@
 #include "esp_ota_ops.h" // For OTA updates
 #include "esp_chip_info.h" // Report which ESP32 variant we're running on (device-info JSON)
 #include "device_settings.h" // NVS-backed comm mode / WiFi creds / sleep timer / rgb-test
+#include <time.h>           // wall-clock: time()/localtime for the on/off schedule
+#include <sys/time.h>       // settimeofday() — feed the system clock from app sync / NTP
 
 // PSA Crypto API includes for signature verification
 #include "psa/crypto.h"
@@ -44,6 +46,10 @@
 #define LED_PIN     CHROMABAY_DEFAULT_LED_PIN
 #define NUM_LEDS    64  // 5x5 LED matrix (DISPLAY_WIDTH * DISPLAY_HEIGHT)
 #define BRIGHTNESS  20      // Applied to LedManager
+// Never boot dark: a device that lost power (or was saved at a very low value) comes back
+// visibly so it's obviously alive + controllable. Floors the power-on brightness only; live
+// slider sets afterward can still go to 0.
+#define BOOT_MIN_BRIGHTNESS 16
 
 // Note: CRGB type still needed for pattern renderer, but no global array needed
 
@@ -137,6 +143,14 @@ static volatile bool newCommCfgAvailable = false;
 static bool gAsleep = false;
 static uint32_t gLastActivityMs = 0;
 static void noteActivity();              // defined below; resets the sleep countdown / wakes
+
+// Scheduled on/off + clock validity. gClockValid is true once we know the wall-clock time
+// (from the app's TIMESTAMP_SYNC or, on WiFi, NTP). gScheduledOff blanks output while the
+// daily schedule says "off". Both gate rendering alongside gAsleep. On power loss the clock
+// resets to unknown, so the schedule is inert until the app connects or NTP is reached.
+static bool gClockValid = false;
+static bool gScheduledOff = false;
+static void blankAllStrips();            // defined below; writes every LED black once
 
 // Realtime streaming (Art-Net/sACN): while millis() < gRealtimeUntilMs the render loop
 // yields to streamed pixels; it lapses back to the pattern/cycle after rtTimeout of silence.
@@ -601,6 +615,18 @@ void updateDeviceInfoCharacteristic() {
 static void noteActivity() {
     gLastActivityMs = millis();
     if (gAsleep) { gAsleep = false; Serial.println("[Sleep] woke on activity"); }
+}
+
+// Write every LED on every strip black and push it out once. Used when going to sleep or
+// entering a scheduled-off window; the render guard then keeps rendering paused so it stays
+// dark (the configured brightness is untouched, so waking restores the look).
+static void blankAllStrips() {
+    for (size_t s = 0; s < ledMgr.getNumStrips(); s++) {
+        const LedConfig::LedBus* strip = ledMgr.getStrip(s);
+        if (!strip) continue;
+        for (int i = 0; i < strip->getLength(); i++) ledMgr.setPixelColor(s, i, CRGB::Black);
+    }
+    ledMgr.show();
 }
 
 // Hand a fully-reassembled pattern msgpack buffer to the render loop. Takes ownership of
@@ -1199,6 +1225,10 @@ class TimestampSyncCallbacks : public NimBLECharacteristicCallbacks {
             syncedEpochMs = timestamp;          // full 64-bit epoch ms for the wall clock
             syncedEpochLocalMs = (uint32_t)localTime;
             timestampSynced = true;
+            // Feed the system clock so time() ticks on its own — the wall clock + on/off
+            // schedule read time(), and this seeds it even without NTP.
+            { struct timeval tv = { (time_t)(timestamp / 1000ULL), (suseconds_t)((timestamp % 1000ULL) * 1000ULL) };
+              settimeofday(&tv, nullptr); }
             
             // Update pattern renderer with synchronized time
             if (patternRenderer) {
@@ -2187,6 +2217,11 @@ static String commSettingsJson() {
     j += "\"rtuni\":" + String(gSettings.rtUniverse) + ",";
     j += "\"rtto\":" + String(gSettings.rtTimeoutSec) + ",";
     j += "\"rtlayout\":" + String(gSettings.rtLayout ? 1 : 0) + ",";
+    j += "\"sen\":" + String(gSettings.schedEnable ? 1 : 0) + ",";
+    j += "\"son\":" + String(gSettings.schedOnMin) + ",";
+    j += "\"sof\":" + String(gSettings.schedOffMin) + ",";
+    j += "\"tz\":" + String(gSettings.tzOffsetMin) + ",";
+    j += "\"clk\":" + String(gClockValid ? 1 : 0) + ",";  // 1 = device knows the wall-clock time
     j += "\"mode_active\":\"" + String(gWifiMode ? "wifi" : "ble") + "\"";
 #if CHROMABAY_WIFI
     if (gWifiMode) j += ",\"ip\":\"" + WiFi.localIP().toString() + "\"";
@@ -2254,6 +2289,14 @@ void processCommConfig() {
                 gSettings.rtTimeoutSec = (uint16_t)mpack_node_u16(v);
             } else if (strcmp(key, "rtlayout") == 0) {
                 gSettings.rtLayout = mpack_node_bool(v);
+            } else if (strcmp(key, "sen") == 0) {
+                gSettings.schedEnable = mpack_node_bool(v);
+            } else if (strcmp(key, "son") == 0) {
+                gSettings.schedOnMin = (uint16_t)mpack_node_u16(v);
+            } else if (strcmp(key, "sof") == 0) {
+                gSettings.schedOffMin = (uint16_t)mpack_node_u16(v);
+            } else if (strcmp(key, "tz") == 0) {
+                gSettings.tzOffsetMin = (int16_t)mpack_node_i16(v);
             }
         }
     } else {
@@ -2406,6 +2449,8 @@ namespace WifiLink {
                     uint64_t ts = 0; memcpy(&ts, p, 8);
                     syncedTimestampMs = (unsigned long)ts; syncedLocalTime = millis(); timestampSynced = true;
                     syncedEpochMs = ts; syncedEpochLocalMs = (uint32_t)syncedLocalTime;
+                    { struct timeval tv = { (time_t)(ts / 1000ULL), (suseconds_t)((ts % 1000ULL) * 1000ULL) };
+                      settimeofday(&tv, nullptr); } // feed system clock (see BLE handler)
                     if (patternRenderer) patternRenderer->setSynchronizedTime(syncedTimestampMs, syncedLocalTime);
                 }
                 break;
@@ -2515,6 +2560,10 @@ namespace WifiLink {
                 }
             } else {
                 Serial.printf("[WiFi] connected: %s\n", WiFi.localIP().toString().c_str());
+                // Start SNTP so the device learns the time on its own (no app needed) — this
+                // is what lets a WiFi-only device run the on/off schedule after a power loss.
+                // UTC (offset 0); we apply the timezone offset ourselves for the schedule.
+                configTime(0, 0, "pool.ntp.org", "time.nist.gov", "time.google.com");
             }
         }
         server.begin();
@@ -2733,6 +2782,14 @@ void setup() {
             ledMgr.setGlobalBrightness(BRIGHTNESS);
             ledMgr.begin(); // Initialize the LED hardware driver
         }
+    }
+
+    // Never boot dark (see BOOT_MIN_BRIGHTNESS): the saved global brightness may be very low
+    // (or 0), which on power-up would look like a dead device. Floor it on boot only.
+    if (ledMgr.getNumStrips() > 0 && ledMgr.getGlobalBrightness() < BOOT_MIN_BRIGHTNESS) {
+        Serial.printf("[Boot] brightness %u below floor → %u\n",
+                      ledMgr.getGlobalBrightness(), BOOT_MIN_BRIGHTNESS);
+        ledMgr.setGlobalBrightness(BOOT_MIN_BRIGHTNESS);
     }
 
     if (ledMgr.getNumStrips() == 0) {
@@ -2979,9 +3036,32 @@ const unsigned long heapUpdateInterval = 5000; // Update heap in device info eve
 void loop() {
     unsigned long currentTime = millis();
 
-    // Keep the wall clock current for the Clock node (Unix seconds), derived from the
-    // app-synced 64-bit epoch. No-op until a timestamp sync arrives.
-    if (syncedEpochMs) WallClock::set((uint32_t)((syncedEpochMs + (uint64_t)(currentTime - syncedEpochLocalMs)) / 1000ULL));
+    // Keep the wall clock current for the Clock node + on/off schedule (Unix seconds).
+    // Prefer the free-running system clock (seeded by app TIMESTAMP_SYNC via settimeofday,
+    // and/or kept in sync by NTP on WiFi); fall back to the app-synced snapshot + elapsed
+    // millis. Valid once we've heard a plausible time (after 2024-01-01).
+    uint32_t nowEpoch = 0;
+    time_t sysNow = time(nullptr);
+    if (sysNow > 1704067200) { nowEpoch = (uint32_t)sysNow; gClockValid = true; }
+    else if (syncedEpochMs)  { nowEpoch = (uint32_t)((syncedEpochMs + (uint64_t)(currentTime - syncedEpochLocalMs)) / 1000ULL); gClockValid = true; }
+    else                     { gClockValid = false; }
+    if (nowEpoch) WallClock::set(nowEpoch);
+
+    // Daily on/off schedule: blank output outside the on-window. Re-evaluated each loop so a
+    // settings change or a clock arriving takes effect immediately. Inert without a valid
+    // clock (e.g. right after a power loss) — output stays on until the time is known.
+    if (gSettings.schedEnable && gClockValid && gSettings.schedOnMin != gSettings.schedOffMin) {
+        long localSec = ((long)nowEpoch + (long)gSettings.tzOffsetMin * 60) % 86400;
+        if (localSec < 0) localSec += 86400;
+        uint16_t minOfDay = (uint16_t)(localSec / 60);
+        bool inOn = (gSettings.schedOnMin < gSettings.schedOffMin)
+            ? (minOfDay >= gSettings.schedOnMin && minOfDay < gSettings.schedOffMin)   // same-day window
+            : (minOfDay >= gSettings.schedOnMin || minOfDay < gSettings.schedOffMin);  // wraps midnight
+        if (!inOn && !gScheduledOff) { gScheduledOff = true; blankAllStrips(); Serial.println("[Sched] entering OFF window"); }
+        else if (inOn && gScheduledOff) { gScheduledOff = false; gLastActivityMs = currentTime; Serial.println("[Sched] entering ON window"); }
+    } else if (gScheduledOff) {
+        gScheduledOff = false; gLastActivityMs = currentTime; // schedule disabled / clock lost → resume
+    }
 
     // Update pattern rendering
     if (currentTime - lastUpdate >= updateInterval) {
@@ -2998,7 +3078,7 @@ void loop() {
             } else {
                 renderCalibrationFrame(); // structured-light flash for camera auto-layout
             }
-        } else if (patternRenderer != nullptr && !ota_in_progress && !gAsleep
+        } else if (patternRenderer != nullptr && !ota_in_progress && !gAsleep && !gScheduledOff
                    && (uint32_t)(currentTime) >= gRealtimeUntilMs) {
             // Not streaming (or the stream lapsed) → run the pattern/cycle. While realtime
             // packets are arriving (gRealtimeUntilMs in the future) we hold the streamed
@@ -3046,12 +3126,7 @@ void loop() {
         if (!gAsleep && idleMs >= (uint32_t)gSettings.sleepMinutes * 60000UL) {
             gAsleep = true;
             Serial.printf("[Sleep] idle %us → sleeping (LEDs off)\n", (unsigned)(idleMs / 1000));
-            for (size_t s = 0; s < ledMgr.getNumStrips(); s++) {
-                const LedConfig::LedBus* strip = ledMgr.getStrip(s);
-                if (!strip) continue;
-                for (int i = 0; i < strip->getLength(); i++) ledMgr.setPixelColor(s, i, CRGB::Black);
-            }
-            ledMgr.show();
+            blankAllStrips();
         }
     }
 

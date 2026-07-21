@@ -29,6 +29,13 @@ struct Settings {
     uint16_t rtUniverse   = 0;      // first universe this device consumes (0-based Art-Net / 1-based sACN handled in parse)
     uint16_t rtTimeoutSec = 10;     // revert to pattern after this much silence
     bool     rtLayout     = false;  // true = stream into the custom layout (reorder/skip); false = physical order
+    // Daily on/off schedule (local wall-clock). Needs a synced clock (app TIMESTAMP_SYNC or,
+    // on WiFi, NTP); inert until the device knows the time, and after power loss until it
+    // re-syncs. Times are minutes past local midnight (0..1439); a wrap (on>off) spans midnight.
+    bool     schedEnable  = false;
+    uint16_t schedOnMin   = 0;      // turn output ON at this local minute-of-day
+    uint16_t schedOffMin  = 0;      // turn output OFF at this local minute-of-day
+    int16_t  tzOffsetMin  = 0;      // local = UTC + this many minutes (app sends its current offset)
 };
 
 static const char* NS = "cbay";
@@ -47,6 +54,10 @@ inline Settings load() {
     s.rtUniverse   = p.getUShort("rtuni", s.rtUniverse);
     s.rtTimeoutSec = p.getUShort("rtto", s.rtTimeoutSec);
     s.rtLayout     = p.getBool("rtlayout", s.rtLayout);
+    s.schedEnable  = p.getBool("sen", s.schedEnable);
+    s.schedOnMin   = p.getUShort("son", s.schedOnMin);
+    s.schedOffMin  = p.getUShort("sof", s.schedOffMin);
+    s.tzOffsetMin  = p.getShort("tz", s.tzOffsetMin);
     p.end();
     return s;
 }
@@ -64,6 +75,10 @@ inline void save(const Settings& s) {
     p.putUShort("rtuni", s.rtUniverse);
     p.putUShort("rtto", s.rtTimeoutSec);
     p.putBool("rtlayout", s.rtLayout);
+    p.putBool("sen", s.schedEnable);
+    p.putUShort("son", s.schedOnMin);
+    p.putUShort("sof", s.schedOffMin);
+    p.putShort("tz", s.tzOffsetMin);
     p.end();
     Serial.printf("[Settings] saved: mode=%u ssid='%s' fb=%u sleep=%u rgbtest=%u\n",
                   s.commMode, s.wifiSsid.c_str(), s.wifiFallback, s.sleepMinutes, s.rgbTest);

@@ -115,6 +115,12 @@ export interface DeviceSettings {
   rtuni: number;            // first DMX universe consumed
   rtto: number;             // realtime revert timeout (seconds)
   rtlayout: number;         // 1 = stream into custom layout, 0 = physical order
+  // Daily on/off schedule (firmware feat>=2; may be absent on older builds)
+  sen?: number;             // 1 = schedule enabled
+  son?: number;             // turn-on minute-of-day (local), 0..1439
+  sof?: number;             // turn-off minute-of-day (local)
+  tz?: number;              // device's stored UTC offset in minutes (local = UTC + tz)
+  clk?: number;             // 1 = device currently knows the wall-clock time
   mode_active?: 'ble' | 'wifi';
   ip?: string;
 }
@@ -130,6 +136,10 @@ export interface DeviceSettingsPatch {
   rtuni?: number;
   rtto?: number;
   rtlayout?: boolean;
+  sen?: boolean;            // enable daily on/off schedule
+  son?: number;             // turn-on minute-of-day (local), 0..1439
+  sof?: number;             // turn-off minute-of-day (local)
+  tz?: number;              // UTC offset in minutes (local = UTC + tz); app sends its own
 }
 
 export interface FirmwareRegistryEntry {
