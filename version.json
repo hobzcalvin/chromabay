@@ -1,7 +1,7 @@
 {
-  "version": "0.1.257",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.257.zip",
-  "buildDate": "2026-07-20T18:26:45Z",
-  "commitHash": "c4e9ae859961400de093d3cabb0aa5c8602181d9",
-  "commitMessage": "Deep links: open ALL chromabay.app links in the app + add iOS Smart App Banner"
+  "version": "0.1.258",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.258.zip",
+  "buildDate": "2026-07-21T05:53:39Z",
+  "commitHash": "2e9288e58c3dfc9063c5c3c16ddce7c4e629e8f1",
+  "commitMessage": "Firmware: RGBW auto-white (accurate) — actually drive the white LED"
 }
