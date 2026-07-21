@@ -1840,6 +1840,13 @@ void processReceivedLedConfig() {
                             stripConfig.wpB = wp & 0xFF;
                         } else if (strcmp(strip_key, "de") == 0) {
                             stripConfig.ditherEnable = mpack_expect_bool(&reader);
+                        } else if (strcmp(strip_key, "aw") == 0) {
+                            stripConfig.autoWhiteMode = mpack_expect_u8(&reader);
+                        } else if (strcmp(strip_key, "wc") == 0) {
+                            uint32_t wc = mpack_expect_u32(&reader);
+                            stripConfig.wLedR = (wc >> 16) & 0xFF;
+                            stripConfig.wLedG = (wc >> 8) & 0xFF;
+                            stripConfig.wLedB = wc & 0xFF;
                         } else {
                             mpack_discard(&reader);
                         }

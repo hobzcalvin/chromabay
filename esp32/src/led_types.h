@@ -34,6 +34,24 @@ inline bool isFourWire(LedChipset cs) {
     return cs == LedChipset::APA102_SPI || cs == LedChipset::SK9822_SPI;
 }
 
+// True for 4-channel RGBW chipsets (a single dedicated white LED per pixel). Auto-white
+// applies to these. NOTE: 5-channel RGBCW (warm+cold white) chipsets are NOT included — they
+// need a CCT split, which auto-white doesn't do yet, so they run RGB-only for now.
+inline bool hasWhiteChannel(LedChipset cs) {
+    return cs == LedChipset::SK6812_RGBW || cs == LedChipset::TM1814_RGBW ||
+           cs == LedChipset::UCS8904_RGBW;
+}
+
+// How the white channel of an RGBW strip is derived from the rendered RGB colour.
+// (Values are firmware-internal; the app doesn't set these yet — RGBW strips just default
+// to Accurate. Room is left to expose mode + white-die colour later.)
+enum class AutoWhiteMode : uint8_t {
+    Off      = 0, // leave W at 0 (RGB only) — the old behaviour
+    Accurate = 1, // W = common white component; SUBTRACT it from RGB (colour-accurate, cooler)
+    Brighter = 2, // W = common white component; keep RGB (adds white on top, more output)
+    Max      = 3, // W = max(R,G,B), keep RGB (legacy/simple)
+};
+
 // Color Orders
 // Lower 4 bits: RGB sequence (defines the order of Red, Green, Blue components)
 // Upper 4 bits: White channel handling (defines swapping behavior for RGBW/RGBCW strips)

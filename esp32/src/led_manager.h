@@ -34,6 +34,18 @@ struct LedStripConfig {
     uint8_t wpR = 255;
     uint8_t wpG = 255;
     uint8_t wpB = 255;
+    // --- Auto-white (RGBW strips only) ---------------------------------------------------
+    // How to drive the dedicated white LED from the rendered RGB. Ignored on non-RGBW
+    // chipsets. Default Accurate: pull the common white component out of RGB and let the
+    // (efficient, single-die) white LED render it, subtracting it from RGB so the colour is
+    // unchanged. See AutoWhiteMode. The app doesn't set this yet — RGBW just works.
+    uint8_t autoWhiteMode = static_cast<uint8_t>(AutoWhiteMode::Accurate);
+    // Colour the white die actually emits at full drive, as an RGB triple (brightest channel
+    // ~255). Lets extraction stay colour-neutral on non-neutral whites. 255/255/255 = neutral
+    // (classic W = min(R,G,B)); a natural-white die is ~255/246/224, warm-white ~255/210/168.
+    uint8_t wLedR = 255;
+    uint8_t wLedG = 255;
+    uint8_t wLedB = 255;
     // Temporal dithering opt-in for this strip. Even when true it only activates if the
     // strip is small/fast enough (see LedBus::chooseDitherBits); default on.
     bool ditherEnable = true;
@@ -246,10 +258,51 @@ public:
                 _lut16[ch][i] = (uint16_t)(o16 < 0 ? 0 : (o16 > 65535 ? 65535 : o16));
             }
         }
+        // White channel: gamma only (white-point is an RGB-primary correction, N/A to W).
+        for (int i = 0; i < 256; i++) {
+            int o8 = (int)(powf((float)i / 255.0f, g) * 255.0f + 0.5f);
+            _lutW[i] = (uint8_t)(o8 < 0 ? 0 : (o8 > 255 ? 255 : o8));
+        }
+        _hasWhite = hasWhiteChannel(_config.chipset);
     }
     uint8_t lutR(uint8_t c) const { return _lut[0][c]; }
     uint8_t lutG(uint8_t c) const { return _lut[1][c]; }
     uint8_t lutB(uint8_t c) const { return _lut[2][c]; }
+    uint8_t lutW(uint8_t c) const { return _lutW[c]; }
+
+    // Derive the white channel + (for Accurate mode) the reduced RGB for an RGBW pixel.
+    // Colour-aware: the white die emits (wLedR,wLedG,wLedB) at full, so we pull the largest
+    // white level whose emission stays under the target on every channel, then subtract that
+    // emission. With a neutral die (255,255,255) this is exactly W=min(R,G,B) then R,G,B-=W.
+    // Operates in the pattern's colour space (pre-gamma), matching WLED; gamma is applied to
+    // the results by the per-channel LUTs afterwards.
+    void computeAutoWhite(uint8_t r, uint8_t g, uint8_t b,
+                          uint8_t& oR, uint8_t& oG, uint8_t& oB, uint8_t& oW) const {
+        const AutoWhiteMode mode = static_cast<AutoWhiteMode>(_config.autoWhiteMode);
+        if (mode == AutoWhiteMode::Max) {
+            oR = r; oG = g; oB = b;
+            oW = r > g ? (r > b ? r : b) : (g > b ? g : b); // additive, no subtract
+            return;
+        }
+        const uint32_t wr = _config.wLedR ? _config.wLedR : 1;
+        const uint32_t wg = _config.wLedG ? _config.wLedG : 1;
+        const uint32_t wb = _config.wLedB ? _config.wLedB : 1;
+        uint32_t lvl = 255u;                              // cap at full white
+        uint32_t c;
+        c = (uint32_t)r * 255u / wr; if (c < lvl) lvl = c;
+        c = (uint32_t)g * 255u / wg; if (c < lvl) lvl = c;
+        c = (uint32_t)b * 255u / wb; if (c < lvl) lvl = c;
+        oW = (uint8_t)lvl;
+        if (mode == AutoWhiteMode::Brighter) {            // keep RGB, add white on top
+            oR = r; oG = g; oB = b;
+            return;
+        }
+        // Accurate: subtract the white die's actual emission (>= 0 by construction).
+        uint32_t sr = lvl * wr / 255u, sg = lvl * wg / 255u, sb = lvl * wb / 255u;
+        oR = (uint8_t)(r > sr ? r - sr : 0);
+        oG = (uint8_t)(g > sg ? g - sg : 0);
+        oB = (uint8_t)(b > sb ? b - sb : 0);
+    }
 
     // ---- Arbitrary pixel layout (WLED ledmap model) ------------------------------------
     // A layout is a W×H grid plus a `map`: map[cell] = the physical LED index that displays
@@ -352,6 +405,8 @@ private:
     InternalLedType _internalType;
     uint8_t _brightness;
     uint8_t _lut[3][256];
+    uint8_t _lutW[256];        // gamma-only LUT for the white channel (RGBW strips)
+    bool _hasWhite = false;    // true for RGBW chipsets (auto-white applies)
     bool _hasLayout = false;
     uint16_t _layoutW = 0, _layoutH = 0;
     std::vector<int16_t> _layoutMap; // per-cell physical LED index (-1 = gap), length W*H
@@ -386,6 +441,9 @@ private:
     // Largest N in 1..3 keeping the slowest dither component (rate/2^N) above ~70 Hz.
     uint8_t chooseDitherBits() const {
         if (!_config.ditherEnable || _internalType == ITYPE_NONE || _config.numLeds == 0) return 0;
+        // The dither pipeline carries only 3 (RGB) channels; auto-white sets a 4th. Rather
+        // than clobber W, don't dither RGBW strips (they're slower anyway, so headroom is low).
+        if (_hasWhite && _config.autoWhiteMode != static_cast<uint8_t>(AutoWhiteMode::Off)) return 0;
         uint32_t rate = estShowRateHz();
         for (int n = 3; n >= 1; n--) {
             if ((rate >> n) > 70u) return (uint8_t)n;
@@ -592,10 +650,16 @@ inline void LedConfig::LedBus::setPixelColor(uint16_t pixelIndex, const CRGB& co
             setDitherTarget(pixelIndex, color);
             return;
         }
+        // RGBW: split off the white channel first (in the pattern's colour space), then
+        // gamma-correct the reduced RGB + W on output. Non-RGBW strips keep w=0 (no-op).
+        uint8_t r = color.r, g = color.g, b = color.b, w = 0;
+        if (_hasWhite && _config.autoWhiteMode != static_cast<uint8_t>(AutoWhiteMode::Off))
+            computeAutoWhite(color.r, color.g, color.b, r, g, b, w);
         // Gamma-correct each channel on output (per-strip LUT).
-        uint32_t wrgbColor = (static_cast<uint32_t>(lutR(color.r)) << 16) |
-                             (static_cast<uint32_t>(lutG(color.g)) << 8)  |
-                             static_cast<uint32_t>(lutB(color.b));
+        uint32_t wrgbColor = (static_cast<uint32_t>(lutW(w)) << 24) |
+                             (static_cast<uint32_t>(lutR(r)) << 16) |
+                             (static_cast<uint32_t>(lutG(g)) << 8)  |
+                             static_cast<uint32_t>(lutB(b));
         LedWrapper::setPixelColor(_busPtr, _internalType, pixelIndex, wrgbColor, _config.colorOrder);
     }
 }
