@@ -120,6 +120,7 @@ export interface DeviceSettings {
   son?: number;             // turn-on minute-of-day (local), 0..1439
   sof?: number;             // turn-off minute-of-day (local)
   tz?: number;              // device's stored UTC offset in minutes (local = UTC + tz)
+  sdw?: number;             // day-of-week bitmask, bit0=Sun..bit6=Sat
   clk?: number;             // 1 = device currently knows the wall-clock time
   mode_active?: 'ble' | 'wifi';
   ip?: string;
@@ -140,6 +141,7 @@ export interface DeviceSettingsPatch {
   son?: number;             // turn-on minute-of-day (local), 0..1439
   sof?: number;             // turn-off minute-of-day (local)
   tz?: number;              // UTC offset in minutes (local = UTC + tz); app sends its own
+  sdw?: number;             // day-of-week bitmask, bit0=Sun..bit6=Sat
 }
 
 export interface FirmwareRegistryEntry {

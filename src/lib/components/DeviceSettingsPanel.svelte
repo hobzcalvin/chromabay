@@ -32,6 +32,9 @@
   let schedEnable = $state(false);
   let schedOnStr = $state('20:00');
   let schedOffStr = $state('06:00');
+  let schedDays = $state(0x7F); // bit0=Sun..bit6=Sat
+  const DAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+  const toggleDay = (d: number) => { schedDays ^= (1 << d); };
   const minToStr = (m: number) => {
     const h = Math.floor(m / 60) % 24, mm = m % 60;
     return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
@@ -59,6 +62,7 @@
         schedEnable = (s.sen ?? 0) === 1;
         if (s.son != null) schedOnStr = minToStr(s.son);
         if (s.sof != null) schedOffStr = minToStr(s.sof);
+        if (s.sdw != null) schedDays = s.sdw;
         loadedFor = deviceId;
       }
     } finally {
@@ -113,7 +117,7 @@
       // sync time is baked in; re-saving or reconnecting the app corrects it after a shift.)
       await writeDeviceSettings(deviceId, {
         sen: schedEnable, son: strToMin(schedOnStr), sof: strToMin(schedOffStr),
-        tz: -new Date().getTimezoneOffset(),
+        sdw: schedDays & 0x7F, tz: -new Date().getTimezoneOffset(),
       });
       msg = 'Schedule saved.';
     } catch (e: any) {
@@ -212,6 +216,15 @@
           <span>Turn off at</span>
           <input type="time" bind:value={schedOffStr} />
         </label>
+        <div class="inline">
+          <span>On these days</span>
+          <div class="day-row" role="group" aria-label="Days of week">
+            {#each DAY_LABELS as label, d}
+              <button type="button" class="day" class:on={(schedDays >> d) & 1}
+                aria-pressed={((schedDays >> d) & 1) === 1} onclick={() => toggleDay(d)}>{label}</button>
+            {/each}
+          </div>
+        </div>
         {#if settings && settings.clk === 0}
           <p class="hint warn">This device doesn't know the current time yet, so the schedule can't run. It learns the time from the app when you connect, or from the internet when it's on Wi-Fi.</p>
         {/if}
@@ -281,5 +294,17 @@
   .btn-row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
   .hint { font-size: 0.82rem; opacity: 0.7; }
   .hint.warn { color: #fca5a5; opacity: 0.95; }
+  /* Connected square day-of-week toggles (like the macOS Calendar repeat picker). */
+  .day-row { display: inline-flex; }
+  .day {
+    width: 2rem; height: 2rem; padding: 0;
+    border: 1px solid rgba(255,255,255,0.25); border-left-width: 0;
+    background: rgba(255,255,255,0.06); color: #fff;
+    font-size: 0.8rem; font-weight: 600; cursor: pointer;
+  }
+  .day:first-child { border-left-width: 1px; border-radius: 6px 0 0 6px; }
+  .day:last-child { border-radius: 0 6px 6px 0; }
+  .day.on { background: #4f8cff; border-color: #4f8cff; }
+  .day.on + .day { border-left-color: #4f8cff; }
   .msg { font-size: 0.82rem; opacity: 0.9; margin-top: 0.4rem; }
 </style>

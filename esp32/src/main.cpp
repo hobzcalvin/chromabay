@@ -2221,6 +2221,7 @@ static String commSettingsJson() {
     j += "\"son\":" + String(gSettings.schedOnMin) + ",";
     j += "\"sof\":" + String(gSettings.schedOffMin) + ",";
     j += "\"tz\":" + String(gSettings.tzOffsetMin) + ",";
+    j += "\"sdw\":" + String(gSettings.schedDays) + ",";
     j += "\"clk\":" + String(gClockValid ? 1 : 0) + ",";  // 1 = device knows the wall-clock time
     j += "\"mode_active\":\"" + String(gWifiMode ? "wifi" : "ble") + "\"";
 #if CHROMABAY_WIFI
@@ -2297,6 +2298,8 @@ void processCommConfig() {
                 gSettings.schedOffMin = (uint16_t)mpack_node_u16(v);
             } else if (strcmp(key, "tz") == 0) {
                 gSettings.tzOffsetMin = (int16_t)mpack_node_i16(v);
+            } else if (strcmp(key, "sdw") == 0) {
+                gSettings.schedDays = (uint8_t)mpack_node_u8(v);
             }
         }
     } else {
@@ -3051,12 +3054,24 @@ void loop() {
     // settings change or a clock arriving takes effect immediately. Inert without a valid
     // clock (e.g. right after a power loss) — output stays on until the time is known.
     if (gSettings.schedEnable && gClockValid && gSettings.schedOnMin != gSettings.schedOffMin) {
-        long localSec = ((long)nowEpoch + (long)gSettings.tzOffsetMin * 60) % 86400;
-        if (localSec < 0) localSec += 86400;
+        long localEpoch = (long)nowEpoch + (long)gSettings.tzOffsetMin * 60;
+        long localDay = localEpoch / 86400;                 // days since 1970 in local time
+        long localSec = localEpoch % 86400; if (localSec < 0) { localSec += 86400; localDay--; }
         uint16_t minOfDay = (uint16_t)(localSec / 60);
-        bool inOn = (gSettings.schedOnMin < gSettings.schedOffMin)
-            ? (minOfDay >= gSettings.schedOnMin && minOfDay < gSettings.schedOffMin)   // same-day window
-            : (minOfDay >= gSettings.schedOnMin || minOfDay < gSettings.schedOffMin);  // wraps midnight
+        int wday = (int)(((localDay % 7) + 7 + 4) % 7);      // 0=Sun..6=Sat (1970-01-01 was Thu)
+        int yday = (wday + 6) % 7;                           // the prior day (for midnight-wrap mornings)
+        auto dayOn = [&](int d) { return (gSettings.schedDays >> d) & 1; };
+        bool inOn;
+        if (gSettings.schedOnMin < gSettings.schedOffMin) {  // same-day window
+            inOn = (minOfDay >= gSettings.schedOnMin && minOfDay < gSettings.schedOffMin) && dayOn(wday);
+        } else {                                             // wraps midnight
+            // Evening (>= on) is triggered by TODAY; the morning tail (< off) belongs to the
+            // day that turned it on last night (yesterday) — so a Mon-only 20:00→06:00 stays
+            // on into Tuesday morning regardless of Tuesday's toggle.
+            if (minOfDay >= gSettings.schedOnMin)      inOn = dayOn(wday);
+            else if (minOfDay < gSettings.schedOffMin) inOn = dayOn(yday);
+            else                                       inOn = false;
+        }
         if (!inOn && !gScheduledOff) { gScheduledOff = true; blankAllStrips(); Serial.println("[Sched] entering OFF window"); }
         else if (inOn && gScheduledOff) { gScheduledOff = false; gLastActivityMs = currentTime; Serial.println("[Sched] entering ON window"); }
     } else if (gScheduledOff) {

@@ -36,6 +36,7 @@ struct Settings {
     uint16_t schedOnMin   = 0;      // turn output ON at this local minute-of-day
     uint16_t schedOffMin  = 0;      // turn output OFF at this local minute-of-day
     int16_t  tzOffsetMin  = 0;      // local = UTC + this many minutes (app sends its current offset)
+    uint8_t  schedDays    = 0x7F;   // day-of-week bitmask, bit0=Sun..bit6=Sat (which days ON-triggers fire)
 };
 
 static const char* NS = "cbay";
@@ -58,6 +59,7 @@ inline Settings load() {
     s.schedOnMin   = p.getUShort("son", s.schedOnMin);
     s.schedOffMin  = p.getUShort("sof", s.schedOffMin);
     s.tzOffsetMin  = p.getShort("tz", s.tzOffsetMin);
+    s.schedDays    = p.getUChar("sdw", s.schedDays);
     p.end();
     return s;
 }
@@ -79,6 +81,7 @@ inline void save(const Settings& s) {
     p.putUShort("son", s.schedOnMin);
     p.putUShort("sof", s.schedOffMin);
     p.putShort("tz", s.tzOffsetMin);
+    p.putUChar("sdw", s.schedDays);
     p.end();
     Serial.printf("[Settings] saved: mode=%u ssid='%s' fb=%u sleep=%u rgbtest=%u\n",
                   s.commMode, s.wifiSsid.c_str(), s.wifiFallback, s.sleepMinutes, s.rgbTest);
