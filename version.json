@@ -1,7 +1,7 @@
 {
-  "version": "0.1.264",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.264.zip",
-  "buildDate": "2026-07-22T21:52:44Z",
-  "commitHash": "817bfe37a8e2a74e70eecdfc1076f6adab4e3ab8",
-  "commitMessage": "Wi-Fi devices: full settings panel (switch back to BLE, schedule…) + fix connect feedback"
+  "version": "0.1.265",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.265.zip",
+  "buildDate": "2026-07-22T22:09:14Z",
+  "commitHash": "3dc758171113f51054be773bcd6b167e4699cb03",
+  "commitMessage": "Unified device handle: foundation + settings panel migrated"
 }
