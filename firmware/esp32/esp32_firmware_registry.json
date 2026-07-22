@@ -1,5 +1,65 @@
 [
   {
+    "version": "fwv0.1.88",
+    "chip": "esp32c3",
+    "wifi": true,
+    "size": 1412944,
+    "hardwareVersion": "hwv0.0.1",
+    "path": "firmware/esp32/fwv0.1.88/esp32c3/firmware.bin",
+    "signaturePath": "firmware/esp32/fwv0.1.88/esp32c3/firmware.sig",
+    "date": "2026-07-22T03:50:18Z"
+  },
+  {
+    "version": "fwv0.1.88",
+    "chip": "esp32c3",
+    "wifi": false,
+    "size": 963104,
+    "hardwareVersion": "hwv0.0.1",
+    "path": "firmware/esp32/fwv0.1.88/esp32c3/firmware-nowifi.bin",
+    "signaturePath": "firmware/esp32/fwv0.1.88/esp32c3/firmware-nowifi.sig",
+    "date": "2026-07-22T03:50:18Z"
+  },
+  {
+    "version": "fwv0.1.88",
+    "chip": "esp32s3",
+    "wifi": true,
+    "size": 1275776,
+    "hardwareVersion": "hwv0.0.1",
+    "path": "firmware/esp32/fwv0.1.88/esp32s3/firmware.bin",
+    "signaturePath": "firmware/esp32/fwv0.1.88/esp32s3/firmware.sig",
+    "date": "2026-07-22T03:50:18Z"
+  },
+  {
+    "version": "fwv0.1.88",
+    "chip": "esp32s3",
+    "wifi": false,
+    "size": 870048,
+    "hardwareVersion": "hwv0.0.1",
+    "path": "firmware/esp32/fwv0.1.88/esp32s3/firmware-nowifi.bin",
+    "signaturePath": "firmware/esp32/fwv0.1.88/esp32s3/firmware-nowifi.sig",
+    "date": "2026-07-22T03:50:18Z"
+  },
+  {
+    "version": "fwv0.1.88",
+    "chip": "esp32",
+    "wifi": true,
+    "size": 1407456,
+    "hardwareVersion": "hwv0.0.1",
+    "path": "firmware/esp32/fwv0.1.88/esp32/firmware.bin",
+    "signaturePath": "firmware/esp32/fwv0.1.88/esp32/firmware.sig",
+    "date": "2026-07-22T03:50:18Z"
+  },
+  {
+    "version": "fwv0.1.88",
+    "chip": "esp32",
+    "wifi": false,
+    "size": 977648,
+    "hardwareVersion": "hwv0.0.1",
+    "path": "firmware/esp32/fwv0.1.88/esp32/firmware-nowifi.bin",
+    "signaturePath": "firmware/esp32/fwv0.1.88/esp32/firmware-nowifi.sig",
+    "date": "2026-07-22T03:50:18Z"
+  },
+  {
     "version": "fwv0.1.87",
     "chip": "esp32c3",
     "wifi": true,
