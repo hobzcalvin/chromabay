@@ -1,7 +1,7 @@
 {
-  "version": "0.1.261",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.261.zip",
-  "buildDate": "2026-07-22T01:06:39Z",
-  "commitHash": "a88b682ce816b1152305fd150eec6b0407d4d51a",
-  "commitMessage": "Fix schedule/Clock wall time: send the real epoch, not the frame clock"
+  "version": "0.1.262",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.262.zip",
+  "buildDate": "2026-07-22T03:51:15Z",
+  "commitHash": "9d9acdb7c138f862179b3bad5028335fc824b8eb",
+  "commitMessage": "On/off is brightness: schedule drives it + remember last-on level"
 }
