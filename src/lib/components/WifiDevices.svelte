@@ -10,6 +10,7 @@
   import { knownWifi, wifiConns, connectWifi, disconnectWifi, forgetWifiDevice, rememberWifiDevice, hostForName } from '$lib/stores/wifiDeviceStore';
   import { currentPattern } from '$lib/stores/patternsStore';
   import DeviceSettingsPanel from '$lib/components/DeviceSettingsPanel.svelte';
+  import LedConfigurationComponent from '$lib/components/LedConfiguration.svelte';
   import { wifiHandle } from '$lib/deviceHandle';
 
   // First native build that carries the Local Network Privacy keys (NSLocalNetworkUsage-
@@ -39,6 +40,43 @@
   let bri = $state<Record<string, number>>({});
   let cycleOn = $state<Record<string, boolean>>({});
   let msg = $state<Record<string, string>>({});
+  // LED-strip config editor state, per device (same LedConfiguration component as BLE, via the
+  // handle). Custom layouts are gated off over Wi-Fi (need a LAYOUT WS channel — not added yet).
+  let showLed = $state<Record<string, boolean>>({});
+  let ledState = $state<Record<string, any>>({});
+
+  async function toggleLed(name: string) {
+    showLed[name] = !showLed[name];
+    if (showLed[name] && !ledState[name]) await loadLed(name);
+  }
+  async function loadLed(name: string) {
+    const c = $wifiConns[name];
+    if (!c?.dev) return;
+    ledState[name] = { ledConfig: null, deviceInfo: c.info, ledConfigLoading: true };
+    try {
+      ledState[name] = { ledConfig: await wifiHandle(c.dev, name).getLedConfig(), deviceInfo: c.info, ledConfigLoading: false };
+    } catch (e: any) {
+      ledState[name] = { ledConfig: null, deviceInfo: c.info, ledConfigLoading: false };
+      msg[name] = 'Couldn’t read LED config: ' + (e?.message ?? e);
+    }
+  }
+  async function saveLed(name: string) {
+    const c = $wifiConns[name]; const s = ledState[name];
+    if (!c?.dev || !s?.ledConfig) return;
+    s.ledConfigLoading = true;
+    try { await wifiHandle(c.dev, name).setLedConfig(s.ledConfig); msg[name] = 'LED config saved.'; }
+    catch (e: any) { msg[name] = 'Save failed: ' + (e?.message ?? e); }
+    finally { s.ledConfigLoading = false; }
+  }
+  function addStripLed(name: string) {
+    const s = ledState[name]; if (!s?.ledConfig) return;
+    s.ledConfig.strips = [...s.ledConfig.strips,
+      { chipset: 22, pin: 2, clockPin: 0, numLeds: 30, colorOrder: 0, rmtChannel: 0, width: 0, height: 0, orientation: 0, gamma: 1, dither: true }];
+  }
+  function removeStripLed(name: string, index: number) {
+    const s = ledState[name]; if (!s?.ledConfig) return;
+    s.ledConfig.strips = s.ledConfig.strips.filter((_: any, i: number) => i !== index);
+  }
 
   function addManual() {
     const h = manualHost.trim();
@@ -112,6 +150,20 @@
                Bluetooth, the on/off schedule, sleep timer, streaming. -->
           <div class="wifi-settings">
             <DeviceSettingsPanel device={wifiHandle(c.dev, d.name)} deviceInfo={c.info ?? null} />
+          </div>
+          <div class="wifi-settings">
+            <button class="btn small" onclick={() => toggleLed(d.name)}>{showLed[d.name] ? '▾ LED strip setup' : '▸ LED strip setup'}</button>
+            {#if showLed[d.name] && ledState[d.name]?.ledConfig}
+              <LedConfigurationComponent
+                settings={ledState[d.name]}
+                deviceId={d.name}
+                layoutSupported={false}
+                onAddStrip={() => addStripLed(d.name)}
+                onRemoveStrip={(_, i) => removeStripLed(d.name, i)}
+                onSaveConfig={() => saveLed(d.name)} />
+            {:else if showLed[d.name]}
+              <p class="ok">Reading LED config…</p>
+            {/if}
           </div>
         </div>
       {/if}

@@ -75,6 +75,7 @@
     settings,
     deviceId,
     idPrefix = '', // '' for mobile, 'web-' for web
+    layoutSupported = true, // custom-layout upload/download needs the BLE layout chars (no Wi-Fi channel yet)
     onAddStrip,
     onRemoveStrip,
     onSaveConfig
@@ -82,6 +83,7 @@
     settings: any;
     deviceId: string;
     idPrefix?: string;
+    layoutSupported?: boolean;
     onAddStrip: (deviceId: string) => void;
     onRemoveStrip: (deviceId: string, index: number) => void;
     onSaveConfig: (deviceId: string) => void;
@@ -278,6 +280,7 @@
                   </label>
                 </div>
               </details>
+              {#if layoutSupported}
               <details class="sub-section">
                 <summary>Custom Layout</summary>
                 <p class="layout-hint">
@@ -303,6 +306,7 @@
                   <LayoutPreview width={pl.width} height={pl.height} map={pl.map} />
                 {/if}
               </details>
+              {/if}
             </div>
           </div>
         {/each}
