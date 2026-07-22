@@ -1,7 +1,7 @@
 {
-  "version": "0.1.260",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.260.zip",
-  "buildDate": "2026-07-21T14:02:26Z",
-  "commitHash": "e9d256a44cb0661e99611bb06106800f52d305e6",
-  "commitMessage": "Schedule: per-day-of-week toggles (connected square buttons)"
+  "version": "0.1.261",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.261.zip",
+  "buildDate": "2026-07-22T01:06:39Z",
+  "commitHash": "a88b682ce816b1152305fd150eec6b0407d4d51a",
+  "commitMessage": "Fix schedule/Clock wall time: send the real epoch, not the frame clock"
 }
