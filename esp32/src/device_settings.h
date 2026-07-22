@@ -37,6 +37,10 @@ struct Settings {
     uint16_t schedOffMin  = 0;      // turn output OFF at this local minute-of-day
     int16_t  tzOffsetMin  = 0;      // local = UTC + this many minutes (app sends its current offset)
     uint8_t  schedDays    = 0x7F;   // day-of-week bitmask, bit0=Sun..bit6=Sat (which days ON-triggers fire)
+    // Last "settled" non-zero global brightness. Restored when turning back on (schedule
+    // auto-on, or a power toggle) so on never means brightness 0. Updated when the live
+    // brightness holds a non-zero value for a while (see the loop tracker). Not app-settable.
+    uint8_t  lastNonZeroBright = 128;
 };
 
 static const char* NS = "cbay";
@@ -60,6 +64,7 @@ inline Settings load() {
     s.schedOffMin  = p.getUShort("sof", s.schedOffMin);
     s.tzOffsetMin  = p.getShort("tz", s.tzOffsetMin);
     s.schedDays    = p.getUChar("sdw", s.schedDays);
+    s.lastNonZeroBright = p.getUChar("lnzb", s.lastNonZeroBright);
     p.end();
     return s;
 }
@@ -82,9 +87,19 @@ inline void save(const Settings& s) {
     p.putUShort("sof", s.schedOffMin);
     p.putShort("tz", s.tzOffsetMin);
     p.putUChar("sdw", s.schedDays);
+    p.putUChar("lnzb", s.lastNonZeroBright);
     p.end();
     Serial.printf("[Settings] saved: mode=%u ssid='%s' fb=%u sleep=%u rgbtest=%u\n",
                   s.commMode, s.wifiSsid.c_str(), s.wifiFallback, s.sleepMinutes, s.rgbTest);
+}
+
+// Targeted persist for just the last-on brightness (updated more often than the rest, so we
+// avoid rewriting the whole settings blob + its serial log each time).
+inline void saveLastNonZero(uint8_t v) {
+    Preferences p;
+    if (!p.begin(NS, /*readOnly=*/false)) return;
+    p.putUChar("lnzb", v);
+    p.end();
 }
 
 } // namespace DeviceSettings

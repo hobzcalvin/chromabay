@@ -144,12 +144,17 @@ static bool gAsleep = false;
 static uint32_t gLastActivityMs = 0;
 static void noteActivity();              // defined below; resets the sleep countdown / wakes
 
-// Scheduled on/off + clock validity. gClockValid is true once we know the wall-clock time
-// (from the app's TIMESTAMP_SYNC or, on WiFi, NTP). gScheduledOff blanks output while the
-// daily schedule says "off". Both gate rendering alongside gAsleep. On power loss the clock
-// resets to unknown, so the schedule is inert until the app connects or NTP is reached.
+// On/off is tied to GLOBAL BRIGHTNESS: brightness 0 == off (output blanked + render skipped);
+// any non-zero == on. The daily schedule + a power toggle just drive brightness, so the one
+// control the user already touches is the single source of on/off.
+//  - gClockValid: true once we know the wall-clock time (app TIMESTAMP_SYNC or WiFi NTP).
+//  - gSchedInOffWindow: schedule edge state; on a transition it sets brightness (0 / last-on).
+//  - gBriDark: mirror of "brightness == 0", used to blank once + skip rendering.
+// On power loss the clock resets to unknown → schedule inert until the app connects / NTP.
 static bool gClockValid = false;
-static bool gScheduledOff = false;
+static bool gSchedInOffWindow = false;
+static bool gBriDark = false;
+static const uint32_t LNZB_DEBOUNCE_MS = 10000; // brightness must hold ~10s before we trust it as "settled"
 static void blankAllStrips();            // defined below; writes every LED black once
 
 // Realtime streaming (Art-Net/sACN): while millis() < gRealtimeUntilMs the render loop
@@ -3079,10 +3084,48 @@ void loop() {
             else if (minOfDay < gSettings.schedOffMin) inOn = dayOn(yday);
             else                                       inOn = false;
         }
-        if (!inOn && !gScheduledOff) { gScheduledOff = true; blankAllStrips(); Serial.println("[Sched] entering OFF window"); }
-        else if (inOn && gScheduledOff) { gScheduledOff = false; gLastActivityMs = currentTime; Serial.println("[Sched] entering ON window"); }
-    } else if (gScheduledOff) {
-        gScheduledOff = false; gLastActivityMs = currentTime; // schedule disabled / clock lost → resume
+        // Fire only on a transition (so a manual change between transitions sticks):
+        //  → OFF window: turn brightness to 0.
+        //  → ON  window: if currently off (0), restore the last-on level (never on at 0).
+        bool off = !inOn;
+        if (off != gSchedInOffWindow) {
+            gSchedInOffWindow = off;
+            if (off) { ledMgr.setGlobalBrightness(0); Serial.println("[Sched] auto-off (brightness 0)"); }
+            else {
+                if (ledMgr.getGlobalBrightness() == 0)
+                    ledMgr.setGlobalBrightness(gSettings.lastNonZeroBright ? gSettings.lastNonZeroBright : BOOT_MIN_BRIGHTNESS);
+                gLastActivityMs = currentTime;
+                Serial.printf("[Sched] auto-on (brightness %u)\n", ledMgr.getGlobalBrightness());
+            }
+        }
+    } else if (gSchedInOffWindow) {
+        // Schedule turned off (or the clock was lost) while we had it dark → bring it back on.
+        gSchedInOffWindow = false;
+        if (ledMgr.getGlobalBrightness() == 0)
+            ledMgr.setGlobalBrightness(gSettings.lastNonZeroBright ? gSettings.lastNonZeroBright : BOOT_MIN_BRIGHTNESS);
+        gLastActivityMs = currentTime;
+    }
+
+    // Remember the last "settled" non-zero brightness (held ~10s), so turning back on never
+    // means 0. Watches the actual global brightness, whatever set it (slider, button,
+    // schedule) — but a quick drag down through low values never settles, so it captures the
+    // level the user was AT before turning down, not a transient.
+    {
+        static uint8_t sBriObs = 255; static uint32_t sBriSince = 0;
+        uint8_t cur = ledMgr.getGlobalBrightness();
+        if (cur != sBriObs) { sBriObs = cur; sBriSince = currentTime; }
+        else if (cur > 0 && cur != gSettings.lastNonZeroBright && (currentTime - sBriSince) >= LNZB_DEBOUNCE_MS) {
+            gSettings.lastNonZeroBright = cur;
+            DeviceSettings::saveLastNonZero(cur);
+            Serial.printf("[Bri] last-on level = %u\n", cur);
+        }
+    }
+
+    // Off ≡ brightness 0: blank once and let the render guard skip work while dark.
+    {
+        uint8_t cur = ledMgr.getGlobalBrightness();
+        if (cur == 0 && !gBriDark) { gBriDark = true; blankAllStrips(); }
+        else if (cur > 0 && gBriDark) { gBriDark = false; }
     }
 
     // Update pattern rendering
@@ -3100,7 +3143,7 @@ void loop() {
             } else {
                 renderCalibrationFrame(); // structured-light flash for camera auto-layout
             }
-        } else if (patternRenderer != nullptr && !ota_in_progress && !gAsleep && !gScheduledOff
+        } else if (patternRenderer != nullptr && !ota_in_progress && !gAsleep && !gBriDark
                    && (uint32_t)(currentTime) >= gRealtimeUntilMs) {
             // Not streaming (or the stream lapsed) → run the pattern/cycle. While realtime
             // packets are arriving (gRealtimeUntilMs in the future) we hold the streamed
