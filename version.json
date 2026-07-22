@@ -1,7 +1,7 @@
 {
-  "version": "0.1.263",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.263.zip",
-  "buildDate": "2026-07-22T06:02:46Z",
-  "commitHash": "fc2690a938e62b9a149f27feac142ddeee55bdef",
-  "commitMessage": "Device settings: tabs, one Save, BLE/Wi-Fi radio, consistent buttons + feedback"
+  "version": "0.1.264",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.264.zip",
+  "buildDate": "2026-07-22T21:52:44Z",
+  "commitHash": "817bfe37a8e2a74e70eecdfc1076f6adab4e3ab8",
+  "commitMessage": "Wi-Fi devices: full settings panel (switch back to BLE, schedule…) + fix connect feedback"
 }
