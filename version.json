@@ -1,7 +1,7 @@
 {
-  "version": "0.1.265",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.265.zip",
-  "buildDate": "2026-07-22T22:09:14Z",
-  "commitHash": "3dc758171113f51054be773bcd6b167e4699cb03",
-  "commitMessage": "Unified device handle: foundation + settings panel migrated"
+  "version": "0.1.266",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.266.zip",
+  "buildDate": "2026-07-22T22:46:27Z",
+  "commitHash": "6088a5c4ae71104ee3d26d19646baf36412b3386",
+  "commitMessage": "LED strip config over WiFi (core config) via the device handle"
 }
