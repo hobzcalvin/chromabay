@@ -4,23 +4,19 @@
   // Save button writes everything in a single patch; picking a different transport (the
   // Bluetooth/Wi-Fi radio) and saving reboots the device into it, so the link drops — we show
   // clear feedback for that.
-  import { readDeviceSettings, writeDeviceSettings, type DeviceSettings, type DeviceSettingsPatch, type DeviceInfo } from '$lib/ble';
+  import type { DeviceSettings, DeviceSettingsPatch, DeviceInfo } from '$lib/ble';
   import { rememberWifiDevice } from '$lib/stores/wifiDeviceStore';
-  import type { WifiDevice } from '$lib/wifiTransport';
+  import type { DeviceHandle } from '$lib/deviceHandle';
 
-  // Works over either transport: pass a BLE `deviceId`, OR a `wifi` handle for a device reached
-  // over Wi-Fi. The panel is identical either way — same tabs, same single Save.
-  let { deviceId, deviceInfo, wifi }: { deviceId?: string; deviceInfo: DeviceInfo | null; wifi?: WifiDevice } =
-    $props();
+  // Transport-agnostic: the panel drives a DeviceHandle (BLE or Wi-Fi) — identical either way.
+  let { device, deviceInfo }: { device: DeviceHandle; deviceInfo: DeviceInfo | null } = $props();
 
-  const readSettingsFn = (): Promise<DeviceSettings | null> =>
-    wifi ? wifi.readSettings() : readDeviceSettings(deviceId!);
-  const writeSettingsFn = (patch: DeviceSettingsPatch): Promise<void> =>
-    wifi ? Promise.resolve(wifi.writeSettings(patch)) : writeDeviceSettings(deviceId!, patch);
-  const key = $derived(deviceId ?? `wifi:${deviceInfo?.name ?? ''}`);
+  const readSettingsFn = (): Promise<DeviceSettings | null> => device.readSettings();
+  const writeSettingsFn = (patch: DeviceSettingsPatch): Promise<void> => device.writeSettings(patch);
+  const key = $derived(device.id);
 
-  // Wi-Fi only exists on feat>=2 firmware, so a wifi handle implies supported.
-  const supported = $derived(!!wifi || (deviceInfo?.feat ?? 1) >= 2);
+  // Wi-Fi only exists on feat>=2 firmware, so a Wi-Fi handle implies supported.
+  const supported = $derived(device.transport === 'wifi' || (deviceInfo?.feat ?? 1) >= 2);
 
   let settings = $state<DeviceSettings | null>(null);
   let loading = $state(false);
@@ -50,7 +46,7 @@
   const minToStr = (m: number) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
   const strToMin = (s: string) => { const [h, m] = s.split(':').map(Number); return (((h || 0) * 60 + (m || 0)) % 1440 + 1440) % 1440; };
 
-  const activeMode = $derived(settings?.mode_active ?? deviceInfo?.mode ?? (wifi ? 'wifi' : 'ble'));
+  const activeMode = $derived(settings?.mode_active ?? deviceInfo?.mode ?? device.transport);
 
   function applySnapshot(s: DeviceSettings) {
     ssid = s.ssid || '';
@@ -65,7 +61,7 @@
     if (s.son != null) schedOnStr = minToStr(s.son);
     if (s.sof != null) schedOffStr = minToStr(s.sof);
     if (s.sdw != null) schedDays = s.sdw;
-    transport = s.mode_active ?? deviceInfo?.mode ?? 'ble';
+    transport = s.mode_active ?? deviceInfo?.mode ?? device.transport;
   }
 
   async function load() {
@@ -79,7 +75,7 @@
       loading = false;
     }
   }
-  $effect(() => { if (supported && (deviceId || wifi)) load(); });
+  $effect(() => { if (supported && device) load(); });
 
   function setMsg(text: string, kind: 'ok' | 'err' | 'info' = 'info') { msg = text; msgKind = kind; }
 

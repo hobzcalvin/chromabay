@@ -1529,40 +1529,39 @@ export async function getLedConfiguration(deviceId: string): Promise<LedConfigur
   });
 }
 
+// Encode an LED configuration into the exact MessagePack bytes the firmware's LED_CONFIG_SET
+// expects. Shared by BLE (this file) and WiFi (wifiTransport) so BOTH transports send the
+// identical payload — the firmware decodes it the same way regardless of how it arrived.
+// The firmware expects integers for num/w/h; coerce defensively so a stray null can't
+// serialize to nil and break the decode.
+export function encodeLedConfig(config: LedConfiguration): Uint8Array {
+  const esp32Config = {
+    gb: config.globalBrightness,
+    strips: config.strips.map(strip => ({
+      cs: strip.chipset,
+      pin: strip.pin,
+      clk: strip.clockPin ?? 0,
+      num: strip.numLeds ?? 0,
+      co: strip.colorOrder,
+      rmt: strip.rmtChannel,
+      w: strip.width ?? 0,
+      h: strip.height ?? 0,
+      ort: strip.orientation,
+      gm: Math.round((strip.gamma ?? 1.0) * 100),
+      wp: strip.whitePoint ? (parseInt(strip.whitePoint.slice(1), 16) & 0xffffff) : 0xffffff,
+      de: strip.dither ?? true
+    }))
+  };
+  return msgpackEncode(esp32Config) as Uint8Array;
+}
+
 export async function setLedConfiguration(deviceId: string, config: LedConfiguration): Promise<void> {
   try {
     console.log(`[LED Config] Setting configuration for ${deviceId}:`, config);
-    
-    // Convert to ESP32 format and encode as MessagePack. The firmware expects integers
-    // for num/w/h; callers normalize blanks before saving, but coerce defensively so a
-    // stray null can never serialize to nil and break the firmware decode.
-    const esp32Config = {
-      gb: config.globalBrightness,
-      strips: config.strips.map(strip => ({
-        cs: strip.chipset,
-        pin: strip.pin,
-        clk: strip.clockPin ?? 0,
-        num: strip.numLeds ?? 0,
-        co: strip.colorOrder,
-        rmt: strip.rmtChannel,
-        w: strip.width ?? 0,
-        h: strip.height ?? 0,
-        ort: strip.orientation,
-        gm: Math.round((strip.gamma ?? 1.0) * 100),
-        wp: strip.whitePoint ? (parseInt(strip.whitePoint.slice(1), 16) & 0xffffff) : 0xffffff,
-        de: strip.dither ?? true
-      }))
-    };
-    
-    // Encode as MessagePack
-    const msgpackData = msgpackEncode(esp32Config);
+    const msgpackData = encodeLedConfig(config);
     const dataView = new DataView(msgpackData.buffer, msgpackData.byteOffset, msgpackData.byteLength);
-    
     console.log(`[LED Config] Sending MessagePack data: ${msgpackData.byteLength} bytes`);
-    
-    // Send binary data to characteristic
     await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_LED_CONFIG_SET, dataView);
-    
     console.log('[LED Config] Configuration sent successfully');
   } catch (error) {
     console.error('Error setting LED configuration:', error);

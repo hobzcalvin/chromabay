@@ -8,6 +8,7 @@
 // works too. The deployed https site can't (mixed content) — WiFi control is native + dev.
 import * as msgpack from '@msgpack/msgpack';
 import type { DeviceInfo, DeviceSettings, DeviceSettingsPatch, LedConfiguration } from './ble';
+import { encodeLedConfig } from './ble';
 import type { SerializedPattern } from './patternSerializer';
 
 export const WIFI_PORT = 8080;
@@ -92,6 +93,9 @@ export class WifiDevice {
     }));
     return { globalBrightness: raw.gb ?? 255, strips } as unknown as LedConfiguration;
   }
+  // Same bytes the BLE LED_CONFIG_SET characteristic receives — the firmware's WS dispatch
+  // routes channel 3 into the identical stageLedConfigBytes() path.
+  setLedConfig(config: LedConfiguration) { this.send(CH.LED_CONFIG_SET, encodeLedConfig(config)); }
   setBrightness(v: number) { this.send(CH.BRIGHTNESS, Uint8Array.of(Math.max(0, Math.min(255, Math.round(v))))); }
   async readBrightness(): Promise<number> { const d = await this.request(CH.BRIGHTNESS); return d[0]; }
 

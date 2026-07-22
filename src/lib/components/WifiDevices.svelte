@@ -10,6 +10,7 @@
   import { knownWifi, wifiConns, connectWifi, disconnectWifi, forgetWifiDevice, rememberWifiDevice, hostForName } from '$lib/stores/wifiDeviceStore';
   import { currentPattern } from '$lib/stores/patternsStore';
   import DeviceSettingsPanel from '$lib/components/DeviceSettingsPanel.svelte';
+  import { wifiHandle } from '$lib/deviceHandle';
 
   // First native build that carries the Local Network Privacy keys (NSLocalNetworkUsage-
   // Description + NSBonjourServices). Older installed builds can't reach LAN devices — iOS
@@ -110,7 +111,7 @@
           <!-- Same settings panel as BLE devices — incl. the transport radio to switch back to
                Bluetooth, the on/off schedule, sleep timer, streaming. -->
           <div class="wifi-settings">
-            <DeviceSettingsPanel wifi={c.dev} deviceInfo={c.info ?? null} />
+            <DeviceSettingsPanel device={wifiHandle(c.dev, d.name)} deviceInfo={c.info ?? null} />
           </div>
         </div>
       {/if}
