@@ -105,8 +105,11 @@ export class WifiDevice {
     this.send(CH.PLAYLIST_SYNC, b);
   }
   syncTime(epochMs = Date.now()) {
-    const b = new Uint8Array(8); const dv = new DataView(b.buffer);
-    dv.setUint32(0, epochMs >>> 0, true); dv.setUint32(4, Math.floor(epochMs / 4294967296), true);
+    // [u64 frame-clock ms (performance.now)][u64 wall-epoch ms (Date.now)] — see ble.ts.
+    const frameMs = Math.floor(performance.now());
+    const b = new Uint8Array(16); const dv = new DataView(b.buffer);
+    dv.setUint32(0, frameMs >>> 0, true);  dv.setUint32(4, Math.floor(frameMs / 4294967296), true);
+    dv.setUint32(8, epochMs >>> 0, true);  dv.setUint32(12, Math.floor(epochMs / 4294967296), true);
     this.send(CH.TIMESTAMP_SYNC, b);
   }
   async getName(): Promise<string> { return td.decode(await this.request(CH.DEVICE_NAME)); }

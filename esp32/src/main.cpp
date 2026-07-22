@@ -1212,33 +1212,34 @@ class CycleControlCallbacks : public NimBLECharacteristicCallbacks {
 class TimestampSyncCallbacks : public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic* pCharacteristic) {
         std::string value = pCharacteristic->getValue();
-        if (value.length() == 8) { // Expecting 64-bit timestamp in milliseconds
-            // Parse the timestamp (little-endian 64-bit unsigned integer)
-            uint64_t timestamp = 0;
-            memcpy(&timestamp, value.data(), 8);
-            
+        // Bytes 0-7 = the frame-sync clock (monotonic ms, matches the browser preview) → drives
+        // animation timing. Bytes 8-15 (optional) = the Unix epoch ms → the WALL clock for the
+        // Clock node + on/off schedule. These are DIFFERENT clocks: the frame clock is
+        // performance.now() (not a real date), so only the epoch may seed time().
+        if (value.length() >= 8) {
+            uint64_t frameMs = 0;
+            memcpy(&frameMs, value.data(), 8);
             unsigned long localTime = millis();
-            
-            // Store sync point
-            syncedTimestampMs = (unsigned long)timestamp;
+            syncedTimestampMs = (unsigned long)frameMs;
             syncedLocalTime = localTime;
-            syncedEpochMs = timestamp;          // full 64-bit epoch ms for the wall clock
-            syncedEpochLocalMs = (uint32_t)localTime;
             timestampSynced = true;
-            // Feed the system clock so time() ticks on its own — the wall clock + on/off
-            // schedule read time(), and this seeds it even without NTP.
-            { struct timeval tv = { (time_t)(timestamp / 1000ULL), (suseconds_t)((timestamp % 1000ULL) * 1000ULL) };
-              settimeofday(&tv, nullptr); }
-            
-            // Update pattern renderer with synchronized time
             if (patternRenderer) {
                 patternRenderer->setSynchronizedTime(syncedTimestampMs, syncedLocalTime);
             }
-            
-            Serial.printf("Timestamp sync received: %lu ms (local: %lu ms)\n", 
-                         syncedTimestampMs, syncedLocalTime);
+            if (value.length() >= 16) {
+                uint64_t epochMs = 0;
+                memcpy(&epochMs, value.data() + 8, 8);
+                if (epochMs > 1704067200000ULL) { // sane epoch (after 2024-01-01) only
+                    syncedEpochMs = epochMs;
+                    syncedEpochLocalMs = (uint32_t)localTime;
+                    struct timeval tv = { (time_t)(epochMs / 1000ULL), (suseconds_t)((epochMs % 1000ULL) * 1000ULL) };
+                    settimeofday(&tv, nullptr); // seed the system clock for time()/schedule
+                }
+            }
+            Serial.printf("Timestamp sync: frame=%lu ms, wall-epoch=%s\n", syncedTimestampMs,
+                          value.length() >= 16 ? String((uint32_t)(syncedEpochMs / 1000ULL)).c_str() : "(none)");
         } else {
-            Serial.printf("Invalid timestamp sync length: %d bytes (expected 8)\n", value.length());
+            Serial.printf("Invalid timestamp sync length: %d bytes\n", value.length());
         }
     }
 };
@@ -2448,13 +2449,19 @@ namespace WifiLink {
                 if (len >= 5) { memcpy(&pendingCycleIntervalMs, p, 4); pendingCycleEnabled = (p[4] != 0); newCycleControlAvailable = true; }
                 break;
             case CH_TIMESTAMP_SYNC:
-                if (len == 8) {
-                    uint64_t ts = 0; memcpy(&ts, p, 8);
-                    syncedTimestampMs = (unsigned long)ts; syncedLocalTime = millis(); timestampSynced = true;
-                    syncedEpochMs = ts; syncedEpochLocalMs = (uint32_t)syncedLocalTime;
-                    { struct timeval tv = { (time_t)(ts / 1000ULL), (suseconds_t)((ts % 1000ULL) * 1000ULL) };
-                      settimeofday(&tv, nullptr); } // feed system clock (see BLE handler)
+                // [u64 frame-clock ms][u64 wall-epoch ms(optional)] — see the BLE handler.
+                if (len >= 8) {
+                    uint64_t frameMs = 0; memcpy(&frameMs, p, 8);
+                    syncedTimestampMs = (unsigned long)frameMs; syncedLocalTime = millis(); timestampSynced = true;
                     if (patternRenderer) patternRenderer->setSynchronizedTime(syncedTimestampMs, syncedLocalTime);
+                    if (len >= 16) {
+                        uint64_t epochMs = 0; memcpy(&epochMs, p + 8, 8);
+                        if (epochMs > 1704067200000ULL) {
+                            syncedEpochMs = epochMs; syncedEpochLocalMs = (uint32_t)syncedLocalTime;
+                            struct timeval tv = { (time_t)(epochMs / 1000ULL), (suseconds_t)((epochMs % 1000ULL) * 1000ULL) };
+                            settimeofday(&tv, nullptr);
+                        }
+                    }
                 }
                 break;
             case CH_LIBRARY_CMD: {
@@ -3046,7 +3053,7 @@ void loop() {
     uint32_t nowEpoch = 0;
     time_t sysNow = time(nullptr);
     if (sysNow > 1704067200) { nowEpoch = (uint32_t)sysNow; gClockValid = true; }
-    else if (syncedEpochMs)  { nowEpoch = (uint32_t)((syncedEpochMs + (uint64_t)(currentTime - syncedEpochLocalMs)) / 1000ULL); gClockValid = true; }
+    else if (syncedEpochMs > 1704067200000ULL) { nowEpoch = (uint32_t)((syncedEpochMs + (uint64_t)(currentTime - syncedEpochLocalMs)) / 1000ULL); gClockValid = true; }
     else                     { gClockValid = false; }
     if (nowEpoch) WallClock::set(nowEpoch);
 

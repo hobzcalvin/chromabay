@@ -1797,30 +1797,26 @@ export async function pullDeviceLibrary(deviceId: string): Promise<import('./pat
  */
 export async function sendTimestampSync(deviceId: string): Promise<void> {
   try {
-    // Canonical clock = integer ms since page load (performance.now), the SAME
-    // clock the browser preview feeds its operators (see flowStore). Devices sync
-    // to THIS so preview and hardware render the same frame. Monotonic (no NTP
-    // jumps); resets on page reload, which the next periodic sync corrects.
-    const currentTimestamp = Math.floor(performance.now());
-
-    // Convert to 64-bit little-endian binary format
-    const buffer = new ArrayBuffer(8);
+    // Two clocks in one 16-byte message:
+    //  bytes 0-7  = the frame clock: integer ms since page load (performance.now), the SAME
+    //               clock the browser preview feeds its operators (see flowStore). Devices sync
+    //               to THIS so preview and hardware render the same frame. Monotonic.
+    //  bytes 8-15 = the WALL clock: Unix epoch ms (Date.now). Used for the Clock node + the
+    //               on/off schedule. This is a real date — the frame clock is NOT, so they must
+    //               travel separately. (Older firmware ignores bytes 8-15 and just frame-syncs.)
+    const frameMs = Math.floor(performance.now());
+    const epochMs = Date.now();
+    const buffer = new ArrayBuffer(16);
     const view = new DataView(buffer);
-    
-    // Write timestamp as 64-bit little-endian unsigned integer
-    // JavaScript numbers are 64-bit floats, but we need to split into two 32-bit parts
-    const timestampLow = currentTimestamp & 0xFFFFFFFF;
-    const timestampHigh = Math.floor(currentTimestamp / 0x100000000);
-    
-    view.setUint32(0, timestampLow, true);  // little-endian
-    view.setUint32(4, timestampHigh, true); // little-endian
-    
-    const dataView = new DataView(buffer);
-    
+    view.setUint32(0, frameMs >>> 0, true);
+    view.setUint32(4, Math.floor(frameMs / 0x100000000), true);
+    view.setUint32(8, epochMs >>> 0, true);
+    view.setUint32(12, Math.floor(epochMs / 0x100000000), true);
+
     // Send binary data to timestamp sync characteristic
-    await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_TIMESTAMP_SYNC, dataView);
-    
-    console.log(`[Timestamp Sync] Sent timestamp ${currentTimestamp} to device ${deviceId}`);
+    await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_TIMESTAMP_SYNC, view);
+
+    console.log(`[Timestamp Sync] Sent frame=${frameMs} epoch=${epochMs} to device ${deviceId}`);
   } catch (error) {
     console.error('Error sending timestamp sync:', error);
     throw error;
