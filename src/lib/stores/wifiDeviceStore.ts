@@ -49,11 +49,13 @@ export function forgetWifiDevice(name: string) {
 export async function connectWifi(name: string, host: string) {
   wifiConns.update((m) => ({ ...m, [name]: { name, host, dev: null, state: 'connecting' } }));
   const dev = new WifiDevice(host);
-  dev.onClose = () => wifiConns.update((m) => (m[name] ? { ...m, [name]: { ...m[name], state: 'idle', dev: null } } : m));
   try {
     await dev.connect();
     const info = await dev.getDeviceInfo();
     dev.syncTime(); // give the device our clock (for cycle timing / the Clock node)
+    // Only NOW wire onClose — during a failed connect the socket's close event would
+    // otherwise fire after we set 'error' and clobber it back to 'idle' (no feedback).
+    dev.onClose = () => wifiConns.update((m) => (m[name] ? { ...m, [name]: { ...m[name], state: 'idle', dev: null } } : m));
     wifiConns.update((m) => ({ ...m, [name]: { name, host, dev, state: 'ready', info } }));
   } catch (e: any) {
     dev.disconnect();

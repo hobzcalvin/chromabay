@@ -9,6 +9,7 @@
   import { Capacitor } from '@capacitor/core';
   import { knownWifi, wifiConns, connectWifi, disconnectWifi, forgetWifiDevice, rememberWifiDevice, hostForName } from '$lib/stores/wifiDeviceStore';
   import { currentPattern } from '$lib/stores/patternsStore';
+  import DeviceSettingsPanel from '$lib/components/DeviceSettingsPanel.svelte';
 
   // First native build that carries the Local Network Privacy keys (NSLocalNetworkUsage-
   // Description + NSBonjourServices). Older installed builds can't reach LAN devices — iOS
@@ -106,6 +107,11 @@
             </button>
           </div>
           {#if msg[d.name]}<p class="ok">{msg[d.name]}</p>{/if}
+          <!-- Same settings panel as BLE devices — incl. the transport radio to switch back to
+               Bluetooth, the on/off schedule, sleep timer, streaming. -->
+          <div class="wifi-settings">
+            <DeviceSettingsPanel wifi={c.dev} deviceInfo={c.info ?? null} />
+          </div>
         </div>
       {/if}
     </div>
@@ -114,7 +120,7 @@
   <div class="wifi-add">
     <input type="text" placeholder="device.local or 192.168.x.x" bind:value={manualHost}
       onkeydown={(e) => { if (e.key === 'Enter') addManual(); }} />
-    <button class="btn small" onclick={addManual}>Add / connect</button>
+    <button class="btn small" onclick={addManual}>Connect</button>
   </div>
 </section>
 {/if}
@@ -141,6 +147,7 @@
   .pill { font-size: 0.8rem; opacity: 0.8; }
   .err { color: #fca5a5; font-size: 0.82rem; margin: 0.4rem 0 0; }
   .ok { color: #86efac; font-size: 0.8rem; margin: 0.3rem 0 0; }
+  .wifi-settings { margin-top: 0.75rem; padding-top: 0.7rem; border-top: 1px solid rgba(255,255,255,0.12); }
   .wifi-add { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
   .wifi-add input { flex: 1; padding: 0.4rem 0.6rem; border-radius: 8px; border: 1px solid rgba(255,255,255,0.15); background: rgba(0,0,0,0.25); color: #fff; }
 </style>

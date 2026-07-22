@@ -6,10 +6,21 @@
   // clear feedback for that.
   import { readDeviceSettings, writeDeviceSettings, type DeviceSettings, type DeviceSettingsPatch, type DeviceInfo } from '$lib/ble';
   import { rememberWifiDevice } from '$lib/stores/wifiDeviceStore';
+  import type { WifiDevice } from '$lib/wifiTransport';
 
-  let { deviceId, deviceInfo }: { deviceId: string; deviceInfo: DeviceInfo | null } = $props();
+  // Works over either transport: pass a BLE `deviceId`, OR a `wifi` handle for a device reached
+  // over Wi-Fi. The panel is identical either way — same tabs, same single Save.
+  let { deviceId, deviceInfo, wifi }: { deviceId?: string; deviceInfo: DeviceInfo | null; wifi?: WifiDevice } =
+    $props();
 
-  const supported = $derived((deviceInfo?.feat ?? 1) >= 2);
+  const readSettingsFn = (): Promise<DeviceSettings | null> =>
+    wifi ? wifi.readSettings() : readDeviceSettings(deviceId!);
+  const writeSettingsFn = (patch: DeviceSettingsPatch): Promise<void> =>
+    wifi ? Promise.resolve(wifi.writeSettings(patch)) : writeDeviceSettings(deviceId!, patch);
+  const key = $derived(deviceId ?? `wifi:${deviceInfo?.name ?? ''}`);
+
+  // Wi-Fi only exists on feat>=2 firmware, so a wifi handle implies supported.
+  const supported = $derived(!!wifi || (deviceInfo?.feat ?? 1) >= 2);
 
   let settings = $state<DeviceSettings | null>(null);
   let loading = $state(false);
@@ -39,7 +50,7 @@
   const minToStr = (m: number) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
   const strToMin = (s: string) => { const [h, m] = s.split(':').map(Number); return (((h || 0) * 60 + (m || 0)) % 1440 + 1440) % 1440; };
 
-  const activeMode = $derived(settings?.mode_active ?? deviceInfo?.mode ?? 'ble');
+  const activeMode = $derived(settings?.mode_active ?? deviceInfo?.mode ?? (wifi ? 'wifi' : 'ble'));
 
   function applySnapshot(s: DeviceSettings) {
     ssid = s.ssid || '';
@@ -58,17 +69,17 @@
   }
 
   async function load() {
-    if (!supported || loading || loadedFor === deviceId) return;
+    if (!supported || loading || loadedFor === key) return;
     loading = true;
     try {
-      const s = await readDeviceSettings(deviceId);
+      const s = await readSettingsFn();
       settings = s;
-      if (s) { applySnapshot(s); loadedFor = deviceId; }
+      if (s) { applySnapshot(s); loadedFor = key; }
     } finally {
       loading = false;
     }
   }
-  $effect(() => { if (supported && deviceId) load(); });
+  $effect(() => { if (supported && (deviceId || wifi)) load(); });
 
   function setMsg(text: string, kind: 'ok' | 'err' | 'info' = 'info') { msg = text; msgKind = kind; }
 
@@ -97,7 +108,7 @@
     saving = true;
     setMsg(switching ? `Switching to ${dest}…` : 'Saving…', 'info');
     try {
-      await writeDeviceSettings(deviceId, patch);
+      await writeSettingsFn(patch);
       if (switching) {
         if (transport === 'wifi' && deviceInfo?.name) rememberWifiDevice(deviceInfo.name);
         setMsg(transport === 'wifi'
@@ -106,7 +117,7 @@
       } else {
         pass = '';
         setMsg('Saved ✓', 'ok');
-        const s2 = await readDeviceSettings(deviceId).catch(() => null); // refresh pill / hasPass / clock
+        const s2 = await readSettingsFn().catch(() => null); // refresh pill / hasPass / clock
         if (s2) settings = s2;
       }
     } catch (e: any) {
