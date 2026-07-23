@@ -66,6 +66,17 @@
           <span slot="not-allowed" class="note">Allow the serial device when prompted, then retry.</span>
         </esp-web-install-button>
         <p class="hint">Connect the board with USB, then click to install.</p>
+        <details class="dl-details">
+          <summary>What's the “Erase device” checkbox?</summary>
+          <p class="hint">The install dialog offers an <strong>Erase device</strong> option — it's a full-chip
+            wipe before flashing.</p>
+          <p class="hint"><strong>Leave it off</strong> to update ChromaBay and keep everything: your stored
+            patterns, LED-strip config, Wi-Fi credentials, device name, and settings all survive.</p>
+          <p class="hint"><strong>Turn it on</strong> for a clean slate — wipes all of that, so the board comes
+            up factory-fresh (Bluetooth, no Wi-Fi, no patterns). Use it when <em>converting from WLED or other
+            firmware</em> (their old data would be stale under ChromaBay's layout), or to reset a misbehaving
+            device.</p>
+        </details>
       {/if}
 
       <!-- Manual download of the per-chip images (flash with esptool, or when Web Serial
