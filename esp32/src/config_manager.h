@@ -77,13 +77,17 @@ public:
             const LedBus* bus = _ledManager.getStrip(i);
             if (bus) {
                 const LedStripConfig& stripConfig = bus->getConfig();
-                // Each strip is a map (13 key-value pairs incl. gamma + white point + dither
-                // + auto-white mode + white-die colour)
-                mpack_start_map(&writer, 13);
+                // Each strip is a map (14 key-value pairs incl. clock pin, gamma, white point,
+                // dither, auto-white mode + white-die colour)
+                mpack_start_map(&writer, 14);
                 mpack_write_cstr(&writer, ConfigKeys::CHIPSET);
                 mpack_write_u8(&writer, static_cast<uint8_t>(stripConfig.chipset));
                 mpack_write_cstr(&writer, ConfigKeys::PIN);
                 mpack_write_u8(&writer, stripConfig.pin);
+                // clk MUST be persisted — 4-wire SPI chipsets (APA102/SK9822) need it. It was
+                // missing here while load() read it, so the clock pin reset to 0 every reboot.
+                mpack_write_cstr(&writer, ConfigKeys::CLOCK_PIN);
+                mpack_write_u8(&writer, stripConfig.clockPin);
                 mpack_write_cstr(&writer, ConfigKeys::NUM_LEDS);
                 mpack_write_u16(&writer, stripConfig.numLeds);
                 mpack_write_cstr(&writer, ConfigKeys::COLOR_ORDER);
