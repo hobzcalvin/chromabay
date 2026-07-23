@@ -1,7 +1,7 @@
 {
-  "version": "0.1.266",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.266.zip",
-  "buildDate": "2026-07-22T22:46:27Z",
-  "commitHash": "6088a5c4ae71104ee3d26d19646baf36412b3386",
-  "commitMessage": "LED strip config over WiFi (core config) via the device handle"
+  "version": "0.1.267",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.267.zip",
+  "buildDate": "2026-07-23T04:38:07Z",
+  "commitHash": "33d50fffb37cb74088a7e90b1cb8e20d2a8973f6",
+  "commitMessage": "Fix: persist clockPin (SK9822/APA102 clock pin reset to 0 on every reboot)"
 }
