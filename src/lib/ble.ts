@@ -1725,7 +1725,11 @@ export async function getStripLayout(
  * decoded patterns. Mirrors getStripLayout's reassembly.
  */
 export async function pullDeviceLibrary(deviceId: string): Promise<import('./patternSerializer').SerializedPattern[]> {
-  const bufs = new Map<number, { total: number; buf: Uint8Array; received: number; done: boolean }>();
+  // Track TRUE coverage per pattern (a set of chunk offsets + bytes actually filled), not just
+  // a max-offset watermark: a dropped middle chunk would otherwise let `received` reach `total`
+  // over a hole, and we'd decode a zero-filled buffer into a garbage pattern (renders wrong /
+  // decode-fails). Only decode once every byte is present.
+  const bufs = new Map<number, { total: number; buf: Uint8Array; covered: number; seen: Set<number>; done: boolean }>();
   const results: any[] = [];
   let settle: ((v: any) => void) | null = null;
   let cleanedUp = false;
@@ -1750,11 +1754,11 @@ export async function pullDeviceLibrary(deviceId: string): Promise<import('./pat
     const totalLen = dv.getUint16(1, true);
     const offset = dv.getUint16(3, true);
     let e = bufs.get(idx);
-    if (!e) { e = { total: totalLen, buf: new Uint8Array(totalLen), received: 0, done: false }; bufs.set(idx, e); }
+    if (!e) { e = { total: totalLen, buf: new Uint8Array(totalLen), covered: 0, seen: new Set(), done: false }; bufs.set(idx, e); }
     const dataLen = dv.byteLength - 5;
     for (let i = 0; i < dataLen && offset + i < e.total; i++) e.buf[offset + i] = dv.getUint8(5 + i);
-    e.received = Math.max(e.received, offset + dataLen);
-    if (!e.done && e.received >= e.total) {
+    if (!e.seen.has(offset)) { e.seen.add(offset); e.covered += Math.min(dataLen, e.total - offset); } // dedupe; count real bytes
+    if (!e.done && e.covered >= e.total) {
       e.done = true;
       try { const p = msgpackDecode(e.buf) as any; if (p && Array.isArray(p.nodes)) results.push(p); }
       catch (err) { console.warn('[LibDump] decode failed for pattern', idx, err); }

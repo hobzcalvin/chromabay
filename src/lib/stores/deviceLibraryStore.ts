@@ -106,6 +106,23 @@ export function markUnsyncedLocally(name: string): void {
   });
 }
 
+// Optimistically drop ONE pattern from ONE device's cached library (instant UI feedback on a
+// per-device delete). We deliberately DON'T follow a delete with a full re-dump: the dump is
+// lossy over BLE (dropped notifications → fewer patterns come back), so re-dumping would make
+// the whole list collapse to an undercount. Trust the optimistic edit; the write is reliable.
+export function markUnsyncedLocallyOn(deviceId: string, name: string): void {
+  deviceLibraries.update((libs) => {
+    const lib = libs[deviceId];
+    if (!lib) return libs;
+    return { ...libs, [deviceId]: lib.filter((p) => p.meta?.name !== name) };
+  });
+}
+
+// Optimistically empty ONE device's cached library (per-device "Delete all").
+export function clearDeviceLibraryLocally(deviceId: string): void {
+  deviceLibraries.update((libs) => ({ ...libs, [deviceId]: [] }));
+}
+
 export function syncedCountFor(
   libs: Record<string, SerializedPattern[]>,
   name: string,

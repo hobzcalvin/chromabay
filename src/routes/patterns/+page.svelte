@@ -6,7 +6,7 @@
   import PatternPreview from '$lib/components/PatternPreview.svelte';
   import type { SerializedPattern } from '$lib/patternSerializer';
   import { syncPatternToAllDevices, deletePatternOnAllDevices, sendSinglePatternToDevice, deletePatternOnDevice, clearDeviceLibrary } from '$lib/ble';
-  import { deviceLibraries, refreshDeviceLibraries, syncedCountFor, markSyncedLocally } from '$lib/stores/deviceLibraryStore';
+  import { deviceLibraries, refreshDeviceLibraries, syncedCountFor, markSyncedLocally, markUnsyncedLocallyOn, clearDeviceLibraryLocally } from '$lib/stores/deviceLibraryStore';
   import { currentPattern } from '$lib/stores/patternsStore';
   import { connectedDevices, getConnectedDevicesList } from '$lib/stores/deviceStore';
   import { authUser } from '$lib/stores/authStore';
@@ -78,6 +78,9 @@
           } catch (e) { console.error('Sync-all failed for', device.deviceId, pattern.meta?.name, e); }
         }
       }
+      // Each push is shown by the device as it lands, so it'd otherwise end on the LAST pattern
+      // synced. Re-assert the app's current pattern so the device ends where the user expects.
+      try { await syncPatternToAllDevices(); } catch (e) { console.error('Re-assert current after sync-all failed:', e); }
     } finally { syncingAll = false; }
   }
 
@@ -119,8 +122,9 @@
   // Wipe one device's entire stored library (empties its cycle).
   async function handleClearDevice(deviceId: string, name: string) {
     if (!confirm(`Delete all patterns stored on ${name}? This empties its cycle. (Your own library isn't touched.)`)) return;
-    try { await clearDeviceLibrary(deviceId); } catch (e) { console.error('Clear device failed:', e); }
-    refreshDeviceLibraries({ force: true });
+    clearDeviceLibraryLocally(deviceId); // instant feedback
+    try { await clearDeviceLibrary(deviceId); }
+    catch (e) { console.error('Clear device failed:', e); refreshDeviceLibraries({ force: true }); }
   }
 
   // Swipe state
@@ -186,14 +190,18 @@
   const handleImportDevicePattern = (p: SerializedPattern) => importAndSelect(() => importLibraryPattern(p));
   const handleImportGallery = (g: GalleryPattern) => importAndSelect(() => importGalleryPattern(g));
 
-  // Remove a pattern from ONE device's library (not from My Patterns).
+  // Remove a pattern from ONE device's library (not from My Patterns). Optimistic: the row
+  // disappears immediately. We do NOT re-dump on success — the BLE dump is lossy (drops
+  // patterns), so a re-dump here would wrongly collapse the whole list. Only re-dump to
+  // recover if the delete actually failed.
   async function handleRemoveFromDevice(deviceId: string, name: string) {
+    markUnsyncedLocallyOn(deviceId, name); // instant feedback
     try {
       await deletePatternOnDevice(deviceId, name);
     } catch (e) {
       console.error('Remove from device failed:', e);
+      refreshDeviceLibraries({ force: true }); // reconcile only on failure
     }
-    refreshDeviceLibraries({ force: true }); // we changed this device's library → re-dump
   }
 
   // Bring the current pattern into view when landing on this page (it may be far down a
