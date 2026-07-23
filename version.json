@@ -1,7 +1,7 @@
 {
-  "version": "0.1.270",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.270.zip",
-  "buildDate": "2026-07-23T05:01:41Z",
-  "commitHash": "4bf4eaf1bdeadc81b548abd9bc7c4fc40c810fb3",
-  "commitMessage": "Shared single-render for pattern previews (render once, blit everywhere)"
+  "version": "0.1.271",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.271.zip",
+  "buildDate": "2026-07-23T05:09:43Z",
+  "commitHash": "6333866e6400b85520bcf3f29a6519f387138f80",
+  "commitMessage": "Fix: LEDs stay lit (frozen) when schedule/sleep turns output off, if dithering on"
 }
