@@ -1,7 +1,7 @@
 {
-  "version": "0.1.269",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.269.zip",
-  "buildDate": "2026-07-23T04:57:24Z",
-  "commitHash": "96f952737ba11aa26bc65ae79d1d5e17fe5f4eec",
-  "commitMessage": "Per-Device previews render the current pattern (fix stale preview after edit)"
+  "version": "0.1.270",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.270.zip",
+  "buildDate": "2026-07-23T05:01:41Z",
+  "commitHash": "4bf4eaf1bdeadc81b548abd9bc7c4fc40c810fb3",
+  "commitMessage": "Shared single-render for pattern previews (render once, blit everywhere)"
 }
