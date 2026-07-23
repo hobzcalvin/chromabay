@@ -1,7 +1,7 @@
 {
-  "version": "0.1.271",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.271.zip",
-  "buildDate": "2026-07-23T05:09:43Z",
-  "commitHash": "6333866e6400b85520bcf3f29a6519f387138f80",
-  "commitMessage": "Fix: LEDs stay lit (frozen) when schedule/sleep turns output off, if dithering on"
+  "version": "0.1.272",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.272.zip",
+  "buildDate": "2026-07-23T05:24:08Z",
+  "commitHash": "665c73ce251fc4117935d089e1d966330df3fe36",
+  "commitMessage": "USB flash: explain the Erase device checkbox"
 }
