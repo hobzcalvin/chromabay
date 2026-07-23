@@ -10,6 +10,7 @@
   import { SvelteFlowProvider } from '@xyflow/svelte';
   import '$lib/patternSync'; // activates cloud library sync (inert unless signed in)
   import { initDeepLinks } from '$lib/deepLinks';
+  import PreviewRenderHost from '$lib/components/PreviewRenderHost.svelte';
 
   $: connected = $connectedDevices.size;
 
@@ -57,6 +58,8 @@
 </script>
 
 <SvelteFlowProvider>
+  <!-- Renders each unique pattern preview once; PatternPreview instances blit the frames. -->
+  <PreviewRenderHost />
   <div class="app-container">
     <div class="content-area">
       <slot />
