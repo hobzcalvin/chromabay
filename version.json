@@ -1,7 +1,7 @@
 {
-  "version": "0.1.268",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.268.zip",
-  "buildDate": "2026-07-23T04:47:50Z",
-  "commitHash": "39190e76dfcff1db36043f6cb61281a47f5da34b",
-  "commitMessage": "Fix Per-Device sync/list bugs: optimistic delete, end-on-current, holey-dump guard"
+  "version": "0.1.269",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.269.zip",
+  "buildDate": "2026-07-23T04:57:24Z",
+  "commitHash": "96f952737ba11aa26bc65ae79d1d5e17fe5f4eec",
+  "commitMessage": "Per-Device previews render the current pattern (fix stale preview after edit)"
 }
