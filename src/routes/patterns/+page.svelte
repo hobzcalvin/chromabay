@@ -137,6 +137,11 @@
   // Names already in My Patterns (used to filter the other sections so they only show
   // things you don't already have).
   $: myNames = new Set(patternsList.map((p) => p.meta?.name).filter(Boolean) as string[]);
+  // Name → my current (possibly just-edited) version. The Per-Device list should preview the
+  // CURRENT pattern, not the stale snapshot dumped from the device — otherwise editing a
+  // pattern leaves its per-device preview out of date. (Patterns not in My Patterns fall back
+  // to the device's copy.)
+  $: myByName = new Map(patternsList.map((p) => [p.meta?.name, p] as const));
   $: connectedIds = connectedList.map((d) => d.deviceId);
 
   // Patterns present on a CONNECTED device but NOT in My Patterns (deduped by name).
@@ -545,7 +550,7 @@
             {#each ($deviceLibraries[device.deviceId] ?? []) as p (p.meta?.name)}
               {@const nm = p.meta?.name ?? ''}
               <div class="simple-row">
-                <PatternPreview pattern={p} size={44} />
+                <PatternPreview pattern={myByName.get(nm) ?? p} size={44} />
                 <span class="simple-name">{nm || 'Unnamed'}</span>
                 {#if nm && !myNames.has(nm)}
                   <button class="import-btn" onclick={() => handleImportDevicePattern(p)}>Import</button>
