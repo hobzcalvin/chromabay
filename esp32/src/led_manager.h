@@ -395,6 +395,21 @@ public:
         LedWrapper::show(_busPtr, _internalType, false);
     }
 
+    // Force the strip fully dark and TRANSMIT it now, regardless of dithering. A plain
+    // black-write + show() does NOT blank a dithered strip: show()/ditherShow() re-emit the
+    // last dither TARGET (the frozen lit frame), clobbering the black. So zero the dither
+    // buffers too, then write black and push it out. Used for sleep / scheduled-off.
+    void blank() {
+        if (_busPtr == nullptr || _internalType == ITYPE_NONE) return;
+        if (_ditherOn) {
+            for (auto& v : _ditherTarget) v = 0;
+            for (auto& v : _ditherResid) v = 0;
+        }
+        for (uint16_t i = 0; i < _config.numLeds; i++)
+            LedWrapper::setPixelColor(_busPtr, _internalType, i, 0u, _config.colorOrder);
+        LedWrapper::show(_busPtr, _internalType, false);
+    }
+
     // Store a render's pixel as a high-precision dither target (defined below, after the
     // FastLED.h include, since it reads CRGB channels). Called by setPixelColor.
     void setDitherTarget(uint16_t pixelIndex, const CRGB& color);
@@ -577,6 +592,11 @@ public:
             if (strip_ptr->ditherEnabled()) { if (strip_ptr->canShow()) strip_ptr->ditherShow(); }
             else strip_ptr->show(false);
         }
+    }
+
+    // Turn every strip fully dark and transmit it (dither-safe — see LedBus::blank).
+    void blank() {
+        for (auto& strip_ptr : _strips) if (strip_ptr) strip_ptr->blank();
     }
 
     bool canShow() const {

@@ -626,12 +626,10 @@ static void noteActivity() {
 // entering a scheduled-off window; the render guard then keeps rendering paused so it stays
 // dark (the configured brightness is untouched, so waking restores the look).
 static void blankAllStrips() {
-    for (size_t s = 0; s < ledMgr.getNumStrips(); s++) {
-        const LedConfig::LedBus* strip = ledMgr.getStrip(s);
-        if (!strip) continue;
-        for (int i = 0; i < strip->getLength(); i++) ledMgr.setPixelColor(s, i, CRGB::Black);
-    }
-    ledMgr.show();
+    // Dither-safe blank: writing black + show() alone leaves a dithered strip lit (show()
+    // re-emits the last dither target). ledMgr.blank() zeroes the dither buffers + transmits
+    // black, so the LEDs actually go dark for sleep / scheduled-off.
+    ledMgr.blank();
 }
 
 // Hand a fully-reassembled pattern msgpack buffer to the render loop. Takes ownership of
