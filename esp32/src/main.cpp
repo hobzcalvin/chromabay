@@ -3222,7 +3222,11 @@ void loop() {
     // each is a fresh window for a BLE ISR to jitter WS2812 timing → the dithering meant to
     // smooth output was itself a top flicker source. (Trade-off: low brightness may band a
     // little on single-core one-wire strips; use APA102 to get both smooth AND flicker-free.)
-    if (!ota_in_progress && !SINGLE_CORE) {
+    // Must also stop while the output is meant to be OFF (schedule/brightness-0 = gBriDark, or
+    // sleep = gAsleep): otherwise the dither loop keeps re-emitting the LAST target and the
+    // LEDs stay lit/frozen on top of the blank (render is skipped, so the target never updates
+    // to black). Gate it on the same "output on" condition as rendering.
+    if (!ota_in_progress && !SINGLE_CORE && !gBriDark && !gAsleep) {
         ledMgr.ditherTick();
     }
 
