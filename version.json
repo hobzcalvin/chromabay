@@ -1,7 +1,7 @@
 {
-  "version": "0.1.275",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.275.zip",
-  "buildDate": "2026-07-25T05:32:01Z",
-  "commitHash": "4c326181186628acf4aa35392214ac286105347f",
-  "commitMessage": "Editor: generators have no input handle, bigger grabbers, restore the Output node"
+  "version": "0.1.276",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.276.zip",
+  "buildDate": "2026-07-25T15:46:22Z",
+  "commitHash": "3cd4747db9496398e055943fb2aec1f0448049cf",
+  "commitMessage": "Editor: top (target) handles back to 16px (bottom grabbers' original size)"
 }
