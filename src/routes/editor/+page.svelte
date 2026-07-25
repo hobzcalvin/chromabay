@@ -648,11 +648,11 @@
     height: 24px !important;
   }
 
-  /* Disable mouse events on top handles to prevent dragging from them (but size them to
-     match so they're an easy drop target during connection). */
+  /* Disable mouse events on top handles to prevent dragging from them. Sized at the original
+     16px (the bottom grabbers' old size). */
   :global(.svelte-flow__handle-top) {
-    width: 24px !important;
-    height: 24px !important;
+    width: 16px !important;
+    height: 16px !important;
     pointer-events: none !important;
   }
 
