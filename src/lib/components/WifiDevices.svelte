@@ -7,7 +7,7 @@
   import { onMount } from 'svelte';
   import { get } from 'svelte/store';
   import { Capacitor } from '@capacitor/core';
-  import { knownWifi, wifiConns, connectWifi, disconnectWifi, forgetWifiDevice, rememberWifiDevice, hostForName } from '$lib/stores/wifiDeviceStore';
+  import { knownWifi, wifiConns, connectWifi, disconnectWifi, forgetWifiDevice, rememberWifiDevice, hostForName, setWifiBrightness } from '$lib/stores/wifiDeviceStore';
   import { currentPattern } from '$lib/stores/patternsStore';
   import DeviceSettingsPanel from '$lib/components/DeviceSettingsPanel.svelte';
   import LedConfigurationComponent from '$lib/components/LedConfiguration.svelte';
@@ -37,7 +37,6 @@
   });
 
   let manualHost = $state('');
-  let bri = $state<Record<string, number>>({});
   let cycleOn = $state<Record<string, boolean>>({});
   let msg = $state<Record<string, string>>({});
   // LED-strip config editor state, per device (same LedConfiguration component as BLE, via the
@@ -93,7 +92,10 @@
     else msg[name] = p ? 'Not connected' : 'No current pattern';
   }
   function onBri(name: string, v: number) {
-    bri[name] = v; $wifiConns[name]?.dev?.setBrightness(v);
+    // Optimistically update the conn's brightness (single source of truth, shared with the
+    // device's own brightness pushes) so the readout reflects drags AND schedule/button changes.
+    setWifiBrightness(name, v);
+    $wifiConns[name]?.dev?.setBrightness(v);
   }
   function toggleCycle(name: string) {
     const on = !(cycleOn[name] ?? false); cycleOn[name] = on;
@@ -135,9 +137,9 @@
           <div class="row"><span class="lbl">Chip</span><span>{c.info?.chip ?? '—'} · fw {c.info?.fw_ver ?? '—'}</span></div>
           <label class="row">
             <span class="lbl">Brightness</span>
-            <input type="range" min="0" max="255" value={bri[d.name] ?? 128}
+            <input type="range" min="0" max="255" value={c.brightness ?? 128}
               oninput={(e) => onBri(d.name, parseInt(e.currentTarget.value))} />
-            <span class="val">{bri[d.name] ?? 128}</span>
+            <span class="val">{c.brightness ?? 128}</span>
           </label>
           <div class="btn-row">
             <button class="btn small" onclick={() => pushCurrent(d.name)}>Push current pattern</button>

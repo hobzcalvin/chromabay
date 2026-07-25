@@ -26,6 +26,7 @@
     prefetchFirmware,
     startOTAStatusNotifications,
     stopOTAStatusNotifications,
+    startBrightnessNotifications,
     type DeviceInfo,
     type FirmwareRegistryEntry,
     type OTAUpdateStatus,
@@ -476,6 +477,15 @@
         if (ev === 'next') statusMessage = 'Device → next pattern';
       });
     } catch (e) { console.error('button event subscribe failed', e); }
+    try {
+      // Device-initiated brightness changes (button, schedule→0/restore) → keep the slider
+      // in sync. Also mirror into the loaded ledConfig so a later Save persists the same value.
+      await startBrightnessNotifications(deviceId, (b) => {
+        liveBrightness[deviceId] = b;
+        const s = deviceSettings[deviceId];
+        if (s?.ledConfig) s.ledConfig.globalBrightness = b;
+      });
+    } catch (e) { console.error('brightness subscribe failed', e); }
     try { await checkForUpdateSilently(deviceId); } catch (e) { console.error('update check failed', e); }
     try {
       await startOTAStatusNotifications(deviceId, (status) => {

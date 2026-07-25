@@ -636,6 +636,31 @@ export async function startNotifications(deviceId: string, serviceUuid: string, 
   }
 }
 
+// Like startNotifications but hands the callback the raw DataView (for binary chars such as
+// brightness, a single byte). Kept separate so the string path above is unchanged.
+export async function startBinaryNotifications(deviceId: string, serviceUuid: string, characteristicUuid: string, callback: (data: DataView) => void): Promise<void> {
+  if (isWeb()) {
+    const deviceInfo = connectedDevices.get(deviceId);
+    if (!deviceInfo?.gattServer) throw new Error('Device not connected');
+    const service = await deviceInfo.gattServer.getPrimaryService(serviceUuid);
+    const characteristic = await service.getCharacteristic(characteristicUuid);
+    await characteristic.startNotifications();
+    characteristic.addEventListener('characteristicvaluechanged', (event: any) => callback(event.target.value as DataView));
+  } else {
+    await BleClient.startNotifications(deviceId, serviceUuid, characteristicUuid, (v: DataView) => callback(v));
+  }
+  console.log(`Started binary notifications for ${characteristicUuid}`);
+}
+
+// Subscribe to device-initiated brightness changes (button press, on/off schedule → 0 or
+// restore, boot floor). feat>=2 firmware notifies the BRIGHTNESS characteristic; older
+// firmware never notifies, so this is simply inert there.
+export async function startBrightnessNotifications(deviceId: string, callback: (brightness: number) => void): Promise<void> {
+  await startBinaryNotifications(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_BRIGHTNESS, (dv) => {
+    if (dv.byteLength >= 1) callback(dv.getUint8(0));
+  });
+}
+
 export async function stopNotifications(deviceId: string, serviceUuid: string, characteristicUuid: string): Promise<void> {
   try {
     if (isWeb()) {

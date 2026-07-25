@@ -20,6 +20,7 @@ export const knownWifi = writable<KnownWifi[]>(load());
 export type WifiConn = {
   name: string; host: string; dev: WifiDevice | null;
   state: 'idle' | 'connecting' | 'ready' | 'error'; info?: DeviceInfo; error?: string;
+  brightness?: number; // last device-reported brightness (button / schedule push)
 };
 export const wifiConns = writable<Record<string, WifiConn>>({});
 
@@ -53,14 +54,22 @@ export async function connectWifi(name: string, host: string) {
     await dev.connect();
     const info = await dev.getDeviceInfo();
     dev.syncTime(); // give the device our clock (for cycle timing / the Clock node)
+    const brightness = await dev.readBrightness().catch(() => undefined); // seed the slider
     // Only NOW wire onClose — during a failed connect the socket's close event would
     // otherwise fire after we set 'error' and clobber it back to 'idle' (no feedback).
     dev.onClose = () => wifiConns.update((m) => (m[name] ? { ...m, [name]: { ...m[name], state: 'idle', dev: null } } : m));
-    wifiConns.update((m) => ({ ...m, [name]: { name, host, dev, state: 'ready', info } }));
+    // Device-initiated brightness (button / schedule) → keep the card's slider in sync.
+    dev.onBrightness = (b) => wifiConns.update((m) => (m[name] ? { ...m, [name]: { ...m[name], brightness: b } } : m));
+    wifiConns.update((m) => ({ ...m, [name]: { name, host, dev, state: 'ready', info, brightness } }));
   } catch (e: any) {
     dev.disconnect();
     wifiConns.update((m) => ({ ...m, [name]: { name, host, dev: null, state: 'error', error: e?.message ?? String(e) } }));
   }
+}
+// Optimistically record a brightness for a WiFi device (slider drag); device pushes use the
+// same field, so the readout is one source of truth.
+export function setWifiBrightness(name: string, b: number) {
+  wifiConns.update((m) => (m[name] ? { ...m, [name]: { ...m[name], brightness: b } } : m));
 }
 export function disconnectWifi(name: string) {
   get(wifiConns)[name]?.dev?.disconnect();

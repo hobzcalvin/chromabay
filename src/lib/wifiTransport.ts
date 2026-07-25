@@ -30,6 +30,7 @@ export class WifiDevice {
   private pending = new Map<number, (data: Uint8Array) => void>();
   private dump: { entries: SerializedPattern[]; resolve?: (v: SerializedPattern[]) => void } | null = null;
   onClose?: () => void;
+  onBrightness?: (b: number) => void; // device-initiated brightness (button / schedule)
 
   constructor(host: string) { this.host = host; }
 
@@ -63,7 +64,9 @@ export class WifiDevice {
       return;
     }
     const p = this.pending.get(ch);
-    if (p) { this.pending.delete(ch); p(payload); }
+    if (p) { this.pending.delete(ch); p(payload); return; }
+    // Unsolicited (no pending request): the device pushes brightness on button/schedule changes.
+    if (ch === CH.BRIGHTNESS && payload.length >= 1) this.onBrightness?.(payload[0]);
   }
 
   private send(ch: number, payload: Uint8Array = new Uint8Array(0)) {

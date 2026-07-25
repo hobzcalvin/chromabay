@@ -2392,6 +2392,10 @@ namespace WifiLink {
     static void sendStr(uint8_t channel, const String& s) {
         sendFrame(channel, (const uint8_t*)s.c_str(), s.length());
     }
+    // True when a WS client is connected + handshaked — safe to push unsolicited frames.
+    inline bool clientReady() { return wsReady && client && client.connected(); }
+    // Push a brightness update to the connected WS client (mirror of the BLE notify).
+    inline void pushBrightness(uint8_t b) { if (clientReady()) sendFrame(CH_BRIGHTNESS, &b, 1); }
 
     // Stream the stored library: one frame per pattern on CH_LIBRARY_DUMP, payload =
     // NUL-terminated name followed by the raw pattern msgpack; an empty frame signals done.
@@ -2973,7 +2977,7 @@ void setup() {
             pPlaylistSyncCharacteristic->setCallbacks(new CycleControlCallbacks());
 
             // Brightness Characteristic (live global brightness, single byte)
-            pBrightnessCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_BRIGHTNESS, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR | NIMBLE_PROPERTY::READ);
+            pBrightnessCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_BRIGHTNESS, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR | NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY);
             pBrightnessCharacteristic->setCallbacks(new BrightnessCallbacks());
 
             // Device Name Characteristic (read current name / write to rename)
@@ -3124,6 +3128,24 @@ void loop() {
         uint8_t cur = ledMgr.getGlobalBrightness();
         if (cur == 0 && !gBriDark) { gBriDark = true; blankAllStrips(); }
         else if (cur > 0 && gBriDark) { gBriDark = false; }
+    }
+
+    // Report brightness to the app whenever it changes for ANY reason — button press, the
+    // on/off schedule (→ 0 or restore), boot floor — so the slider/readout stays in sync.
+    // (App writes come back too; the app just displays the value, never echoes, so no loop.)
+    {
+        static uint8_t lastNotifiedBri = 0xFE; // impossible-first so the first real value sends
+        uint8_t cur = ledMgr.getGlobalBrightness();
+        if (cur != lastNotifiedBri) {
+            lastNotifiedBri = cur;
+            if (deviceConnected && pBrightnessCharacteristic) {
+                pBrightnessCharacteristic->setValue(&cur, 1);
+                pBrightnessCharacteristic->notify();
+            }
+#if CHROMABAY_WIFI
+            WifiLink::pushBrightness(cur);
+#endif
+        }
     }
 
     // Update pattern rendering
