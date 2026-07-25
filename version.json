@@ -1,7 +1,7 @@
 {
-  "version": "0.1.277",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.277.zip",
-  "buildDate": "2026-07-25T17:46:47Z",
-  "commitHash": "68e6968a2cf6f85cd7db35781f4836d4c201c694",
-  "commitMessage": "Dev Xcode builds get hot updates again (MARKETING 0.0.1) + WiFi gate allows dev builds"
+  "version": "0.1.278",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.278.zip",
+  "buildDate": "2026-07-25T18:04:47Z",
+  "commitHash": "7634617b7d55b45440e5ce94164f3fc727b1c0de",
+  "commitMessage": "Account deletion (App Store 5.1.1(v)): in-app delete account + cloud data"
 }
