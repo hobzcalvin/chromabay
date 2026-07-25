@@ -391,11 +391,21 @@ export function serializePattern(
     positions.forEach((pos, i) => { conflictSafeOrder[pos] = orderedGroup[i]; });
   });
   
-  // Step 2: Infer the final output buffer from the terminal node (no explicit Output node).
-  // -1 means "empty graph" — the device (and preview) show black. All nodes are still
-  // serialized; this only controls which lane buffer gets displayed on the LEDs.
-  const terminalNode = inferOutputNode(allNodes, allEdges);
-  const finalOutputBufferIndex = terminalNode ? getNodeLaneBuffer(terminalNode) : -1;
+  // Step 2: Find the explicit Output node and determine the final output buffer.
+  // -1 is a sentinel meaning "nothing is wired to the output" — the device (and preview) then
+  // show black instead of whatever sits in a lane buffer. All nodes are still serialized; this
+  // only controls what gets displayed.
+  let finalOutputBufferIndex = 0; // default buffer (used when there is no output node)
+  const outputNode = allNodes.find(n => n.data.type === 'output');
+  if (outputNode) {
+    const inputEdgesToOutputNode = allEdges.filter(edge => edge.target === outputNode.id);
+    if (inputEdgesToOutputNode.length > 0) {
+      const sourceNode = allNodes.find(n => n.id === inputEdgesToOutputNode[0].source);
+      finalOutputBufferIndex = sourceNode ? getNodeLaneBuffer(sourceNode) : -1;
+    } else {
+      finalOutputBufferIndex = -1; // output node exists but nothing feeds it
+    }
+  }
   
   // Step 3: Filter out output node for serialization (every other node is kept, even
   // if it isn't wired to the output — disconnected nodes must survive a reload).
@@ -850,9 +860,36 @@ export function deserializePattern(
     }
   });
   
-  // Step 4: (No explicit Output node.) The display target is inferred from the graph's terminal
-  // node at render + serialize time (see inferOutputNode); meta.output still drives the device but
-  // is not materialized as a node in the editor.
+  // Step 4: Add the explicit Output node and wire the node that writes the final output buffer
+  // into it. The device never sees this node (serialize filters type 'output'); it exists only
+  // in the editor as the display target.
+  const outputDef = getNodeDefinition('output');
+  if (outputDef) {
+    const outputNodeId = `deserialized_output_${Date.now()}`;
+    const maxLevel = (dependencyLevels.size ? Math.max(...Array.from(dependencyLevels.values())) : 0) + 1;
+    // -1 = "nothing wired to output"; place it in lane 0 and leave it unconnected.
+    const finalOutputBuffer = serializedPattern.meta?.output !== undefined ? serializedPattern.meta.output : 0;
+    const outputX = getLaneFromBuffer(finalOutputBuffer >= 0 ? finalOutputBuffer : 0);
+    const outputNode = createNodeFromType(outputDef, outputNodeId, { x: outputX, y: placeRow(outputX, maxLevel) });
+    newNodeParameters.set(outputNodeId, new Map());
+    svelteFlowNodes.push(outputNode);
+
+    // Wire the LAST node that writes to the final output buffer into the output node.
+    let sourceForOutput: string | undefined;
+    for (let i = serializedPattern.nodes.length - 1; i >= 0; i--) {
+      const created = indexToNode.get(i); // skip unknown/uncreated nodes
+      if (serializedPattern.nodes[i].o === finalOutputBuffer && created) { sourceForOutput = created.id; break; }
+    }
+    if (sourceForOutput) {
+      svelteFlowEdges.push({
+        id: `e_${sourceForOutput}_${outputNodeId}_out`,
+        source: sourceForOutput, target: outputNodeId,
+        sourceHandle: 'output', targetHandle: 'input',
+      });
+    }
+  } else {
+    console.warn('Output node definition not found (WASM operators not loaded yet?).');
+  }
 
   return {
     nodes: svelteFlowNodes,

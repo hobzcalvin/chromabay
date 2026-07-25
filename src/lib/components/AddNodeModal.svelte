@@ -5,6 +5,7 @@
   // (Blend also gets the RGB venn as its second input). Pick one to add it; Esc / backdrop
   // / × to dismiss.
   import OperatorPreview from './OperatorPreview.svelte';
+  import { isGeneratorType } from '$lib/operatorArity';
 
   let {
     open = false,
@@ -18,16 +19,10 @@
     onClose: () => void;
   } = $props();
 
-  // Operators that TRANSFORM an input (everything else is a generator — a pattern source).
-  // Explicit because a render-based probe is unreliable both ways: point modifiers read a
-  // black input and emit colour (look like generators), while random/stateful generators
-  // (Fire seeds from its instance pointer) differ between probe instances. Keep this in
-  // sync when adding operators; unknown ops default to "generator" (previewed on black).
-  const MODIFIER_OPS = new Set([
-    'blend', 'blur', 'convolve', 'fade', 'feedback', 'glitch', 'huegray', 'huerotate',
-    'invert', 'lumahue', 'mirror', 'posterize', 'scroll', 'tile'
-  ]);
-  const isGeneratorOp = (type: string) => !MODIFIER_OPS.has(type);
+  // A generator (arity 0 — no image input) is a pattern SOURCE, previewed on black; a modifier
+  // (arity >= 1) runs on a canonical duck image. Same distinction as input arity, so we share
+  // the single generator list in operatorArity.ts (keep new operators in sync there).
+  const isGeneratorOp = (type: string) => isGeneratorType(type);
 
   const ops = $derived(nodeTypes.filter((n) => n && n.type && n.type !== 'output'));
   const generators = $derived(open ? ops.filter((n) => isGeneratorOp(n.type)) : []);

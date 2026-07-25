@@ -157,15 +157,15 @@ test('Deserialization back to the correct nodes and edges', () => {
   // Verify deserialization
   let passed = true;
   
-  // No explicit Output node anymore — the graph is just the pattern's own nodes.
+  // Deserialize re-adds the explicit Output node: rainbow + output = 2 nodes, 1 edge.
   passed = passed && assert(
-    nodes.length === 1,
-    `Deserialized pattern should have 1 node (rainbow; no Output node). Got: ${nodes.length}`
+    nodes.length === 2,
+    `Deserialized pattern should have 2 nodes (rainbow + Output). Got: ${nodes.length}`
   );
 
   passed = passed && assert(
-    edges.length === 0,
-    `Deserialized pattern should have 0 edges (no Output node to wire). Got: ${edges.length}`
+    edges.length === 1,
+    `Deserialized pattern should have 1 edge (source → Output). Got: ${edges.length}`
   );
 
   // Check node types
@@ -173,15 +173,19 @@ test('Deserialization back to the correct nodes and edges', () => {
   const outputNode = nodes.find(n => n.data.type === 'output');
 
   passed = passed && assert(!!rainbowNode, 'Rainbow node should be present');
-  passed = passed && assert(!outputNode, 'There should be no Output node');
-  
+  passed = passed && assert(!!outputNode, 'Output node should be present');
+
   passed = passed && assert(
     (rainbowNode?.data.parameters as any)?.speed === 0.3 &&
     (rainbowNode?.data.parameters as any)?.angle === 45,
     'Rainbow node parameters should be preserved'
   );
 
-  // (No Output node → no edge to assert; the rainbow is itself the inferred display terminal.)
+  // The rainbow (output buffer 1, matching meta.output) should feed the Output node.
+  passed = passed && assert(
+    edges.some(e => e.source === rainbowNode?.id && e.target === outputNode?.id),
+    'Rainbow should be wired into the Output node'
+  );
 
   return passed;
 });
@@ -342,25 +346,24 @@ test('Pattern with nodes but no connections', () => {
     'Rainbow node should have output buffer but no input buffer'
   );
   
-  // No explicit Output node: the display target is inferred from a terminal node. Both
-  // disconnected nodes are terminals, so the serializer picks one deterministically — meta.output
-  // is a real lane buffer (>= 0), not the old "black" sentinel.
+  // The Output node exists but nothing is wired to it → meta.output is the "black" sentinel -1.
   passed = passed && assert(
-    serialized.meta.output >= 0,
-    `Unwired multi-node pattern should infer a terminal buffer (>=0). Got: ${serialized.meta.output}`
+    serialized.meta.output === -1,
+    `Unwired Output should serialize to -1 (black). Got: ${serialized.meta.output}`
   );
 
   const { nodes: deserializedNodes, edges: deserializedEdges } = deserializePattern(serialized);
 
-  // Deserialization reconstructs the 2 real nodes and no edges (no Output node to wire).
+  // Deserialization reconstructs the 2 real nodes + the Output node, with no edges (nothing
+  // was wired to output).
   passed = passed && assert(
-    deserializedNodes.length === 2 && deserializedEdges.length === 0,
-    `Deserialized pattern should have 2 nodes and 0 edges (no Output node). Got nodes: ${deserializedNodes.length}, edges: ${deserializedEdges.length}`
+    deserializedNodes.length === 3 && deserializedEdges.length === 0,
+    `Deserialized pattern should have 3 nodes (2 real + Output) and 0 edges. Got nodes: ${deserializedNodes.length}, edges: ${deserializedEdges.length}`
   );
 
   passed = passed && assert(
-    !deserializedNodes.some(n => n.data.type === 'output'),
-    'There should be no reconstructed Output node'
+    deserializedNodes.some(n => n.data.type === 'output'),
+    'The Output node should be reconstructed'
   );
 
   return passed;
@@ -389,8 +392,8 @@ test('Deserialization handles an unknown node type mid-list without misaligning 
   const blend = nodes.find(n => n.data.type === 'blend');
   const output = nodes.find(n => n.data.type === 'output');
 
-  passed = passed && assert(!!rainbow && !!blend && !output,
-    'rainbow and blend should be present; there is no reconstructed Output node');
+  passed = passed && assert(!!rainbow && !!blend && !!output,
+    'rainbow, blend, and the reconstructed Output node should be present');
   passed = passed && assert(
     !nodes.some(n => n.data.type === 'definitely_not_a_real_operator'),
     'the unknown node type should be dropped, not created'

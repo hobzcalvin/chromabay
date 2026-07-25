@@ -2,6 +2,7 @@
   import { Handle, Position, type NodeProps } from '@xyflow/svelte';
   import { onMount, onDestroy, getContext } from 'svelte';
   import { getNodeDefinition, disableIndividualAnimation, type RenderContext } from '$lib/flowStore';
+  import { operatorInputCount } from '$lib/operatorArity';
   import { flowNodes as globalFlowNodes, flowEdges as globalFlowEdges, nodeOutputs as globalNodeOutputs, globalStartTime as globalGlobalStartTime, nodeParameters as globalNodeParameters } from '$lib/flowStore';
   import { renderConfig } from '$lib/renderConfig';
   import type { Writable } from 'svelte/store';
@@ -163,6 +164,7 @@
   
   const isBlendNode = nodeType === 'blend';
   const isOutputNode = nodeType === 'output';
+  const inputCount = operatorInputCount(nodeType); // 0 generator, 1 transform/output, 2 blend
 </script>
 
 <div 
@@ -183,10 +185,10 @@
     {data.label}
   </div>
   
-  {#if isBlendNode}
+  {#if inputCount === 2}
     <Handle type="target" position={Position.Top} id="input-1" style="left: 30%" />
     <Handle type="target" position={Position.Top} id="input-2" style="left: 70%" />
-  {:else}
+  {:else if inputCount === 1}
     <Handle type="target" position={Position.Top} id="input" style="left: 50%" />
   {/if}
   

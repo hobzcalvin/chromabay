@@ -6,7 +6,7 @@
   import { onDestroy, setContext } from 'svelte';
   import { writable } from 'svelte/store';
   import type { SerializedPattern } from '$lib/patternSerializer';
-  import { deserializePatternWhenReady, inferOutputNode } from '$lib/patternSerializer';
+  import { deserializePatternWhenReady } from '$lib/patternSerializer';
   import { clearNodeModulators } from '$lib/stores/modulatorStore';
   import { publishPreviewFrame } from '$lib/stores/previewRender';
   import ContextualPatternNode from './ContextualPatternNode.svelte';
@@ -34,7 +34,7 @@
   let modulatedNodeIds: string[] = [];
   let loadedPattern: SerializedPattern | null = null;
 
-  $: outputNodeId = inferOutputNode($localFlowNodes, $localFlowEdges)?.id ?? '';
+  $: outputNodeId = $localFlowNodes.find(n => n.data.type === 'output')?.id ?? '';
 
   function animate() {
     if (outputNodeId) {

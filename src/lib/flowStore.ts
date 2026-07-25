@@ -3,6 +3,7 @@ import type { Node, Edge, Connection } from '@xyflow/svelte';
 import { clearNodeInteractiveParameters } from './stores/interactiveStore';
 import { getModulator, modulatorSeed } from './stores/modulatorStore';
 import { renderConfig, type RenderConfig } from './renderConfig';
+import { operatorInputCount } from './operatorArity';
 
 // Global start time for synchronized animations across all nodes
 export const globalStartTime = writable<number>(Date.now());
@@ -37,7 +38,7 @@ let autoSaveTimeout: ReturnType<typeof setTimeout> | undefined;
 // loaded into the editor" (e.g. the patterns page renders isolated previews and
 // never populates the global store), NOT "the user cleared the pattern".
 function hasEditablePattern(): boolean {
-  return get(flowNodes).length > 0; // any node is real content now (no Output node)
+  return get(flowNodes).some(n => (n.data as { type?: string })?.type !== 'output'); // a real (non-Output) node exists
 }
 
 // Centralized auto-save function with debouncing
@@ -773,10 +774,14 @@ export function isValidConnectionWithBuffers(connection: Edge | Connection, node
   const source = nodes.find((node) => node.id === connection.source);
   
   if (!target || !source) return false;
-  
+
   // Prevent self-loops
   if (target.id === source.id) return false;
-  
+
+  // Generators (arity 0) have no input — nothing can feed them. (They render no input handle
+  // now, so this mainly guards programmatic/legacy edges.)
+  if (operatorInputCount(target.data.type as string) === 0) return false;
+
   // Check buffer constraints first
   if (!validateBufferConnection(connection, nodes, edges)) return false;
   
@@ -1397,34 +1402,35 @@ export async function loadSerializedPattern(serializedPattern: SerializedPattern
   }
 }
 
-// Initialize flow with default pattern if no patterns exist
+// Initialize flow with default pattern if no patterns exist: a generator wired into the
+// explicit Output node (the display target).
 export function initializeDefaultPattern(): void {
-  // A single generator — no Output node; the terminal (this node) is the inferred display.
   const rainbow = getNodeDefinition('rainbow') ?? NODE_TYPES[1];
+  const output = getNodeDefinition('output') ?? NODE_TYPES[0];
   const defaultNodes: Node[] = [
     createNodeFromType(rainbow, '1', { x: LANES.CENTER, y: 120 }),
+    createNodeFromType(output, '2', { x: LANES.CENTER, y: 260 }),
+  ];
+  const defaultEdges: Edge[] = [
+    { id: 'e1-2', source: '1', target: '2', sourceHandle: 'output', targetHandle: 'input' },
   ];
 
-  // Set the stores
   flowNodes.set(defaultNodes);
-  flowEdges.set([]);
-  nextNodeId.set(2);
-  
-  // Mark as clean after initialization
+  flowEdges.set(defaultEdges);
+  nextNodeId.set(3);
+
   markPatternClean();
 }
 
-// Initialize an empty pattern with just the output node (for when all patterns are deleted)
+// Initialize an empty pattern with just the Output node (for when all patterns are deleted).
 export function initializeEmptyPattern(): void {
-  // Reset all stores first
   nodeParameters.set(new Map());
-  
-  // Truly empty — no Output node anymore. The user adds nodes; the terminal is the display.
-  flowNodes.set([]);
+
+  const output = getNodeDefinition('output') ?? NODE_TYPES[0];
+  flowNodes.set([createNodeFromType(output, '1', { x: LANES.CENTER, y: 260 })]);
   flowEdges.set([]);
-  nextNodeId.set(1);
-  
-  // Mark as clean after initialization
+  nextNodeId.set(2);
+
   markPatternClean();
 }
 

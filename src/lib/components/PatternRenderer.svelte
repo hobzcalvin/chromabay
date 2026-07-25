@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { flowNodes, flowEdges, nodeOutputs } from '$lib/flowStore';
-  import { inferOutputNode } from '$lib/patternSerializer';
   import PatternNode from '$lib/PatternNode.svelte';
   import { SvelteFlow } from '@xyflow/svelte';
   import '@xyflow/svelte/dist/style.css';
@@ -23,7 +22,7 @@
   const offCtx = offscreen.getContext('2d');
 
   // Find the output node id reactively
-  $: outputNodeId = inferOutputNode($flowNodes, $flowEdges)?.id ?? '';
+  $: outputNodeId = $flowNodes.find(n => n.data.type === 'output')?.id ?? '';
 
   function renderOutput() {
     if (!ctx || !offCtx || !outputNodeId) return;

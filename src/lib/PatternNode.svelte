@@ -2,6 +2,7 @@
   import { Handle, Position, type NodeProps } from '@xyflow/svelte';
   import { onMount, onDestroy } from 'svelte';
   import { flowNodes, flowEdges, nodeOutputs, getNodeDefinition, globalStartTime, disableIndividualAnimation, type RenderContext } from '$lib/flowStore';
+  import { operatorInputCount } from '$lib/operatorArity';
   import { renderConfig } from '$lib/renderConfig';
   
   let { data, id, type, ...nodeProps }: NodeProps & { type: string } = $props();
@@ -151,6 +152,7 @@
   
   const isBlendNode = nodeType === 'blend';
   const isOutputNode = nodeType === 'output';
+  const inputCount = operatorInputCount(nodeType);
   
   // Debug parameter availability
   $effect(() => {
@@ -181,10 +183,10 @@
     {data.label}
   </div>
   
-  {#if isBlendNode}
+  {#if inputCount === 2}
     <Handle type="target" position={Position.Top} id="input-1" style="left: 30%" />
     <Handle type="target" position={Position.Top} id="input-2" style="left: 70%" />
-  {:else}
+  {:else if inputCount === 1}
     <Handle type="target" position={Position.Top} id="input" style="left: 50%" />
   {/if}
   

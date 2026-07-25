@@ -642,13 +642,17 @@
     }
   }
 
+  /* Connection grabbers — 50% larger (16 → 24px) so they're easier to hit on touch. */
   :global(.svelte-flow__handle-bottom) {
-    width: 16px !important;
-    height: 16px !important;
+    width: 24px !important;
+    height: 24px !important;
   }
 
-  /* Disable mouse events on top handles to prevent dragging from them */
+  /* Disable mouse events on top handles to prevent dragging from them (but size them to
+     match so they're an easy drop target during connection). */
   :global(.svelte-flow__handle-top) {
+    width: 24px !important;
+    height: 24px !important;
     pointer-events: none !important;
   }
 
