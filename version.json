@@ -1,7 +1,7 @@
 {
-  "version": "0.1.273",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.273.zip",
-  "buildDate": "2026-07-23T05:31:51Z",
-  "commitHash": "5768d97140bbc9ed03c9646909cf863eb6c0d8db",
-  "commitMessage": "Fix (for real): scheduled-off/sleep now blanks dithered strips"
+  "version": "0.1.274",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.274.zip",
+  "buildDate": "2026-07-25T05:12:34Z",
+  "commitHash": "7d6779a748185c4b75ffa284fe25cce86f77c1cf",
+  "commitMessage": "Device reports brightness changes (button + schedule) so the app stays in sync"
 }
