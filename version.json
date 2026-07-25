@@ -1,7 +1,7 @@
 {
-  "version": "0.1.276",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.276.zip",
-  "buildDate": "2026-07-25T15:46:22Z",
-  "commitHash": "3cd4747db9496398e055943fb2aec1f0448049cf",
-  "commitMessage": "Editor: top (target) handles back to 16px (bottom grabbers' original size)"
+  "version": "0.1.277",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.277.zip",
+  "buildDate": "2026-07-25T17:46:47Z",
+  "commitHash": "68e6968a2cf6f85cd7db35781f4836d4c201c694",
+  "commitMessage": "Dev Xcode builds get hot updates again (MARKETING 0.0.1) + WiFi gate allows dev builds"
 }
