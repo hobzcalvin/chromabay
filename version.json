@@ -1,7 +1,7 @@
 {
-  "version": "0.1.274",
-  "downloadUrl": "https://chromabay.app/live-update-0.1.274.zip",
-  "buildDate": "2026-07-25T05:12:34Z",
-  "commitHash": "7d6779a748185c4b75ffa284fe25cce86f77c1cf",
-  "commitMessage": "Device reports brightness changes (button + schedule) so the app stays in sync"
+  "version": "0.1.275",
+  "downloadUrl": "https://chromabay.app/live-update-0.1.275.zip",
+  "buildDate": "2026-07-25T05:32:01Z",
+  "commitHash": "4c326181186628acf4aa35392214ac286105347f",
+  "commitMessage": "Editor: generators have no input handle, bigger grabbers, restore the Output node"
 }
