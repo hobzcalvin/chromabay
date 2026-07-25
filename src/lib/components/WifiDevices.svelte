@@ -13,10 +13,13 @@
   import LedConfigurationComponent from '$lib/components/LedConfiguration.svelte';
   import { wifiHandle } from '$lib/deviceHandle';
 
-  // First native build that carries the Local Network Privacy keys (NSLocalNetworkUsage-
-  // Description + NSBonjourServices). Older installed builds can't reach LAN devices — iOS
-  // silently blocks it — so we hide the whole WiFi section on them. On web we only show it in
-  // local dev (http); the deployed https site can't do cleartext ws:// (mixed content).
+  // WiFi needs the Local Network Privacy keys (NSLocalNetworkUsageDescription +
+  // NSBonjourServices) in the native build; iOS silently blocks LAN on builds without them.
+  // Those keys shipped in the 1.1.0 store build, so store builds need >= 1.1.0. But LOCAL dev
+  // builds carry MARKETING_VERSION 0.0.1 (kept below the hot-update line so they always update)
+  // and are always built from current code — so anything BELOW 1.0.0 is a dev build that has
+  // the keys. Hide only the genuine pre-1.1.0 STORE builds (the 1.0.x range).
+  // On web we only show it in local dev (http); deployed https can't do cleartext ws://.
   const WIFI_MIN_VERSION = '1.1.0';
   let available = $state(false);
   function cmpVer(a: string, b: string) {
@@ -32,7 +35,8 @@
     try {
       const { App } = await import('@capacitor/app');
       const info = await App.getInfo();
-      available = cmpVer(info.version, WIFI_MIN_VERSION) >= 0;
+      available = cmpVer(info.version, WIFI_MIN_VERSION) >= 0 // store 1.1.0+
+        || cmpVer(info.version, '1.0.0') < 0;                // OR a sub-1.0 dev build (has keys)
     } catch { available = false; }
   });
 
