@@ -71,6 +71,20 @@ export async function signOut(): Promise<void> {
   if (supabase) await supabase.auth.signOut();
 }
 
+/**
+ * Permanently delete the signed-in user's account + cloud data (App Store 5.1.1(v)). Calls the
+ * `delete_account` SECURITY DEFINER RPC (self-scoped to auth.uid()), then clears the now-invalid
+ * local session. Local-first on-device patterns are untouched — this only removes the cloud
+ * account, synced library, keyring, and the user's gallery entries. Irreversible.
+ */
+export async function deleteAccount(): Promise<{ ok: boolean; error?: string }> {
+  if (!supabase) return { ok: false, error: 'Cloud sync is not configured' };
+  const { error } = await supabase.rpc('delete_account');
+  if (error) return { ok: false, error: error.message };
+  await supabase.auth.signOut().catch(() => {}); // token is already invalid; just clear local state
+  return { ok: true };
+}
+
 /** Email a password-reset link (lands back on /account in recovery mode). */
 export async function sendPasswordReset(email: string): Promise<void> {
   if (!supabase) throw new Error('Cloud sync is not configured');

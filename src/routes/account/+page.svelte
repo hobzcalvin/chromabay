@@ -2,8 +2,23 @@
   import {
     authUser, authReady, isConfigured, recoveryMode,
     signIn, signUp, signOut, sendPasswordReset, updatePassword, resendConfirmation,
-    getDisplayName, updateDisplayName,
+    getDisplayName, updateDisplayName, deleteAccount,
   } from '$lib/stores/authStore';
+
+  // Account deletion (App Store 5.1.1(v)). Two-step: a button reveals a confirm, so it can't be
+  // triggered by one accidental tap.
+  let confirmingDelete = false;
+  let deleting = false;
+  let deleteMsg = '';
+  async function doDeleteAccount() {
+    deleting = true; deleteMsg = '';
+    try {
+      const res = await deleteAccount();
+      // On success the auth state clears → the signed-out view renders automatically.
+      if (!res.ok) deleteMsg = 'Couldn’t delete account: ' + (res.error ?? 'failed');
+      else confirmingDelete = false;
+    } finally { deleting = false; }
+  }
 
   type Mode = 'in' | 'up' | 'reset';
   let mode: Mode = 'in';
@@ -119,6 +134,21 @@
 
       <button class="btn" on:click={signOut}>Sign out</button>
     </div>
+
+    <div class="card danger">
+      <p class="dn-label">Delete account</p>
+      <p class="muted">Permanently deletes your account and all cloud data — synced library, device owner-keys, and any patterns you published to the gallery. This can't be undone. (Patterns saved only on this device stay.)</p>
+      {#if !confirmingDelete}
+        <button class="btn danger-btn" on:click={() => { confirmingDelete = true; deleteMsg = ''; }}>Delete account</button>
+      {:else}
+        <p class="confirm-q">Delete your account permanently?</p>
+        <div class="dn-row">
+          <button class="btn danger-btn" on:click={doDeleteAccount} disabled={deleting}>{deleting ? 'Deleting…' : 'Yes, delete permanently'}</button>
+          <button class="btn" on:click={() => (confirmingDelete = false)} disabled={deleting}>Cancel</button>
+        </div>
+      {/if}
+      {#if deleteMsg}<p class="muted err">{deleteMsg}</p>{/if}
+    </div>
   {:else}
     <p class="muted">Optional — everything works without an account. Signing in syncs your patterns and devices across your phone and the web, and unlocks the gallery.</p>
     <div class="card">
@@ -183,4 +213,8 @@
   .signed-in { font-size: 1rem; margin: 0 0 0.5rem; }
   .error { color: #fca5a5; font-size: 0.85rem; margin: 0.75rem 0 0; }
   .notice { color: #86efac; font-size: 0.85rem; margin: 0.75rem 0 0; }
+  .card.danger { margin-top: 1rem; border-color: rgba(239,68,68,0.4); }
+  .btn.danger-btn { background: rgba(239,68,68,0.25); border-color: rgba(239,68,68,0.6); }
+  .confirm-q { font-weight: 600; margin: 0 0 0.5rem; }
+  .err { color: #fca5a5; }
 </style>
