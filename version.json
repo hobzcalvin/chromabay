@@ -1,7 +1,7 @@
 {
-  "version": "1.1.279",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.279.zip",
-  "buildDate": "2026-08-06T04:11:56Z",
-  "commitHash": "04105c25ec8e4db8b78fc4ecc7d699f3e6feedad",
-  "commitMessage": "Release 1.1 live-update line and visible refresh"
+  "version": "1.1.280",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.280.zip",
+  "buildDate": "2026-08-06T14:43:54Z",
+  "commitHash": "c628e3f9baf7a3aa453bcfd6b342a033a3e94f69",
+  "commitMessage": "Add advanced Transform modifier and BLE OTA automation"
 }
