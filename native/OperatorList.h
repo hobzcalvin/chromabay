@@ -43,6 +43,7 @@
 #include "FireOperator.h"
 #include "ScrollOperator.h"
 #include "TileOperator.h"
+#include "TransformOperator.h"
 #include "GlitchOperator.h"
 #include "SymbolOperator.h"
 #include "TextOperator.h"

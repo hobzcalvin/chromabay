@@ -975,7 +975,6 @@
 
 <main>
   <header>
-    <div class="release-pill" aria-label="Latest release">NEW · LIVE</div>
     <h1>ChromaBay</h1>
     <p class="company">by ReVolt Labs</p>
   </header>
@@ -1706,19 +1705,6 @@
     margin: 0.35rem 0 0.5rem;
     font-size: 0.9rem;
     opacity: 0.75;
-  }
-
-  .release-pill {
-    display: inline-block;
-    margin-bottom: 0.65rem;
-    padding: 0.3rem 0.7rem;
-    border: 1px solid rgba(255, 255, 255, 0.45);
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.16);
-    box-shadow: 0 0 20px rgba(255, 255, 255, 0.15);
-    font-size: 0.72rem;
-    font-weight: 800;
-    letter-spacing: 0.14em;
   }
 
   footer {

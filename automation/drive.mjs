@@ -39,7 +39,9 @@ const PROJECT_DIR = process.env.ESP32_DIR || path.resolve('esp32');
 const PIO = process.env.PIO || `${homedir()}/.platformio/penv/bin/pio`;
 const PYTHON = process.env.PYTHON || `${homedir()}/.platformio/penv/bin/python`;
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const DEVICE_NAME_RE = /chromabay|esp32|m5/i;
+const DEVICE_NAME_RE = process.env.DEVICE_NAME_RE
+  ? new RegExp(process.env.DEVICE_NAME_RE, 'i')
+  : /chromabay|esp32|m5/i;
 const SERIAL_BAUD = '115200';
 const NO_FLASH = process.argv.includes('--no-flash');
 // By default we run the flow then EXIT 0/1 (so an automated loop gets a verdict).
@@ -135,7 +137,13 @@ async function cleanup() {
 process.on('SIGINT', async () => { await cleanup(); process.exit(0); });
 
 try {
-  const port = findSerialPort();
+  // A serial cable is optional for a BLE-only run. It is required only when doing the
+  // initial PlatformIO flash; otherwise the UI itself is our source of truth.
+  let port = null;
+  try { port = findSerialPort(); } catch (e) {
+    if (!NO_FLASH) throw e;
+    log('no USB serial device; continuing BLE-only (--no-flash)');
+  }
 
   // 1. Reflash (upload uses the port, so do it BEFORE opening the monitor).
   if (!NO_FLASH) {
@@ -145,8 +153,8 @@ try {
     log('skipping reflash (--no-flash)');
   }
 
-  // 2. Serial monitor (BLE traffic is independent of this USB serial line).
-  serial = startSerialMonitor(port);
+  // 2. Serial monitor when a USB UART is present (BLE itself does not require one).
+  if (port) serial = startSerialMonitor(port);
 
   // 3. Launch real Chrome (channel:'chrome' so Web Bluetooth has a real radio).
   log('launching Chrome…');
@@ -200,15 +208,32 @@ try {
   await page.getByRole('button', { name: /Select ESP32 Device|Scan for ESP32s/i }).click();
   log('clicked connect — waiting for the device to report the connection on serial…');
 
-  // The firmware logs a timestamp sync shortly after the app connects.
-  const line = await serial.waitFor(/Timestamp sync received|sync received|Client connected/i, 20000);
-  log(green(`✓ device acknowledged connection: ${line.trim()}`));
+  // The firmware logs a timestamp sync shortly after the app connects when USB serial is
+  // available. In a BLE-only run, wait for the connected device's settings button instead.
+  if (serial) {
+    const line = await serial.waitFor(/Timestamp sync received|sync received|Client connected/i, 20000);
+    log(green(`✓ device acknowledged connection: ${line.trim()}`));
+  } else {
+    await page.getByRole('button', { name: /Show Settings/i }).first().waitFor({ state: 'visible', timeout: 30000 });
+    log(green('✓ device connected over BLE'));
+  }
 
-  // Example "fiddle": open the device settings panel and refresh device info
-  // (a characteristic read the firmware logs). Replace with real interactions —
-  // change brightness, pick a pattern, etc. — and assert the serial reaction.
+  // Open settings and optionally exercise the registry OTA path. OTA_MODE=latest clicks
+  // the offered "Update to …" button and waits for success/failure text.
   await page.getByRole('button', { name: /Show Settings/i }).first().click().catch(() => {});
   await page.getByRole('button', { name: /Refresh Info/i }).first().click().catch(() => {});
+
+  if (process.env.OTA_MODE === 'latest') {
+    const update = page.getByRole('button', { name: /Update to /i }).first();
+    await update.waitFor({ state: 'visible', timeout: 30000 });
+    log(`clicking firmware update: ${await update.textContent()}`);
+    await update.click();
+    const result = page.getByText(/Firmware update completed|OTA Failed:|firmware update failed/i).first();
+    await result.waitFor({ state: 'visible', timeout: 10 * 60 * 1000 });
+    const text = (await result.textContent()) || '';
+    log(`OTA result: ${text}`);
+    if (/failed/i.test(text)) throw new Error(text);
+  }
 
   if (KEEP_OPEN) {
     log(green('flow complete. Browser + serial stay open — Ctrl-C to stop, or edit the DRIVE section.'));
