@@ -84,9 +84,9 @@ if (browser && Capacitor.isNativePlatform() && !dev && !isLocalBuild) {
           
           // Numeric semver compare (drops any 'v' prefix): returns >0 when a > b.
           // We ONLY offer an update when the remote is STRICTLY HIGHER than what's running —
-          // never a downgrade. This is what protects the App Store build: it ships as 1.0.0,
-          // and the in-review hot-update line is 0.1.x (lower), so it's never offered to swap
-          // the reviewed binary. Once we bump the hot line to 1.0.x it starts updating again.
+          // never a downgrade. The App Store build ships as 1.1.0 and production deploys use
+          // the 1.1.N line, so each new deployment is eligible while older/incompatible lines
+          // cannot replace the released binary.
           const cmpVersion = (a: string, b: string): number => {
             const pa = a.replace(/^v/, '').split('.').map((n) => parseInt(n, 10) || 0);
             const pb = b.replace(/^v/, '').split('.').map((n) => parseInt(n, 10) || 0);
