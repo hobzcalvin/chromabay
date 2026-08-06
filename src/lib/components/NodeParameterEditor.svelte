@@ -132,6 +132,15 @@
 
   function updateParameter(param: Parameter, value: any) {
     setNodeParameter(node.id, param.name, value);
+
+    // Transform's scale lock is a UI constraint, not a renderer shortcut: either scale slider
+    // becomes the master while locked and the paired stored value follows it. Keeping both
+    // values equal also means unlocking starts from the exact shape currently on screen.
+    if (node.data.type === 'transform' && (param.name === 'scaleX' || param.name === 'scaleY')) {
+      const def = nodeDefinition?.params.find((p) => p.name === 'lockScale');
+      const locked = Number($nodeParameters.get(node.id)?.get('lockScale') ?? def?.default ?? 1) !== 0;
+      if (locked) setNodeParameter(node.id, param.name === 'scaleX' ? 'scaleY' : 'scaleX', value);
+    }
   }
 
   // Double-click / double-tap a slider to snap it back to the operator's default.
@@ -175,6 +184,12 @@
   function handleBooleanChange(param: Parameter, event: Event) {
     const input = event.target as HTMLInputElement;
     updateParameter(param, input.checked ? 1 : 0);
+    // On locking, make X authoritative immediately so the two visible sliders agree.
+    if (node.data.type === 'transform' && param.name === 'lockScale' && input.checked) {
+      const scaleX = nodeDefinition?.params.find((p) => p.name === 'scaleX');
+      const x = scaleX ? getParameterValue(scaleX) : 1;
+      setNodeParameter(node.id, 'scaleY', x);
+    }
   }
 
   function handleSelectChange(param: Parameter, event: Event) {

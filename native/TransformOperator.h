@@ -134,14 +134,14 @@ public:
                           std::vector<std::string>{"Transparent", "Wrap", "Clamp", "Mirror"}),
             ParameterInfo("sampling", "Sampling", ParameterInfo::SELECT, 1,
                           std::vector<std::string>{"Nearest", "Smooth"}),
-            ParameterInfo("pivotX", "Advanced: Pivot X (%)", ParameterInfo::FLOAT, 50.0f, 0.0f, 100.0f),
-            ParameterInfo("pivotY", "Advanced: Pivot Y (%)", ParameterInfo::FLOAT, 50.0f, 0.0f, 100.0f),
-            ParameterInfo("shearX", "Advanced: Shear X (%)", ParameterInfo::FLOAT, 0.0f, -200.0f, 200.0f),
-            ParameterInfo("shearY", "Advanced: Shear Y (%)", ParameterInfo::FLOAT, 0.0f, -200.0f, 200.0f),
-            ParameterInfo("perspectiveX", "Advanced: Perspective X", ParameterInfo::FLOAT, 0.0f, -1.5f, 1.5f),
-            ParameterInfo("perspectiveY", "Advanced: Perspective Y", ParameterInfo::FLOAT, 0.0f, -1.5f, 1.5f),
-            ParameterInfo("flipX", "Advanced: Flip X", ParameterInfo::BOOL, false),
-            ParameterInfo("flipY", "Advanced: Flip Y", ParameterInfo::BOOL, false)
+            ParameterInfo("pivotX", "Pivot X (%)", ParameterInfo::FLOAT, 50.0f, 0.0f, 100.0f),
+            ParameterInfo("pivotY", "Pivot Y (%)", ParameterInfo::FLOAT, 50.0f, 0.0f, 100.0f),
+            ParameterInfo("shearX", "Shear X (%)", ParameterInfo::FLOAT, 0.0f, -200.0f, 200.0f),
+            ParameterInfo("shearY", "Shear Y (%)", ParameterInfo::FLOAT, 0.0f, -200.0f, 200.0f),
+            ParameterInfo("perspectiveX", "Perspective X", ParameterInfo::FLOAT, 0.0f, -1.5f, 1.5f),
+            ParameterInfo("perspectiveY", "Perspective Y", ParameterInfo::FLOAT, 0.0f, -1.5f, 1.5f),
+            ParameterInfo("flipX", "Flip X", ParameterInfo::BOOL, false),
+            ParameterInfo("flipY", "Flip Y", ParameterInfo::BOOL, false)
         };
     }
 };

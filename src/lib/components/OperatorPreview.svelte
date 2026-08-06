@@ -3,6 +3,8 @@
   // Generators render with no input (their canonical look); modifiers are fed the RGB venn
   // as input 1 and a white X as input 2 (single-input ops ignore input 2; Blend uses both).
   // Operators read params via getX(params, i, default), so setting NO params == defaults.
+  // Transform is the exception: its real defaults are intentionally neutral for newly-created
+  // nodes, while this chooser thumbnail applies a small warpy demo to advertise the effect.
   // Only animates while on-screen (IntersectionObserver) to keep many previews cheap.
   import { onMount } from 'svelte';
   import { getVennInput, getWhiteXInput } from '$lib/previewImages';
@@ -43,6 +45,22 @@
         in2Ptr = m._malloc(N);
         copyImageDataToBuffer(getVennInput(W, H), in1Ptr);
         copyImageDataToBuffer(getWhiteXInput(W, H), in2Ptr);
+      }
+      if (op === 'transform') {
+        const setF = (index: number, value: number) => m.ccall(
+          'setOperatorFloatParameter', null, ['number', 'number', 'number'], [inst, index, value]
+        );
+        const setI = (index: number, value: number) => m.ccall(
+          'setOperatorIntParameter', null, ['number', 'number', 'number'], [inst, index, value]
+        );
+        // Scale, move, rotate, wrap, smooth, pivot, shear and perspective: recognizable but
+        // still readable at thumbnail size. These values affect only the chooser preview.
+        setF(0, 0.82); setF(1, 1.18); setI(2, 0);
+        setF(3, 12); setF(4, -7); setF(5, 22);
+        setI(6, 1); setI(7, 1);
+        setF(8, 42); setF(9, 56);
+        setF(10, 28); setF(11, -10);
+        setF(12, 0.48); setF(13, -0.22);
       }
       return true;
     }
