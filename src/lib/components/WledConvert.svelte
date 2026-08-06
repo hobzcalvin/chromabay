@@ -17,7 +17,7 @@
   const REGISTRY_URL = 'https://chromabay.app/firmware/esp32/esp32_firmware_registry.json';
 
   let open = $state(false);
-  let cached = $state<{ version: string; date: string; cachedAt: number }[]>([]);
+  let cached = $state<{ key: string; version: string; date: string; cachedAt: number }[]>([]);
   let preparing = $state(false);
   let ready = $derived(cached.length > 0);
   let busy = $state(false);
@@ -51,7 +51,7 @@
   async function convert() {
     const latest = cached[0]; // newest by cachedAt
     if (!latest) { message = 'Firmware not ready. Connect to the internet and reopen this section.'; result = 'error'; return; }
-    const fw = await getFirmware(latest.version);
+    const fw = await getFirmware(latest.version, latest.key);
     if (!fw) { message = 'Firmware could not be read. Connect to the internet and reopen this section.'; result = 'error'; return; }
 
     busy = true; result = 'idle'; message = '';

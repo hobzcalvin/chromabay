@@ -10,6 +10,8 @@
 // UserDefaults would not be).
 
 export interface CachedFirmware {
+  /** Unique image identity (version + chip + Wi-Fi variant). */
+  key: string;
   version: string;
   date: string;
   bin: ArrayBuffer;
@@ -19,9 +21,11 @@ export interface CachedFirmware {
 
 const DB_NAME = 'chromabay-firmware';
 const STORE = 'images';
-const DB_VERSION = 1;
-// Keep only the few newest images so the cache can't grow unbounded.
-const MAX_CACHED = 3;
+const DB_VERSION = 2;
+// Two variants (Wi-Fi/no-Wi-Fi) for each of our three chip families, plus a little
+// headroom for the previous release. This intentionally trades ~8–12 MB for the ability
+// to update any supported device after the phone goes offline.
+const MAX_CACHED = 12;
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -32,9 +36,11 @@ function openDb(): Promise<IDBDatabase> {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
-      if (!db.objectStoreNames.contains(STORE)) {
-        db.createObjectStore(STORE, { keyPath: 'version' });
-      }
+      // v1 keyed only by version, so esp32/esp32s3/esp32c3 and Wi-Fi/no-Wi-Fi images
+      // overwrote one another. Recreate it with a true per-image key. Old entries are
+      // deliberately discarded and immediately replenished by the app-start prefetch.
+      if (db.objectStoreNames.contains(STORE)) db.deleteObjectStore(STORE);
+      db.createObjectStore(STORE, { keyPath: 'key' });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error ?? new Error('IndexedDB open failed'));
@@ -61,8 +67,8 @@ export async function putFirmware(fw: CachedFirmware): Promise<void> {
   }
 }
 
-/** Return the cached image for a version, or null if not cached. */
-export async function getFirmware(version: string): Promise<CachedFirmware | null> {
+/** Return a specific cached image, or (legacy call) the newest image for a version. */
+export async function getFirmware(version: string, key?: string): Promise<CachedFirmware | null> {
   let db: IDBDatabase;
   try {
     db = await openDb();
@@ -70,8 +76,9 @@ export async function getFirmware(version: string): Promise<CachedFirmware | nul
     return null; // no IndexedDB (e.g. private mode) -> behave as "not cached"
   }
   try {
-    const fw = await tx<CachedFirmware | undefined>(db, 'readonly', (s) => s.get(version));
-    return fw ?? null;
+    if (key) return (await tx<CachedFirmware | undefined>(db, 'readonly', (s) => s.get(key))) ?? null;
+    const all = await tx<CachedFirmware[]>(db, 'readonly', (s) => s.getAll());
+    return all.filter((fw) => fw.version === version).sort((a, b) => b.cachedAt - a.cachedAt)[0] ?? null;
   } catch {
     return null;
   } finally {
@@ -79,8 +86,8 @@ export async function getFirmware(version: string): Promise<CachedFirmware | nul
   }
 }
 
-/** Lightweight list of what's cached (version + date), newest first. No binaries. */
-export async function listCachedFirmware(): Promise<{ version: string; date: string; cachedAt: number }[]> {
+/** Lightweight list of what's cached, newest first. No binaries. */
+export async function listCachedFirmware(): Promise<{ key: string; version: string; date: string; cachedAt: number }[]> {
   let db: IDBDatabase;
   try {
     db = await openDb();
@@ -90,7 +97,7 @@ export async function listCachedFirmware(): Promise<{ version: string; date: str
   try {
     const all = await tx<CachedFirmware[]>(db, 'readonly', (s) => s.getAll());
     return all
-      .map(({ version, date, cachedAt }) => ({ version, date, cachedAt }))
+      .map(({ key, version, date, cachedAt }) => ({ key, version, date, cachedAt }))
       .sort((a, b) => b.cachedAt - a.cachedAt);
   } catch {
     return [];

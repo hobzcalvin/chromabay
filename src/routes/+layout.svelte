@@ -10,6 +10,7 @@
   import { SvelteFlowProvider } from '@xyflow/svelte';
   import '$lib/patternSync'; // activates cloud library sync (inert unless signed in)
   import { initDeepLinks } from '$lib/deepLinks';
+  import { prefetchLatestFirmwareSet } from '$lib/ble';
   import PreviewRenderHost from '$lib/components/PreviewRenderHost.svelte';
 
   $: connected = $connectedDevices.size;
@@ -33,6 +34,10 @@
   onMount(() => {
     loadCurrentPatternIntoFlow();
     initDeepLinks(); // auth emails open the app via universal links (native only)
+    // Start immediately and independently of the Devices page / BLE connection. This caches
+    // signed Wi-Fi + no-Wi-Fi images for every supported chip while internet is available,
+    // so opening the app once is sufficient preparation for fully offline OTA later.
+    prefetchLatestFirmwareSet().catch((e) => console.warn('[OTA] startup prefetch failed:', e));
 
     // iOS Safari viewport height fix
     function setVHProperty() {

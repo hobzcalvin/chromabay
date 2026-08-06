@@ -917,24 +917,52 @@ export async function stopOTAStatusNotifications(deviceId: string): Promise<void
  * Best-effort: returns silently if the fetch fails or IndexedDB is unavailable.
  * Call this while online (e.g. when the Devices page loads the registry).
  */
+export function firmwareCacheKey(version: string, firmwareUrl: string): string {
+  // The URL contains /<version>/<chip>/<filename>; retaining it makes every chip and
+  // Wi-Fi/no-Wi-Fi variant distinct while remaining deterministic across launches.
+  return `${version}:${firmwareUrl}`;
+}
+
 export async function prefetchFirmware(
   version: string,
   date: string,
   firmwareUrl: string,
   signatureUrl: string
-): Promise<void> {
+): Promise<boolean> {
   try {
-    if (await getFirmware(version)) return; // already cached
+    const key = firmwareCacheKey(version, firmwareUrl);
+    if (await getFirmware(version, key)) return true; // already cached
     const [binResp, sigResp] = await Promise.all([fetch(firmwareUrl), fetch(signatureUrl)]);
-    if (!binResp.ok || !sigResp.ok) return;
+    if (!binResp.ok || !sigResp.ok) return false;
     const bin = await binResp.arrayBuffer();
     const sig = await sigResp.arrayBuffer();
-    if (sig.byteLength !== 64) return; // not a valid signature; don't poison the cache
-    await putFirmware({ version, date, bin, sig, cachedAt: Date.now() });
-    console.log(`[OTA] Prefetched firmware ${version} into offline cache.`);
+    if (sig.byteLength !== 64) return false; // not a valid signature; don't poison the cache
+    await putFirmware({ key, version, date, bin, sig, cachedAt: Date.now() });
+    console.log(`[OTA] Prefetched firmware ${key} into offline cache.`);
+    return true;
   } catch (e) {
     console.warn('[OTA] Firmware prefetch skipped:', e);
+    return false;
   }
+}
+
+/** Cache every current chip/partition variant as soon as the app opens. */
+export async function prefetchLatestFirmwareSet(
+  registryUrl = 'https://chromabay.app/firmware/esp32/esp32_firmware_registry.json'
+): Promise<{ cached: number; total: number }> {
+  const registry = await fetchFirmwareRegistry(registryUrl);
+  if (!registry.length) return { cached: 0, total: 0 };
+  const newestDate = [...registry].sort((a, b) => b.date.localeCompare(a.date))[0].date;
+  const newestVersion = [...registry].sort((a, b) => b.date.localeCompare(a.date))[0].version;
+  // Registry entries of a release share version/date. Cache all six supported variants.
+  const entries = registry.filter((e) => e.version === newestVersion && e.date === newestDate);
+  const base = 'https://chromabay.app';
+  const results = await Promise.all(entries.map((e) => prefetchFirmware(
+    e.version, e.date, `${base}/${e.path}`, `${base}/${e.signaturePath}`
+  )));
+  const cached = results.filter(Boolean).length;
+  console.log(`[OTA] Offline firmware set ready: ${cached}/${entries.length} images for ${newestVersion}`);
+  return { cached, total: entries.length };
 }
 
 export async function performOTAUpdate(
@@ -954,7 +982,7 @@ export async function performOTAUpdate(
   let firmwareBuffer: ArrayBuffer;
   let signatureBuffer: ArrayBuffer;
   try {
-    const cached = version ? await getFirmware(version) : null;
+    const cached = version ? await getFirmware(version, firmwareCacheKey(version, firmwareUrl)) : null;
     if (cached) {
       firmwareBuffer = cached.bin;
       signatureBuffer = cached.sig;
@@ -977,7 +1005,7 @@ export async function performOTAUpdate(
       }
       // Store for offline reuse (best-effort; keyed by version).
       if (version) {
-        try { await putFirmware({ version, date: date ?? '', bin: firmwareBuffer, sig: signatureBuffer, cachedAt: Date.now() }); }
+        try { await putFirmware({ key: firmwareCacheKey(version, firmwareUrl), version, date: date ?? '', bin: firmwareBuffer, sig: signatureBuffer, cachedAt: Date.now() }); }
         catch (e) { console.warn('[OTA] cache store failed:', e); }
       }
     }
