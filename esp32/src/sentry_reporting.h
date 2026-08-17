@@ -94,6 +94,9 @@ namespace SentryReporting {
 // The DSN is stored by POINTER by the SDK (it never copies option strings — see
 // sentry_options_t), so the buffer it points at has to outlive init. Hence a static.
 static char gDsn[SENTRY_MICRO_MAX_DSN_LEN + 1] = { 0 };
+// A DSN the app wrote, waiting to be persisted + applied on the loop task.
+static char gPendingDsn[SENTRY_MICRO_MAX_DSN_LEN + 1] = { 0 };
+static volatile bool gDsnPending = false;
 static NimBLECharacteristic *gRelayTx = nullptr;
 static bool gBleConnected = false;
 static bool gRelayWasReady = false;
@@ -206,14 +209,12 @@ class SentryConfigCallbacks : public NimBLECharacteristicCallbacks {
             Serial.println("[Sentry] refusing a DSN outside the allowed ingest host");
             return;
         }
-        // A device that has been told a DSN keeps it across reboots; an empty write is how
-        // the app (or a user turning diagnostics off) revokes it.
-        Preferences p;
-        if (!p.begin(NVS_NAMESPACE, false)) return;
-        p.putString(NVS_KEY_DSN, String(value.c_str()));
-        p.end();
-        Serial.printf("[Sentry] DSN %s by app\n", value.empty() ? "cleared" : "provisioned");
-        initSdk();
+        // Stage it and let the loop task do the work, the way every other characteristic in
+        // this firmware does: writing NVS and reopening the filesystem buffer from the NimBLE
+        // host task would both stall the BLE stack and race the loop task's own file I/O.
+        strncpy(gPendingDsn, value.c_str(), sizeof(gPendingDsn) - 1);
+        gPendingDsn[sizeof(gPendingDsn) - 1] = '\0';
+        gDsnPending = true;
     }
 };
 
@@ -373,6 +374,20 @@ inline void reportLastBoot() {
  * that also renders the LEDs.
  */
 inline void tick(uint32_t nowMs) {
+    // Apply a DSN the app wrote since the last loop. Before the enabled check, because this
+    // is exactly how a device with no DSN gets one — and it's the only path that can turn
+    // reporting on for the first time.
+    if (gDsnPending) {
+        gDsnPending = false;
+        Preferences p;
+        if (p.begin(NVS_NAMESPACE, false)) {
+            p.putString(NVS_KEY_DSN, String(gPendingDsn));
+            p.end();
+            Serial.printf("[Sentry] DSN %s by app\n", gPendingDsn[0] ? "provisioned" : "cleared");
+            initSdk();
+        }
+    }
+
     if (!sentry_is_enabled()) return;
 
     // The app connecting is the event we're waiting for on a BLE-only device — flush then
