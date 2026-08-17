@@ -1,7 +1,7 @@
 {
-  "version": "1.1.282",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.282.zip",
-  "buildDate": "2026-08-06T20:21:28Z",
-  "commitHash": "b9407b74fe183af00ea49fc90c23b0236ca7668d",
-  "commitMessage": "Cache every current firmware variant at app startup"
+  "version": "1.1.283",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.283.zip",
+  "buildDate": "2026-08-17T22:47:47Z",
+  "commitHash": "823faac2cd162fe6ce04d2a73f3dd9ba8997e5d8",
+  "commitMessage": "Add a Buggy Rainbow node that panics the device at speed 0"
 }
