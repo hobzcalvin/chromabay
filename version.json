@@ -1,7 +1,7 @@
 {
-  "version": "1.1.285",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.285.zip",
-  "buildDate": "2026-08-17T23:05:29Z",
-  "commitHash": "af3e24d1adbfb97b4cb28a56b3335920952ef197",
-  "commitMessage": "Accept regional Sentry ingest hosts when provisioning a DSN"
+  "version": "1.1.286",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.286.zip",
+  "buildDate": "2026-08-17T23:42:49Z",
+  "commitHash": "c888801f62a80def1a3becf93125848dc5328d98",
+  "commitMessage": "Re-attach the crash relay on every reconnect, not just first connect"
 }
