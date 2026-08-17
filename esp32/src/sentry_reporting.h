@@ -184,21 +184,40 @@ inline void initSdk();  // fwd: provisioning re-runs init with the new DSN
 // control and have it deliver its own diagnostics there. Override at build time for a
 // self-hosted Sentry.
 #ifndef CHROMABAY_SENTRY_ALLOWED_HOST_SUFFIX
-#define CHROMABAY_SENTRY_ALLOWED_HOST_SUFFIX ".ingest.sentry.io"
+#define CHROMABAY_SENTRY_ALLOWED_HOST_SUFFIX ".sentry.io"
+#endif
+#ifndef CHROMABAY_SENTRY_REQUIRED_HOST_PART
+#define CHROMABAY_SENTRY_REQUIRED_HOST_PART ".ingest."
 #endif
 
-/** True if `dsn` is https and its host ends with the allowed suffix. */
+/**
+ * True if `dsn` is https and names a Sentry ingest host.
+ *
+ * Two conditions, not one: the host must END with `.sentry.io` and CONTAIN `.ingest.`. A
+ * plain suffix of ".ingest.sentry.io" looks like it covers everything but does not — ingest
+ * is regional, and the real hosts are `o<org>.ingest.us.sentry.io` / `.ingest.de.sentry.io`,
+ * which that suffix rejects. (Found the hard way: the device refused the app's own DSN.)
+ */
 inline bool dsnHostAllowed(const char *dsn) {
     if (!dsn || strncmp(dsn, "https://", 8) != 0) return false;
     const char *at = strrchr(dsn, '@');            // skip the key: https://<key>@<host>/<id>
     const char *host = at ? at + 1 : dsn + 8;
     const char *slash = strchr(host, '/');
     const size_t hostLen = slash ? (size_t)(slash - host) : strlen(host);
-    // ".ingest.sentry.io" also matches the regional ".ingest.us.sentry.io" / ".ingest.de…".
+
     const char *suffix = CHROMABAY_SENTRY_ALLOWED_HOST_SUFFIX;
     const size_t suffixLen = strlen(suffix);
     if (hostLen < suffixLen) return false;
-    return strncmp(host + hostLen - suffixLen, suffix, suffixLen) == 0;
+    if (strncmp(host + hostLen - suffixLen, suffix, suffixLen) != 0) return false;
+
+    // Bounded search: strstr would happily match inside the path that follows the host.
+    const char *needle = CHROMABAY_SENTRY_REQUIRED_HOST_PART;
+    const size_t needleLen = strlen(needle);
+    if (hostLen < needleLen) return false;
+    for (size_t i = 0; i + needleLen <= hostLen; i++) {
+        if (strncmp(host + i, needle, needleLen) == 0) return true;
+    }
+    return false;
 }
 
 class SentryConfigCallbacks : public NimBLECharacteristicCallbacks {
@@ -227,7 +246,10 @@ static SentryConfigCallbacks gConfigCallbacks;
 inline void loadDsn() {
     gDsn[0] = '\0';
     Preferences p;
-    if (p.begin(NVS_NAMESPACE, true)) {
+    // Read-write, not read-only: opening a namespace that doesn't exist yet fails, and the
+    // Preferences library logs that at ERROR level on every boot of a device that has never
+    // been provisioned. Opening it writable creates it once and keeps the console honest.
+    if (p.begin(NVS_NAMESPACE, false)) {
         String stored = p.getString(NVS_KEY_DSN, "");
         p.end();
         if (stored.length() > 0 && stored.length() <= SENTRY_MICRO_MAX_DSN_LEN) {
@@ -249,7 +271,12 @@ inline void loadDsn() {
 inline void initSdk() {
     sentry_close();
     loadDsn();
-    if (gDsn[0] == '\0') return;  // nothing configured; stay silent
+    if (gDsn[0] == '\0') {
+        // Say so once. Silence here is indistinguishable from a build with no SDK at all,
+        // which makes bringing the relay up on a new device needlessly hard to debug.
+        Serial.println("[Sentry] no DSN provisioned yet — connect the app to enable reporting");
+        return;
+    }
 
     sentry::Options options;
     options.dsn = gDsn;
