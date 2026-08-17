@@ -7,7 +7,7 @@
 // `blend` names both. Keep this in sync when adding operators — a new generator not listed
 // here just falls back to 1 (a harmless, ignored input handle), same as before.
 const GENERATORS = new Set<string>([
-  'bands', 'fire', 'gradient', 'interference', 'movingblob', 'perlinnoise', 'plasma',
+  'bands', 'buggy_rainbow', 'fire', 'gradient', 'interference', 'movingblob', 'perlinnoise', 'plasma',
   'radial_rainbow', 'rainbow', 'raindrops', 'static', 'strobe', 'svgfill', 'symbol',
   'test', 'text', 'clock', 'venn', 'wave',
 ]);
