@@ -1,0 +1,300 @@
+/**
+ * Relay crash reports from a connected device to Sentry.
+ *
+ * The firmware has no route to the internet in BLE mode, so it hands us a complete HTTP
+ * request — URL, two headers, body — and we perform it and report the status back. Everything
+ * Sentry-specific (the envelope, the auth header, the ingest URL) is built on the device by
+ * sentry-micro; this file knows nothing about any of it and would relay a request to any
+ * whitelisted host equally well.
+ *
+ * That is the point of the design: a companion app supports device crash reporting in about
+ * the amount of code below, and never has to learn what an envelope is.
+ *
+ * Wire protocol (sentry-micro `core/sentry_relay.h`), little-endian:
+ *
+ *   device -> app   0x01 BEGIN  [req u8][urlLen u16][authLen u16][ctypeLen u16][bodyLen u32]
+ *                   0x02 DATA   [req u8][offset u16][payload…]
+ *                   0x03 END    [req u8]
+ *   app -> device   0x80 HELLO  [version u8][maxChunk u16]
+ *                   0x81 STATUS [req u8][result u8][httpStatus u16][retryAfterMs u32]
+ *
+ * DATA payloads are slices of one stream: url ++ auth ++ contentType ++ body, cut apart using
+ * the lengths from BEGIN.
+ */
+
+import { LED_SERVICE_UUID, startBinaryNotifications, writeCharacteristicBinary } from './ble';
+
+const SENTRY_TX_UUID = 'a0be83fb-8dc9-47f0-ab40-b19721d20ed1'; // device → app, notify
+const SENTRY_RX_UUID = 'a0be83fc-8dc9-47f0-ab40-b19721d20ed1'; // app → device, write
+const SENTRY_CONFIG_UUID = 'a0be83fd-8dc9-47f0-ab40-b19721d20ed1'; // app → device: the DSN
+
+const PROTOCOL_VERSION = 1;
+/** Matches the firmware's notification payload budget; the device clamps to the smaller. */
+const MAX_CHUNK_BYTES = 180;
+/** A relayed request is an envelope, never a large upload. Anything bigger is a bug or an abuse. */
+const MAX_REQUEST_BYTES = 64 * 1024;
+
+const FRAME_BEGIN = 0x01;
+const FRAME_DATA = 0x02;
+const FRAME_END = 0x03;
+const FRAME_HELLO = 0x80;
+const FRAME_STATUS = 0x81;
+
+const RESULT_OK = 0;
+const RESULT_UNAVAILABLE = 1;
+const RESULT_REJECTED = 2;
+const RESULT_RATE_LIMITED = 3;
+const RESULT_ERROR = 4;
+
+/**
+ * The DSN devices report to.
+ *
+ * Defaults to the app's own project so this works with no extra configuration; point
+ * VITE_SENTRY_DEVICE_DSN at a separate firmware project to keep device crashes (and their
+ * quota) apart from app errors.
+ */
+const DEVICE_DSN: string =
+  (import.meta as any).env?.VITE_SENTRY_DEVICE_DSN ||
+  (import.meta as any).env?.VITE_SENTRY_DSN ||
+  'https://3bb11192b1334f860c0e31fd7fe2c65b@o4511260075884544.ingest.us.sentry.io/4511695305900032';
+
+/**
+ * The ONE host we are willing to POST to, derived from the DSN above.
+ *
+ * Non-negotiable: without it, a buggy or hostile device could use the phone as an open proxy
+ * to any URL it likes, with the user's IP and network. Matching is exact — no suffix checks,
+ * which `sentry.io.evil.com` would pass.
+ */
+const ALLOWED_HOST: string | null = (() => {
+  try {
+    return new URL(DEVICE_DSN).host.toLowerCase();
+  } catch {
+    console.warn('[SentryRelay] device DSN is not a URL; relay disabled');
+    return null;
+  }
+})();
+
+interface PendingRequest {
+  requestId: number;
+  urlLen: number;
+  authLen: number;
+  ctypeLen: number;
+  bodyLen: number;
+  buffer: Uint8Array;
+  received: number;
+  seen: Set<number>;
+}
+
+/** One in-flight request per device; the firmware never has two outstanding. */
+const pending = new Map<string, PendingRequest>();
+const started = new Set<string>();
+
+function statusFrame(
+  requestId: number,
+  result: number,
+  httpStatus: number,
+  retryAfterMs: number
+): DataView {
+  const out = new Uint8Array(9);
+  const dv = new DataView(out.buffer);
+  dv.setUint8(0, FRAME_STATUS);
+  dv.setUint8(1, requestId);
+  dv.setUint8(2, result);
+  dv.setUint16(3, httpStatus & 0xffff, true);
+  dv.setUint32(5, retryAfterMs >>> 0, true);
+  return dv;
+}
+
+async function sendStatus(
+  deviceId: string,
+  requestId: number,
+  result: number,
+  httpStatus = 0,
+  retryAfterMs = 0
+): Promise<void> {
+  try {
+    await writeCharacteristicBinary(
+      deviceId,
+      LED_SERVICE_UUID,
+      SENTRY_RX_UUID,
+      statusFrame(requestId, result, httpStatus, retryAfterMs)
+    );
+  } catch (err) {
+    // The device times out on its own and keeps the event buffered, so a lost status costs a
+    // retry rather than the report.
+    console.warn('[SentryRelay] could not report status to device:', err);
+  }
+}
+
+/** `Retry-After` is seconds (or an HTTP date); the device wants milliseconds. */
+function retryAfterMs(response: Response): number {
+  const header = response.headers.get('Retry-After');
+  if (!header) return 0;
+  const seconds = Number(header);
+  if (Number.isFinite(seconds)) return Math.max(0, Math.round(seconds * 1000));
+  const date = Date.parse(header);
+  return Number.isNaN(date) ? 0 : Math.max(0, date - Date.now());
+}
+
+async function performRequest(deviceId: string, request: PendingRequest): Promise<void> {
+  const decoder = new TextDecoder();
+  let at = 0;
+  const url = decoder.decode(request.buffer.subarray(at, (at += request.urlLen)));
+  const auth = decoder.decode(request.buffer.subarray(at, (at += request.authLen)));
+  const contentType = decoder.decode(request.buffer.subarray(at, (at += request.ctypeLen)));
+  const body = request.buffer.subarray(at, at + request.bodyLen);
+
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    await sendStatus(deviceId, request.requestId, RESULT_REJECTED);
+    return;
+  }
+
+  // The whitelist. `username` is checked because `https://ingest.sentry.io@evil.com/` has a
+  // host of `evil.com` but reads like the real thing to a human skimming logs.
+  if (parsed.protocol !== 'https:' || parsed.host.toLowerCase() !== ALLOWED_HOST || parsed.username) {
+    console.warn(`[SentryRelay] refusing to POST to ${parsed.host} (allowed: ${ALLOWED_HOST})`);
+    await sendStatus(deviceId, request.requestId, RESULT_REJECTED);
+    return;
+  }
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'X-Sentry-Auth': auth, 'Content-Type': contentType },
+      body: body as BodyInit
+    });
+
+    let result = RESULT_ERROR;
+    if (response.ok) result = RESULT_OK;
+    else if (response.status === 429) result = RESULT_RATE_LIMITED;
+    else if (response.status >= 400 && response.status < 500) result = RESULT_REJECTED;
+
+    console.log(
+      `[SentryRelay] relayed ${body.byteLength}B for ${deviceId} → ${response.status}`
+    );
+    await sendStatus(deviceId, request.requestId, result, response.status, retryAfterMs(response));
+  } catch (err) {
+    // No network on the phone either. UNAVAILABLE tells the device to keep it buffered and
+    // try again rather than treating it as delivered.
+    console.warn('[SentryRelay] relay fetch failed:', err);
+    await sendStatus(deviceId, request.requestId, RESULT_UNAVAILABLE);
+  }
+}
+
+function onFrame(deviceId: string, dv: DataView): void {
+  if (dv.byteLength < 2) return;
+  const type = dv.getUint8(0);
+  const requestId = dv.getUint8(1);
+
+  if (type === FRAME_BEGIN) {
+    if (dv.byteLength < 12) return;
+    const urlLen = dv.getUint16(2, true);
+    const authLen = dv.getUint16(4, true);
+    const ctypeLen = dv.getUint16(6, true);
+    const bodyLen = dv.getUint32(8, true);
+    const total = urlLen + authLen + ctypeLen + bodyLen;
+    if (total === 0 || total > MAX_REQUEST_BYTES) {
+      pending.delete(deviceId);
+      void sendStatus(deviceId, requestId, RESULT_REJECTED);
+      return;
+    }
+    pending.set(deviceId, {
+      requestId,
+      urlLen,
+      authLen,
+      ctypeLen,
+      bodyLen,
+      buffer: new Uint8Array(total),
+      received: 0,
+      seen: new Set()
+    });
+    return;
+  }
+
+  const request = pending.get(deviceId);
+  if (!request || request.requestId !== requestId) return;
+
+  if (type === FRAME_DATA) {
+    if (dv.byteLength <= 4) return;
+    const offset = dv.getUint16(2, true);
+    const payload = dv.byteLength - 4;
+    if (offset + payload > request.buffer.length) return; // overrun: ignore the frame
+    for (let i = 0; i < payload; i++) request.buffer[offset + i] = dv.getUint8(4 + i);
+    // Count coverage by offset rather than a running total, so a retransmitted chunk can't
+    // make a request with a hole in it look complete.
+    if (!request.seen.has(offset)) {
+      request.seen.add(offset);
+      request.received += payload;
+    }
+    return;
+  }
+
+  if (type === FRAME_END) {
+    pending.delete(deviceId);
+    if (request.received < request.buffer.length) {
+      console.warn(
+        `[SentryRelay] incomplete request (${request.received}/${request.buffer.length} bytes)`
+      );
+      void sendStatus(deviceId, requestId, RESULT_ERROR); // retryable: the device still has it
+      return;
+    }
+    void performRequest(deviceId, request);
+  }
+}
+
+/**
+ * Start relaying for a device, and tell it which project to report to.
+ *
+ * Safe to call on every connect and on firmware that predates the relay — the characteristics
+ * simply won't be there, and it gives up quietly. Provisioning the DSN here rather than baking
+ * it into the firmware is deliberate: released firmware binaries are public, and a key
+ * extractable with `strings` is a key anyone can spend our quota with.
+ */
+export async function startSentryRelay(deviceId: string): Promise<void> {
+  if (!ALLOWED_HOST) return;
+  if (started.has(deviceId)) return;
+
+  try {
+    await startBinaryNotifications(deviceId, LED_SERVICE_UUID, SENTRY_TX_UUID, (dv) =>
+      onFrame(deviceId, dv)
+    );
+  } catch {
+    return; // firmware without the relay characteristics
+  }
+  started.add(deviceId);
+
+  try {
+    await writeCharacteristicBinary(
+      deviceId,
+      LED_SERVICE_UUID,
+      SENTRY_CONFIG_UUID,
+      new DataView(new TextEncoder().encode(DEVICE_DSN).buffer)
+    );
+  } catch (err) {
+    console.warn('[SentryRelay] DSN provisioning failed:', err);
+  }
+
+  // HELLO last: the device treats it as "a host that speaks this protocol is attached" and
+  // may start relaying immediately, so everything it needs must already be in place.
+  const hello = new Uint8Array(4);
+  const dv = new DataView(hello.buffer);
+  dv.setUint8(0, FRAME_HELLO);
+  dv.setUint8(1, PROTOCOL_VERSION);
+  dv.setUint16(2, MAX_CHUNK_BYTES, true);
+  try {
+    await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, SENTRY_RX_UUID, dv);
+    console.log(`[SentryRelay] attached to ${deviceId}`);
+  } catch (err) {
+    console.warn('[SentryRelay] hello failed:', err);
+    started.delete(deviceId);
+  }
+}
+
+/** Forget a device's relay state on disconnect, so a reconnect re-announces itself. */
+export function stopSentryRelay(deviceId: string): void {
+  started.delete(deviceId);
+  pending.delete(deviceId);
+}

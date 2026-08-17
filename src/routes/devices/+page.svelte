@@ -48,6 +48,7 @@
     setFlipH,
     setSerpentine
   } from '$lib/ble';
+  import { startSentryRelay, stopSentryRelay } from '$lib/sentryRelay';
   import { Capacitor } from '@capacitor/core';
   import { connectedDevices, getConnectedDevicesList, type ConnectedDevice } from '$lib/stores/deviceStore';
   import { deviceSettings, liveBrightness, initializedDevices } from '$lib/stores/deviceUiStore.svelte';
@@ -110,6 +111,7 @@
     delete shown[id];
     delete deviceSettings[id];
     initializedDevices.delete(id);
+    stopSentryRelay(id);
   }
 
   function reconcileShown(list: ConnectedDevice[]) {
@@ -493,6 +495,12 @@
         if (status.isError || status.isComplete) settings.otaInProgress = false;
       });
     } catch (e) { console.error('OTA status subscribe failed', e); }
+    try {
+      // Crash-report relay: the device has no internet of its own in BLE mode, so it hands us
+      // a ready-made request and we perform it. Also provisions the DSN, which released
+      // firmware deliberately doesn't carry. Inert on firmware without the characteristics.
+      await startSentryRelay(deviceId);
+    } catch (e) { console.error('sentry relay attach failed', e); }
   }
 
   async function handleDisconnect(deviceId: string) {

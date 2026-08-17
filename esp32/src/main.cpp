@@ -34,6 +34,7 @@
 #include "led_manager.h" // Include the new LED Manager
 #include "config_manager.h"   // Restore MessagePack config handling
 #include "firmware_version.h" // Include firmware version header
+#include "sentry_reporting.h" // Crash/reset-reason reporting (no-op unless a DSN is baked in)
 #include "pattern_renderer_base.h" // Include pattern renderer
 
 // LED Configuration (some of these are now defaults for LedManager config)
@@ -706,6 +707,7 @@ class ServerCallbacks: public NimBLEServerCallbacks {
         deviceConnected = true;
         currentConnHandle = desc ? desc->conn_handle : 0xFFFF;
         noteActivity();
+        SentryReporting::setBleConnected(true);  // a route for any buffered crash report
         Serial.println("BLE Client Connected");
         logPatternState("connect");
         // Update device info characteristic as heap might have changed or client needs fresh info
@@ -716,6 +718,7 @@ class ServerCallbacks: public NimBLEServerCallbacks {
     void onDisconnect(NimBLEServer* pServer) {
         currentConnHandle = 0xFFFF;
         deviceConnected = false;
+        SentryReporting::setBleConnected(false);
         Serial.println("BLE Client Disconnected");
         logPatternState("disconnect");
         // If OTA was in progress and client disconnects, abort it to free resources
@@ -2773,6 +2776,13 @@ void setup() {
         }
     }
 
+    // Crash reporting. Started here rather than earlier because its offline buffer lives on
+    // the filesystem: a device in BLE mode has no route to the internet at boot, so the report
+    // of the crash it just came back from waits on flash until the app connects (or WiFi
+    // associates) and tick() can deliver it. Inert unless a DSN has been provisioned.
+    SentryReporting::begin();
+    SentryReporting::reportLastBoot();
+
     // Initialize LED configuration
     LedConfig::LedStripConfig defaultStrip;
     defaultStrip.chipset     = LedConfig::LedChipset::WS2812_RGB;
@@ -3001,6 +3011,10 @@ void setup() {
             pCommConfigCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_COMM_CONFIG, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE);
             pCommConfigCharacteristic->setCallbacks(new CommConfigCallbacks());
 
+            // Crash-report relay: the device hands the app a fully-formed HTTP request and the
+            // app performs it. No-op in a build without sentry-micro.
+            SentryReporting::attachBleService(pService);
+
             pService->start();
             updateDeviceInfoCharacteristic();
             
@@ -3203,6 +3217,10 @@ void loop() {
 #if CHROMABAY_WIFI
     if (gWifiMode) { WifiLink::tick(); RtStream::tick(); }
 #endif
+
+    // Retry any buffered crash report. Returns immediately unless something is queued AND
+    // the flush interval has elapsed, so a healthy device never pays for this.
+    SentryReporting::tick(currentTime);
 
     // Sleep timer: after gSettings.sleepMinutes of no activity, blank the output and pause
     // rendering. Any inbound command / button press calls noteActivity() → wakes. 0 = off.

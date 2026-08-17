@@ -43,7 +43,7 @@ function bleSerial<T>(op: () => Promise<T>): Promise<T> {
 import { removeConnectedDevice, addConnectedDevice, updateDeviceInfo } from './stores/deviceStore';
 
 // ChromaBay LED Service UUID - the only service we care about for general commands
-const LED_SERVICE_UUID = 'a0be83e4-8dc9-47f0-ab40-b19721d20ed1';
+export const LED_SERVICE_UUID = 'a0be83e4-8dc9-47f0-ab40-b19721d20ed1';
 // Original RX/TX Characteristics (still useful for general commands)
 const CHARACTERISTIC_UUID_RX = 'a0be83e5-8dc9-47f0-ab40-b19721d20ed1';
 const CHARACTERISTIC_UUID_TX = 'a0be83e6-8dc9-47f0-ab40-b19721d20ed1';
@@ -1392,7 +1392,7 @@ export async function startButtonEventNotifications(deviceId: string, callback: 
 /**
  * Writes binary data to a BLE characteristic
  */
-async function writeCharacteristicBinary(deviceId: string, serviceUuid: string, characteristicUuid: string, dataView: DataView): Promise<void> {
+export async function writeCharacteristicBinary(deviceId: string, serviceUuid: string, characteristicUuid: string, dataView: DataView): Promise<void> {
   return bleSerial(async () => {
     try {
       if (isWeb()) {
