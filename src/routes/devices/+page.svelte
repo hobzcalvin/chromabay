@@ -48,7 +48,7 @@
     setFlipH,
     setSerpentine
   } from '$lib/ble';
-  import { startSentryRelay, stopSentryRelay } from '$lib/sentryRelay';
+  import { watchSentryRelay, stopSentryRelay } from '$lib/sentryRelay';
   import { Capacitor } from '@capacitor/core';
   import { connectedDevices, getConnectedDevicesList, type ConnectedDevice } from '$lib/stores/deviceStore';
   import { deviceSettings, liveBrightness, initializedDevices } from '$lib/stores/deviceUiStore.svelte';
@@ -181,6 +181,10 @@
     isWeb = Capacitor.getPlatform() === 'web';
     // Periodically drop discovered devices that have gone quiet (see pruneStaleDevices).
     pruneTimer = setInterval(pruneStaleDevices, 3000);
+    // Relay crash reports for any device that connects, now and on every reconnect. Driven by
+    // the store, not by this page's init, because a reconnect doesn't re-run that — and both
+    // the notification subscription and the device's HELLO are per-connection.
+    watchSentryRelay();
     try {
       await initBle();
       bleSupported = true;
@@ -495,12 +499,6 @@
         if (status.isError || status.isComplete) settings.otaInProgress = false;
       });
     } catch (e) { console.error('OTA status subscribe failed', e); }
-    try {
-      // Crash-report relay: the device has no internet of its own in BLE mode, so it hands us
-      // a ready-made request and we perform it. Also provisions the DSN, which released
-      // firmware deliberately doesn't carry. Inert on firmware without the characteristics.
-      await startSentryRelay(deviceId);
-    } catch (e) { console.error('sentry relay attach failed', e); }
   }
 
   async function handleDisconnect(deviceId: string) {

@@ -420,13 +420,24 @@ inline void tick(uint32_t nowMs) {
     // The app connecting is the event we're waiting for on a BLE-only device — flush then
     // rather than up to 30 s later, so a crash report lands while someone is still looking.
     const bool ready = gRelayTransport.host_ready();
-    if (ready && !gRelayWasReady) gLastFlushMs = nowMs - FLUSH_INTERVAL_MS;
+    if (ready != gRelayWasReady) {
+        // Log both edges. Whether the phone has announced itself is the single fact that
+        // decides if a queued crash can go anywhere, and inferring it from silence cost an
+        // afternoon: the device sat on three panics because the app never re-sent HELLO
+        // after reconnecting.
+        Serial.printf("[Sentry] relay host %s (%u queued)\n", ready ? "ready" : "gone",
+                      (unsigned)sentry_buffered_count());
+        if (ready) gLastFlushMs = nowMs - FLUSH_INTERVAL_MS;  // deliver now, not in 30s
+    }
     gRelayWasReady = ready;
 
     if (sentry_buffered_count() == 0) return;
     if (nowMs - gLastFlushMs < FLUSH_INTERVAL_MS) return;
     gLastFlushMs = nowMs;
-    sentry_flush(1);
+    uint32_t delivered = sentry_flush(1);
+    Serial.printf("[Sentry] flush: delivered %u, %u still queued (route: %s)\n",
+                  (unsigned)delivered, (unsigned)sentry_buffered_count(),
+                  gTransport.is_available() ? "up" : "none");
 }
 
 }  // namespace SentryReporting

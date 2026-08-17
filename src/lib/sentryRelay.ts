@@ -23,6 +23,7 @@
  */
 
 import { LED_SERVICE_UUID, startBinaryNotifications, writeCharacteristicBinary } from './ble';
+import { connectedDevices } from './stores/deviceStore';
 
 const SENTRY_TX_UUID = 'a0be83fb-8dc9-47f0-ab40-b19721d20ed1'; // device → app, notify
 const SENTRY_RX_UUID = 'a0be83fc-8dc9-47f0-ab40-b19721d20ed1'; // app → device, write
@@ -297,4 +298,37 @@ export async function startSentryRelay(deviceId: string): Promise<void> {
 export function stopSentryRelay(deviceId: string): void {
   started.delete(deviceId);
   pending.delete(deviceId);
+}
+
+let watching = false;
+
+/**
+ * Attach the relay to every device that connects, for as long as the app is running.
+ *
+ * Driven by the connected-devices store rather than by page state, because a reconnect has
+ * to re-attach and the page's init block does not re-run for one. Both halves of the attach
+ * are per-connection and do not survive a drop: the GATT notification subscription is torn
+ * down with the link, and the firmware forgets our HELLO on disconnect (a new host has to
+ * announce itself). Miss either and the device buffers crash reports it can never deliver —
+ * which is exactly what happened: it queued three panics and shipped none of them.
+ */
+export function watchSentryRelay(): void {
+  if (watching || typeof window === 'undefined') return;
+  watching = true;
+
+  connectedDevices.subscribe((devices) => {
+    for (const deviceId of devices.keys()) {
+      if (started.has(deviceId)) continue;
+      void startSentryRelay(deviceId).then(() => {
+        // A reconnect can land here before service discovery has settled, which fails the
+        // writes and leaves us detached. One retry costs nothing and covers that window.
+        if (!started.has(deviceId)) {
+          setTimeout(() => { void startSentryRelay(deviceId); }, 2000);
+        }
+      });
+    }
+    for (const deviceId of [...started]) {
+      if (!devices.has(deviceId)) stopSentryRelay(deviceId);
+    }
+  });
 }
