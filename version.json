@@ -1,7 +1,7 @@
 {
-  "version": "1.1.283",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.283.zip",
-  "buildDate": "2026-08-17T22:47:47Z",
-  "commitHash": "823faac2cd162fe6ce04d2a73f3dd9ba8997e5d8",
-  "commitMessage": "Add a Buggy Rainbow node that panics the device at speed 0"
+  "version": "1.1.284",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.284.zip",
+  "buildDate": "2026-08-17T22:56:35Z",
+  "commitHash": "d0a9de3b06f53b95b36bad2d7e84dc6141fba0de",
+  "commitMessage": "Don't link a GNU build-id into the firmware; it boot-loops the chip"
 }
