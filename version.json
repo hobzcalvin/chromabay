@@ -1,7 +1,7 @@
 {
-  "version": "1.1.286",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.286.zip",
-  "buildDate": "2026-08-17T23:42:49Z",
-  "commitHash": "c888801f62a80def1a3becf93125848dc5328d98",
-  "commitMessage": "Re-attach the crash relay on every reconnect, not just first connect"
+  "version": "1.1.287",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.287.zip",
+  "buildDate": "2026-08-18T20:36:19Z",
+  "commitHash": "6d86bb31ea5ea4de05e97d8a6be0cab8af290cc3",
+  "commitMessage": "Upload firmware debug files from CI, so crashes arrive readable"
 }
