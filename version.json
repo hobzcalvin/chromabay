@@ -1,7 +1,7 @@
 {
-  "version": "1.1.287",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.287.zip",
-  "buildDate": "2026-08-18T20:36:19Z",
-  "commitHash": "6d86bb31ea5ea4de05e97d8a6be0cab8af290cc3",
-  "commitMessage": "Upload firmware debug files from CI, so crashes arrive readable"
+  "version": "1.1.288",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.288.zip",
+  "buildDate": "2026-08-18T21:00:31Z",
+  "commitHash": "19e73a0d983ad22952fe937b625dc6fe435a0d91",
+  "commitMessage": "Stop linking TLS into the firmware to report crashes"
 }
