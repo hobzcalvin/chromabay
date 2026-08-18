@@ -43,7 +43,10 @@
     animationFrame = requestAnimationFrame(animate);
   }
 
+  let resizeHandler: (() => void) | null = null;
+
   function setupCanvas() {
+    if (!canvasElement) return;
     if (fullscreen) {
       canvasElement.width = window.innerWidth;
       canvasElement.height = window.innerHeight;
@@ -62,11 +65,8 @@
     setupCanvas();
     
     if (fullscreen) {
-      const resize = () => setupCanvas();
-      window.addEventListener('resize', resize);
-      onDestroy(() => {
-        window.removeEventListener('resize', resize);
-      });
+      resizeHandler = () => setupCanvas();
+      window.addEventListener('resize', resizeHandler);
     }
     
     animate();
@@ -74,6 +74,7 @@
 
   onDestroy(() => {
     if (animationFrame) cancelAnimationFrame(animationFrame);
+    if (resizeHandler) window.removeEventListener('resize', resizeHandler);
     // Reset render config when component is destroyed
     resetToDefaultDimensions();
   });
@@ -129,4 +130,4 @@
     touch-action: none;
     border-radius: 0;
   }
-</style> 
+</style>   
