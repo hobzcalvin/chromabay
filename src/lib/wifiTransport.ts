@@ -18,6 +18,7 @@ export const CH = {
   DEVICE_INFO: 1, LED_CONFIG_GET: 2, LED_CONFIG_SET: 3, BRIGHTNESS: 4,
   PATTERN_SYNC: 5, PLAYLIST_SYNC: 6, TIMESTAMP_SYNC: 7, LIBRARY_CMD: 8,
   LIBRARY_DUMP: 9, DEVICE_NAME: 10, COMM_CONFIG: 11,
+  SENTRY_RELAY: 12, SENTRY_CONFIG: 13,
 } as const;
 
 const td = new TextDecoder();
@@ -31,6 +32,7 @@ export class WifiDevice {
   private dump: { entries: SerializedPattern[]; resolve?: (v: SerializedPattern[]) => void } | null = null;
   onClose?: () => void;
   onBrightness?: (b: number) => void; // device-initiated brightness (button / schedule)
+  onSentryFrame?: (payload: Uint8Array) => void; // crash-relay frames (see sentryRelay.ts)
 
   constructor(host: string) { this.host = host; }
 
@@ -67,6 +69,9 @@ export class WifiDevice {
     if (p) { this.pending.delete(ch); p(payload); return; }
     // Unsolicited (no pending request): the device pushes brightness on button/schedule changes.
     if (ch === CH.BRIGHTNESS && payload.length >= 1) this.onBrightness?.(payload[0]);
+    // Crash-report relay: the device asks us to make an HTTP request on its behalf. Handled
+    // above the `pending` lookup would be wrong — these arrive unprompted, in bursts.
+    else if (ch === CH.SENTRY_RELAY) this.onSentryFrame?.(payload);
   }
 
   private send(ch: number, payload: Uint8Array = new Uint8Array(0)) {
@@ -123,6 +128,10 @@ export class WifiDevice {
   setName(name: string) { this.send(CH.DEVICE_NAME, te.encode(name)); }
   async readSettings(): Promise<DeviceSettings> { return JSON.parse(td.decode(await this.request(CH.COMM_CONFIG))); }
   writeSettings(patch: DeviceSettingsPatch) { this.send(CH.COMM_CONFIG, msgpack.encode(patch) as Uint8Array); }
+  // Crash relay: HELLO/STATUS back to the device, and the DSN it should report to. Raw
+  // frames — sentryRelay.ts owns the protocol, this only carries bytes (same as BLE).
+  sendSentry(frame: Uint8Array) { this.send(CH.SENTRY_RELAY, frame); }
+  sendSentryConfig(dsn: Uint8Array) { this.send(CH.SENTRY_CONFIG, dsn); }
   clearLibrary() { this.send(CH.LIBRARY_CMD, Uint8Array.of(0x00)); }
   deletePattern(name: string) { const nb = te.encode(name); const m = new Uint8Array(1 + nb.length); m[0] = 0x01; m.set(nb, 1); this.send(CH.LIBRARY_CMD, m); }
 

@@ -115,6 +115,21 @@ static char gPendingDsn[SENTRY_MICRO_MAX_DSN_LEN + 1] = { 0 };
 static volatile bool gDsnPending = false;
 static NimBLECharacteristic *gRelayTx = nullptr;
 static bool gBleConnected = false;
+
+/**
+ * The Wi-Fi half of the relay.
+ *
+ * BLE and Wi-Fi are mutually exclusive per boot (NVS commMode), so at most one of these links
+ * is ever live — but the relay has to work on whichever one it is, or a device switched to
+ * Wi-Fi silently stops reporting. Registered as a function pointer by WifiLink rather than
+ * called directly, because this header is included long before that namespace is defined.
+ */
+typedef bool (*FrameSink)(const uint8_t *frame, size_t len);
+/** Services the Wi-Fi link's socket. See relayWait() for why the relay cannot work without it. */
+typedef void (*PumpFn)();
+static FrameSink gWifiSink = nullptr;
+static PumpFn gWifiPump = nullptr;
+static bool gWifiConnected = false;
 static bool gRelayWasReady = false;
 static uint32_t gLastFlushMs = 0;
 static bool gLastFlushDelivered = false;
@@ -147,14 +162,45 @@ static const size_t RELAY_CHUNK_BYTES = 180;
 // notifications faster than the link can drain them and silently drop the excess, and 8 ms
 // is the interval the library dump already uses successfully.
 inline bool relayWriteFrame(void *, const uint8_t *frame, size_t len) {
-    if (!gRelayTx || !gBleConnected) return false;
-    gRelayTx->setValue(const_cast<uint8_t *>(frame), len);
-    gRelayTx->notify();
-    delay(8);
-    return true;
+    if (gRelayTx && gBleConnected) {
+        gRelayTx->setValue(const_cast<uint8_t *>(frame), len);
+        gRelayTx->notify();
+        delay(8);
+        return true;
+    }
+    // No pacing on the Wi-Fi path: TCP has its own flow control, and the 8 ms above exists
+    // only because NimBLE accepts notifications faster than the link drains them and drops
+    // the excess in silence.
+    if (gWifiSink && gWifiConnected) return gWifiSink(frame, len);
+    return false;
 }
 
 static sentry::RelayTransport gRelayTransport(relayWriteFrame);
+
+/**
+ * What the relay does while waiting for the app to answer — and on Wi-Fi it must be more than
+ * sleep, or nothing ever answers.
+ *
+ * send() blocks the loop task until a STATUS frame arrives. Over BLE that works because
+ * inbound writes land on the NimBLE host task, which is still running. Over Wi-Fi the socket
+ * is read by WifiLink::tick() — from the loop task, the one now blocked here. Sleeping
+ * through the wait would mean nothing ever reads the reply: every relayed report would sit
+ * for the full 10 s timeout and then fail, hanging the LED render loop each time. So the wait
+ * pumps the link it is waiting on.
+ *
+ * Guarded against re-entry rather than assumed safe: a dispatch from inside the pump could in
+ * principle reach code that sends again, and WifiLink's receive buffers are not reentrant.
+ */
+static bool gPumping = false;
+
+inline void relayWait(void *, uint32_t ms) {
+    if (gWifiPump && gWifiConnected && !gPumping) {
+        gPumping = true;
+        gWifiPump();
+        gPumping = false;
+    }
+    delay(ms);
+}
 
 #if CHROMABAY_WIFI && CHROMABAY_SENTRY_WIFI
 static sentry::WiFiTransport gWifiTransport;
@@ -173,13 +219,24 @@ static sentry::AutoTransport gTransport({ &gWifiTransport, &gRelayTransport });
 static sentry::AutoTransport gTransport({ &gRelayTransport });
 #endif
 
+// ── Inbound, from whichever transport the app is on ─────────────────────────────────────
+// Written once and called from both the BLE callbacks below and the Wi-Fi channel dispatch
+// in main.cpp. onConfigWrite (further down, next to the host check it depends on) matters
+// most: that check is the thing standing between an unpaired stranger and pointing this
+// device at a host they control, and it must not exist in two places.
+
+/** A HELLO or STATUS frame from the app. */
+inline void onHostFrame(const uint8_t *data, size_t len) {
+    // May run on the NimBLE host task while the loop task is blocked inside send() waiting
+    // for exactly this frame. on_host_frame() is written for that.
+    gRelayTransport.on_host_frame(data, len);
+}
+
 // ── BLE plumbing ────────────────────────────────────────────────────────────────────────
 class RelayRxCallbacks : public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic *pCharacteristic) {
-        // Runs on the NimBLE host task, possibly while the loop task is blocked inside
-        // send() waiting for exactly this frame. on_host_frame() is written for that.
         std::string value = pCharacteristic->getValue();
-        gRelayTransport.on_host_frame((const uint8_t *)value.data(), value.length());
+        onHostFrame((const uint8_t *)value.data(), value.length());
     }
 };
 
@@ -227,20 +284,27 @@ inline bool dsnHostAllowed(const char *dsn) {
     return false;
 }
 
+/** The DSN the app is provisioning. Empty clears it. */
+inline void onConfigWrite(const uint8_t *data, size_t len) {
+    if (len > SENTRY_MICRO_MAX_DSN_LEN) return;
+    char dsn[SENTRY_MICRO_MAX_DSN_LEN + 1];
+    memcpy(dsn, data, len);
+    dsn[len] = '\0';
+    if (len > 0 && !dsnHostAllowed(dsn)) {
+        Serial.println("[Sentry] refusing a DSN outside the allowed ingest host");
+        return;
+    }
+    // Stage it and let the loop task do the work, the way every other characteristic in
+    // this firmware does: writing NVS and reopening the filesystem buffer from the NimBLE
+    // host task would both stall the BLE stack and race the loop task's own file I/O.
+    memcpy(gPendingDsn, dsn, len + 1);
+    gDsnPending = true;
+}
+
 class SentryConfigCallbacks : public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic *pCharacteristic) {
         std::string value = pCharacteristic->getValue();
-        if (value.length() > SENTRY_MICRO_MAX_DSN_LEN) return;
-        if (!value.empty() && !dsnHostAllowed(value.c_str())) {
-            Serial.println("[Sentry] refusing a DSN outside the allowed ingest host");
-            return;
-        }
-        // Stage it and let the loop task do the work, the way every other characteristic in
-        // this firmware does: writing NVS and reopening the filesystem buffer from the NimBLE
-        // host task would both stall the BLE stack and race the loop task's own file I/O.
-        strncpy(gPendingDsn, value.c_str(), sizeof(gPendingDsn) - 1);
-        gPendingDsn[sizeof(gPendingDsn) - 1] = '\0';
-        gDsnPending = true;
+        onConfigWrite((const uint8_t *)value.data(), value.length());
     }
 };
 
@@ -304,6 +368,7 @@ inline void initSdk() {
     // that renders LEDs, so a phone that stops answering must cost a visible hitch rather
     // than a visible freeze.
     gRelayTransport.set_timeout_ms(10000);
+    gRelayTransport.set_wait_fn(relayWait);
     gRelayTransport.set_host_attached(gBleConnected);
 
     // LittleFS rather than NVS deliberately: the nvs partition is 20 KB and already holds
@@ -338,11 +403,31 @@ inline void attachBleService(NimBLEService *service) {
     config->setCallbacks(&gConfigCallbacks);
 }
 
-/** Track the BLE link. An app that disconnects mid-relay must not be waited on. */
+/**
+ * Track whichever link the app is on. One that disconnects mid-relay must not be waited on.
+ *
+ * `host_attached` is the OR of the two, not the last one set: the transport uses it to decide
+ * whether waiting for a STATUS frame can possibly be answered, and answering that with the
+ * state of a radio the app is not on would strand every queued report.
+ */
+inline void updateHostAttached() {
+    gRelayTransport.set_host_attached(gBleConnected || gWifiConnected);
+}
 inline void setBleConnected(bool connected) {
     gBleConnected = connected;
-    gRelayTransport.set_host_attached(connected);
+    updateHostAttached();
 }
+inline void setWifiConnected(bool connected) {
+    gWifiConnected = connected;
+    updateHostAttached();
+}
+
+/**
+ * Register the Wi-Fi link: how to write a frame, and how to service its socket.
+ *
+ * Both, not just the writer — see relayWait(). Call once, from the Wi-Fi transport's setup.
+ */
+inline void setWifiLink(FrameSink sink, PumpFn pump) { gWifiSink = sink; gWifiPump = pump; }
 
 /**
  * Report the crash the device just came back from, if it was one. Call after begin().
@@ -463,9 +548,14 @@ inline void tick(uint32_t nowMs) {
 class NimBLEService;
 
 namespace SentryReporting {
+typedef bool (*FrameSink)(const uint8_t *frame, size_t len);
 inline void begin() {}
 inline void attachBleService(NimBLEService *) {}
 inline void setBleConnected(bool) {}
+inline void setWifiConnected(bool) {}
+inline void setWifiLink(FrameSink, void (*)()) {}
+inline void onHostFrame(const uint8_t *, size_t) {}
+inline void onConfigWrite(const uint8_t *, size_t) {}
 inline void reportLastBoot() {}
 inline void tick(uint32_t) {}
 }  // namespace SentryReporting

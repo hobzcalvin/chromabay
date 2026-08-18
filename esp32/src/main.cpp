@@ -2359,6 +2359,8 @@ enum TcpChannel : uint8_t {
     CH_LIBRARY_DUMP   = 9,  // req(empty) → one frame per pattern: [name\0][mpack]; then empty frame = done
     CH_DEVICE_NAME    = 10, // write utf8 name; empty req → name reply
     CH_COMM_CONFIG    = 11, // write mpack patch; empty req → settings JSON reply
+    CH_SENTRY_RELAY   = 12, // crash-report relay frames, both directions (see sentry_reporting.h)
+    CH_SENTRY_CONFIG  = 13, // write the DSN the device reports to
 };
 
 // WebSocket control transport (hand-rolled over WiFiServer — the browser can only speak
@@ -2399,6 +2401,15 @@ namespace WifiLink {
     inline bool clientReady() { return wsReady && client && client.connected(); }
     // Push a brightness update to the connected WS client (mirror of the BLE notify).
     inline void pushBrightness(uint8_t b) { if (clientReady()) sendFrame(CH_BRIGHTNESS, &b, 1); }
+
+    // Hand a crash-relay frame to the app over Wi-Fi — the mirror of notifying the BLE TX
+    // characteristic. Registered with SentryReporting as a function pointer at startup;
+    // returning false tells the relay the host is gone, which keeps the report buffered.
+    static bool sendSentryFrame(const uint8_t* frame, size_t len) {
+        if (!clientReady()) return false;
+        sendFrame(CH_SENTRY_RELAY, frame, (uint32_t)len);
+        return true;
+    }
 
     // Stream the stored library: one frame per pattern on CH_LIBRARY_DUMP, payload =
     // NUL-terminated name followed by the raw pattern msgpack; an empty frame signals done.
@@ -2488,6 +2499,10 @@ namespace WifiLink {
                 if (len > 0) stageCommConfig(p, len);
                 else sendStr(CH_COMM_CONFIG, commSettingsJson());
                 break;
+            // Same two handlers the BLE characteristics call — the relay protocol and the
+            // DSN host check live in sentry_reporting.h and are not reimplemented here.
+            case CH_SENTRY_RELAY:  SentryReporting::onHostFrame(p, len); break;
+            case CH_SENTRY_CONFIG: SentryReporting::onConfigWrite(p, len); break;
             default: Serial.printf("[TCP] unknown channel %u\n", ch); break;
         }
     }
@@ -2516,6 +2531,9 @@ namespace WifiLink {
         client.write((const uint8_t*)resp.c_str(), resp.length());
         rx.erase(rx.begin(), rx.begin() + end + 4); // keep any WS bytes already after the headers
         msg.clear(); wsReady = true; deviceConnected = true; noteActivity();
+        // The app is reachable: a crash queued from a previous boot can go out now. (It still
+        // has to send HELLO before anything is relayed — this only says the pipe exists.)
+        SentryReporting::setWifiConnected(true);
         Serial.printf("[WS] handshake OK: %s\n", client.remoteIP().toString().c_str());
     }
 
@@ -2617,11 +2635,13 @@ namespace WifiLink {
             if (nc) {
                 if (client && client.connected()) { nc.stop(); } // one client at a time
                 else { client = nc; client.setNoDelay(true); rx.clear(); msg.clear(); wsReady = false;
+                       SentryReporting::setWifiConnected(false);  // not until the handshake
                        Serial.printf("[WS] TCP client %s\n", client.remoteIP().toString().c_str()); }
             }
         }
         if (!client || !client.connected()) {
             if (deviceConnected && gWifiMode) { deviceConnected = false; wsReady = false; }
+            SentryReporting::setWifiConnected(false);
             return;
         }
         int av = client.available();
@@ -2912,6 +2932,11 @@ void setup() {
         gWifiMode = WifiLink::begin();
         Serial.println(gWifiMode ? "Transport: WiFi/TCP (BLE disabled this boot)"
                                  : "Transport: BLE (WiFi requested but unavailable)");
+        // Crash reports go out over whichever link the app is on. Without this a device in
+        // WiFi mode has no BLE and no route, and buffers panics it can never deliver.
+        // The pump matters as much as the writer: a relayed report blocks the loop task, and
+        // WifiLink::tick() is what would otherwise deliver the app's answer.
+        if (gWifiMode) SentryReporting::setWifiLink(&WifiLink::sendSentryFrame, &WifiLink::tick);
     }
 #endif
 

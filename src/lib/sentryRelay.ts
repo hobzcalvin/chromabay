@@ -1,7 +1,8 @@
 /**
  * Relay crash reports from a connected device to Sentry.
  *
- * The firmware has no route to the internet in BLE mode, so it hands us a complete HTTP
+ * The firmware has no route to the internet of its own — it deliberately does not link a TLS
+ * stack (107 KB, see CHROMABAY_SENTRY_WIFI in the firmware) — so it hands us a complete HTTP
  * request — URL, two headers, body — and we perform it and report the status back. Everything
  * Sentry-specific (the envelope, the auth header, the ingest URL) is built on the device by
  * sentry-micro; this file knows nothing about any of it and would relay a request to any
@@ -9,6 +10,10 @@
  *
  * That is the point of the design: a companion app supports device crash reporting in about
  * the amount of code below, and never has to learn what an envelope is.
+ *
+ * Both links carry the identical frames: over BLE they are GATT notifications and writes on
+ * three characteristics; over Wi-Fi they are WebSocket messages on channels 12 (relay) and 13
+ * (DSN). Everything below is keyed by an opaque RelayLink, so the protocol is written once.
  *
  * Wire protocol (sentry-micro `core/sentry_relay.h`), little-endian:
  *
@@ -24,6 +29,8 @@
 
 import { LED_SERVICE_UUID, startBinaryNotifications, writeCharacteristicBinary } from './ble';
 import { connectedDevices } from './stores/deviceStore';
+import { wifiConns } from './stores/wifiDeviceStore';
+import type { WifiDevice } from './wifiTransport';
 
 const SENTRY_TX_UUID = 'a0be83fb-8dc9-47f0-ab40-b19721d20ed1'; // device → app, notify
 const SENTRY_RX_UUID = 'a0be83fc-8dc9-47f0-ab40-b19721d20ed1'; // app → device, write
@@ -86,9 +93,62 @@ interface PendingRequest {
   seen: Set<number>;
 }
 
+/**
+ * One device, reachable somehow. The three operations the relay needs, and nothing else.
+ *
+ * A hand-written pair of implementations rather than something generic, because the firmware
+ * side is the same way: Wi-Fi mirrors a subset of the BLE characteristics by hand. When that
+ * gets a real bridge (see the Endpoint table plan), this collapses with it.
+ */
+interface RelayLink {
+  /** Identity for the maps below: a BLE device id, or `wifi:<name>`. */
+  key: string;
+  /** Subscribe to device → app frames. Rejects on firmware without the relay. */
+  subscribe(onFrame: (dv: DataView) => void): Promise<void>;
+  /** app → device: HELLO and STATUS. */
+  toDevice(frame: DataView): Promise<void>;
+  /** app → device: the DSN to report to. */
+  config(dsn: Uint8Array): Promise<void>;
+}
+
+function bleLink(deviceId: string): RelayLink {
+  return {
+    key: deviceId,
+    subscribe: (onFrame) =>
+      startBinaryNotifications(deviceId, LED_SERVICE_UUID, SENTRY_TX_UUID, onFrame),
+    toDevice: (frame) =>
+      writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, SENTRY_RX_UUID, frame),
+    config: (dsn) =>
+      writeCharacteristicBinary(
+        deviceId,
+        LED_SERVICE_UUID,
+        SENTRY_CONFIG_UUID,
+        new DataView(dsn.buffer, dsn.byteOffset, dsn.byteLength)
+      )
+  };
+}
+
+function wifiLink(name: string, dev: WifiDevice): RelayLink {
+  const asBytes = (frame: DataView) =>
+    new Uint8Array(frame.buffer, frame.byteOffset, frame.byteLength);
+  return {
+    key: `wifi:${name}`,
+    // Nothing to subscribe to over a WebSocket — the socket is already open and the device
+    // pushes when it has something. Installing the hook is the whole of it.
+    subscribe: async (onFrame) => {
+      dev.onSentryFrame = (payload) =>
+        onFrame(new DataView(payload.buffer, payload.byteOffset, payload.byteLength));
+    },
+    toDevice: async (frame) => dev.sendSentry(asBytes(frame)),
+    config: async (dsn) => dev.sendSentryConfig(dsn)
+  };
+}
+
 /** One in-flight request per device; the firmware never has two outstanding. */
 const pending = new Map<string, PendingRequest>();
 const started = new Set<string>();
+/** Live links, so a STATUS can be sent back over whichever one the request arrived on. */
+const links = new Map<string, RelayLink>();
 
 function statusFrame(
   requestId: number,
@@ -107,19 +167,16 @@ function statusFrame(
 }
 
 async function sendStatus(
-  deviceId: string,
+  key: string,
   requestId: number,
   result: number,
   httpStatus = 0,
   retryAfterMs = 0
 ): Promise<void> {
+  const link = links.get(key);
+  if (!link) return;   // link dropped mid-request; the device times out and keeps the event
   try {
-    await writeCharacteristicBinary(
-      deviceId,
-      LED_SERVICE_UUID,
-      SENTRY_RX_UUID,
-      statusFrame(requestId, result, httpStatus, retryAfterMs)
-    );
+    await link.toDevice(statusFrame(requestId, result, httpStatus, retryAfterMs));
   } catch (err) {
     // The device times out on its own and keeps the event buffered, so a lost status costs a
     // retry rather than the report.
@@ -254,26 +311,20 @@ function onFrame(deviceId: string, dv: DataView): void {
  * it into the firmware is deliberate: released firmware binaries are public, and a key
  * extractable with `strings` is a key anyone can spend our quota with.
  */
-export async function startSentryRelay(deviceId: string): Promise<void> {
+async function attach(link: RelayLink): Promise<void> {
   if (!ALLOWED_HOST) return;
-  if (started.has(deviceId)) return;
+  if (started.has(link.key)) return;
 
   try {
-    await startBinaryNotifications(deviceId, LED_SERVICE_UUID, SENTRY_TX_UUID, (dv) =>
-      onFrame(deviceId, dv)
-    );
+    await link.subscribe((dv) => onFrame(link.key, dv));
   } catch {
     return; // firmware without the relay characteristics
   }
-  started.add(deviceId);
+  started.add(link.key);
+  links.set(link.key, link);
 
   try {
-    await writeCharacteristicBinary(
-      deviceId,
-      LED_SERVICE_UUID,
-      SENTRY_CONFIG_UUID,
-      new DataView(new TextEncoder().encode(DEVICE_DSN).buffer)
-    );
+    await link.config(new TextEncoder().encode(DEVICE_DSN));
   } catch (err) {
     console.warn('[SentryRelay] DSN provisioning failed:', err);
   }
@@ -286,18 +337,24 @@ export async function startSentryRelay(deviceId: string): Promise<void> {
   dv.setUint8(1, PROTOCOL_VERSION);
   dv.setUint16(2, MAX_CHUNK_BYTES, true);
   try {
-    await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, SENTRY_RX_UUID, dv);
-    console.log(`[SentryRelay] attached to ${deviceId}`);
+    await link.toDevice(dv);
+    console.log(`[SentryRelay] attached to ${link.key}`);
   } catch (err) {
     console.warn('[SentryRelay] hello failed:', err);
-    started.delete(deviceId);
+    started.delete(link.key);
+    links.delete(link.key);
   }
 }
 
+export function startSentryRelay(deviceId: string): Promise<void> {
+  return attach(bleLink(deviceId));
+}
+
 /** Forget a device's relay state on disconnect, so a reconnect re-announces itself. */
-export function stopSentryRelay(deviceId: string): void {
-  started.delete(deviceId);
-  pending.delete(deviceId);
+export function stopSentryRelay(key: string): void {
+  started.delete(key);
+  pending.delete(key);
+  links.delete(key);
 }
 
 let watching = false;
@@ -319,16 +376,33 @@ export function watchSentryRelay(): void {
   connectedDevices.subscribe((devices) => {
     for (const deviceId of devices.keys()) {
       if (started.has(deviceId)) continue;
-      void startSentryRelay(deviceId).then(() => {
+      void attach(bleLink(deviceId)).then(() => {
         // A reconnect can land here before service discovery has settled, which fails the
         // writes and leaves us detached. One retry costs nothing and covers that window.
         if (!started.has(deviceId)) {
-          setTimeout(() => { void startSentryRelay(deviceId); }, 2000);
+          setTimeout(() => { void attach(bleLink(deviceId)); }, 2000);
         }
       });
     }
-    for (const deviceId of [...started]) {
-      if (!devices.has(deviceId)) stopSentryRelay(deviceId);
+    // Only prune BLE keys here — a Wi-Fi device is not in this store and would be detached
+    // on every BLE event.
+    for (const key of [...started]) {
+      if (!key.startsWith('wifi:') && !devices.has(key)) stopSentryRelay(key);
+    }
+  });
+
+  // The same, for devices reached over Wi-Fi. A device in Wi-Fi comm mode has no BLE at all,
+  // so this is its only route: without it, it buffers panics on flash that nothing collects.
+  wifiConns.subscribe((conns) => {
+    const live = new Set<string>();
+    for (const [name, conn] of Object.entries(conns)) {
+      if (conn.state !== 'ready' || !conn.dev) continue;
+      const key = `wifi:${name}`;
+      live.add(key);
+      if (!started.has(key)) void attach(wifiLink(name, conn.dev));
+    }
+    for (const key of [...started]) {
+      if (key.startsWith('wifi:') && !live.has(key)) stopSentryRelay(key);
     }
   });
 }
