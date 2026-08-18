@@ -133,6 +133,7 @@ static bool gWifiConnected = false;
 static bool gRelayWasReady = false;
 static uint32_t gLastFlushMs = 0;
 static bool gLastFlushDelivered = false;
+static bool gLastBootReported = false;
 
 // NVS namespace of its own rather than a field on DeviceSettings: the DSN is optional
 // diagnostics config, and mixing it into the settings struct would mean touching the
@@ -433,11 +434,21 @@ inline void setWifiLink(FrameSink sink, PumpFn pump) { gWifiSink = sink; gWifiPu
  * Report the crash the device just came back from, if it was one. Call after begin().
  *
  * Almost always ends up in the offline buffer rather than on the wire: at this point in
- * setup() the app has not connected and WiFi has not associated. That is the design working,
- * not failing — the event survives to the next time either happens.
+ * setup() the app has not connected. That is the design working, not failing — the event
+ * survives to the next time it does.
+ *
+ * Runs at most once per boot, but not necessarily *at* boot. A device that has never met the
+ * app has no DSN, so it cannot build an envelope at all, and the crash it just came back from
+ * would be dropped on the floor — which is precisely the first crash of a new device, the one
+ * most worth having. So this stays armed until reporting is actually enabled, and tick()
+ * calls it again the moment the app provisions a DSN.
  */
 inline void reportLastBoot() {
-    if (!sentry_is_enabled()) return;
+    if (gLastBootReported) return;
+    if (!sentry_is_enabled()) return;   // still armed; try again once a DSN arrives
+    // From here we either report or establish there is nothing to report, and either way
+    // this boot is done with the question.
+    gLastBootReported = true;
 
     const sentry_device_info_t &dev = sentry::device_info();
 #if CHROMABAY_SENTRY_COREDUMP
@@ -504,6 +515,9 @@ inline void tick(uint32_t nowMs) {
             p.end();
             Serial.printf("[Sentry] DSN %s by app\n", gPendingDsn[0] ? "provisioned" : "cleared");
             initSdk();
+            // A first-ever provisioning can be the thing that makes this boot's crash
+            // reportable. No-op on every subsequent connect — it only runs once per boot.
+            reportLastBoot();
         }
     }
 
