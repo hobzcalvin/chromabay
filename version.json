@@ -1,7 +1,7 @@
 {
-  "version": "1.1.292",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.292.zip",
-  "buildDate": "2026-08-18T23:07:59Z",
-  "commitHash": "5ab93dcc9965cb4a4be95dd26f44fec9d0718219",
-  "commitMessage": "Make the demo's crashing frame read as C++, not as a mangled symbol"
+  "version": "1.1.293",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.293.zip",
+  "buildDate": "2026-08-18T23:28:27Z",
+  "commitHash": "bb0fc7bd8b9a0a5c85711f3d9d0ab24e94e4ca06",
+  "commitMessage": "Don't put a generic message beside a specific backtrace"
 }
