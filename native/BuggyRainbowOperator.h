@@ -89,6 +89,12 @@ private:
      *
      * `noinline` so the frame survives -O2 and shows up in the backtrace by name — without it
      * the panic is reported inside render() and the stack trace is a great deal less obvious.
+     *
+     * `noclone` because GCC's interprocedural SRA otherwise emits a specialised copy named
+     * `_ZN20BuggyRainbowOperator12msPerHueStepEj$isra$55`, and the `$isra$` suffix is not
+     * valid in a mangled name, so demanglers give up and Sentry prints that verbatim while
+     * every other frame reads as C++. Measured, not theorised — it is what the first
+     * symbolicated backtrace showed.
      */
 #if defined(__EMSCRIPTEN__)
     // Browser preview: float division, so speed 0 yields infinity rather than a trap and the
@@ -101,7 +107,7 @@ private:
         return (ms > 1000000.0f || !(ms == ms)) ? 0u : (uint32_t)ms;
     }
 #else
-    __attribute__((noinline))
+    __attribute__((noinline, noclone))
     uint32_t msPerHueStep(uint32_t hueStepsPerSecond) {
         return 1000u / hueStepsPerSecond;
     }
