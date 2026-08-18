@@ -1,7 +1,7 @@
 {
-  "version": "1.1.289",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.289.zip",
-  "buildDate": "2026-08-18T21:47:27Z",
-  "commitHash": "b6743a0eb82de3e329369391ca40d631035eed33",
-  "commitMessage": "Relay crash reports over Wi-Fi too, not only Bluetooth"
+  "version": "1.1.290",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.290.zip",
+  "buildDate": "2026-08-18T22:30:48Z",
+  "commitHash": "0e8ad0554d876ca2f73dd74898d0c7f6b41cbe25",
+  "commitMessage": "Don't drop a new device's first crash for want of a DSN"
 }
