@@ -1,7 +1,7 @@
 {
-  "version": "1.1.288",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.288.zip",
-  "buildDate": "2026-08-18T21:00:31Z",
-  "commitHash": "19e73a0d983ad22952fe937b625dc6fe435a0d91",
-  "commitMessage": "Stop linking TLS into the firmware to report crashes"
+  "version": "1.1.289",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.289.zip",
+  "buildDate": "2026-08-18T21:47:27Z",
+  "commitHash": "b6743a0eb82de3e329369391ca40d631035eed33",
+  "commitMessage": "Relay crash reports over Wi-Fi too, not only Bluetooth"
 }
