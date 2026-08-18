@@ -48,6 +48,7 @@
 #if CHROMABAY_SENTRY
 
 #include <sentry_micro.h>
+#include <transport/sentry_transport_auto.hpp>
 #include <transport/sentry_transport_relay.hpp>
 #include <device/sentry_storage_fs.hpp>
 #if CHROMABAY_WIFI
@@ -101,6 +102,7 @@ static NimBLECharacteristic *gRelayTx = nullptr;
 static bool gBleConnected = false;
 static bool gRelayWasReady = false;
 static uint32_t gLastFlushMs = 0;
+static bool gLastFlushDelivered = false;
 
 // NVS namespace of its own rather than a field on DeviceSettings: the DSN is optional
 // diagnostics config, and mixing it into the settings struct would mean touching the
@@ -110,7 +112,14 @@ static const char *NVS_KEY_DSN = "dsn";
 
 // How often we're willing to spend a blocking send from loop(). Only ever paid when
 // something is actually queued — i.e. after a crash — never on a healthy device.
+//
+// Two rates, because the two cases are not alike. An attempt that delivered proves the route
+// works, and the only thing left to decide is how fast a backlog drains: one envelope every
+// 5 s clears a handful of crashes while someone is still holding the phone, and still bounds
+// the stall to one blocking send per interval. An attempt that failed says the far end is
+// gone, and retrying that every 5 s is a hitch in the LED render loop paid for nothing.
 static const uint32_t FLUSH_INTERVAL_MS = 30000;
+static const uint32_t FLUSH_BACKLOG_INTERVAL_MS = 5000;
 
 // Payload budget per BLE notification. 180 is what the rest of this firmware uses for
 // device→app chunk streams (see processLibraryDumpRequest), so it's the size already known
@@ -136,35 +145,18 @@ static sentry::RelayTransport gRelayTransport(relayWriteFrame);
 static sentry::WiFiTransport gWifiTransport;
 #endif
 
-/**
- * Picks a route per attempt: WiFi if the device is actually associated, else the phone.
- *
- * The SDK has no auto-select chain of its own yet, so it lives here for now. It belongs in
- * sentry-micro — "WiFi if connected → else a registered relay → else buffer" is in the
- * design, and every adopter with two transports needs exactly this object.
- */
-class AutoTransport : public sentry::Transport {
-public:
-    sentry::Response send(const char *url, const sentry::Headers &headers, const uint8_t *body,
-                          size_t len) override {
+// Picks a route per delivery attempt: WiFi when the device is actually associated, else
+// the phone. Ordering is the whole contract — AutoTransport takes the first transport whose
+// is_available() says yes, so the one that can tell the truth about its own link goes first.
+//
+// This used to be a hand-written class here. It is the SDK's now (sentry-micro SDK-1389):
+// every adopter with two routes needs exactly this object, and the re-selection it does on
+// every attempt — rather than once at boot — is the part that is easy to get wrong.
 #if CHROMABAY_WIFI
-        if (gWifiTransport.is_available()) return gWifiTransport.send(url, headers, body, len);
+static sentry::AutoTransport gTransport({ &gWifiTransport, &gRelayTransport });
+#else
+static sentry::AutoTransport gTransport({ &gRelayTransport });
 #endif
-        if (gRelayTransport.is_available()) return gRelayTransport.send(url, headers, body, len);
-        return sentry::SEND_UNAVAILABLE;
-    }
-
-    bool is_available() override {
-#if CHROMABAY_WIFI
-        if (gWifiTransport.is_available()) return true;
-#endif
-        return gRelayTransport.is_available();
-    }
-
-    const char *name() const override { return "auto"; }
-};
-
-static AutoTransport gTransport;
 
 // ── BLE plumbing ────────────────────────────────────────────────────────────────────────
 class RelayRxCallbacks : public NimBLECharacteristicCallbacks {
@@ -427,17 +419,25 @@ inline void tick(uint32_t nowMs) {
         // after reconnecting.
         Serial.printf("[Sentry] relay host %s (%u queued)\n", ready ? "ready" : "gone",
                       (unsigned)sentry_buffered_count());
-        if (ready) gLastFlushMs = nowMs - FLUSH_INTERVAL_MS;  // deliver now, not in 30s
+        if (ready) {
+            gLastFlushMs = nowMs - FLUSH_INTERVAL_MS;  // deliver now, not in 30s
+            gLastFlushDelivered = false;
+        }
     }
     gRelayWasReady = ready;
 
     if (sentry_buffered_count() == 0) return;
-    if (nowMs - gLastFlushMs < FLUSH_INTERVAL_MS) return;
+    const uint32_t interval = gLastFlushDelivered ? FLUSH_BACKLOG_INTERVAL_MS : FLUSH_INTERVAL_MS;
+    if (nowMs - gLastFlushMs < interval) return;
     gLastFlushMs = nowMs;
     uint32_t delivered = sentry_flush(1);
+    gLastFlushDelivered = delivered > 0;
+    // name() reports whichever route AutoTransport actually selected, so this says `wifi` or
+    // `relay` rather than a generic "up" — which is the first thing you want to know when a
+    // device that should be relaying through the phone quietly went out over WiFi instead.
     Serial.printf("[Sentry] flush: delivered %u, %u still queued (route: %s)\n",
                   (unsigned)delivered, (unsigned)sentry_buffered_count(),
-                  gTransport.is_available() ? "up" : "none");
+                  gTransport.is_available() ? gTransport.name() : "none");
 }
 
 }  // namespace SentryReporting
