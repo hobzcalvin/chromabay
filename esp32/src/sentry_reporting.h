@@ -3,17 +3,15 @@
 // Crash + reset-reason reporting through sentry-micro (https://github.com/getsentry/sentry-micro).
 //
 // The device builds a real Sentry envelope itself and hands the bytes to a transport; the SDK
-// owns every Sentry-specific detail (DSN, envelope format, auth header, backoff). Two
-// transports are wired up here and chosen automatically per attempt:
+// owns every Sentry-specific detail (DSN, envelope format, auth header, backoff). The route
+// is the relay: the device chunks (url, headers, body) over a BLE characteristic and the app
+// performs the request. A phone that is already holding an HTTPS stack is a better place to
+// put one than a chip with 300 KB of usable flash left — see CHROMABAY_SENTRY_WIFI below for
+// the direct-to-ingest alternative and what it costs.
 //
-//   wifi   HTTPS straight to ingest, when the device is in WiFi mode and associated.
-//   relay  the phone does it. The device chunks (url, headers, body) over a BLE
-//          characteristic and the app performs the request — which is the only route a
-//          BLE-mode ChromaBay has, and therefore the one that matters most here.
-//
-// Neither is usually available at the moment a crash is discovered — that happens in setup(),
-// before the radio is up and long before the app connects — so the event is written to the
-// LittleFS-backed offline buffer and delivered later by tick().
+// The route is not usually available at the moment a crash is discovered — that happens in
+// setup(), long before the app connects — so the event is written to the LittleFS-backed
+// offline buffer and delivered later by tick().
 //
 // Entirely optional, and inert unless two things line up:
 //   1. the SDK is on the include path  (lib_deps: ${sysenv.CHROMABAY_SENTRY_MICRO})
@@ -47,11 +45,28 @@
 
 #if CHROMABAY_SENTRY
 
+// Whether the device may deliver its own reports over HTTPS, instead of always handing them
+// to the phone. Off, and deliberately so, even in WiFi builds.
+//
+// It is not the DSN or the certificate that costs anything — we pin no root anyway, so the
+// connection has always been encrypted but unauthenticated. It is mbedTLS: WiFiClientSecure
+// drags in the SSL and x509 layers, which is ~120 KB of flash on top of the mbedcrypto this
+// firmware already links for OTA signature checks. That is more than the entire rest of
+// crash reporting costs (~18 KB), spent so a device can do for itself something the phone
+// in the user's hand can already do for it.
+//
+// The cost of leaving it off: a device in WiFi comm mode has no BLE, so it can only deliver
+// when the app is connected over the WiFi link. Set to 1 for a fleet that must report with
+// no app anywhere near it, and accept the flash.
+#ifndef CHROMABAY_SENTRY_WIFI
+#define CHROMABAY_SENTRY_WIFI 0
+#endif
+
 #include <sentry_micro.h>
 #include <transport/sentry_transport_auto.hpp>
 #include <transport/sentry_transport_relay.hpp>
 #include <device/sentry_storage_fs.hpp>
-#if CHROMABAY_WIFI
+#if CHROMABAY_WIFI && CHROMABAY_SENTRY_WIFI
 #include <transport/sentry_transport_wifi.hpp>
 #endif
 // The coredump half of the SDK is still landing; use it when the checkout has it, and fall
@@ -141,7 +156,7 @@ inline bool relayWriteFrame(void *, const uint8_t *frame, size_t len) {
 
 static sentry::RelayTransport gRelayTransport(relayWriteFrame);
 
-#if CHROMABAY_WIFI
+#if CHROMABAY_WIFI && CHROMABAY_SENTRY_WIFI
 static sentry::WiFiTransport gWifiTransport;
 #endif
 
@@ -152,7 +167,7 @@ static sentry::WiFiTransport gWifiTransport;
 // This used to be a hand-written class here. It is the SDK's now (sentry-micro SDK-1389):
 // every adopter with two routes needs exactly this object, and the re-selection it does on
 // every attempt — rather than once at boot — is the part that is easy to get wrong.
-#if CHROMABAY_WIFI
+#if CHROMABAY_WIFI && CHROMABAY_SENTRY_WIFI
 static sentry::AutoTransport gTransport({ &gWifiTransport, &gRelayTransport });
 #else
 static sentry::AutoTransport gTransport({ &gRelayTransport });
