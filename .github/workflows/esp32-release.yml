@@ -1,5 +1,30 @@
 name: ESP32 Firmware Release
 
+# Builds every firmware variant, makes each one's crashes readable in Sentry, signs them,
+# and publishes the result.
+#
+# Three jobs rather than one, because the middle step fans out. Symbolication is per-binary:
+# each board and feature variant is a distinct ELF with its own debug id, and a variant
+# nobody uploaded debug files for is invisible — its firmware works, its crash reports
+# arrive, and only its users get raw hex addresses. So every variant is built in its own job,
+# and the list of variants is read out of platformio.ini rather than written here. Adding a
+# board adds it to the release.
+#
+#   plan     read the variants out of esp32/platformio.ini, decide the version
+#   build    one job per variant: build with a build-id compiled in, stamp the ELF,
+#            upload its debug files to Sentry, hand the binaries on as an artifact
+#   publish  merge the factory images, PSA-sign the OTA images, push to gh-pages
+#
+# Secrets and variables:
+#   ESP32_SIGNING_PRIVATE_KEY  (secret)   required — OTA signing, as before
+#   SENTRY_AUTH_TOKEN          (secret)   optional — org auth token with scope `org:ci`.
+#                                         Absent, the release still builds and publishes;
+#                                         it just ships without debug files, and the job
+#                                         summary says so per variant.
+#   SENTRY_ORG / SENTRY_PROJECT (vars)    the project debug files go to. SENTRY_ORG can be
+#                                         left unset with an organization auth token, which
+#                                         embeds its own org.
+
 on:
   push:
     branches:
@@ -12,31 +37,166 @@ on:
       - 'fwv*'
   workflow_dispatch:
 
-concurrency:
-  # Shared with deploy.yml so the two never push to gh-pages simultaneously.
-  group: "gh-pages-publish"
-  cancel-in-progress: false
+permissions:
+  contents: read
+
+env:
+  # sentry-micro, pinned by commit. The same revision supplies both halves of this: the
+  # library the firmware links (below, via lib_deps) and the action that stamps and uploads
+  # the debug files describing it. They must not drift — debug files that describe a
+  # slightly different binary resolve addresses to confidently wrong functions — so there is
+  # one SHA, used twice. `uses:` cannot take an expression, so the steps below repeat it
+  # literally; change all three together.
+  CHROMABAY_SENTRY_MICRO: https://github.com/getsentry/sentry-micro.git#3315fb793864afb7b01851d059ea68166a0a0936
 
 jobs:
-  build-and-sign:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    outputs:
+      environments: ${{ steps.list.outputs.environments }}
+      version: ${{ steps.version.outputs.VERSION }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Every [env:...] in esp32/platformio.ini becomes a build job. A new board therefore
+      # cannot ship without debug files by someone forgetting to add it to a list here.
+      - name: List firmware variants
+        id: list
+        uses: getsentry/sentry-micro/.github/actions/list-environments@3315fb793864afb7b01851d059ea68166a0a0936
+        with:
+          project-dir: esp32
+
+      - name: Determine firmware version
+        id: version
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            # Tagged release: use the clean tag (e.g. fwv0.0.20)
+            VERSION="${GITHUB_REF#refs/tags/}"
+          else
+            # Auto build on main: base from firmware_version.h + monotonic CI build
+            # number → e.g. fwv0.1.143 (unique + newest-first sortable).
+            BASE=$(grep '#define FIRMWARE_VERSION' esp32/src/firmware_version.h | sed 's/.*"\(.*\)".*/\1/')
+            VERSION="${BASE}.${{ github.run_number }}"
+          fi
+          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Firmware version: ${VERSION}"
+
+  build:
+    name: Build ${{ matrix.environment }}
+    needs: plan
+    runs-on: ubuntu-latest
+    strategy:
+      # One broken variant should not hide the status of the other five.
+      fail-fast: false
+      matrix:
+        environment: ${{ fromJSON(needs.plan.outputs.environments) }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      # Cache the heavy bits: downloaded platforms/toolchains (~/.platformio) and the
+      # incremental build dir (esp32/.pio). Keyed per variant, since each job builds one.
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            esp32/.pio
+          key: pio-${{ runner.os }}-${{ matrix.environment }}-${{ hashFiles('esp32/platformio.ini') }}
+          restore-keys: |
+            pio-${{ runner.os }}-${{ matrix.environment }}-
+            pio-${{ runner.os }}-
+
+      - name: Stamp firmware version into source
+        run: |
+          # Make the built binary report exactly the version we publish to the OTA
+          # registry, so the app's "device up to date?" comparison matches — and so the
+          # release name below, which the firmware reports on every event, matches the
+          # debug files uploaded under it.
+          sed -i "s/#define FIRMWARE_VERSION \".*\"/#define FIRMWARE_VERSION \"${{ needs.plan.outputs.version }}\"/" esp32/src/firmware_version.h
+          grep '#define FIRMWARE_VERSION' esp32/src/firmware_version.h
+
+      # Builds this variant to a fixpoint (the load address it compiles in changes the image
+      # it describes, so it re-measures until they agree), stamps the build-id into the ELF
+      # as a non-ALLOC note, and uploads the debug files. `chromabay@<version>` is the same
+      # string src/sentry_reporting.h sets as options.release, which is what ties an arriving
+      # event to these files.
+      - name: Build and upload debug files
+        uses: getsentry/sentry-micro/.github/actions/upload-debug-files@3315fb793864afb7b01851d059ea68166a0a0936
+        with:
+          project-dir: esp32
+          environments: ${{ matrix.environment }}
+          # Coverage is guaranteed by the matrix, which came from platformio.ini.
+          require-complete: false
+          release: chromabay@${{ needs.plan.outputs.version }}
+          org: ${{ vars.SENTRY_ORG }}
+          project: ${{ vars.SENTRY_PROJECT }}
+          # Build, stamp and verify unconditionally; only talk to Sentry when there is a
+          # token. A repository without one still ships firmware — it just ships firmware
+          # whose crashes arrive as addresses.
+          upload: ${{ secrets.SENTRY_AUTH_TOKEN != '' }}
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+
+      # Everything the publish job needs from this variant. bootloader/partitions/boot_app0
+      # are only used for the three WiFi variants (they become the merged USB image), but
+      # copying them from every build keeps this step free of per-variant special cases.
+      - name: Collect build output
+        run: |
+          set -euo pipefail
+          OUT="artifact"
+          mkdir -p "$OUT"
+          BUILD="esp32/.pio/build/${{ matrix.environment }}"
+          cp "$BUILD/firmware.bin" "$BUILD/bootloader.bin" "$BUILD/partitions.bin" "$OUT/"
+          cp "$(find ~/.platformio -name boot_app0.bin | head -1)" "$OUT/"
+          ls -l "$OUT"
+
+      - name: Upload build output
+        uses: actions/upload-artifact@v4
+        with:
+          name: fw-${{ matrix.environment }}
+          path: artifact/
+          retention-days: 7
+          if-no-files-found: error
+
+  publish:
+    name: Sign and publish
+    needs: [plan, build]
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # Required to create releases
-      actions: read    # Required to read workflow info
-    
+      contents: write  # Required to create releases and push to gh-pages
+    concurrency:
+      # Shared with deploy.yml so the two never push to gh-pages simultaneously. Held by
+      # this job alone rather than the whole workflow, so a firmware build no longer blocks
+      # an app deploy for the length of six compiles.
+      group: "gh-pages-publish"
+      cancel-in-progress: false
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-    
+
+    - name: Download every variant
+      uses: actions/download-artifact@v4
+      with:
+        path: builds
+        pattern: fw-*
+
     - name: Setup Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.11'
-        
+
     - name: Install Python dependencies
       run: |
-        pip install cryptography
-    
+        pip install cryptography esptool
+
     - name: Install mbedTLS for PSA crypto
       run: |
         # The runner's pre-installed Microsoft apt repos intermittently serve invalid InRelease
@@ -44,76 +204,28 @@ jobs:
         sudo grep -lr packages.microsoft.com /etc/apt/sources.list.d/ 2>/dev/null | xargs -r sudo rm -f
         sudo apt-get update
         sudo apt-get install -y libmbedtls-dev
-    
-    - name: Setup PlatformIO
-      run: |
-        pip install platformio
-        pio --version
-
-    # Cache the heavy bits: downloaded platforms/toolchains (~/.platformio) and the
-    # incremental build dir (esp32/.pio). This is what turns the ~8 min cold build into
-    # a ~1-2 min warm one. Key is invalidated when platformio.ini changes (e.g. a pinned
-    # dep bump); restore-keys lets an older cache seed a partial restore.
-    - name: Cache PlatformIO
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.platformio
-          esp32/.pio
-        key: pio-${{ runner.os }}-${{ hashFiles('esp32/platformio.ini') }}
-        restore-keys: |
-          pio-${{ runner.os }}-
 
     - name: Create private key file from secret
       run: |
         echo "${{ secrets.ESP32_SIGNING_PRIVATE_KEY }}" > esp32-signing-private.pem
         chmod 600 esp32-signing-private.pem
-    
+
     - name: Convert private key to raw format for PSA
       run: |
         python3 convert_key_to_raw.py esp32-signing-private.pem private_key.raw
-        
+
     - name: Build PSA signing tool
       run: |
         gcc -Wall -std=c99 psa_sign_firmware.c -lmbedcrypto -o psa_sign_firmware
         chmod +x psa_sign_firmware
-        
-    - name: Determine firmware version
-      id: version
-      run: |
-        if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-          # Tagged release: use the clean tag (e.g. fwv0.0.20)
-          VERSION="${GITHUB_REF#refs/tags/}"
-        else
-          # Auto build on main: base from firmware_version.h + monotonic CI build
-          # number → e.g. fwv0.1.143 (unique + newest-first sortable).
-          BASE=$(grep '#define FIRMWARE_VERSION' esp32/src/firmware_version.h | sed 's/.*"\(.*\)".*/\1/')
-          VERSION="${BASE}.${{ github.run_number }}"
-        fi
-        echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
-        echo "Firmware version: ${VERSION}"
-
-    - name: Stamp firmware version into source
-      run: |
-        # Make the built binary report exactly the version we publish to the OTA
-        # registry, so the app's "device up to date?" comparison matches.
-        sed -i "s/#define FIRMWARE_VERSION \".*\"/#define FIRMWARE_VERSION \"${{ steps.version.outputs.VERSION }}\"/" esp32/src/firmware_version.h
-        grep '#define FIRMWARE_VERSION' esp32/src/firmware_version.h
-
-    - name: Build firmware
-      run: |
-        cd esp32
-        pio run
 
     - name: Build merged factory images and sign (all chips)
       run: |
-        # `pio run` above built every env. For each chip: merge a factory image (bootloader +
-        # partition table + boot_app0 + app @ offset 0) for USB flashing, and sign the app
-        # image (firmware.bin @ 0x10000) for BLE OTA. OTA and USB are always the same build.
+        set -euo pipefail
+        # For each chip: merge a factory image (bootloader + partition table + boot_app0 +
+        # app @ offset 0) for USB flashing, and sign the app image (firmware.bin @ 0x10000)
+        # for BLE OTA. OTA and USB are always the same build.
         # Classic ESP32's bootloader lives at 0x1000; ESP32-S3/C3 at 0x0.
-        pip install --quiet esptool
-        BOOT_APP0=$(find ~/.platformio -name boot_app0.bin | head -1)   # same for every variant
-        echo "boot_app0: $BOOT_APP0"
         # pio env | esptool --chip | bootloader offset | flash size (S3 is N8 = 8MB)
         VARIANTS=(
           "esp32dev|esp32|0x1000|4MB"
@@ -123,8 +235,8 @@ jobs:
         mkdir -p dist
         for row in "${VARIANTS[@]}"; do
           IFS='|' read -r ENV CHIP BOOTOFF FLASHSZ <<< "$row"
-          B="esp32/.pio/build/$ENV"            # WiFi build (factory + OTA)
-          BN="esp32/.pio/build/$ENV-nowifi"    # no-WiFi build (OTA-only, fits legacy slots)
+          B="builds/fw-$ENV"            # WiFi build (factory + OTA)
+          BN="builds/fw-$ENV-nowifi"    # no-WiFi build (OTA-only, fits legacy slots)
           echo "▶ $CHIP: merge factory image (WiFi) + sign both OTA variants"
           # Factory USB image = the WiFi build (new partition, full features).
           esptool.py --chip "$CHIP" merge_bin \
@@ -132,7 +244,7 @@ jobs:
             -o "dist/chromabay-factory-$CHIP.bin" \
             "$BOOTOFF" "$B/bootloader.bin" \
             0x8000  "$B/partitions.bin" \
-            0xe000  "$BOOT_APP0" \
+            0xe000  "$B/boot_app0.bin" \
             0x10000 "$B/firmware.bin"
           # Sign + stage both OTA app images.
           ./psa_sign_firmware "$B/firmware.bin"  private_key.raw "dist/firmware-$CHIP.sig"
@@ -157,8 +269,8 @@ jobs:
           dist/chromabay-factory-esp32s3.bin
           dist/chromabay-factory-esp32c3.bin
         body: |
-          ## 🔵 ESP32 Firmware Release ${{ steps.version.outputs.VERSION }}
-          
+          ## 🔵 ESP32 Firmware Release ${{ needs.plan.outputs.version }}
+
           ### 📦 Files (one set per chip — esp32 / esp32s3 / esp32c3):
           - **`firmware-<chip>.bin`** - app image (BLE OTA)
           - **`firmware-<chip>.sig`** - ECDSA P-256 signature for secure OTA updates
@@ -169,21 +281,21 @@ jobs:
           - ✅ Signature verification enforced on device during OTA using **PSA Crypto**
           - ✅ **Complete PSA compatibility** between signing and verification
           - ✅ Tamper-proof updates prevent malicious firmware installation
-          
+
           ### 📋 Installation:
           **Initial Upload (USB):**
           ```bash
           # Download firmware.bin and flash via USB
           esptool.py --port /dev/ttyUSB0 write_flash 0x10000 firmware.bin
           ```
-          
+
           **OTA Update (BLE):**
           1. Connect to device via BLE (Service UUID: `a0be83e4-8dc9-47f0-ab40-b19721d20ed1`)
           2. Send signature to characteristic `a0be83eb-8dc9-47f0-ab40-b19721d20ed1`
           3. Send firmware data to characteristic `a0be83e9-8dc9-47f0-ab40-b19721d20ed1`
           4. Send "END_OTA" to characteristic `a0be83e8-8dc9-47f0-ab40-b19721d20ed1`
           5. Device verifies signature and reboots with new firmware
-          
+
           ### 🛠 Technical Details:
           - **Targets:** ESP32 (classic), ESP32-S3, ESP32-C3 — 4MB partition layout
           - **Framework:** Arduino with PlatformIO
@@ -191,7 +303,8 @@ jobs:
           - **BLE Stack:** NimBLE for efficient memory usage
           - **LED Support:** WS2812B via NeoPixelBus + FastLED
           - **Crypto:** PSA Crypto API for signing and verification
-          
+          - **Crash reporting:** Sentry, via sentry-micro — debug files uploaded per variant
+
         draft: false
         prerelease: false
 
@@ -200,27 +313,27 @@ jobs:
         # Install jq for JSON manipulation (drop the flaky Microsoft repos first — see above)
         sudo grep -lr packages.microsoft.com /etc/apt/sources.list.d/ 2>/dev/null | xargs -r sudo rm -f
         sudo apt-get update && sudo apt-get install -y jq
-        
+
         # Get hardware version from firmware
         HARDWARE_VERSION=$(grep '#define HARDWARE_VERSION' esp32/src/firmware_version.h | sed 's/.*"\(.*\)".*/\1/')
         echo "Hardware version: $HARDWARE_VERSION"
-        
+
         # Get current date
         BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-        
+
         # Clone gh-pages branch to get existing registry
         git clone --depth=1 --branch=gh-pages "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" gh_pages_temp
-        
+
         # Create firmware directory structure
         mkdir -p gh_pages_temp/firmware/esp32
-        
+
         # Initialize registry if it doesn't exist
         REGISTRY_FILE="gh_pages_temp/firmware/esp32/esp32_firmware_registry.json"
         if [ ! -f "$REGISTRY_FILE" ]; then
           echo "[]" > "$REGISTRY_FILE"
         fi
-        
-        VER="${{ steps.version.outputs.VERSION }}"
+
+        VER="${{ needs.plan.outputs.version }}"
         # Publish one set of files per chip under <version>/<chip>/, add one registry entry
         # per chip (with a `chip` field so the app picks the matching architecture), and build
         # a single esp-web-tools manifest listing all chip families (the USB flasher
@@ -284,13 +397,13 @@ jobs:
         git config user.name 'github-actions[bot]'
         git config user.email 'github-actions[bot]@users.noreply.github.com'
         git add .
-        git commit -m "Deploy ESP32 firmware ${{ steps.version.outputs.VERSION }} and update registry (PSA-signed)"
+        git commit -m "Deploy ESP32 firmware ${{ needs.plan.outputs.version }} and update registry (PSA-signed)"
         git push origin gh-pages
-        
+
         # Clean up
         cd ..
         rm -rf gh_pages_temp
-        
+
     - name: Clean up private key files
       if: always()
       run: |
