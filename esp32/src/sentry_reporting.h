@@ -462,26 +462,35 @@ inline void reportLastBoot() {
     sentry_event_t event;
     if (!sentry_event_prepare(&event, eventId)) return;
 
+    event.level = SENTRY_LEVEL_FATAL;
+
+    // The coredump first, because whether we got one decides what there is to say. It turns
+    // the event from "it panicked" into an `exception` with a symbolicated backtrace — which
+    // is also what Sentry titles the issue from, so an event that has one needs no message
+    // of ours competing with it.
+#if CHROMABAY_SENTRY_COREDUMP
+    sentry_coredump_t coredump;
+    const bool attached = sentry_event_attach_coredump(&event, &coredump);
+#else
+    const bool attached = false;
+#endif
+
+    // Only when the dump gave us nothing: a brownout or a watchdog with an empty coredump
+    // partition still deserves to be reported, and "Device rebooted: brownout" is the whole
+    // of what we know. Attaching it to an event that already carries a stack trace would
+    // just add a generic line beside a specific one.
     char message[96];
     snprintf(message, sizeof(message), "Device rebooted: %s",
              sentry_reset_reason_name(dev.reset_reason));
-    event.level = SENTRY_LEVEL_FATAL;
-    event.message = message;
-
-#if CHROMABAY_SENTRY_COREDUMP
-    // Turns the event from "it panicked" into a symbolicated backtrace. Sets its own message
-    // and level when a dump is present, so the fallback above only ever describes a crash we
-    // have nothing better to say about.
-    sentry_coredump_t coredump;
-    const bool attached = sentry_event_attach_coredump(&event, &coredump);
-#endif
+    if (!attached) event.message = message;
 
     // 2 KB of the setup() stack (the Arduino loop task has 8 KB), released on return.
     uint8_t envelope[SENTRY_MICRO_ENVELOPE_BUFFER_BYTES];
     size_t len = sentry_envelope_write((char *)envelope, sizeof(envelope), &event);
     if (len >= sizeof(envelope)) return;  // nothing usable was written
 
-    Serial.printf("[Sentry] reporting last boot: %s\n", message);
+    Serial.printf("[Sentry] reporting last boot: %s%s\n", message,
+                  attached ? " (with backtrace)" : "");
     sentry_response_t response = sentry_send_envelope(envelope, len);
 
 #if CHROMABAY_SENTRY_COREDUMP
@@ -493,6 +502,7 @@ inline void reportLastBoot() {
     }
 #else
     (void)response;
+    (void)attached;
 #endif
 }
 
