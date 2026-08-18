@@ -1,7 +1,7 @@
 {
-  "version": "1.1.291",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.291.zip",
-  "buildDate": "2026-08-18T23:06:18Z",
-  "commitHash": "ca2fc298e6a8ef294b7054873d521f69de162894",
-  "commitMessage": "Stop shouting two NVS errors on every boot, and fix the boot banner"
+  "version": "1.1.292",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.292.zip",
+  "buildDate": "2026-08-18T23:07:59Z",
+  "commitHash": "5ab93dcc9965cb4a4be95dd26f44fec9d0718219",
+  "commitMessage": "Make the demo's crashing frame read as C++, not as a mangled symbol"
 }
