@@ -50,8 +50,13 @@ inline Settings load() {
     Preferences p;
     if (!p.begin(NS, /*readOnly=*/true)) return s; // namespace not created yet → defaults
     s.commMode     = p.getUChar("mode", s.commMode);
-    s.wifiSsid     = p.getString("ssid", s.wifiSsid);
-    s.wifiPass     = p.getString("pass", s.wifiPass);
+    // isKey() first, and only for the strings. Preferences::getString() logs at ERROR level
+    // when a key is absent — before correctly returning the default — while getUChar and
+    // friends stay quiet. A device that has never been given WiFi credentials has no `ssid`
+    // or `pass` key (the namespace exists anyway, created by saveLastNonZero), so it shouted
+    // two red lines on every boot about a completely ordinary state.
+    if (p.isKey("ssid")) s.wifiSsid = p.getString("ssid", s.wifiSsid);
+    if (p.isKey("pass")) s.wifiPass = p.getString("pass", s.wifiPass);
     s.wifiFallback = p.getUChar("fb", s.wifiFallback);
     s.sleepMinutes = p.getUShort("sleep", s.sleepMinutes);
     s.rgbTest      = p.getBool("rgbtest", s.rgbTest);

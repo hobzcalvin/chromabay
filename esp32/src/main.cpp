@@ -2751,7 +2751,7 @@ namespace RtStream {
 void setup() {
     Serial.begin(115200);
     delay(1000);
-    Serial.println("ESP32 LedManager + OTA Demo Starting...");
+    Serial.printf("ChromaBay %s starting (hardware %s)\n", FIRMWARE_VERSION, HARDWARE_VERSION);
 
     // Load device settings (comm mode / WiFi creds / sleep timer / rgb-test) from NVS.
     gSettings = DeviceSettings::load();
