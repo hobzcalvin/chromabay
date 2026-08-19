@@ -110,7 +110,12 @@ private:
     __attribute__((noinline, noclone))
     uint32_t msPerHueStep(uint32_t hueStepsPerSecond) {
         const uint32_t millisecondsPerSecond = 1000u;
-        return millisecondsPerSecond / hueStepsPerSecond;
+        // Named rather than returned directly, so the faulting instruction belongs to the
+        // division's own line. Returning the expression let -O2 fold the divide into the
+        // epilogue, and the backtrace pointed at the closing brace — technically the right
+        // address, useless to read.
+        const uint32_t millisecondsPerStep = millisecondsPerSecond / hueStepsPerSecond;
+        return millisecondsPerStep;
     }
 #endif
 
