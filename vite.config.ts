@@ -81,6 +81,13 @@ function fastledWatcher(): Plugin {
 
 export default defineConfig({
 	plugins: [sveltekit(), fastledWatcher()],
+	build: {
+		// Emit source maps so Sentry can turn `app.DM-_Jxoa.js:18` back into a file and a
+		// line. They are uploaded to Sentry and then DELETED before publishing (deploy.yml)
+		// — this repo is private while the site is public, so shipping them would publish
+		// the source along with it.
+		sourcemap: true
+	},
 	server: {
 		watch: {
 			ignored: [

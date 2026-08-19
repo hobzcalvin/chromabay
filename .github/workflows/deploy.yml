@@ -86,7 +86,18 @@ jobs:
           # backticks, backslashes, dollar signs. (A commit subject with quotes failed the build.)
           echo "COMMIT_MESSAGE=$(git log -1 --pretty=%B | head -1 | tr -d '"`\\$')" >> $GITHUB_OUTPUT
 
+      # Installed once for both source-map uploads and the release registration at the end.
+      - name: Install sentry-cli
+        run: |
+          curl -sL https://sentry.io/get-cli/ | INSTALL_DIR="$RUNNER_TEMP/sentry-cli" bash
+          echo "$RUNNER_TEMP/sentry-cli" >> "$GITHUB_PATH"
+
       - name: Build for GitHub Pages
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_RELEASE: app${{ steps.version.outputs.VERSION }}
         run: |
           export VITE_VERSION="${{ steps.version.outputs.VERSION }}"
           export VITE_BUILD_DATE="${{ steps.version.outputs.BUILD_DATE }}"
@@ -101,7 +112,23 @@ jobs:
           sed -i "s/assets: 'build'/assets: 'docs'/" svelte.config.js
           npm run build
 
+          # Source maps → Sentry, then removed before anything is published. `inject` stamps
+          # a debug id into each bundle and its map so they are matched by id rather than by
+          # guessing a URL, which is what makes this work behind a CDN and inside a WebView.
+          # Deleting them afterwards is not optional: the repo is private and the site is
+          # not, so a published .map file publishes the source.
+          if [ -n "${SENTRY_AUTH_TOKEN:-}" ]; then
+            sentry-cli sourcemaps inject docs
+            sentry-cli sourcemaps upload --release "$SENTRY_RELEASE" docs
+          fi
+          find docs -name '*.map' -delete
+
       - name: Build mobile live update bundle (no base path)
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_RELEASE: app${{ steps.version.outputs.VERSION }}
         run: |
           export VITE_VERSION="${{ steps.version.outputs.VERSION }}"
           export VITE_BUILD_DATE="${{ steps.version.outputs.BUILD_DATE }}"
@@ -117,6 +144,17 @@ jobs:
           git checkout svelte.config.js
           # Build for mobile (no base path)
           npm run build
+
+          # Source maps → Sentry, then removed before anything is published. `inject` stamps
+          # a debug id into each bundle and its map so they are matched by id rather than by
+          # guessing a URL, which is what makes this work behind a CDN and inside a WebView.
+          # Deleting them afterwards is not optional: the repo is private and the site is
+          # not, so a published .map file publishes the source.
+          if [ -n "${SENTRY_AUTH_TOKEN:-}" ]; then
+            sentry-cli sourcemaps inject build
+            sentry-cli sourcemaps upload --release "$SENTRY_RELEASE" build
+          fi
+          find build -name '*.map' -delete
           # Create mobile bundle directory
           mkdir -p mobile-bundle
           cp -r build/* mobile-bundle/
@@ -169,8 +207,6 @@ jobs:
           RELEASE: app${{ steps.version.outputs.VERSION }}
         run: |
           set -euo pipefail
-          curl -sL https://sentry.io/get-cli/ | INSTALL_DIR="$RUNNER_TEMP/sentry-cli" bash
-          export PATH="$RUNNER_TEMP/sentry-cli:$PATH"
           # --ignore-missing: an unresolvable commit (force-push, rewritten history) should
           # not fail a deploy that is otherwise fine.
           sentry-cli releases new "$RELEASE"
