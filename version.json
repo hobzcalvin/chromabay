@@ -1,7 +1,7 @@
 {
-  "version": "1.1.295",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.295.zip",
-  "buildDate": "2026-08-19T16:52:13Z",
-  "commitHash": "e8d738bbcf393ff61c13b437e71e21925a3b25cd",
-  "commitMessage": "Stop stalling the BLE link for 1.3s at the start of every OTA"
+  "version": "1.1.296",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.296.zip",
+  "buildDate": "2026-08-19T16:56:49Z",
+  "commitHash": "4294a309d30427854ea7f5d0965bd5a87d3b55f5",
+  "commitMessage": "Send the org id with the trace, not just the replay"
 }
