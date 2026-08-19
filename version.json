@@ -1,7 +1,7 @@
 {
-  "version": "1.1.293",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.293.zip",
-  "buildDate": "2026-08-18T23:28:27Z",
-  "commitHash": "bb0fc7bd8b9a0a5c85711f3d9d0ab24e94e4ca06",
-  "commitMessage": "Don't put a generic message beside a specific backtrace"
+  "version": "1.1.294",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.294.zip",
+  "buildDate": "2026-08-19T01:01:40Z",
+  "commitHash": "445ec9ff8cdba400f4a07ca304b3fcb8add7295e",
+  "commitMessage": "Link a device crash to the app session that caused it"
 }
