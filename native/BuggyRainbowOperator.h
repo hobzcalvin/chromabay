@@ -10,7 +10,7 @@
  * can be demonstrated end to end: set Speed to 0, the device divides by zero, panics, reboots,
  * and reports a symbolicated backtrace to Sentry through the phone.
  *
- * The bug is the ordinary kind, not a contrived one. `msPerHueStep()` divides by a parameter
+ * The bug is the ordinary kind, not a contrived one. `millisecondsPerHueStep()` divides by a parameter
  * the UI is perfectly happy to set to zero, and the author guarded the *other* division a few
  * lines down — the shape of a real oversight rather than an `abort()` in a wrapper.
  *
@@ -44,7 +44,7 @@ public:
         uint8_t saturation = (uint8_t)getFloat(parameters, 1, 255.0f);
 
         // How long one hue step lasts at the configured speed.
-        uint32_t stepMs = msPerHueStep(speed);
+        uint32_t stepMs = millisecondsPerHueStep(speed);
 
         // Advance the hue by however many steps fit in the time since the last frame.
         _elapsedMs += deltaTimeMs;
@@ -91,7 +91,7 @@ private:
      * the panic is reported inside render() and the stack trace is a great deal less obvious.
      *
      * `noclone` because GCC's interprocedural SRA otherwise emits a specialised copy named
-     * `_ZN20BuggyRainbowOperator12msPerHueStepEj$isra$55`, and the `$isra$` suffix is not
+     * `_ZN20BuggyRainbowOperator12millisecondsPerHueStepEj$isra$55`, and the `$isra$` suffix is not
      * valid in a mangled name, so demanglers give up and Sentry prints that verbatim while
      * every other frame reads as C++. Measured, not theorised — it is what the first
      * symbolicated backtrace showed.
@@ -102,13 +102,13 @@ private:
     // converting infinity to an integer, which would crash the editor just as hard as the
     // division it is standing in for.
     __attribute__((noinline))
-    uint32_t msPerHueStep(uint32_t hueStepsPerSecond) {
+    uint32_t millisecondsPerHueStep(uint32_t hueStepsPerSecond) {
         float ms = 1000.0f / (float)hueStepsPerSecond;
         return (ms > 1000000.0f || !(ms == ms)) ? 0u : (uint32_t)ms;
     }
 #else
     __attribute__((noinline, noclone))
-    uint32_t msPerHueStep(uint32_t hueStepsPerSecond) {
+    uint32_t millisecondsPerHueStep(uint32_t hueStepsPerSecond) {
         const uint32_t millisecondsPerSecond = 1000u;
         // Named rather than returned directly, so the faulting instruction belongs to the
         // division's own line. Returning the expression let -O2 fold the divide into the
