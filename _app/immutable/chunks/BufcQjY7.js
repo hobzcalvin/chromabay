@@ -1,3 +1,5 @@
+
+!function(){try{var e="undefined"!=typeof window?window:"undefined"!=typeof global?global:"undefined"!=typeof globalThis?globalThis:"undefined"!=typeof self?self:{},n=(new e.Error).stack;n&&(e._sentryDebugIds=e._sentryDebugIds||{},e._sentryDebugIds[n]="f3d6e038-0d87-5b4d-b712-7a762b14968b")}catch(e){}}();
 import{_ as c}from"./DiO3gC3-.js";import{w,d as h,i as u,t as p,a as v,b as i}from"./DuihNSCd.js";const g=()=>{var t,e;const a=window.navigator.userAgent,o=((e=(t=window.navigator)===null||t===void 0?void 0:t.userAgentData)===null||e===void 0?void 0:e.platform)||window.navigator.platform,s=["macOS","Macintosh","MacIntel","MacPPC","Mac68K"],r=["Win32","Win64","Windows","WinCE"],d=["iPhone","iPad","iPod"];return s.indexOf(o)!==-1?"Mac OS":d.indexOf(o)!==-1?"iOS":r.indexOf(o)!==-1?"Windows":/Android/.test(a)?"Android":/Linux/.test(o)?"Linux":null},n=w`
   <svg
     version="1.1"
@@ -127,3 +129,6 @@ import{_ as c}from"./DiO3gC3-.js";import{w,d as h,i as u,t as p,a as v,b as i}fr
         margin: 0.5em 0;
       }
     `];l=c([p("ewt-no-port-picked-dialog")],l);const y=async t=>{const e=document.createElement("ewt-no-port-picked-dialog");return e.doTryAgain=t,document.body.append(e),!0};export{y as openNoPortPickedDialog};
+//# sourceMappingURL=BufcQjY7.js.map
+
+//# debugId=f3d6e038-0d87-5b4d-b712-7a762b14968b

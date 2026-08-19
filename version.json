@@ -1,7 +1,7 @@
 {
-  "version": "1.1.296",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.296.zip",
-  "buildDate": "2026-08-19T16:56:49Z",
-  "commitHash": "4294a309d30427854ea7f5d0965bd5a87d3b55f5",
-  "commitMessage": "Send the org id with the trace, not just the replay"
+  "version": "1.1.299",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.299.zip",
+  "buildDate": "2026-08-19T17:45:08Z",
+  "commitHash": "a8759f74f0ec5adb214eeac8f3fd56fb77383f68",
+  "commitMessage": "Don't let a slow apt mirror hold the publish lock for six hours"
 }
