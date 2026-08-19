@@ -179,13 +179,33 @@ async function sendTraceContext(link: RelayLink): Promise<void> {
   const payload = ['trace', sentryTrace, bag('sentry-replay_id', '[0-9a-f]{32}'),
                    bag('sentry-org_id', '[0-9]+')].filter(Boolean).join(' ');
 
+  // Only when it changed. This runs on a timer as well as on connect (see below), and the
+  // device does real work with each write.
+  if (lastTraceSent.get(link.key) === payload) return;
+
   try {
     await link.config(new TextEncoder().encode(payload));
+    lastTraceSent.set(link.key, payload);
   } catch (err) {
     // Never load-bearing: no trace just means the crash arrives unlinked.
     console.warn('[SentryRelay] trace context not delivered:', err);
   }
 }
+
+/**
+ * How often to check whether the replay has rotated under us.
+ *
+ * A Sentry replay ends after 60 minutes, or 15 without a click or navigation — and a device
+ * left connected while the lights are on outlives both easily. The trace would still resolve,
+ * but its replay_id would name a recording that had already ended: the link would point at
+ * "the session that happened to be recording" instead of "the interaction that caused this",
+ * which is the wrong-link failure in a quieter form.
+ *
+ * So re-send whenever the pair changes. Nothing is written while it doesn't, so a device that
+ * sits connected for an hour sees one or two writes, not one every 30 seconds.
+ */
+const TRACE_REFRESH_MS = 30000;
+const lastTraceSent = new Map<string, string>();
 
 /** One in-flight request per device; the firmware never has two outstanding. */
 const pending = new Map<string, PendingRequest>();
@@ -401,6 +421,7 @@ export function stopSentryRelay(key: string): void {
   started.delete(key);
   pending.delete(key);
   links.delete(key);
+  lastTraceSent.delete(key);
 }
 
 let watching = false;
@@ -418,6 +439,11 @@ let watching = false;
 export function watchSentryRelay(): void {
   if (watching || typeof window === 'undefined') return;
   watching = true;
+
+  // Keep every attached device on a live replay, not the one it was handed at connect.
+  setInterval(() => {
+    for (const link of links.values()) void sendTraceContext(link);
+  }, TRACE_REFRESH_MS);
 
   connectedDevices.subscribe((devices) => {
     for (const deviceId of devices.keys()) {
