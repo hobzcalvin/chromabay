@@ -1,7 +1,7 @@
 {
-  "version": "1.1.294",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.294.zip",
-  "buildDate": "2026-08-19T01:01:40Z",
-  "commitHash": "445ec9ff8cdba400f4a07ca304b3fcb8add7295e",
-  "commitMessage": "Link a device crash to the app session that caused it"
+  "version": "1.1.295",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.295.zip",
+  "buildDate": "2026-08-19T16:52:13Z",
+  "commitHash": "e8d738bbcf393ff61c13b437e71e21925a3b25cd",
+  "commitMessage": "Stop stalling the BLE link for 1.3s at the start of every OTA"
 }
