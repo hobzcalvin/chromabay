@@ -65,12 +65,22 @@
   }
 
   async function load() {
+    // `loadedFor` is claimed BEFORE the await, and on failure as well as success. Both
+    // matter: the effect below reads `loading` through this function, so writing it
+    // re-triggers the effect, and a read that failed never set `loadedFor` — so a
+    // disconnected device looped forever. It shipped 37,255 identical log lines to Sentry
+    // in a day before Logs made it visible, and each one was a real BLE read attempt.
+    //
+    // Claiming the key on failure means we do not retry until the device id changes. That
+    // is the right trade: a device that cannot answer now will not answer on the next tick
+    // either, and the panel reloads when you reopen it.
     if (!supported || loading || loadedFor === key) return;
+    loadedFor = key;
     loading = true;
     try {
       const s = await readSettingsFn();
       settings = s;
-      if (s) { applySnapshot(s); loadedFor = key; }
+      if (s) applySnapshot(s);
     } finally {
       loading = false;
     }

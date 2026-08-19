@@ -38,6 +38,12 @@ Sentry.init({
   // do any of this — sentry-micro has no logging API — so this is the only side that can.
   enableLogs: true,
 
+  // A disconnected device is a fact of life on BLE, not a defect, and the app narrates it
+  // from a dozen call sites. Dropping it here keeps Logs about things that are worth
+  // reading. Belt and braces: the loop that generated 74,000 of these in a day is fixed in
+  // DeviceSettingsPanel, but nothing should be one bug away from a quota incident.
+  beforeSendLog: (log) => (log.message?.includes('Not connected to device') ? null : log),
+
   integrations: [
     Sentry.consoleLoggingIntegration({ levels: ['warn', 'error'] }),
     Sentry.browserTracingIntegration(),
