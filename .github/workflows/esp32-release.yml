@@ -21,9 +21,11 @@ name: ESP32 Firmware Release
 #                                         Absent, the release still builds and publishes;
 #                                         it just ships without debug files, and the job
 #                                         summary says so per variant.
-#   SENTRY_ORG / SENTRY_PROJECT (vars)    the project debug files go to. SENTRY_ORG can be
-#                                         left unset with an organization auth token, which
-#                                         embeds its own org.
+#   SENTRY_PROJECT             (var)      the project debug files and releases go to. There
+#                                         is deliberately no SENTRY_ORG anywhere: an
+#                                         organization auth token carries its own org, and
+#                                         setting the variable to an empty string is what
+#                                         made sentry-cli warn about it on every single run.
 
 on:
   push:
@@ -148,7 +150,6 @@ jobs:
           # Coverage is guaranteed by the matrix, which came from platformio.ini.
           require-complete: false
           release: chromabay@${{ needs.plan.outputs.version }}
-          org: ${{ vars.SENTRY_ORG }}
           project: ${{ vars.SENTRY_PROJECT }}
           # Build, stamp and verify unconditionally; only talk to Sentry when there is a
           # token. A repository without one still ships firmware — it just ships firmware
@@ -432,7 +433,6 @@ jobs:
       env:
         SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
         SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
-        SENTRY_ORG: ${{ vars.SENTRY_ORG }}
         RELEASE: chromabay@${{ needs.plan.outputs.version }}
       run: |
         set -euo pipefail
@@ -443,6 +443,7 @@ jobs:
         sentry-cli releases new "$RELEASE"
         sentry-cli releases set-commits --auto --ignore-missing "$RELEASE"
         sentry-cli releases finalize "$RELEASE"
+        sentry-cli releases deploys "$RELEASE" new -e production
         echo "registered $RELEASE"
 
     - name: Clean up private key files

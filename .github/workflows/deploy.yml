@@ -96,7 +96,6 @@ jobs:
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
-          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
           SENTRY_RELEASE: app${{ steps.version.outputs.VERSION }}
         run: |
           export VITE_VERSION="${{ steps.version.outputs.VERSION }}"
@@ -127,7 +126,6 @@ jobs:
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
-          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
           SENTRY_RELEASE: app${{ steps.version.outputs.VERSION }}
         run: |
           export VITE_VERSION="${{ steps.version.outputs.VERSION }}"
@@ -203,7 +201,6 @@ jobs:
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
-          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
           RELEASE: app${{ steps.version.outputs.VERSION }}
         run: |
           set -euo pipefail
@@ -212,4 +209,5 @@ jobs:
           sentry-cli releases new "$RELEASE"
           sentry-cli releases set-commits --auto --ignore-missing "$RELEASE"
           sentry-cli releases finalize "$RELEASE"
+          sentry-cli releases deploys "$RELEASE" new -e web
           echo "registered $RELEASE"
