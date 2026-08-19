@@ -590,15 +590,22 @@ inline void tick(uint32_t nowMs) {
     // reporting on for the first time.
     if (gDsnPending) {
         gDsnPending = false;
-        Preferences p;
-        if (p.begin(NVS_NAMESPACE, false)) {
-            p.putString(NVS_KEY_DSN, String(gPendingDsn));
-            p.end();
-            Serial.printf("[Sentry] DSN %s by app\n", gPendingDsn[0] ? "provisioned" : "cleared");
-            initSdk();
-            // A first-ever provisioning can be the thing that makes this boot's crash
-            // reportable. No-op on every subsequent connect — it only runs once per boot.
-            reportLastBoot();
+        // Only when it actually changed. The app re-sends the DSN on every connect and it is
+        // the same string every time; without this each connect cost an NVS write plus a full
+        // sentry_close()/init() cycle that reopens the filesystem buffer — during a reconnect
+        // storm, dozens of flash writes to store something that never changed.
+        if (strcmp(gPendingDsn, gDsn) != 0) {
+            Preferences p;
+            if (p.begin(NVS_NAMESPACE, false)) {
+                p.putString(NVS_KEY_DSN, String(gPendingDsn));
+                p.end();
+                Serial.printf("[Sentry] DSN %s by app\n",
+                              gPendingDsn[0] ? "provisioned" : "cleared");
+                initSdk();
+                // A first-ever provisioning can be the thing that makes this boot's crash
+                // reportable. No-op afterwards — it only runs once per boot.
+                reportLastBoot();
+            }
         }
     }
 
