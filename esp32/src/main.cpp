@@ -1774,7 +1774,16 @@ void processReceivedPattern() {
     // the library (debounced so a slider drag doesn't hammer flash). Cycling is left
     // untouched — it's just an auto-advance, independent of the stored set; this manual
     // pick simply shows until the next cycle boundary.
+    // What the app asked this device to do, as the device's own node in the app's trace.
+    // Sampled — see SentryReporting::Operation for why one per apply would stutter the LEDs.
+    // It closes when this function returns, so it spans the decode AND the library staging
+    // below, which together are what "applying a pattern" actually costs.
+    SentryReporting::Operation trace("apply pattern", "device.pattern.apply");
+    auto *decode = trace.child("pattern.decode");
     bool success = patternRenderer->loadPatternFromMessagePack(buf, size);
+    trace.set(decode, "payload_bytes", (int64_t)size);
+    trace.set(decode, "free_heap", (int64_t)ESP.getFreeHeap());
+    trace.finish(decode);
     if (success) {
         if (cyclingActive && cycleIntervalMs > 0 && !libOrder.empty()) {
             // Don't let the next tick instantly override the manual pick.

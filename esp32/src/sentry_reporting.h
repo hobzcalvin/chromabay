@@ -83,9 +83,15 @@
 #  if __has_include(<core/sentry_trace.h>)
 #    define CHROMABAY_SENTRY_TRACE 1
 #  endif
+#  if __has_include(<core/sentry_span.h>)
+#    define CHROMABAY_SENTRY_SPANS 1
+#  endif
 #endif
 #ifndef CHROMABAY_SENTRY_TRACE
 #define CHROMABAY_SENTRY_TRACE 0
+#endif
+#ifndef CHROMABAY_SENTRY_SPANS
+#define CHROMABAY_SENTRY_SPANS 0
 #endif
 
 #include <LittleFS.h>
@@ -374,6 +380,75 @@ class SentryConfigCallbacks : public NimBLECharacteristicCallbacks {
 
 static RelayRxCallbacks gRelayRxCallbacks;
 static SentryConfigCallbacks gConfigCallbacks;
+
+// ── Tracing this device's own work ──────────────────────────────────────────────────────
+#if CHROMABAY_SENTRY_SPANS
+// How often an operation is allowed to become a transaction.
+//
+// This is the whole design, so it is worth stating plainly: transaction_finish() SENDS. On a
+// BLE-only ChromaBay that send goes out over the relay from the loop task — the same task
+// that renders the LEDs — and blocks until the phone answers. A slider drag applies a
+// pattern several times a second, so a transaction per apply would trade a visibly smooth
+// strip for telemetry nobody asked for.
+//
+// Sampling one operation per interval keeps the shape of the work (what it does, how long,
+// how much heap was left) while paying for it about as often as a crash report. If spans
+// ever move to a route where sending is cheap — WiFi, or a queue drained off-task — this
+// is the constant to reconsider.
+static const uint32_t TRACE_INTERVAL_MS = 15000;
+static uint32_t gLastTraceMs = 0;
+
+/**
+ * One traced operation on the device, as a child of whatever the app was doing.
+ *
+ * Declare it where the work happens; it sends when it goes out of scope. The parent is
+ * handled by the SDK — the transaction reuses the span id minted when the device adopted the
+ * app's trace, so it lands as the node it was already advertising.
+ *
+ * Silently inert when sampled out, when reporting is off, or when the device has never been
+ * told the date. That last one is not a shortcut: the SDK discards an undated transaction,
+ * because a duration with no anchor would place real work at an arbitrary time. ChromaBay's
+ * clock arrives with TIMESTAMP_SYNC shortly after the app connects, so the only window this
+ * skips is between a power cut and the first sync.
+ */
+class Operation {
+public:
+    Operation(const char *name, const char *op) {
+        if (!sentry_is_enabled()) return;
+        if (time(nullptr) < 1704067200) return;   // 2024-01-01: no clock yet
+        const uint32_t now = millis();
+        if (gLastTraceMs != 0 && (now - gLastTraceMs) < TRACE_INTERVAL_MS) return;
+        if (!sentry::transaction_start(txn_, name, op)) return;
+        gLastTraceMs = now;
+        active_ = true;
+    }
+    ~Operation() {
+        if (active_) sentry::transaction_finish(txn_);
+    }
+
+    /** nullptr when inactive or full; every call below tolerates that, so never check. */
+    sentry_span_t *child(const char *op, const char *description = nullptr) {
+        return active_ ? sentry::start_child(txn_, op, description) : nullptr;
+    }
+    void set(sentry_span_t *span, const char *key, int64_t value) {
+        sentry::span_set_attribute(span, key, value);
+    }
+    void finish(sentry_span_t *span) { sentry::span_finish(span); }
+
+private:
+    sentry::Transaction txn_;   // 688 B of this task's stack, live only for the operation
+    bool active_ = false;
+};
+#else
+// Same shape, no SDK. `auto *` at the call sites makes the span type irrelevant.
+class Operation {
+public:
+    Operation(const char *, const char *) {}
+    void *child(const char *, const char * = nullptr) { return nullptr; }
+    void set(void *, const char *, int64_t) {}
+    void finish(void *) {}
+};
+#endif
 
 // ── Lifecycle ───────────────────────────────────────────────────────────────────────────
 
@@ -675,6 +750,13 @@ class NimBLEService;
 
 namespace SentryReporting {
 typedef bool (*FrameSink)(const uint8_t *frame, size_t len);
+class Operation {
+public:
+    Operation(const char *, const char *) {}
+    void *child(const char *, const char * = nullptr) { return nullptr; }
+    void set(void *, const char *, int64_t) {}
+    void finish(void *) {}
+};
 inline void begin() {}
 inline void attachBleService(NimBLEService *) {}
 inline void setBleConnected(bool) {}

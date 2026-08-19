@@ -135,6 +135,15 @@ jobs:
             pio-${{ runner.os }}-${{ matrix.environment }}-
             pio-${{ runner.os }}-
 
+      # The SDK is tracked as a branch, not a commit — and PlatformIO resolves a branch
+      # exactly once, then keeps the resolved copy. With esp32/.pio in the build cache that
+      # means CI would happily build against whatever main was on the day the cache was
+      # written, forever, while the log says `#main`. Found the hard way locally: a build
+      # picked up sentry_trace.h but not sentry_span.h, and the only symptom was 3 KB of
+      # firmware quietly not being there.
+      - name: Drop the cached SDK so the branch is re-resolved
+        run: rm -rf esp32/.pio/libdeps/*/sentry-micro
+
       - name: Stamp firmware version into source
         run: |
           # Make the built binary report exactly the version we publish to the OTA
