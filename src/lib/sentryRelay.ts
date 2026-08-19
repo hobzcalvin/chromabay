@@ -166,10 +166,18 @@ async function sendTraceContext(link: RelayLink): Promise<void> {
   const sentryTrace = data['sentry-trace'];
   if (!sentryTrace) return;   // no active trace: send nothing rather than something empty
 
-  // The SDK reads exactly one baggage key, so send exactly that one. The full DSC is several
-  // hundred bytes of things the device will discard.
-  const replayId = /(?:^|,)\s*sentry-replay_id\s*=\s*([0-9a-f]{32})/.exec(data.baggage ?? '')?.[1];
-  const payload = `trace ${sentryTrace}${replayId ? ` sentry-replay_id=${replayId}` : ''}`;
+  // Two baggage keys, not the whole DSC — the rest is a few hundred bytes the device
+  // discards. `replay_id` is what links the issue to the video. `org_id` is what proves the
+  // trace belongs to us: the device compares it against the org in its own DSN and refuses
+  // a trace from somewhere else. It tolerates the key being absent (that is "nothing to
+  // compare", not a mismatch), but sending it costs 20 bytes and means the check can never
+  // become the reason a trace quietly fails to join.
+  const bag = (key: string, pattern: string) => {
+    const m = new RegExp(`(?:^|,)\\s*${key}\\s*=\\s*(${pattern})`).exec(data.baggage ?? '');
+    return m ? `${key}=${m[1]}` : '';
+  };
+  const payload = ['trace', sentryTrace, bag('sentry-replay_id', '[0-9a-f]{32}'),
+                   bag('sentry-org_id', '[0-9]+')].filter(Boolean).join(' ');
 
   try {
     await link.config(new TextEncoder().encode(payload));
