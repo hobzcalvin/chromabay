@@ -153,6 +153,10 @@ static bool gRelayWasReady = false;
 static uint32_t gLastFlushMs = 0;
 static bool gLastFlushDelivered = false;
 static bool gLastBootReported = false;
+// Slow on purpose: see the comment at the flush in tick().
+static const uint32_t METRICS_INTERVAL_MS = 300000;   // 5 minutes
+static uint32_t gLastMetricsMs = 0;
+static uint32_t gLastFpsTimes10 = 0;
 
 // NVS namespace of its own rather than a field on DeviceSettings: the DSN is optional
 // diagnostics config, and mixing it into the settings struct would mean touching the
@@ -430,38 +434,44 @@ private:
 };
 
 /**
- * One transaction per boot, so a device that only ever renders still reports something.
+ * Numbers this device wants to report that belong to no operation.
  *
- * Everything else traced here is app-initiated — an OTA, a config write — and a device can
- * run for months without either. That would leave the whole metrics side of this empty on
- * exactly the devices that are behaving, which is backwards. This is the floor: it says the
- * device came online and what booting cost it.
+ * Free heap, uptime, frame rate, disconnect counts: continuous, and attached to nothing a
+ * trace could hang them off. Span attributes cannot carry them — a span needs an operation,
+ * and the only operations here are an OTA, a config write, and a boot.
  *
- * Sent when the clock first arrives rather than at boot, because at boot there is no date
- * and the SDK would (correctly) discard it. The transaction is near-instant — it is a
- * carrier for the attributes, not a measurement of the boot itself. Boot duration is an
- * attribute, taken from uptime, which needs no clock to be correct.
+ * The property that matters on this hardware is that RECORDING DOES NOT SEND. A gauge is a
+ * write into a fixed table; nothing touches the transport until the next flush that was
+ * happening anyway. That is what makes it safe to call these from the render loop, which is
+ * exactly where transactions are not safe — finishing one blocks the task drawing the LEDs.
+ *
+ * They do need a clock, like everything else. Unlike a transaction, one without a date is
+ * held rather than dropped: a counter covering a longer interval is still true, while a
+ * duration anchored to nothing is not. So boot numbers recorded before the app ever connects
+ * survive until it does — which is the honest version of the boot-transaction carrier this
+ * replaces, and it needs no carrier at all.
  */
-static uint32_t gSetupMs = 0;
-static bool gBootReported = false;
+inline void recordBoot(uint32_t setupMs) {
+    sentry::metric_count("device.boot");
+    sentry::metric_gauge("device.setup_ms", (int64_t)setupMs, "millisecond");
+}
 
-/** Record how long setup() took. Call once, at the end of it. */
-inline void noteSetupComplete(uint32_t elapsedMs) { gSetupMs = elapsedMs; }
+/** The render loop hands us its latest rate; recorded on the flush cadence, not here. */
+inline void noteFps(uint32_t fpsTimes10) { gLastFpsTimes10 = fpsTimes10; }
 
-inline void reportBootOnce() {
-    if (gBootReported || !sentry_is_enabled() || !clockIsSet()) return;
-    gBootReported = true;
+/** Called on every BLE drop. A fleet's disconnect rate is a number, not an anecdote. */
+inline void recordDisconnect() { sentry::metric_count("device.ble_disconnect"); }
 
-    sentry::Transaction txn;
-    if (!sentry::transaction_start(txn, "device online", "device.boot")) return;
-    auto *boot = sentry::start_child(txn, "device.startup");
-    sentry::span_set_attribute(boot, "setup_ms", (int64_t)gSetupMs);
-    sentry::span_set_attribute(boot, "uptime_ms", (int64_t)millis());
-    sentry::span_set_attribute(boot, "free_heap", (int64_t)ESP.getFreeHeap());
-    sentry::span_set_attribute(boot, "min_free_heap", (int64_t)ESP.getMinFreeHeap());
-    sentry::span_finish(boot);
-    sentry::transaction_finish(txn);
-    Serial.printf("[Sentry] reported boot (setup %lu ms)\n", (unsigned long)gSetupMs);
+/**
+ * The periodic readings, sampled on the flush cadence rather than continuously — a gauge
+ * keeps only the newest value, so recording it more often than it is flushed just burns
+ * cycles writing over itself.
+ */
+inline void recordVitals(uint32_t fpsTimes10) {
+    sentry::metric_gauge("device.free_heap", (int64_t)ESP.getFreeHeap(), "byte");
+    sentry::metric_gauge("device.min_free_heap", (int64_t)ESP.getMinFreeHeap(), "byte");
+    sentry::metric_gauge("device.uptime", (int64_t)(millis() / 1000), "second");
+    sentry::metric_gauge("device.fps_x10", (int64_t)fpsTimes10);
 }
 
 // ── OTA, which outlives any scope ───────────────────────────────────────────────────────
@@ -517,8 +527,10 @@ public:
     void set(void *, const char *, int64_t) {}
     void finish(void *) {}
 };
-inline void noteSetupComplete(uint32_t) {}
-inline void reportBootOnce() {}
+inline void recordBoot(uint32_t) {}
+inline void noteFps(uint32_t) {}
+inline void recordDisconnect() {}
+inline void recordVitals(uint32_t) {}
 inline void otaBegin() {}
 inline void otaPhase(const char *) {}
 inline void otaSet(const char *, int64_t) {}
@@ -802,12 +814,20 @@ inline void tick(uint32_t nowMs) {
     }
     gRelayWasReady = ready;
 
-    // Once the app has told us the date, say we are here. See reportBootOnce().
-    reportBootOnce();
+    // Metrics ride sentry_flush(), which this used to reach only when something was
+    // buffered — i.e. only after a crash. A healthy device would have accumulated gauges
+    // forever and sent none of them. They get their own slow cadence instead: the flush
+    // blocks the render loop for as long as the phone takes to answer, so once every few
+    // minutes is the right price for numbers that change slowly.
+    const bool metricsDue = (nowMs - gLastMetricsMs) >= METRICS_INTERVAL_MS;
+    if (metricsDue) {
+        gLastMetricsMs = nowMs;
+        recordVitals(gLastFpsTimes10);
+    }
 
-    if (sentry_buffered_count() == 0) return;
+    if (sentry_buffered_count() == 0 && !metricsDue) return;
     const uint32_t interval = gLastFlushDelivered ? FLUSH_BACKLOG_INTERVAL_MS : FLUSH_INTERVAL_MS;
-    if (nowMs - gLastFlushMs < interval) return;
+    if (sentry_buffered_count() > 0 && nowMs - gLastFlushMs < interval) return;
     gLastFlushMs = nowMs;
     uint32_t delivered = sentry_flush(1);
     gLastFlushDelivered = delivered > 0;
@@ -835,8 +855,10 @@ public:
     void set(void *, const char *, int64_t) {}
     void finish(void *) {}
 };
-inline void noteSetupComplete(uint32_t) {}
-inline void reportBootOnce() {}
+inline void recordBoot(uint32_t) {}
+inline void noteFps(uint32_t) {}
+inline void recordDisconnect() {}
+inline void recordVitals(uint32_t) {}
 inline void otaBegin() {}
 inline void otaPhase(const char *) {}
 inline void otaSet(const char *, int64_t) {}

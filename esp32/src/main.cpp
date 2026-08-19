@@ -718,6 +718,7 @@ class ServerCallbacks: public NimBLEServerCallbacks {
         currentConnHandle = 0xFFFF;
         deviceConnected = false;
         SentryReporting::setBleConnected(false);
+        SentryReporting::recordDisconnect();
         Serial.println("BLE Client Disconnected");
         logPatternState("disconnect");
         // If OTA was in progress and client disconnects, abort it to free resources
@@ -3138,7 +3139,9 @@ void setup() {
                   SINGLE_CORE ? "single — WS2812 flicker mitigations ON: dithering off, slower frame cadence; prefer APA102"
                               : "multi — render on core 1, BLE on core 0");
     Serial.println("Setup complete");
-    SentryReporting::noteSetupComplete(millis());
+    // Recorded, not sent — it rides whenever the app next shows up. Metrics without a clock
+    // are held rather than dropped, which is why boot numbers survive a cold start.
+    SentryReporting::recordBoot(millis());
 }
 
 unsigned long lastHeapUpdateTime = 0;
@@ -3273,6 +3276,8 @@ void loop() {
     if (currentTime - fpsLastReport >= 5000) {
         float secs = (currentTime - fpsLastReport) / 1000.0f;
         Serial.printf("[FPS] %.1f fps (%lu frames / %.1fs)\n", fpsFrames / secs, (unsigned long)fpsFrames, secs);
+        // Safe from here precisely because recording a metric never touches the transport.
+        SentryReporting::noteFps((uint32_t)(fpsFrames * 10.0f / secs));
         fpsFrames = 0;
         fpsLastReport = currentTime;
     }
