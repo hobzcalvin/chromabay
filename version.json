@@ -1,7 +1,7 @@
 {
-  "version": "1.1.307",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.307.zip",
-  "buildDate": "2026-08-19T20:03:11Z",
-  "commitHash": "be74ee07f8045c45593aaa6d8e218e55fa60f058",
-  "commitMessage": "Point the crash at the division, not the closing brace"
+  "version": "1.1.308",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.308.zip",
+  "buildDate": "2026-08-19T20:35:11Z",
+  "commitHash": "18ceff57e71ee179880bbf54844d3abc5c34a1d7",
+  "commitMessage": "Rename msPerHueStep, to force a fresh issue for suspect commits"
 }
