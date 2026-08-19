@@ -1,7 +1,7 @@
 {
-  "version": "1.1.306",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.306.zip",
-  "buildDate": "2026-08-19T19:28:15Z",
-  "commitHash": "027e4435e0ff082af08362ccaca944e70d604ac9",
-  "commitMessage": "Re-fetch the firmware registry on foreground, not just re-check it"
+  "version": "1.1.307",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.307.zip",
+  "buildDate": "2026-08-19T20:03:11Z",
+  "commitHash": "be74ee07f8045c45593aaa6d8e218e55fa60f058",
+  "commitMessage": "Point the crash at the division, not the closing brace"
 }
