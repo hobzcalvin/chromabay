@@ -415,7 +415,11 @@ inline void initSdk() {
 
     sentry::Options options;
     options.dsn = gDsn;
-    options.release = "chromabay@" FIRMWARE_VERSION;  // must match the uploaded debug files
+    // Plain `fwv0.1.x`, matching the app's `app1.1.x` — one glance tells you which half of
+    // the product an issue came from. Must match the string CI registers the release under,
+    // or the release has no commits attached to the events reporting it. (It does NOT have
+    // to match the debug files: symbolication keys off debug_id, from the GNU build-id.)
+    options.release = FIRMWARE_VERSION;
     options.environment = CHROMABAY_SENTRY_ENV;
     options.board = ARDUINO_BOARD;
 #ifdef CHROMABAY_SENTRY_DEBUG

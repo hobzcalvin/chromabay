@@ -139,7 +139,7 @@ jobs:
 
       # Builds this variant to a fixpoint (the load address it compiles in changes the image
       # it describes, so it re-measures until they agree), stamps the build-id into the ELF
-      # as a non-ALLOC note, and uploads the debug files. `chromabay@<version>` is the same
+      # as a non-ALLOC note, and uploads the debug files. `fwv0.1.x` is the same
       # string src/sentry_reporting.h sets as options.release, which is what ties an arriving
       # event to these files.
       - name: Build and upload debug files
@@ -149,7 +149,7 @@ jobs:
           environments: ${{ matrix.environment }}
           # Coverage is guaranteed by the matrix, which came from platformio.ini.
           require-complete: false
-          release: chromabay@${{ needs.plan.outputs.version }}
+          release: ${{ needs.plan.outputs.version }}
           project: ${{ vars.SENTRY_PROJECT }}
           # Build, stamp and verify unconditionally; only talk to Sentry when there is a
           # token. A repository without one still ships firmware — it just ships firmware
@@ -433,7 +433,7 @@ jobs:
       env:
         SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
         SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
-        RELEASE: chromabay@${{ needs.plan.outputs.version }}
+        RELEASE: ${{ needs.plan.outputs.version }}
       run: |
         set -euo pipefail
         curl -sL https://sentry.io/get-cli/ | INSTALL_DIR="$RUNNER_TEMP/sentry-cli" bash
