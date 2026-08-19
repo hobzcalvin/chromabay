@@ -1,7 +1,7 @@
 {
-  "version": "1.1.302",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.302.zip",
-  "buildDate": "2026-08-19T18:59:12Z",
-  "commitHash": "f7207b18e6787ab248938b08f8b32dc0d7a5c13f",
-  "commitMessage": "Name the firmware release fwv0.1.x, matching app1.1.x"
+  "version": "1.1.303",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.303.zip",
+  "buildDate": "2026-08-19T19:06:02Z",
+  "commitHash": "ce2f0e2b0eaedaac9de466392aafda7fdaa6710b",
+  "commitMessage": "Wire the app/firmware project split, inert until the project exists"
 }
