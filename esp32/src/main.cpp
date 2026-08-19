@@ -2847,12 +2847,20 @@ void setup() {
         }
     }
 
-    // Never boot dark (see BOOT_MIN_BRIGHTNESS): the saved global brightness may be very low
-    // (or 0), which on power-up would look like a dead device. Floor it on boot only.
-    if (ledMgr.getNumStrips() > 0 && ledMgr.getGlobalBrightness() < BOOT_MIN_BRIGHTNESS) {
-        Serial.printf("[Boot] brightness %u below floor → %u\n",
-                      ledMgr.getGlobalBrightness(), BOOT_MIN_BRIGHTNESS);
-        ledMgr.setGlobalBrightness(BOOT_MIN_BRIGHTNESS);
+    // Never boot dark: a device that was switched off — which is brightness 0 — would come
+    // back from a power cut looking broken rather than off. Restore the last level it was
+    // actually on at, exactly as the schedule's auto-on does, and fall back to the floor only
+    // when there has never been one.
+    //
+    // Only 0 counts as dark. This used to floor anything below 16, which meant a deliberate
+    // dim setting did not survive a power cycle: set 7, come back at 16, and it read as the
+    // device forgetting rather than overriding. 7 is a level someone chose; 0 is the device
+    // being off.
+    if (ledMgr.getNumStrips() > 0 && ledMgr.getGlobalBrightness() == 0) {
+        const uint8_t restored = gSettings.lastNonZeroBright ? gSettings.lastNonZeroBright
+                                                             : BOOT_MIN_BRIGHTNESS;
+        Serial.printf("[Boot] was off (brightness 0) → %u\n", restored);
+        ledMgr.setGlobalBrightness(restored);
     }
 
     if (ledMgr.getNumStrips() == 0) {
