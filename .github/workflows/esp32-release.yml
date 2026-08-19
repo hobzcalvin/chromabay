@@ -212,6 +212,11 @@ jobs:
         pip install cryptography esptool
 
     - name: Install mbedTLS for PSA crypto
+      # Bounded, because this step hung for 40 minutes on a slow apt mirror and took the
+      # shared gh-pages lock with it — which stalls every firmware release AND every app
+      # deploy behind it, for up to the 6-hour job timeout. Failing in 5 minutes is a bad
+      # build; hanging is an outage of the whole publish pipeline.
+      timeout-minutes: 5
       run: |
         # The runner's pre-installed Microsoft apt repos intermittently serve invalid InRelease
         # files (NOSPLIT), failing apt-get update. We only need Ubuntu, so drop them first.
