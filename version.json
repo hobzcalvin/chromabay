@@ -1,7 +1,7 @@
 {
-  "version": "1.1.300",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.300.zip",
-  "buildDate": "2026-08-19T17:53:06Z",
-  "commitHash": "76b50366089f044c3271f50dcd943d870e58a080",
-  "commitMessage": "Name the constant in the line that crashes"
+  "version": "1.1.301",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.301.zip",
+  "buildDate": "2026-08-19T18:46:12Z",
+  "commitHash": "9e5ee4c7f6d440482898c2ab3a1448efd478e255",
+  "commitMessage": "Restore the SPA fallback and CNAME I deleted from the deploy"
 }
