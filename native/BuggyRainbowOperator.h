@@ -109,7 +109,8 @@ private:
 #else
     __attribute__((noinline, noclone))
     uint32_t msPerHueStep(uint32_t hueStepsPerSecond) {
-        return 1000u / hueStepsPerSecond;
+        const uint32_t millisecondsPerSecond = 1000u;
+        return millisecondsPerSecond / hueStepsPerSecond;
     }
 #endif
 
