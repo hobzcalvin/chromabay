@@ -103,6 +103,9 @@ jobs:
           export VITE_COMMIT_HASH="${{ steps.version.outputs.COMMIT_HASH }}"
           export VITE_COMMIT_MESSAGE="${{ steps.version.outputs.COMMIT_MESSAGE }}"
           # Supabase (public anon/publishable key — RLS protects data; safe to embed in the client bundle)
+          # Where DEVICES report. Empty until the firmware project exists, in which case
+          # sentryRelay.ts falls back to the app's own DSN, exactly as it does today.
+          export VITE_SENTRY_DEVICE_DSN="${{ vars.SENTRY_DEVICE_DSN }}"
           export VITE_SUPABASE_URL="https://cwyypvhyrkaalagvjebp.supabase.co"
           export VITE_SUPABASE_ANON_KEY="sb_publishable_c5CSmQ-d7sWcntjziCkMMw_ZFaIOwMW"
           export NODE_ENV=production
@@ -144,6 +147,9 @@ jobs:
           export VITE_COMMIT_HASH="${{ steps.version.outputs.COMMIT_HASH }}"
           export VITE_COMMIT_MESSAGE="${{ steps.version.outputs.COMMIT_MESSAGE }}"
           # Supabase (public anon/publishable key — RLS protects data; safe to embed in the client bundle)
+          # Where DEVICES report. Empty until the firmware project exists, in which case
+          # sentryRelay.ts falls back to the app's own DSN, exactly as it does today.
+          export VITE_SENTRY_DEVICE_DSN="${{ vars.SENTRY_DEVICE_DSN }}"
           export VITE_SUPABASE_URL="https://cwyypvhyrkaalagvjebp.supabase.co"
           export VITE_SUPABASE_ANON_KEY="sb_publishable_c5CSmQ-d7sWcntjziCkMMw_ZFaIOwMW"
           export NODE_ENV=production

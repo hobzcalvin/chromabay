@@ -21,6 +21,13 @@ name: ESP32 Firmware Release
 #                                         Absent, the release still builds and publishes;
 #                                         it just ships without debug files, and the job
 #                                         summary says so per variant.
+#   SENTRY_PROJECT_FW          (var)      the FIRMWARE project debug files and releases go
+#                                         to. Separate from the app's, because Sentry counts
+#                                         a release's commits as everything since the
+#                                         previous release IN THAT PROJECT — and both
+#                                         artifacts build from the same commit, so whichever
+#                                         registered second correctly found nothing new.
+#                                         Falls back to SENTRY_PROJECT while unset.
 #   SENTRY_PROJECT             (var)      the project debug files and releases go to. There
 #                                         is deliberately no SENTRY_ORG anywhere: an
 #                                         organization auth token carries its own org, and
@@ -150,7 +157,9 @@ jobs:
           # Coverage is guaranteed by the matrix, which came from platformio.ini.
           require-complete: false
           release: ${{ needs.plan.outputs.version }}
-          project: ${{ vars.SENTRY_PROJECT }}
+          # Falls back to the shared project until SENTRY_PROJECT_FW exists, so this lands
+          # inert and switches over the moment the firmware project is created.
+          project: ${{ vars.SENTRY_PROJECT_FW || vars.SENTRY_PROJECT }}
           # Build, stamp and verify unconditionally; only talk to Sentry when there is a
           # token. A repository without one still ships firmware — it just ships firmware
           # whose crashes arrive as addresses.
@@ -432,7 +441,7 @@ jobs:
       if: env.SENTRY_AUTH_TOKEN != ''
       env:
         SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-        SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
+        SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT_FW || vars.SENTRY_PROJECT }}
         RELEASE: ${{ needs.plan.outputs.version }}
       run: |
         set -euo pipefail
