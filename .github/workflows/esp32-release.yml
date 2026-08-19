@@ -41,13 +41,16 @@ permissions:
   contents: read
 
 env:
-  # sentry-micro, pinned by commit. The same revision supplies both halves of this: the
-  # library the firmware links (below, via lib_deps) and the action that stamps and uploads
-  # the debug files describing it. They must not drift — debug files that describe a
-  # slightly different binary resolve addresses to confidently wrong functions — so there is
-  # one SHA, used twice. `uses:` cannot take an expression, so the steps below repeat it
-  # literally; change all three together.
-  CHROMABAY_SENTRY_MICRO: https://github.com/getsentry/sentry-micro.git#6948232b0cbd1707274d2386f60ac878a0afd21e
+  # sentry-micro, tracking main rather than a pinned commit — the SDK is under active
+  # development and every firmware build should have the current one.
+  #
+  # What that costs, so it is a choice rather than an oversight: a given firmware version is
+  # no longer reproducible, because rebuilding fwv0.1.107 tomorrow links a different SDK.
+  # Symbolication is unaffected (debug files are matched by debug_id, which is derived per
+  # build), but a breaking change upstream lands here as a failed — or worse, a silently
+  # different — release. Pin all three back to one SHA before shipping to anyone who is not
+  # in this room.
+  CHROMABAY_SENTRY_MICRO: https://github.com/getsentry/sentry-micro.git#main
 
 jobs:
   plan:
@@ -59,12 +62,19 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          # Full history: `sentry-cli releases set-commits --auto` derives the commit range
+          # from it, and a shallow clone does not produce fewer commits — it produces a
+          # release claiming to contain exactly one change when it contains a hundred, which
+          # reads identically to the truth. The sentry-micro action refuses to build on a
+          # shallow checkout for the same reason.
+          fetch-depth: 0
 
       # Every [env:...] in esp32/platformio.ini becomes a build job. A new board therefore
       # cannot ship without debug files by someone forgetting to add it to a list here.
       - name: List firmware variants
         id: list
-        uses: getsentry/sentry-micro/.github/actions/list-environments@6948232b0cbd1707274d2386f60ac878a0afd21e
+        uses: getsentry/sentry-micro/.github/actions/list-environments@main
         with:
           project-dir: esp32
 
@@ -95,6 +105,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # see the plan job
 
       - name: Setup Python
         uses: actions/setup-python@v4
@@ -129,7 +141,7 @@ jobs:
       # string src/sentry_reporting.h sets as options.release, which is what ties an arriving
       # event to these files.
       - name: Build and upload debug files
-        uses: getsentry/sentry-micro/.github/actions/upload-debug-files@6948232b0cbd1707274d2386f60ac878a0afd21e
+        uses: getsentry/sentry-micro/.github/actions/upload-debug-files@main
         with:
           project-dir: esp32
           environments: ${{ matrix.environment }}
@@ -181,6 +193,8 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 0   # see the plan job
 
     - name: Download every variant
       uses: actions/download-artifact@v4
@@ -403,6 +417,28 @@ jobs:
         # Clean up
         cd ..
         rm -rf gh_pages_temp
+
+    # Register the release properly, rather than letting Sentry auto-create a stub when the
+    # first event arrives. An auto-created release has no ship date and no commit range, so
+    # every issue in it shows "unknown" for suspect commits — the one thing that turns a
+    # crash into "this is the change that caused it". `--auto` uses the repo integration.
+    - name: Register the release in Sentry
+      if: env.SENTRY_AUTH_TOKEN != ''
+      env:
+        SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
+        SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+        RELEASE: chromabay@${{ needs.plan.outputs.version }}
+      run: |
+        set -euo pipefail
+        curl -sL https://sentry.io/get-cli/ | INSTALL_DIR="$RUNNER_TEMP/sentry-cli" bash
+        export PATH="$RUNNER_TEMP/sentry-cli:$PATH"
+        # --ignore-missing: a commit sentry cannot resolve (a force-push, a rewritten
+        # history) should not fail a firmware release that is otherwise fine.
+        sentry-cli releases new "$RELEASE"
+        sentry-cli releases set-commits --auto --ignore-missing "$RELEASE"
+        sentry-cli releases finalize "$RELEASE"
+        echo "registered $RELEASE"
 
     - name: Clean up private key files
       if: always()

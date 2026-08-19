@@ -346,10 +346,8 @@ inline void onConfigWrite(const uint8_t *data, size_t len) {
     // is, after all, more Sentry configuration.
 #if CHROMABAY_SENTRY_TRACE
     if (strncmp(dsn, "trace ", 6) == 0) {
-        // Staged, not adopted here — and specifically not before reportLastBoot(). The trace
-        // that belongs on a crash report is the one the device died in, still sitting in RTC
-        // memory; adopting the new session's trace first would overwrite it and link the
-        // panic to the connection that came to collect it.
+        // Staged, not adopted here — see tick(), which owns both the ordering and the
+        // reason this cannot run on the NimBLE host task.
         strncpy(gPendingTrace, dsn, sizeof(gPendingTrace) - 1);
         gPendingTrace[sizeof(gPendingTrace) - 1] = '\0';
         gTracePending = true;
@@ -612,9 +610,17 @@ inline void tick(uint32_t nowMs) {
     if (!sentry_is_enabled()) return;
 
 #if CHROMABAY_SENTRY_TRACE
-    // Ordering matters and is the reason both of these are staged rather than done in the
-    // BLE callback: reportLastBoot() above must have already run, so the crash report left
-    // with the trace the device died in rather than the one that came to collect it.
+    // Staged for this task rather than done in the BLE callback, for the same reason as the
+    // DSN: NVS and filesystem work must not run on the NimBLE host task.
+    //
+    // It used to matter for a second reason, and the history is worth keeping. reportLastBoot()
+    // above had to run FIRST, because the SDK recovered the crash's trace from RTC memory into
+    // the same slot an adopt would write — so the app connecting to collect a crash report
+    // would offer a new trace, that adopt would clobber the one the device actually died in,
+    // and the panic would be attached to the connection that came to fetch it. A wrong link
+    // that renders exactly like a right one. sentry-micro 0fab55e gives the recovered trace its
+    // own slot, so the order no longer changes the answer — but only because that was reported
+    // and fixed, not because it was ever safe to assume.
     if (gTraceReleasePending) {
         gTraceReleasePending = false;
         sentry::trace_release();

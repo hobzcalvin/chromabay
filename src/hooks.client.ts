@@ -14,7 +14,11 @@ const DSN = (import.meta as any).env?.VITE_SENTRY_DSN
 Sentry.init({
   dsn: DSN,
   // Version baked in by the deploy workflow (VITE_VERSION); groups errors + replays by release.
-  release: (import.meta as any).env?.VITE_VERSION || 'dev',
+  // `app` prefix so app and firmware releases are told apart at a glance — the firmware
+  // reports `chromabay@fwv0.1.x` from its own build. They move independently: this updates
+  // the moment someone loads the page, the firmware only when a user accepts an OTA. Must
+  // match what deploy.yml registers with sentry-cli, or the release has no commits.
+  release: `app${(import.meta as any).env?.VITE_VERSION || 'dev'}`,
   // 'web' in the browser; 'ios' / 'android' inside the Capacitor WebView.
   environment: dev ? 'development' : Capacitor.getPlatform(),
 

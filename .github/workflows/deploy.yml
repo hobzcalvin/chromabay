@@ -100,13 +100,6 @@ jobs:
           sed -i "s/pages: 'build'/pages: 'docs'/" svelte.config.js
           sed -i "s/assets: 'build'/assets: 'docs'/" svelte.config.js
           npm run build
-          # Persist the custom domain on every deploy (keep_files also preserves GitHub's own
-          # CNAME, but write it explicitly so chromabay.app serving never regresses).
-          echo "chromabay.app" > docs/CNAME
-          # SPA fallback: serve the app shell for ANY unknown path so client-side routes
-          # (/patterns, /devices, …) render on GitHub Pages. Replaces the old spa-github-pages
-          # redirect 404.html, which looped/exploded at the apex root (no /chromabay segment).
-          cp docs/index.html docs/404.html
 
       - name: Build mobile live update bundle (no base path)
         run: |
@@ -160,3 +153,27 @@ jobs:
           # ESP32 firmware registry (firmware/…) is published there by
           # esp32-release.yml and must survive a Pages deploy.
           keep_files: true
+
+      # Last, so a release only exists once the code it names is actually live — and rather
+      # than letting the first arriving event auto-create a stub with no ship date and no
+      # commits. `app` prefix so the app and the firmware are
+      # distinguishable at a glance in the release list — they update independently (the app
+      # the moment someone loads it, the firmware when a user accepts an OTA or never), so
+      # they are genuinely separate releases that happen to share a commit.
+      - name: Register the release in Sentry
+        if: env.SENTRY_AUTH_TOKEN != ''
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          RELEASE: app${{ steps.version.outputs.VERSION }}
+        run: |
+          set -euo pipefail
+          curl -sL https://sentry.io/get-cli/ | INSTALL_DIR="$RUNNER_TEMP/sentry-cli" bash
+          export PATH="$RUNNER_TEMP/sentry-cli:$PATH"
+          # --ignore-missing: an unresolvable commit (force-push, rewritten history) should
+          # not fail a deploy that is otherwise fine.
+          sentry-cli releases new "$RELEASE"
+          sentry-cli releases set-commits --auto --ignore-missing "$RELEASE"
+          sentry-cli releases finalize "$RELEASE"
+          echo "registered $RELEASE"
