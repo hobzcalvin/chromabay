@@ -1,7 +1,7 @@
 {
-  "version": "1.1.312",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.312.zip",
-  "buildDate": "2026-08-19T23:18:05Z",
-  "commitHash": "073c0859fc0d1649e9ca84f157dbbeeb9a92189a",
-  "commitMessage": "Stop a disconnected device retrying its settings read forever"
+  "version": "1.1.313",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.313.zip",
+  "buildDate": "2026-08-19T23:56:31Z",
+  "commitHash": "50805b4511339b690933ea06094fb712d08bb00a",
+  "commitMessage": "Replace the boot-transaction carrier with actual metrics"
 }
