@@ -334,7 +334,6 @@ static size_t layoutAccumLen = 0;       // bytes received so far (in-order)
 static volatile bool newLayoutAvailable = false;
 
 bool deviceConnected = false;
-bool oldDeviceConnected = false;
 String receivedData = "";
 
 // Single-core targets (ESP32-C3, -S2) run the render loop, the NimBLE host, AND the BT
@@ -3269,15 +3268,6 @@ void loop() {
         }
     }
     
-    // Handle BLE connection changes
-    if (!deviceConnected && oldDeviceConnected) {
-        oldDeviceConnected = deviceConnected;
-    }
-    if (deviceConnected && !oldDeviceConnected) {
-        Serial.println("BLE client connected");
-        oldDeviceConnected = deviceConnected;
-    }
-
     // Temporal dithering: between animation frames, emit high-rate sub-frames for any
     // strips small/fast enough to dither (no-op otherwise). This is what makes low
     // brightness smooth instead of banded.
