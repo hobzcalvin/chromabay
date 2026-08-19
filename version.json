@@ -1,7 +1,7 @@
 {
-  "version": "1.1.301",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.301.zip",
-  "buildDate": "2026-08-19T18:46:12Z",
-  "commitHash": "9e5ee4c7f6d440482898c2ab3a1448efd478e255",
-  "commitMessage": "Restore the SPA fallback and CNAME I deleted from the deploy"
+  "version": "1.1.302",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.302.zip",
+  "buildDate": "2026-08-19T18:59:12Z",
+  "commitHash": "f7207b18e6787ab248938b08f8b32dc0d7a5c13f",
+  "commitMessage": "Name the firmware release fwv0.1.x, matching app1.1.x"
 }
