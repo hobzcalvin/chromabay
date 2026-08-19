@@ -1,7 +1,7 @@
 {
-  "version": "1.1.299",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.299.zip",
-  "buildDate": "2026-08-19T17:45:08Z",
-  "commitHash": "a8759f74f0ec5adb214eeac8f3fd56fb77383f68",
-  "commitMessage": "Don't let a slow apt mirror hold the publish lock for six hours"
+  "version": "1.1.300",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.300.zip",
+  "buildDate": "2026-08-19T17:53:06Z",
+  "commitHash": "76b50366089f044c3271f50dcd943d870e58a080",
+  "commitMessage": "Name the constant in the line that crashes"
 }
