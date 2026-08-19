@@ -27,6 +27,7 @@
  * the lengths from BEGIN.
  */
 
+import * as Sentry from '@sentry/sveltekit';
 import { LED_SERVICE_UUID, startBinaryNotifications, writeCharacteristicBinary } from './ble';
 import { connectedDevices } from './stores/deviceStore';
 import { wifiConns } from './stores/wifiDeviceStore';
@@ -142,6 +143,40 @@ function wifiLink(name: string, dev: WifiDevice): RelayLink {
     toDevice: async (frame) => dev.sendSentry(asBytes(frame)),
     config: async (dsn) => dev.sendSentryConfig(dsn)
   };
+}
+
+/**
+ * Tell the device which trace this session belongs to, so a crash links to the replay.
+ *
+ * One trace per connection. That is coarser than a trace per operation — the unit sentry-micro
+ * asks for — and the trade is deliberate: a per-command trace would put ~110 bytes of ids on
+ * the wire beside every pattern sync and settings write, and touch a dozen call sites across
+ * the app, for a link this already gives. Everything here stays inside the Sentry integration;
+ * no ChromaBay code path knows tracing exists.
+ *
+ * The device holds it in RTC memory, which survives a panic reset. So a device that dies
+ * mid-session reboots and reports the crash under *this* trace and *this* replay — which is
+ * what turns an issue into "here is the video of the interaction that killed it".
+ *
+ * Sent on the config characteristic rather than a new one: a DSN is always a `https://` URL,
+ * so the prefix tells the two apart, and both are Sentry configuration either way.
+ */
+async function sendTraceContext(link: RelayLink): Promise<void> {
+  const data = Sentry.getTraceData();
+  const sentryTrace = data['sentry-trace'];
+  if (!sentryTrace) return;   // no active trace: send nothing rather than something empty
+
+  // The SDK reads exactly one baggage key, so send exactly that one. The full DSC is several
+  // hundred bytes of things the device will discard.
+  const replayId = /(?:^|,)\s*sentry-replay_id\s*=\s*([0-9a-f]{32})/.exec(data.baggage ?? '')?.[1];
+  const payload = `trace ${sentryTrace}${replayId ? ` sentry-replay_id=${replayId}` : ''}`;
+
+  try {
+    await link.config(new TextEncoder().encode(payload));
+  } catch (err) {
+    // Never load-bearing: no trace just means the crash arrives unlinked.
+    console.warn('[SentryRelay] trace context not delivered:', err);
+  }
 }
 
 /** One in-flight request per device; the firmware never has two outstanding. */
@@ -328,6 +363,9 @@ async function attach(link: RelayLink): Promise<void> {
   } catch (err) {
     console.warn('[SentryRelay] DSN provisioning failed:', err);
   }
+
+  // After the DSN, because a device with no DSN cannot do anything with a trace anyway.
+  await sendTraceContext(link);
 
   // HELLO last: the device treats it as "a host that speaks this protocol is attached" and
   // may start relaying immediately, so everything it needs must already be in place.

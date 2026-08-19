@@ -79,6 +79,14 @@
 #ifndef CHROMABAY_SENTRY_COREDUMP
 #define CHROMABAY_SENTRY_COREDUMP 0
 #endif
+#if defined(__has_include)
+#  if __has_include(<core/sentry_trace.h>)
+#    define CHROMABAY_SENTRY_TRACE 1
+#  endif
+#endif
+#ifndef CHROMABAY_SENTRY_TRACE
+#define CHROMABAY_SENTRY_TRACE 0
+#endif
 
 #include <LittleFS.h>
 #include <NimBLEDevice.h>
@@ -113,6 +121,11 @@ static char gDsn[SENTRY_MICRO_MAX_DSN_LEN + 1] = { 0 };
 // A DSN the app wrote, waiting to be persisted + applied on the loop task.
 static char gPendingDsn[SENTRY_MICRO_MAX_DSN_LEN + 1] = { 0 };
 static volatile bool gDsnPending = false;
+#if CHROMABAY_SENTRY_TRACE
+static char gPendingTrace[192] = { 0 };
+static volatile bool gTracePending = false;
+static volatile bool gTraceReleasePending = false;
+#endif
 static NimBLECharacteristic *gRelayTx = nullptr;
 static bool gBleConnected = false;
 
@@ -285,12 +298,64 @@ inline bool dsnHostAllowed(const char *dsn) {
     return false;
 }
 
+/**
+ * The trace the app is currently working in: `trace <sentry-trace> <baggage>`.
+ *
+ * One trace per connection, adopted when the app attaches and released when it goes away.
+ * That is coarser than sentry-micro asks for — it wants a trace per *request*, and a
+ * connection is a session — and the trade is deliberate. A per-command trace would mean
+ * putting ids on the wire beside every pattern sync, slider drag and settings write, for a
+ * link the demo gets from the connection alone. The failure the SDK warns about is a device
+ * holding one id for days and welding unrelated interactions to it; this one dies with the
+ * link, which is what keeps that from happening.
+ *
+ * The crash path is why it works at all: the active trace lives in RTC memory, which
+ * survives a panic reset. A device that dies mid-session reboots, finds the trace still
+ * there, and the report it sends on the next boot carries the trace and replay id of the
+ * session it died in — so the issue links to the video of whatever caused it.
+ */
+#if CHROMABAY_SENTRY_TRACE
+inline void onTraceWrite(const char *payload) {
+    // `trace <sentry-trace> <baggage>` — split on the two spaces, in place.
+    char buf[192];
+    strncpy(buf, payload, sizeof(buf) - 1);
+    buf[sizeof(buf) - 1] = '\0';
+    char *traceHeader = strchr(buf, ' ');
+    if (!traceHeader) return;
+    *traceHeader++ = '\0';
+    char *baggage = strchr(traceHeader, ' ');
+    if (baggage) *baggage++ = '\0';
+    // A malformed header is rejected whole by the SDK, so a garbled write leaves the device
+    // in no trace rather than in a fictional one.
+    if (sentry::trace_adopt(traceHeader, baggage)) {
+        Serial.printf("[Sentry] joined trace %s%s\n", sentry::trace().trace_id,
+                      sentry::trace().replay_id[0] ? " (with replay)" : "");
+    }
+}
+#endif
+
 /** The DSN the app is provisioning. Empty clears it. */
 inline void onConfigWrite(const uint8_t *data, size_t len) {
     if (len > SENTRY_MICRO_MAX_DSN_LEN) return;
     char dsn[SENTRY_MICRO_MAX_DSN_LEN + 1];
     memcpy(dsn, data, len);
     dsn[len] = '\0';
+
+    // Same characteristic, two messages. A DSN is a URL and always starts `https://`, so
+    // the prefix is an unambiguous discriminator and no new BLE surface is needed for what
+    // is, after all, more Sentry configuration.
+#if CHROMABAY_SENTRY_TRACE
+    if (strncmp(dsn, "trace ", 6) == 0) {
+        // Staged, not adopted here — and specifically not before reportLastBoot(). The trace
+        // that belongs on a crash report is the one the device died in, still sitting in RTC
+        // memory; adopting the new session's trace first would overwrite it and link the
+        // panic to the connection that came to collect it.
+        strncpy(gPendingTrace, dsn, sizeof(gPendingTrace) - 1);
+        gPendingTrace[sizeof(gPendingTrace) - 1] = '\0';
+        gTracePending = true;
+        return;
+    }
+#endif
     if (len > 0 && !dsnHostAllowed(dsn)) {
         Serial.println("[Sentry] refusing a DSN outside the allowed ingest host");
         return;
@@ -417,6 +482,12 @@ inline void updateHostAttached() {
 inline void setBleConnected(bool connected) {
     gBleConnected = connected;
     updateHostAttached();
+#if CHROMABAY_SENTRY_TRACE
+    // The session ended, so the trace it carried has ended too. Anything the device does
+    // from here belongs to nobody until the next app connects — which is the whole reason
+    // to release rather than keep the last id around.
+    if (!connected) gTraceReleasePending = true;
+#endif
 }
 inline void setWifiConnected(bool connected) {
     gWifiConnected = connected;
@@ -532,6 +603,20 @@ inline void tick(uint32_t nowMs) {
     }
 
     if (!sentry_is_enabled()) return;
+
+#if CHROMABAY_SENTRY_TRACE
+    // Ordering matters and is the reason both of these are staged rather than done in the
+    // BLE callback: reportLastBoot() above must have already run, so the crash report left
+    // with the trace the device died in rather than the one that came to collect it.
+    if (gTraceReleasePending) {
+        gTraceReleasePending = false;
+        sentry::trace_release();
+    }
+    if (gTracePending) {
+        gTracePending = false;
+        onTraceWrite(gPendingTrace);
+    }
+#endif
 
     // The app connecting is the event we're waiting for on a BLE-only device — flush then
     // rather than up to 30 s later, so a crash report lands while someone is still looking.

@@ -47,7 +47,7 @@ env:
   # slightly different binary resolve addresses to confidently wrong functions — so there is
   # one SHA, used twice. `uses:` cannot take an expression, so the steps below repeat it
   # literally; change all three together.
-  CHROMABAY_SENTRY_MICRO: https://github.com/getsentry/sentry-micro.git#3315fb793864afb7b01851d059ea68166a0a0936
+  CHROMABAY_SENTRY_MICRO: https://github.com/getsentry/sentry-micro.git#6948232b0cbd1707274d2386f60ac878a0afd21e
 
 jobs:
   plan:
@@ -64,7 +64,7 @@ jobs:
       # cannot ship without debug files by someone forgetting to add it to a list here.
       - name: List firmware variants
         id: list
-        uses: getsentry/sentry-micro/.github/actions/list-environments@3315fb793864afb7b01851d059ea68166a0a0936
+        uses: getsentry/sentry-micro/.github/actions/list-environments@6948232b0cbd1707274d2386f60ac878a0afd21e
         with:
           project-dir: esp32
 
@@ -129,7 +129,7 @@ jobs:
       # string src/sentry_reporting.h sets as options.release, which is what ties an arriving
       # event to these files.
       - name: Build and upload debug files
-        uses: getsentry/sentry-micro/.github/actions/upload-debug-files@3315fb793864afb7b01851d059ea68166a0a0936
+        uses: getsentry/sentry-micro/.github/actions/upload-debug-files@6948232b0cbd1707274d2386f60ac878a0afd21e
         with:
           project-dir: esp32
           environments: ${{ matrix.environment }}
