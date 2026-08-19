@@ -278,19 +278,27 @@
       }, 2000);
     }
     
-    // Auto-check for updates when app is foregrounded
+    // Auto-check for updates when app is foregrounded.
     if (typeof document !== 'undefined') {
-      document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') {
-          // Check for updates for all connected devices
-          const connected = getConnectedDevicesList($connectedDevices);
-          for (const device of connected) {
-            checkForUpdateSilently(device.deviceId);
-          }
-        }
-      });
+      document.addEventListener('visibilitychange', onForegrounded);
     }
   });
+
+  // Re-FETCH the registry, don't just re-check against the one we already have. The registry
+  // is loaded once at mount and kept for the session, so a session left open — which is
+  // exactly what happens while iterating on firmware — never learned that a newer build
+  // existed, and this handler kept re-confirming the device was up to date against a stale
+  // list. initializeFirmwareRegistry() fetches and then runs the same per-device check.
+  //
+  // Worth knowing about the freshness ceiling: fetchFirmwareRegistry() cache-busts with a
+  // `?t=` query, which defeats the browser cache but NOT GitHub Pages' CDN — it ignores
+  // query strings in its cache key (verified: a brand-new `?t=` URL still returned a cached
+  // body). So the registry can be up to its 10-minute max-age behind no matter how often
+  // this fires, and re-checking on every foreground is what closes that gap in practice.
+  function onForegrounded() {
+    if (document.visibilityState !== 'visible') return;
+    void initializeFirmwareRegistry();
+  }
 
   function getDeviceSettings(deviceId: string) {
     if (!deviceSettings[deviceId]) {
@@ -405,6 +413,11 @@
   onDestroy(() => {
     if (pruneTimer) { clearInterval(pruneTimer); pruneTimer = null; }
     for (const id of Object.keys(dropTimers)) clearTimeout(dropTimers[id]);
+    // Was never removed before, so a remount left the previous listener attached and every
+    // foreground ran the check one more time than the last.
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', onForegrounded);
+    }
   });
 
   async function maybeAutoReconnect(device: any) {
