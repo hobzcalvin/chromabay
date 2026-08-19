@@ -1,7 +1,7 @@
 {
-  "version": "1.1.308",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.308.zip",
-  "buildDate": "2026-08-19T20:35:11Z",
-  "commitHash": "18ceff57e71ee179880bbf54844d3abc5c34a1d7",
-  "commitMessage": "Rename msPerHueStep, to force a fresh issue for suspect commits"
+  "version": "1.1.309",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.309.zip",
+  "buildDate": "2026-08-19T22:48:04Z",
+  "commitHash": "24637c4a5e5be9953e8ae388e9ad3fff8fa6bcff",
+  "commitMessage": "Trace what the device does with a pattern, not just when it dies"
 }
