@@ -991,7 +991,27 @@ class OTADataCallbacks : public NimBLECharacteristicCallbacks {
             Serial.printf("OTA: Writing to partition subtype %d at offset 0x%x\n",
                           update_partition->subtype, update_partition->address);
 
-            esp_err_t err = esp_ota_begin(update_partition, OTA_SIZE_UNKNOWN, &ota_handle);
+            // Ask for a link that can survive the transfer, BEFORE touching flash. The
+            // previous request (6, 12, 0, 400) asked for a 7.5 ms interval, which violates
+            // Apple's rules twice over — interval min must be >= 15 ms, and max must be at
+            // least min + 15 ms — and an illegal request is rejected WHOLE. So the 4 s
+            // supervision timeout in it never took effect either, and we kept whatever
+            // macOS defaults to. 15-30 ms with a 6 s timeout is the fastest legal ask.
+            if (pServer && currentConnHandle != 0xFFFF) {
+                pServer->updateConnParams(currentConnHandle, 12, 24, 0, 600);
+            }
+
+            // OTA_WITH_SEQUENTIAL_WRITES, not OTA_SIZE_UNKNOWN. NOR flash does have to be
+            // erased before it can be rewritten — that part is unavoidable — but the size
+            // constant decides WHEN. OTA_SIZE_UNKNOWN erases the whole 1.75 MB slot up
+            // front: 1.30 s measured on a PICO-D4, with the flash cache disabled, so the
+            // BLE host cannot run and the central hangs up mid-erase. That is the OTA
+            // failure. This mode erases each sector inside esp_ota_write() instead, as the
+            // data arrives, spreading the same total work into ~40 ms slices between
+            // chunks. It requires writes in a continuous sequence, which is exactly how the
+            // app streams them.
+            const uint32_t otaBeginStart = millis();
+            esp_err_t err = esp_ota_begin(update_partition, OTA_WITH_SEQUENTIAL_WRITES, &ota_handle);
             if (err != ESP_OK) {
                 Serial.printf("OTA Error: esp_ota_begin failed (%s)\n", esp_err_to_name(err));
                 if (pOTAStatusCharacteristic) {
@@ -1004,13 +1024,6 @@ class OTADataCallbacks : public NimBLECharacteristicCallbacks {
             }
             ota_in_progress = true;
 
-            // Ask the central for a fast connection interval (7.5-15ms) for the transfer
-            // so packets fly more often. iOS may clamp this; it's harmless if ignored.
-            // The connection resets on the post-OTA reboot, so no need to restore it.
-            if (pServer && currentConnHandle != 0xFFFF) {
-                pServer->updateConnParams(currentConnHandle, 6, 12, 0, 400);
-            }
-
             // Turn off LEDs during OTA to save power and avoid interference
             if (ledMgr.getNumStrips() > 0 && ledMgr.getStrip(0)) {
                 for(int i = 0; i < ledMgr.getStrip(0)->getLength(); i++) { 
@@ -1019,7 +1032,11 @@ class OTADataCallbacks : public NimBLECharacteristicCallbacks {
                 ledMgr.show();
             }
             
-            Serial.println("OTA: esp_ota_begin succeeded. Ready for firmware data.");
+            // Logged because this number is the whole story: it used to be 1300 ms, and
+            // anything above a second means the link is being asked to survive a stall
+            // again.
+            Serial.printf("OTA: esp_ota_begin succeeded in %lu ms. Ready for firmware data.\n",
+                          (unsigned long)(millis() - otaBeginStart));
             if (pOTAStatusCharacteristic) {
                 const char* msg = "OTA_STARTED_READY";
                 pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
