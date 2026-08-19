@@ -383,50 +383,39 @@ static SentryConfigCallbacks gConfigCallbacks;
 
 // ── Tracing this device's own work ──────────────────────────────────────────────────────
 #if CHROMABAY_SENTRY_SPANS
-// How often an operation is allowed to become a transaction.
-//
-// This is the whole design, so it is worth stating plainly: transaction_finish() SENDS. On a
-// BLE-only ChromaBay that send goes out over the relay from the loop task — the same task
-// that renders the LEDs — and blocks until the phone answers. A slider drag applies a
-// pattern several times a second, so a transaction per apply would trade a visibly smooth
-// strip for telemetry nobody asked for.
-//
-// Sampling one operation per interval keeps the shape of the work (what it does, how long,
-// how much heap was left) while paying for it about as often as a crash report. If spans
-// ever move to a route where sending is cheap — WiFi, or a queue drained off-task — this
-// is the constant to reconsider.
-static const uint32_t TRACE_INTERVAL_MS = 15000;
-static uint32_t gLastTraceMs = 0;
+/**
+ * Whether a transaction can be sent at all.
+ *
+ * The SDK discards an undated one, because a duration with no anchor places real work at an
+ * arbitrary time. ChromaBay learns the date from TIMESTAMP_SYNC just after the app connects
+ * (or from NTP in WiFi mode), so the only gap this skips is between a power cut and the
+ * first sync — and every operation traced below is app-initiated, so the app is by
+ * definition already there.
+ */
+inline bool clockIsSet() { return time(nullptr) >= 1704067200; }  // 2024-01-01
 
 /**
- * One traced operation on the device, as a child of whatever the app was doing.
+ * One traced operation, as a child of whatever the app was doing.
  *
- * Declare it where the work happens; it sends when it goes out of scope. The parent is
- * handled by the SDK — the transaction reuses the span id minted when the device adopted the
- * app's trace, so it lands as the node it was already advertising.
+ * Declare it where the work happens; it sends when it goes out of scope.
  *
- * Silently inert when sampled out, when reporting is off, or when the device has never been
- * told the date. That last one is not a shortcut: the SDK discards an undated transaction,
- * because a duration with no anchor would place real work at an arbitrary time. ChromaBay's
- * clock arrives with TIMESTAMP_SYNC shortly after the app connects, so the only window this
- * skips is between a power cut and the first sync.
+ * NOT SAMPLED, and that is a constraint on where it may be used rather than a free choice:
+ * transaction_finish() SENDS, and on a BLE-only device that send leaves from the loop task —
+ * the one rendering the LEDs — and blocks until the phone answers. Everything traced with
+ * this must be rare and user-initiated. Applying a pattern is neither: a slider drag applies
+ * several a second, which is why it is deliberately not traced.
  */
 class Operation {
 public:
     Operation(const char *name, const char *op) {
-        if (!sentry_is_enabled()) return;
-        if (time(nullptr) < 1704067200) return;   // 2024-01-01: no clock yet
-        const uint32_t now = millis();
-        if (gLastTraceMs != 0 && (now - gLastTraceMs) < TRACE_INTERVAL_MS) return;
-        if (!sentry::transaction_start(txn_, name, op)) return;
-        gLastTraceMs = now;
-        active_ = true;
+        if (!sentry_is_enabled() || !clockIsSet()) return;
+        active_ = sentry::transaction_start(txn_, name, op);
     }
     ~Operation() {
         if (active_) sentry::transaction_finish(txn_);
     }
 
-    /** nullptr when inactive or full; every call below tolerates that, so never check. */
+    /** nullptr when inactive or full; everything below tolerates that, so never check. */
     sentry_span_t *child(const char *op, const char *description = nullptr) {
         return active_ ? sentry::start_child(txn_, op, description) : nullptr;
     }
@@ -439,8 +428,53 @@ private:
     sentry::Transaction txn_;   // 688 B of this task's stack, live only for the operation
     bool active_ = false;
 };
+
+// ── OTA, which outlives any scope ───────────────────────────────────────────────────────
+// An OTA runs for minutes across many loop iterations, so its transaction cannot be a local.
+// 688 bytes of permanent RAM, which is the price of measuring the one operation on this
+// device that actually takes long enough to be worth measuring.
+//
+// Task ownership matters here. esp_ota_begin and the chunk writes run on the NimBLE host
+// task; only the finalize runs on the loop task. The handoff is the existing `ota_finalizing`
+// flag: the BLE side opens the verify span and sets the flag, and the loop side does not
+// touch the transaction until it sees it. Same staged-flag pattern as the rest of this
+// firmware, and it is why there is no lock here.
+static sentry::Transaction gOtaTxn;
+static sentry_span_t *gOtaSpan = nullptr;
+static bool gOtaTracing = false;
+
+/** Begin tracing an OTA. Safe to call when reporting is off. */
+inline void otaBegin() {
+    if (gOtaTracing || !sentry_is_enabled() || !clockIsSet()) return;
+    gOtaTracing = sentry::transaction_start(gOtaTxn, "firmware update", "device.ota");
+    gOtaSpan = nullptr;
+}
+
+/** Close the current phase and open the next. */
+inline void otaPhase(const char *op) {
+    if (!gOtaTracing) return;
+    if (gOtaSpan) sentry::span_finish(gOtaSpan);
+    gOtaSpan = sentry::start_child(gOtaTxn, op);
+}
+
+/** Attach a number to the current phase. */
+inline void otaSet(const char *key, int64_t value) {
+    if (gOtaTracing) sentry::span_set_attribute(gOtaSpan, key, value);
+}
+
+/**
+ * Finish and send. MUST be called before esp_restart() on the success path — a reboot is
+ * not a flush, and the whole point is measuring the update that just happened.
+ */
+inline void otaFinish(bool ok) {
+    if (!gOtaTracing) return;
+    if (gOtaSpan) { sentry::span_finish(gOtaSpan); gOtaSpan = nullptr; }
+    gOtaTracing = false;
+    sentry::transaction_finish(gOtaTxn);
+    (void)ok;
+}
 #else
-// Same shape, no SDK. `auto *` at the call sites makes the span type irrelevant.
+// Same shape, no spans in this SDK. `auto *` at the call sites makes the span type moot.
 class Operation {
 public:
     Operation(const char *, const char *) {}
@@ -448,6 +482,10 @@ public:
     void set(void *, const char *, int64_t) {}
     void finish(void *) {}
 };
+inline void otaBegin() {}
+inline void otaPhase(const char *) {}
+inline void otaSet(const char *, int64_t) {}
+inline void otaFinish(bool) {}
 #endif
 
 // ── Lifecycle ───────────────────────────────────────────────────────────────────────────
@@ -757,6 +795,10 @@ public:
     void set(void *, const char *, int64_t) {}
     void finish(void *) {}
 };
+inline void otaBegin() {}
+inline void otaPhase(const char *) {}
+inline void otaSet(const char *, int64_t) {}
+inline void otaFinish(bool) {}
 inline void begin() {}
 inline void attachBleService(NimBLEService *) {}
 inline void setBleConnected(bool) {}

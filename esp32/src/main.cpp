@@ -723,6 +723,7 @@ class ServerCallbacks: public NimBLEServerCallbacks {
         // If OTA was in progress and client disconnects, abort it to free resources
         if (ota_in_progress) {
             Serial.println("Client disconnected during OTA. Aborting OTA.");
+            SentryReporting::otaFinish(false);
             if (ota_handle != 0) { 
                  esp_ota_abort(ota_handle); 
             }
@@ -894,6 +895,8 @@ class OTAControlCallbacks : public NimBLECharacteristicCallbacks {
                 // notifications below may never flush. Flag the finalize and let
                 // loop() complete it (verify result -> esp_ota_end ->
                 // set_boot_partition -> restart) once the result is ready.
+                SentryReporting::otaSet("image_bytes", (int64_t)ota_received_size);
+                SentryReporting::otaPhase("ota.verify");
                 // See finalizeOtaIfReady().
                 ota_finalizing = true;
                 ota_finalize_start_ms = millis();
@@ -1001,6 +1004,11 @@ class OTADataCallbacks : public NimBLECharacteristicCallbacks {
                 pServer->updateConnParams(currentConnHandle, 12, 24, 0, 600);
             }
 
+            // The one operation on this device long enough to be worth measuring, and the
+            // one that keeps failing. Phases: erase, transfer, verify, finalize.
+            SentryReporting::otaBegin();
+            SentryReporting::otaPhase("ota.erase");
+
             // OTA_WITH_SEQUENTIAL_WRITES, not OTA_SIZE_UNKNOWN. NOR flash does have to be
             // erased before it can be rewritten — that part is unavoidable — but the size
             // constant decides WHEN. OTA_SIZE_UNKNOWN erases the whole 1.75 MB slot up
@@ -1037,6 +1045,7 @@ class OTADataCallbacks : public NimBLECharacteristicCallbacks {
             // again.
             Serial.printf("OTA: esp_ota_begin succeeded in %lu ms. Ready for firmware data.\n",
                           (unsigned long)(millis() - otaBeginStart));
+            SentryReporting::otaPhase("ota.transfer");
             if (pOTAStatusCharacteristic) {
                 const char* msg = "OTA_STARTED_READY";
                 pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
@@ -1774,16 +1783,9 @@ void processReceivedPattern() {
     // the library (debounced so a slider drag doesn't hammer flash). Cycling is left
     // untouched — it's just an auto-advance, independent of the stored set; this manual
     // pick simply shows until the next cycle boundary.
-    // What the app asked this device to do, as the device's own node in the app's trace.
-    // Sampled — see SentryReporting::Operation for why one per apply would stutter the LEDs.
-    // It closes when this function returns, so it spans the decode AND the library staging
-    // below, which together are what "applying a pattern" actually costs.
-    SentryReporting::Operation trace("apply pattern", "device.pattern.apply");
-    auto *decode = trace.child("pattern.decode");
+    // Deliberately NOT traced: a slider drag applies several patterns a second, and
+    // finishing a transaction sends — which blocks this task. See SentryReporting::Operation.
     bool success = patternRenderer->loadPatternFromMessagePack(buf, size);
-    trace.set(decode, "payload_bytes", (int64_t)size);
-    trace.set(decode, "free_heap", (int64_t)ESP.getFreeHeap());
-    trace.finish(decode);
     if (success) {
         if (cyclingActive && cycleIntervalMs > 0 && !libOrder.empty()) {
             // Don't let the next tick instantly override the manual pick.
@@ -1848,6 +1850,13 @@ void processReceivedLedConfig() {
     if (!newLedConfigAvailable || ledConfigBuffer == nullptr) {
         return;
     }
+
+    // Rare, user-initiated, and it rebuilds every strip and every render buffer — exactly
+    // the shape Operation is for. Closes (and sends) when this function returns.
+    SentryReporting::Operation trace("led config", "device.config.led");
+    auto *apply = trace.child("ledconfig.apply");
+    trace.set(apply, "payload_bytes", (int64_t)ledConfigBufferSize);
+    trace.set(apply, "free_heap", (int64_t)ESP.getFreeHeap());
 
     // Parse MessagePack data
     mpack_reader_t reader;
@@ -2147,6 +2156,7 @@ void finalizeOtaIfReady() {
                 pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
                 pOTAStatusCharacteristic->notify();
             }
+            SentryReporting::otaFinish(false);
             esp_ota_abort(ota_handle);
             ota_finalizing = false;
             ota_in_progress = false;
@@ -2167,6 +2177,7 @@ void finalizeOtaIfReady() {
             pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
             pOTAStatusCharacteristic->notify();
         }
+        SentryReporting::otaFinish(false);
         esp_ota_abort(ota_handle);
         ota_in_progress = false;
         ota_handle = 0;
@@ -2183,6 +2194,7 @@ void finalizeOtaIfReady() {
     }
     Serial.printf("OTA End command received. Finalizing update... (Total received: %d bytes)\n", ota_received_size);
 
+    SentryReporting::otaPhase("ota.finalize");
     esp_err_t err = esp_ota_end(ota_handle);
     if (err == ESP_OK) {
         Serial.println("OTA: Firmware write completed successfully.");
@@ -2203,6 +2215,9 @@ void finalizeOtaIfReady() {
                 pOTAStatusCharacteristic->notify();
                 delay(100); // Allow BLE notification to send before reboot
             }
+            // Before the reboot, not after: a restart is not a flush, and this transaction
+            // is the record of the update that just succeeded.
+            SentryReporting::otaFinish(true);
             delay(2000); // Give time for final messages
             esp_restart();
         } else {
@@ -2223,6 +2238,7 @@ void finalizeOtaIfReady() {
     }
 
     // Reset OTA state after attempting to end (unless we already rebooted).
+    SentryReporting::otaFinish(false);
     ota_in_progress = false;
     ota_handle = 0;
     ota_received_size = 0;
@@ -2282,6 +2298,11 @@ static void stageCommConfig(const uint8_t* data, size_t len) {
 void processCommConfig() {
     if (!newCommCfgAvailable) return;
     newCommCfgAvailable = false;
+
+    // Settings writes: WiFi credentials, transport mode, schedule, sleep. Rare, and some of
+    // them reboot the device, so this is the last thing measured before that happens.
+    SentryReporting::Operation trace("device settings", "device.config.settings");
+    auto *apply = trace.child("settings.apply");
     uint8_t* buf = commCfgBuf; size_t len = commCfgLen;
     commCfgBuf = nullptr; commCfgLen = 0;
     if (!buf) return;
