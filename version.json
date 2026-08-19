@@ -1,7 +1,7 @@
 {
-  "version": "1.1.309",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.309.zip",
-  "buildDate": "2026-08-19T22:48:04Z",
-  "commitHash": "24637c4a5e5be9953e8ae388e9ad3fff8fa6bcff",
-  "commitMessage": "Trace what the device does with a pattern, not just when it dies"
+  "version": "1.1.310",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.310.zip",
+  "buildDate": "2026-08-19T22:54:38Z",
+  "commitHash": "2b34f3d7792d84ff19a1d02e65ce5bab137c6a5e",
+  "commitMessage": "Trace the OTA and the config writes; leave the render path alone"
 }
