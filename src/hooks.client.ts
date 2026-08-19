@@ -28,7 +28,18 @@ Sentry.init({
   replaysOnErrorSampleRate: 1.0,   // always keep a replay around an error
   sendDefaultPii: true,
 
+  // Sentry Logs. The app already narrates itself to the console — BLE state, OTA progress,
+  // every GATT failure — and until now all of it was invisible: caught errors become
+  // breadcrumbs, never events, so a whole class of real problems (a wedged OTA, a link that
+  // will not stay up) left no trace in Sentry at all.
+  //
+  // warn and error only, deliberately. `log` would forward the FPS counter and every pattern
+  // sync, which is a lot of quota to spend on proving the device is fine. The device cannot
+  // do any of this — sentry-micro has no logging API — so this is the only side that can.
+  enableLogs: true,
+
   integrations: [
+    Sentry.consoleLoggingIntegration({ levels: ['warn', 'error'] }),
     Sentry.browserTracingIntegration(),
     // Unmasked — this is our own editor, not a PII surface — so replays are actually legible.
     Sentry.replayIntegration({ maskAllText: false, blockAllMedia: false }),

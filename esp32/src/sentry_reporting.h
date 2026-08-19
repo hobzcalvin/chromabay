@@ -429,6 +429,41 @@ private:
     bool active_ = false;
 };
 
+/**
+ * One transaction per boot, so a device that only ever renders still reports something.
+ *
+ * Everything else traced here is app-initiated — an OTA, a config write — and a device can
+ * run for months without either. That would leave the whole metrics side of this empty on
+ * exactly the devices that are behaving, which is backwards. This is the floor: it says the
+ * device came online and what booting cost it.
+ *
+ * Sent when the clock first arrives rather than at boot, because at boot there is no date
+ * and the SDK would (correctly) discard it. The transaction is near-instant — it is a
+ * carrier for the attributes, not a measurement of the boot itself. Boot duration is an
+ * attribute, taken from uptime, which needs no clock to be correct.
+ */
+static uint32_t gSetupMs = 0;
+static bool gBootReported = false;
+
+/** Record how long setup() took. Call once, at the end of it. */
+inline void noteSetupComplete(uint32_t elapsedMs) { gSetupMs = elapsedMs; }
+
+inline void reportBootOnce() {
+    if (gBootReported || !sentry_is_enabled() || !clockIsSet()) return;
+    gBootReported = true;
+
+    sentry::Transaction txn;
+    if (!sentry::transaction_start(txn, "device online", "device.boot")) return;
+    auto *boot = sentry::start_child(txn, "device.startup");
+    sentry::span_set_attribute(boot, "setup_ms", (int64_t)gSetupMs);
+    sentry::span_set_attribute(boot, "uptime_ms", (int64_t)millis());
+    sentry::span_set_attribute(boot, "free_heap", (int64_t)ESP.getFreeHeap());
+    sentry::span_set_attribute(boot, "min_free_heap", (int64_t)ESP.getMinFreeHeap());
+    sentry::span_finish(boot);
+    sentry::transaction_finish(txn);
+    Serial.printf("[Sentry] reported boot (setup %lu ms)\n", (unsigned long)gSetupMs);
+}
+
 // ── OTA, which outlives any scope ───────────────────────────────────────────────────────
 // An OTA runs for minutes across many loop iterations, so its transaction cannot be a local.
 // 688 bytes of permanent RAM, which is the price of measuring the one operation on this
@@ -482,6 +517,8 @@ public:
     void set(void *, const char *, int64_t) {}
     void finish(void *) {}
 };
+inline void noteSetupComplete(uint32_t) {}
+inline void reportBootOnce() {}
 inline void otaBegin() {}
 inline void otaPhase(const char *) {}
 inline void otaSet(const char *, int64_t) {}
@@ -765,6 +802,9 @@ inline void tick(uint32_t nowMs) {
     }
     gRelayWasReady = ready;
 
+    // Once the app has told us the date, say we are here. See reportBootOnce().
+    reportBootOnce();
+
     if (sentry_buffered_count() == 0) return;
     const uint32_t interval = gLastFlushDelivered ? FLUSH_BACKLOG_INTERVAL_MS : FLUSH_INTERVAL_MS;
     if (nowMs - gLastFlushMs < interval) return;
@@ -795,6 +835,8 @@ public:
     void set(void *, const char *, int64_t) {}
     void finish(void *) {}
 };
+inline void noteSetupComplete(uint32_t) {}
+inline void reportBootOnce() {}
 inline void otaBegin() {}
 inline void otaPhase(const char *) {}
 inline void otaSet(const char *, int64_t) {}

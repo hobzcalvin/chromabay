@@ -3138,6 +3138,7 @@ void setup() {
                   SINGLE_CORE ? "single — WS2812 flicker mitigations ON: dithering off, slower frame cadence; prefer APA102"
                               : "multi — render on core 1, BLE on core 0");
     Serial.println("Setup complete");
+    SentryReporting::noteSetupComplete(millis());
 }
 
 unsigned long lastHeapUpdateTime = 0;
