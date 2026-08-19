@@ -110,6 +110,17 @@ jobs:
           sed -i "s/pages: 'build'/pages: 'docs'/" svelte.config.js
           sed -i "s/assets: 'build'/assets: 'docs'/" svelte.config.js
           npm run build
+          # Persist the custom domain on every deploy (keep_files also preserves GitHub's own
+          # CNAME, but write it explicitly so chromabay.app serving never regresses).
+          echo "chromabay.app" > docs/CNAME
+          # SPA fallback: serve the app shell for ANY unknown path so client-side routes
+          # (/patterns, /devices, …) render on GitHub Pages. Replaces the old spa-github-pages
+          # redirect 404.html, which looped/exploded at the apex root (no /chromabay segment).
+          #
+          # MUST come before the source-map inject below: 404.html is a copy of index.html,
+          # and a copy taken afterwards would carry index.html's debug ids into a file that
+          # is served for every deep link — two documents claiming the same identity.
+          cp docs/index.html docs/404.html
 
           # Source maps → Sentry, then removed before anything is published. `inject` stamps
           # a debug id into each bundle and its map so they are matched by id rather than by
