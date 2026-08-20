@@ -1,7 +1,7 @@
 {
-  "version": "1.1.313",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.313.zip",
-  "buildDate": "2026-08-19T23:56:31Z",
-  "commitHash": "50805b4511339b690933ea06094fb712d08bb00a",
-  "commitMessage": "Replace the boot-transaction carrier with actual metrics"
+  "version": "1.1.314",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.314.zip",
+  "buildDate": "2026-08-20T17:01:05Z",
+  "commitHash": "5cbe3bf57bd0edfae9fee1773273922301f6ddf2",
+  "commitMessage": "Send the console lines nobody can read off a cable"
 }
