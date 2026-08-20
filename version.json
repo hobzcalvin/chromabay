@@ -1,7 +1,7 @@
 {
-  "version": "1.1.314",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.314.zip",
-  "buildDate": "2026-08-20T17:01:05Z",
-  "commitHash": "5cbe3bf57bd0edfae9fee1773273922301f6ddf2",
-  "commitMessage": "Send the console lines nobody can read off a cable"
+  "version": "1.1.315",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.315.zip",
+  "buildDate": "2026-08-20T17:38:42Z",
+  "commitHash": "35e7b4d57e84d85f323ae90c3f1edeea19037086",
+  "commitMessage": "Give the metrics table the ten names this device actually has"
 }
