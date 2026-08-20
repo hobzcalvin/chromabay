@@ -106,6 +106,11 @@ jobs:
     name: Build ${{ matrix.environment }}
     needs: plan
     runs-on: ubuntu-latest
+    # Hoisted because `secrets` is not one of the contexts a step-level `if` may read —
+    # only env, github, inputs, job, matrix, needs, runner, steps, strategy and vars. The
+    # value is a boolean, not the token.
+    env:
+      HAS_SENTRY_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN != '' }}
     strategy:
       # One broken variant should not hide the status of the other five.
       fail-fast: false
@@ -192,7 +197,7 @@ jobs:
       # sentry-cli warn on every invocation, which is why it is deliberately absent
       # everywhere else in this file.
       - name: Check the release will produce a readable issue
-        if: ${{ secrets.SENTRY_AUTH_TOKEN != '' && vars.SENTRY_ORG != '' }}
+        if: env.HAS_SENTRY_TOKEN == 'true' && vars.SENTRY_ORG != ''
         continue-on-error: true
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
