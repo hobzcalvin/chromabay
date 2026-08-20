@@ -2840,6 +2840,25 @@ namespace RtStream {
 } // namespace RtStream
 #endif // CHROMABAY_WIFI
 
+// FreeRTOS stack overflow hook — called when CONFIG_FREERTOS_CHECK_STACKOVERFLOW=2 (canary
+// mode) catches a task's stack canary corrupted. Without this, a stack overflow silently
+// corrupts whatever sits in adjacent RAM (e.g. the ESP-IDF interrupt watchdog HAL context)
+// and the resulting crash is reported as a cryptic StoreProhibited at a random address
+// rather than a named error. See CHROMABAY-FW-4.
+//
+// Must be `extern "C"` so the C linker symbol matches what FreeRTOS expects. Logs the
+// offending task name to Sentry (best-effort — the route may not be up yet) then aborts so
+// the crash reporter captures a panic with the task name in scope.
+extern "C" void vApplicationStackOverflowHook(TaskHandle_t /*xTask*/, char *pcTaskName) {
+    // Serial is a last resort — may not work if the overflow hit the UART driver's buffers,
+    // but worth trying for local debugging. Keep it before the Sentry call so we get
+    // something even if the SDK crashes.
+    Serial.printf("FATAL: stack overflow in task '%s'\n", pcTaskName ? pcTaskName : "?");
+    Serial.flush();
+    SentryReporting::logError("Stack overflow in task: %s", pcTaskName ? pcTaskName : "unknown");
+    abort();
+}
+
 void setup() {
     Serial.begin(115200);
     delay(1000);
