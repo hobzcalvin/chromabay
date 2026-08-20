@@ -1018,11 +1018,9 @@ inline void tick(uint32_t nowMs) {
     // forever and sent none of them. They get their own slow cadence instead: the flush
     // blocks the render loop for as long as the phone takes to answer, so once every few
     // minutes is the right price for numbers that change slowly.
+    //
+    // This decides WHEN TO FLUSH. The reading itself happens at the flush — see below.
     const bool metricsDue = (nowMs - gLastMetricsMs) >= METRICS_INTERVAL_MS;
-    if (metricsDue) {
-        gLastMetricsMs = nowMs;
-        recordVitals(gLastFpsTimes10);
-    }
 
     // Log lines ride the same flush on a faster cadence, for the reason in LOG_FLUSH_INTERVAL_MS.
     // Gated on the clock as well as the count: without a date the SDK holds the ring instead of
@@ -1032,20 +1030,36 @@ inline void tick(uint32_t nowMs) {
                          (gPendingLogs >= LOG_HIGH_WATER ||
                           (nowMs - gLastFlushMs) >= LOG_FLUSH_INTERVAL_MS);
 
-    // Nothing is worth a flush without somewhere to flush to — and this is more than wasted
-    // work. A send with no route comes back UNAVAILABLE, and the SDK persists an unavailable
-    // envelope to the offline buffer for retry. A ChromaBay spends most of its life
-    // disconnected, so without this check a device with nothing wrong would write a metrics
-    // envelope to LittleFS every five minutes and a log envelope every twenty seconds,
-    // wearing the filesystem and — because that buffer is one shared ring that evicts the
-    // oldest entry — eventually pushing out the one thing in it that matters, a crash report.
-    // The offline buffer is for what happened while nobody was listening. A heap gauge and a
-    // console line are not that: they are still in RAM, and they can simply wait.
+    // No route, nothing to do. This is no longer load-bearing: sentry-micro 9941587 makes
+    // flush_metrics() and flush_logs() return early on an unavailable transport themselves,
+    // after a device sitting disconnected was found writing a metrics envelope to LittleFS
+    // every five minutes — an UNAVAILABLE send counts as worth retrying, so the periodic
+    // categories were being persisted, wearing flash and eventually evicting a crash report
+    // from a buffer that is one shared ring. Kept because it is still the cheapest way to
+    // skip a doomed retry of the buffered backlog too, and because this firmware must build
+    // against an SDK older than that fix.
     if (!gTransport.is_available()) return;
 
     if (sentry_buffered_count() == 0 && !metricsDue && !logsDue) return;
     const uint32_t interval = gLastFlushDelivered ? FLUSH_BACKLOG_INTERVAL_MS : FLUSH_INTERVAL_MS;
     if (sentry_buffered_count() > 0 && nowMs - gLastFlushMs < interval) return;
+
+    // Read the vitals here, immediately before the send, rather than on a five-minute timer
+    // of their own. A gauge keeps only its newest value, so on a device that spends the day
+    // disconnected — which is most days — a timer produced ~167 readings that overwrote each
+    // other so that exactly one could ship. Nothing is lost by waiting: every number in
+    // recordVitals() is either an instantaneous read or a watermark the system maintains for
+    // us (min_free_heap, the stack high-water), so a sample taken now is identical to the
+    // last of a hundred taken earlier — and uxTaskGetStackHighWaterMark() scans the whole
+    // stack for its fill pattern, which is not free to repeat for nothing.
+    //
+    // metricsDue therefore stays true until a flush actually happens, instead of being
+    // consumed by a tick that then returned. The first flush after the app reappears carries
+    // fresh numbers rather than whatever the clock happened to land on.
+    if (metricsDue) {
+        gLastMetricsMs = nowMs;
+        recordVitals(gLastFpsTimes10);
+    }
     gLastFlushMs = nowMs;
     uint32_t delivered = sentry_flush(1);
     gLastFlushDelivered = delivered > 0;
