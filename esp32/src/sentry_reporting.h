@@ -575,6 +575,16 @@ inline void recordDisconnect() { sentry::metric_count("device.ble_disconnect"); 
 inline void recordVitals(uint32_t fpsTimes10) {
     sentry::metric_gauge("device.free_heap", (int64_t)ESP.getFreeHeap(), "byte");
     sentry::metric_gauge("device.min_free_heap", (int64_t)ESP.getMinFreeHeap(), "byte");
+    // The closest the loop task has come to the bottom of its 8 KB, in bytes (ESP-IDF's
+    // high-water mark is bytes, not the words plain FreeRTOS returns). Worth a slot because
+    // this is the task that renders the LEDs AND runs sentry_flush(), which puts a 2 KB
+    // envelope buffer on the caller's stack on top of whatever the caller already holds —
+    // an Operation's transaction is another 688 B. sentry-micro hit exactly this wall in its
+    // own wifi_basic example, deterministically, and the only warning a stack overflow gives
+    // is the crash. Sampled here rather than at the peak, so it is a floor on the true
+    // margin: the deepest moment may not be the moment we looked.
+    sentry::metric_gauge("device.loop_stack_free",
+                         (int64_t)uxTaskGetStackHighWaterMark(NULL), "byte");
     sentry::metric_gauge("device.uptime", (int64_t)(millis() / 1000), "second");
     sentry::metric_gauge("device.fps_x10", (int64_t)fpsTimes10);
 #if CHROMABAY_SENTRY_LOGS
