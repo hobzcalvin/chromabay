@@ -159,6 +159,7 @@ jobs:
       # string src/sentry_reporting.h sets as options.release, which is what ties an arriving
       # event to these files.
       - name: Build and upload debug files
+        id: sdk
         uses: getsentry/sentry-micro/.github/actions/upload-debug-files@main
         with:
           project-dir: esp32
@@ -176,10 +177,47 @@ jobs:
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
 
+      # Does the Sentry PROJECT agree with the firmware we just uploaded?
+      #
+      # release.sh already refuses to ship a build whose own pieces disagree. This asks the
+      # next question out — are the debug files actually there, is there a code mapping,
+      # can an issue from this release show a suspect commit — and it is the question we
+      # got wrong by hand: a release shipped with no suspect commits and it took a
+      # screenshot and an afternoon to work out why. The script exists for exactly that.
+      #
+      # Advisory, not blocking. A misconfigured Sentry project is worth shouting about, but
+      # it is not a reason to withhold firmware from devices in the field.
+      #
+      # --org is passed as a flag rather than exported: SENTRY_ORG in the environment makes
+      # sentry-cli warn on every invocation, which is why it is deliberately absent
+      # everywhere else in this file.
+      - name: Check the release will produce a readable issue
+        if: ${{ secrets.SENTRY_AUTH_TOKEN != '' && vars.SENTRY_ORG != '' }}
+        continue-on-error: true
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Where PlatformIO put the SDK for this environment. The action does not export a
+          # path to its own checkout, and this is the copy the firmware was actually built
+          # against, which is the one whose doctor.py matches it.
+          ROOT="esp32/.pio/libdeps/${{ matrix.environment }}/sentry-micro"
+          if [[ ! -f "$ROOT/scripts/doctor.py" ]]; then
+            echo "doctor.py not found under $ROOT — skipping"
+            exit 0
+          fi
+          python3 "$ROOT/scripts/doctor.py" \
+            --elf "esp32/.pio/build/${{ matrix.environment }}/firmware.elf" \
+            --release "${{ needs.plan.outputs.version }}" \
+            --org "${{ vars.SENTRY_ORG }}" \
+            --project "${{ vars.SENTRY_PROJECT_FW || vars.SENTRY_PROJECT }}"
+
       # Everything the publish job needs from this variant. bootloader/partitions/boot_app0
       # are only used for the three WiFi variants (they become the merged USB image), but
       # copying them from every build keeps this step free of per-variant special cases.
       - name: Collect build output
+        env:
+          VARIANTS: ${{ steps.sdk.outputs.variants }}
         run: |
           set -euo pipefail
           OUT="artifact"
@@ -187,6 +225,10 @@ jobs:
           BUILD="esp32/.pio/build/${{ matrix.environment }}"
           cp "$BUILD/firmware.bin" "$BUILD/bootloader.bin" "$BUILD/partitions.bin" "$OUT/"
           cp "$(find ~/.platformio -name boot_app0.bin | head -1)" "$OUT/"
+          # What the SDK reported about this build's debug files, carried alongside the
+          # binary so the publish job can audit the release as a whole. See the coverage
+          # check there for why one row per job is not enough.
+          printf '%s' "$VARIANTS" > "$OUT/variants.json"
           ls -l "$OUT"
 
       - name: Upload build output
@@ -220,6 +262,62 @@ jobs:
       with:
         path: builds
         pattern: fw-*
+
+    # Did every variant actually get its debug files uploaded?
+    #
+    # The SDK's summarize_release.py exists to answer this, and sharding defeats it: with
+    # one environment per matrix job, each job renders a one-row table and nothing compares
+    # them. Its own reason for existing is that "a release that covers four variants and a
+    # release that covers three look identical in a scrolling build log, and the difference
+    # only shows up weeks later as <unknown> frames from whichever board nobody uploaded" —
+    # which is exactly the failure sharding reintroduces. This is the missing comparison.
+    #
+    # Blocking, unlike doctor.py. A variant shipped without debug files is a device whose
+    # crashes are unreadable for as long as that firmware is in the field, and it is
+    # trivially fixable before the release exists rather than after.
+    - name: Audit debug-file coverage
+      env:
+        EXPECTED: ${{ needs.plan.outputs.environments }}
+        UPLOADING: ${{ secrets.SENTRY_AUTH_TOKEN != '' }}
+      run: |
+        python3 - <<'PY'
+        import json, os, pathlib, sys
+
+        expected = set(json.loads(os.environ["EXPECTED"]))
+        uploading = os.environ["UPLOADING"] == "true"
+
+        reported, missing_report = {}, []
+        for environment in sorted(expected):
+            report = pathlib.Path("builds") / f"fw-{environment}" / "variants.json"
+            if not report.is_file() or not report.read_text().strip():
+                missing_report.append(environment)
+                continue
+            for variant in json.loads(report.read_text()):
+                reported[variant["environment"]] = variant
+
+        for environment in sorted(expected):
+            variant = reported.get(environment)
+            if not variant:
+                continue
+            mark = "ok" if variant.get("uploaded") else ("NOT UPLOADED" if uploading else "skipped")
+            print(f"  {environment:24} {variant.get('debug_id', '-'):38} {mark}")
+
+        problems = []
+        if missing_report:
+            problems.append(f"no debug-file report from: {', '.join(missing_report)}")
+        if extra := set(reported) - expected:
+            problems.append(f"reported but not planned: {', '.join(sorted(extra))}")
+        if uploading:
+            silent = sorted(e for e, v in reported.items() if not v.get("uploaded"))
+            if silent:
+                problems.append(f"built but no debug files uploaded: {', '.join(silent)}")
+
+        if problems:
+            # Not a warning. Shipping this means crashes from those boards arrive as hex.
+            print("\n".join(f"error: {p}" for p in problems), file=sys.stderr)
+            sys.exit(1)
+        print(f"\n{len(expected)} variant(s), all accounted for")
+        PY
 
     - name: Setup Python
       uses: actions/setup-python@v4
