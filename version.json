@@ -1,7 +1,7 @@
 {
-  "version": "1.1.317",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.317.zip",
-  "buildDate": "2026-08-20T21:43:49Z",
-  "commitHash": "3284c144b6627f1d9ddee354beb426eacd6fa130",
-  "commitMessage": "Use the SDK's own checks instead of trusting six green jobs"
+  "version": "1.1.318",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.318.zip",
+  "buildDate": "2026-08-20T21:45:33Z",
+  "commitHash": "a342c870ab40814dd42b5b1c311aedf424f51e6c",
+  "commitMessage": "Read the token check from env, which is where an if can see it"
 }
