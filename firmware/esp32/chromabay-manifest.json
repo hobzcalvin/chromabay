@@ -1,6 +1,6 @@
 {
   "name": "ChromaBay",
-  "version": "fwv0.1.122",
+  "version": "fwv0.1.123",
   "new_install_prompt_erase": true,
-  "builds": [ { "chipFamily": "ESP32", "parts": [ { "path": "https://chromabay.app/firmware/esp32/fwv0.1.122/esp32/chromabay-factory.bin", "offset": 0 } ] },{ "chipFamily": "ESP32-S3", "parts": [ { "path": "https://chromabay.app/firmware/esp32/fwv0.1.122/esp32s3/chromabay-factory.bin", "offset": 0 } ] },{ "chipFamily": "ESP32-C3", "parts": [ { "path": "https://chromabay.app/firmware/esp32/fwv0.1.122/esp32c3/chromabay-factory.bin", "offset": 0 } ] } ]
+  "builds": [ { "chipFamily": "ESP32", "parts": [ { "path": "https://chromabay.app/firmware/esp32/fwv0.1.123/esp32/chromabay-factory.bin", "offset": 0 } ] },{ "chipFamily": "ESP32-S3", "parts": [ { "path": "https://chromabay.app/firmware/esp32/fwv0.1.123/esp32s3/chromabay-factory.bin", "offset": 0 } ] },{ "chipFamily": "ESP32-C3", "parts": [ { "path": "https://chromabay.app/firmware/esp32/fwv0.1.123/esp32c3/chromabay-factory.bin", "offset": 0 } ] } ]
 }
