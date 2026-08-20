@@ -1,7 +1,7 @@
 {
-  "version": "1.1.316",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.316.zip",
-  "buildDate": "2026-08-20T18:33:26Z",
-  "commitHash": "357e6f383ed3d419d74cea6e21c60c3e2e559316",
-  "commitMessage": "Read the vitals at the send, not on a timer of their own"
+  "version": "1.1.317",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.317.zip",
+  "buildDate": "2026-08-20T21:43:49Z",
+  "commitHash": "3284c144b6627f1d9ddee354beb426eacd6fa130",
+  "commitMessage": "Use the SDK's own checks instead of trusting six green jobs"
 }
