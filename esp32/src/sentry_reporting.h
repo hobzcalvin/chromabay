@@ -20,10 +20,22 @@
 // Miss either and every function below compiles to nothing or no-ops at runtime. Crash
 // reporting must never be load-bearing for the firmware it reports on.
 //
-// What gets sent: one event on the boot that FOLLOWS a crash (panic, watchdog, brownout),
-// carrying the reset reason, chip/board/flash facts, heap and uptime — plus the coredump
-// backtrace when the SDK build supports it. Clean boots send nothing; a fleet of LED
-// controllers rebooting on a power switch is not news, and it would burn the project's quota.
+// What gets sent, in four kinds:
+//   * an EVENT on the boot that FOLLOWS a crash (panic, watchdog, brownout), carrying the
+//     reset reason, chip/board/flash facts, heap and uptime — plus the coredump backtrace
+//     when the SDK build supports it. Clean boots send nothing; a fleet of LED controllers
+//     rebooting on a power switch is not news, and it would burn the project's quota.
+//   * a TRANSACTION per rare, user-initiated operation: a firmware update, an LED
+//     reconfiguration, a settings write. Never the pattern-apply path — see Operation.
+//   * METRICS: heap, uptime, frame rate, boot and disconnect counts. Recorded continuously,
+//     sent on a slow cadence, never blocking anything.
+//   * LOGS: a handful of console lines per event worth explaining — what booted, what an
+//     update did, why the link dropped. See logInfo() for what belongs there and what
+//     emphatically does not.
+//
+// Only the first is load-bearing for support; the other three are what turn "it stopped
+// working" into a timeline. All four ride the same relay, and none of them may ever delay
+// the render loop by more than one blocking send.
 
 #ifndef CHROMABAY_WIFI
 #define CHROMABAY_WIFI 1
@@ -86,12 +98,36 @@
 #  if __has_include(<core/sentry_span.h>)
 #    define CHROMABAY_SENTRY_SPANS 1
 #  endif
+#  if __has_include(<core/sentry_metrics.h>)
+#    define CHROMABAY_SENTRY_METRICS 1
+#  endif
+#  if __has_include(<core/sentry_log.h>)
+#    define CHROMABAY_SENTRY_LOGS 1
+#  endif
 #endif
 #ifndef CHROMABAY_SENTRY_TRACE
 #define CHROMABAY_SENTRY_TRACE 0
 #endif
 #ifndef CHROMABAY_SENTRY_SPANS
 #define CHROMABAY_SENTRY_SPANS 0
+#endif
+// Detected separately from spans, because upstream gates them separately: a build can turn
+// either off with SENTRY_MICRO_METRICS_ENABLED / SENTRY_MICRO_LOGS_ENABLED=0, and doing so
+// REMOVES the functions rather than making them no-ops. Following that with our own detection
+// means a firmware built against an SDK missing (or opting out of) one of them still compiles.
+#ifndef CHROMABAY_SENTRY_METRICS
+#define CHROMABAY_SENTRY_METRICS 0
+#endif
+#ifndef CHROMABAY_SENTRY_LOGS
+#define CHROMABAY_SENTRY_LOGS 0
+#endif
+#if CHROMABAY_SENTRY_METRICS && !SENTRY_MICRO_METRICS_ENABLED
+#undef CHROMABAY_SENTRY_METRICS
+#define CHROMABAY_SENTRY_METRICS 0
+#endif
+#if CHROMABAY_SENTRY_LOGS && !SENTRY_MICRO_LOGS_ENABLED
+#undef CHROMABAY_SENTRY_LOGS
+#define CHROMABAY_SENTRY_LOGS 0
 #endif
 
 #include <LittleFS.h>
@@ -157,6 +193,27 @@ static bool gLastBootReported = false;
 static const uint32_t METRICS_INTERVAL_MS = 300000;   // 5 minutes
 static uint32_t gLastMetricsMs = 0;
 static uint32_t gLastFpsTimes10 = 0;
+
+// Log lines recorded but not yet flushed. The SDK counts what it DROPPED, not what it is
+// holding, so the one number that decides whether a flush has anything to carry has to be
+// kept here.
+static uint32_t gPendingLogs = 0;
+// Faster than the metrics cadence, because these are not readings that keep their meaning
+// while they wait: the ring holds six lines and evicts the oldest, so a device that logged
+// its boot, its update and its disconnect inside five minutes would flush only the last of
+// them. Still slow enough that the send is rare on a device with nothing to say.
+static const uint32_t LOG_FLUSH_INTERVAL_MS = 20000;
+// Send early when the ring is nearly full rather than waiting out the interval, since the
+// next line after this is one that overwrites an old one.
+static const uint32_t LOG_HIGH_WATER = 4;
+
+// Set for the duration of a firmware update. See otaBegin().
+static bool gOtaActive = false;
+static uint32_t gOtaActiveMs = 0;
+// Longer than any OTA this device can survive, and a backstop rather than a timeout: every
+// path out of an update calls otaFinish(), but if one ever failed to, this is the difference
+// between a device that stops reporting for a minute and one that stops reporting forever.
+static const uint32_t OTA_ACTIVE_MAX_MS = 300000;
 
 // NVS namespace of its own rather than a field on DeviceSettings: the DSN is optional
 // diagnostics config, and mixing it into the settings struct would mean touching the
@@ -385,18 +442,39 @@ class SentryConfigCallbacks : public NimBLECharacteristicCallbacks {
 static RelayRxCallbacks gRelayRxCallbacks;
 static SentryConfigCallbacks gConfigCallbacks;
 
-// ── Tracing this device's own work ──────────────────────────────────────────────────────
-#if CHROMABAY_SENTRY_SPANS
 /**
- * Whether a transaction can be sent at all.
+ * Whether a dated report can be sent at all.
  *
- * The SDK discards an undated one, because a duration with no anchor places real work at an
- * arbitrary time. ChromaBay learns the date from TIMESTAMP_SYNC just after the app connects
- * (or from NTP in WiFi mode), so the only gap this skips is between a power cut and the
- * first sync — and every operation traced below is app-initiated, so the app is by
+ * The SDK discards an undated TRANSACTION, because a duration with no anchor places real
+ * work at an arbitrary time. ChromaBay learns the date from TIMESTAMP_SYNC just after the
+ * app connects (or from NTP in WiFi mode), so the only gap this skips is between a power cut
+ * and the first sync — and every operation traced below is app-initiated, so the app is by
  * definition already there.
+ *
+ * Metrics and log lines are HELD rather than dropped when this is false, so for those it
+ * decides when a flush is worth attempting, not whether the reading counts.
  */
 inline bool clockIsSet() { return time(nullptr) >= 1704067200; }  // 2024-01-01
+
+/**
+ * Send whatever has accumulated — metrics, log lines — right now, outside tick()'s cadence.
+ *
+ * Blocking, and only for the moments where waiting for the next tick means never: the device
+ * is about to reboot into new firmware, and a restart is not a flush. The `0` asks for no
+ * buffered envelopes; those are a backlog with no deadline, and draining one here would put
+ * a second round trip in front of a reboot the user is watching.
+ */
+inline void flushNow() {
+    if (!sentry_is_enabled() || !clockIsSet()) return;
+    sentry_flush(0);
+    // The SDK empties its ring whether or not the send landed — a failed envelope has already
+    // been buffered for retry if it was worth retrying, and holding the lines too would send
+    // every one of them twice. Our count follows the ring, not the delivery.
+    gPendingLogs = 0;
+}
+
+// ── Tracing this device's own work ──────────────────────────────────────────────────────
+#if CHROMABAY_SENTRY_SPANS
 
 /**
  * One traced operation, as a child of whatever the app was doing.
@@ -428,11 +506,38 @@ public:
     }
     void finish(sentry_span_t *span) { sentry::span_finish(span); }
 
+    /**
+     * Send now instead of at scope exit.
+     *
+     * For the operations that end in ESP.restart(): a destructor does not run on a reboot, so
+     * a settings change that switches transport — the single most interesting thing on this
+     * list, because the device disappears afterwards — was measured and then thrown away.
+     * Idempotent, so the destructor after it is a no-op rather than a second send.
+     */
+    void finishNow() {
+        if (!active_) return;
+        active_ = false;
+        sentry::transaction_finish(txn_);
+    }
+
 private:
     sentry::Transaction txn_;   // 688 B of this task's stack, live only for the operation
     bool active_ = false;
 };
+#else
+// Same shape, no spans in this SDK. `auto *` at the call sites makes the span type moot.
+class Operation {
+public:
+    Operation(const char *, const char *) {}
+    void *child(const char *, const char * = nullptr) { return nullptr; }
+    void set(void *, const char *, int64_t) {}
+    void finish(void *) {}
+    void finishNow() {}
+};
+#endif  // CHROMABAY_SENTRY_SPANS
 
+// ── Numbers, on their own cadence ───────────────────────────────────────────────────────
+#if CHROMABAY_SENTRY_METRICS
 /**
  * Numbers this device wants to report that belong to no operation.
  *
@@ -472,9 +577,23 @@ inline void recordVitals(uint32_t fpsTimes10) {
     sentry::metric_gauge("device.min_free_heap", (int64_t)ESP.getMinFreeHeap(), "byte");
     sentry::metric_gauge("device.uptime", (int64_t)(millis() / 1000), "second");
     sentry::metric_gauge("device.fps_x10", (int64_t)fpsTimes10);
+#if CHROMABAY_SENTRY_LOGS
+    // What the console stream itself lost. A log that says "6 lines, all fine" while the ring
+    // has been evicting under it is worse than no log at all, and the counters are free —
+    // the SDK keeps them whether or not anyone reads them.
+    sentry::metric_gauge("device.logs_dropped", (int64_t)sentry::logs_dropped());
+    sentry::metric_gauge("device.logs_truncated", (int64_t)sentry::logs_truncated());
+#endif
 }
+#else
+inline void recordBoot(uint32_t) {}
+inline void noteFps(uint32_t) {}
+inline void recordDisconnect() {}
+inline void recordVitals(uint32_t) {}
+#endif  // CHROMABAY_SENTRY_METRICS
 
 // ── OTA, which outlives any scope ───────────────────────────────────────────────────────
+#if CHROMABAY_SENTRY_SPANS
 // An OTA runs for minutes across many loop iterations, so its transaction cannot be a local.
 // 688 bytes of permanent RAM, which is the price of measuring the one operation on this
 // device that actually takes long enough to be worth measuring.
@@ -488,8 +607,7 @@ static sentry::Transaction gOtaTxn;
 static sentry_span_t *gOtaSpan = nullptr;
 static bool gOtaTracing = false;
 
-/** Begin tracing an OTA. Safe to call when reporting is off. */
-inline void otaBegin() {
+inline void otaBeginTrace() {
     if (gOtaTracing || !sentry_is_enabled() || !clockIsSet()) return;
     gOtaTracing = sentry::transaction_start(gOtaTxn, "firmware update", "device.ota");
     gOtaSpan = nullptr;
@@ -507,35 +625,99 @@ inline void otaSet(const char *key, int64_t value) {
     if (gOtaTracing) sentry::span_set_attribute(gOtaSpan, key, value);
 }
 
-/**
- * Finish and send. MUST be called before esp_restart() on the success path — a reboot is
- * not a flush, and the whole point is measuring the update that just happened.
- */
-inline void otaFinish(bool ok) {
+inline void otaFinishTrace() {
     if (!gOtaTracing) return;
     if (gOtaSpan) { sentry::span_finish(gOtaSpan); gOtaSpan = nullptr; }
     gOtaTracing = false;
     sentry::transaction_finish(gOtaTxn);
-    (void)ok;
 }
 #else
-// Same shape, no spans in this SDK. `auto *` at the call sites makes the span type moot.
-class Operation {
-public:
-    Operation(const char *, const char *) {}
-    void *child(const char *, const char * = nullptr) { return nullptr; }
-    void set(void *, const char *, int64_t) {}
-    void finish(void *) {}
-};
-inline void recordBoot(uint32_t) {}
-inline void noteFps(uint32_t) {}
-inline void recordDisconnect() {}
-inline void recordVitals(uint32_t) {}
-inline void otaBegin() {}
+inline void otaBeginTrace() {}
 inline void otaPhase(const char *) {}
 inline void otaSet(const char *, int64_t) {}
-inline void otaFinish(bool) {}
-#endif
+inline void otaFinishTrace() {}
+#endif  // CHROMABAY_SENTRY_SPANS
+
+/**
+ * An update has started. Reporting stands down until it ends: the relay shares the radio
+ * with the firmware image being streamed over it, and a blocking flush in the middle of that
+ * is the one thing this device cannot afford — an OTA that dies because the crash reporter
+ * wanted the link would be a very stupid way to lose a device.
+ */
+inline void otaBegin() {
+    gOtaActive = true;
+    gOtaActiveMs = millis();
+    otaBeginTrace();
+}
+
+/**
+ * The update ended, either way. MUST be called before esp_restart() on the success path — a
+ * reboot is not a flush, and the whole point is measuring the update that just happened.
+ *
+ * The flush is on the success path only. Failure can arrive from the NimBLE host task (a
+ * disconnect mid-update is one of the ways this fails), and a send that fails there is
+ * buffered to LittleFS — filesystem work on the host task, which is exactly what the rest of
+ * this file stages onto the loop task to avoid. The failure's log lines are not lost by
+ * waiting: nothing reboots on that path, so the next tick() sends them.
+ */
+inline void otaFinish(bool ok) {
+    gOtaActive = false;
+    otaFinishTrace();
+    if (ok) flushNow();
+}
+
+// ── The console nobody is holding a cable to ────────────────────────────────────────────
+/**
+ * Mirror one Serial line into Sentry.
+ *
+ *     SentryReporting::logWarn("BLE disconnect after %lus up", uptime);
+ *
+ * Recording does not send — the line goes into a fixed ring and rides the next flush, the
+ * same property that makes a metric safe to record anywhere. What it costs is a `printf`
+ * into an 81-byte buffer, so keep the message short and put the numbers in it.
+ *
+ * The ring holds SENTRY_MICRO_MAX_LOGS (6) lines and evicts the oldest, so this is for the
+ * handful of lines that explain a device to someone who cannot see its console: what it
+ * booted as, what the update did, why the link went away, what the app just changed. Not for
+ * per-frame or per-packet chatter, which would evict all of that within a second.
+ *
+ * Varargs: pass `String` as `.c_str()` and floats as-is; this forwards to a C `...` function
+ * with no format checking of its own, exactly like `Serial.printf` next to it.
+ *
+ * A line recorded while an app-initiated operation is in flight is attached to that
+ * operation's trace by the SDK, so the console lines from a config change land next to the
+ * transaction that made it — which is the whole reason to send them here rather than read
+ * them off a cable.
+ *
+ * Callable from either task, on the same terms as a metric: the write is into a ring, with
+ * no lock, so the worst a race between the NimBLE host task and a flush on the loop task can
+ * produce is one garbled line — never a blocked radio, which is the only outcome that would
+ * matter.
+ */
+#if CHROMABAY_SENTRY_LOGS
+template <typename... Args>
+inline void logAt(sentry_level_t level, const char *message, Args... args) {
+    if (!sentry_is_enabled()) return;
+    sentry::log(level, message, args...);
+    // Clamped at the ring's capacity because that is the truth: past this, recording another
+    // line evicts one rather than adding one, so a larger number would only make tick()
+    // believe there is more to send than the device is still holding.
+    if (gPendingLogs < SENTRY_MICRO_MAX_LOGS) gPendingLogs++;
+}
+template <typename... Args> inline void logInfo(const char *message, Args... args) {
+    logAt(SENTRY_LEVEL_INFO, message, args...);
+}
+template <typename... Args> inline void logWarn(const char *message, Args... args) {
+    logAt(SENTRY_LEVEL_WARNING, message, args...);
+}
+template <typename... Args> inline void logError(const char *message, Args... args) {
+    logAt(SENTRY_LEVEL_ERROR, message, args...);
+}
+#else
+template <typename... Args> inline void logInfo(const char *, Args...) {}
+template <typename... Args> inline void logWarn(const char *, Args...) {}
+template <typename... Args> inline void logError(const char *, Args...) {}
+#endif  // CHROMABAY_SENTRY_LOGS
 
 // ── Lifecycle ───────────────────────────────────────────────────────────────────────────
 
@@ -814,6 +996,13 @@ inline void tick(uint32_t nowMs) {
     }
     gRelayWasReady = ready;
 
+    // Not while an update is streaming over the same link. See otaBegin().
+    if (gOtaActive) {
+        if (nowMs - gOtaActiveMs < OTA_ACTIVE_MAX_MS) return;
+        Serial.println("[Sentry] OTA flag stuck; resuming reporting");
+        gOtaActive = false;
+    }
+
     // Metrics ride sentry_flush(), which this used to reach only when something was
     // buffered — i.e. only after a crash. A healthy device would have accumulated gauges
     // forever and sent none of them. They get their own slow cadence instead: the flush
@@ -825,12 +1014,32 @@ inline void tick(uint32_t nowMs) {
         recordVitals(gLastFpsTimes10);
     }
 
-    if (sentry_buffered_count() == 0 && !metricsDue) return;
+    // Log lines ride the same flush on a faster cadence, for the reason in LOG_FLUSH_INTERVAL_MS.
+    // Gated on the clock as well as the count: without a date the SDK holds the ring instead of
+    // sending it, so a flush attempted now would block the render loop to deliver nothing and
+    // leave the same lines waiting.
+    const bool logsDue = gPendingLogs > 0 && clockIsSet() &&
+                         (gPendingLogs >= LOG_HIGH_WATER ||
+                          (nowMs - gLastFlushMs) >= LOG_FLUSH_INTERVAL_MS);
+
+    // Nothing is worth a flush without somewhere to flush to — and this is more than wasted
+    // work. A send with no route comes back UNAVAILABLE, and the SDK persists an unavailable
+    // envelope to the offline buffer for retry. A ChromaBay spends most of its life
+    // disconnected, so without this check a device with nothing wrong would write a metrics
+    // envelope to LittleFS every five minutes and a log envelope every twenty seconds,
+    // wearing the filesystem and — because that buffer is one shared ring that evicts the
+    // oldest entry — eventually pushing out the one thing in it that matters, a crash report.
+    // The offline buffer is for what happened while nobody was listening. A heap gauge and a
+    // console line are not that: they are still in RAM, and they can simply wait.
+    if (!gTransport.is_available()) return;
+
+    if (sentry_buffered_count() == 0 && !metricsDue && !logsDue) return;
     const uint32_t interval = gLastFlushDelivered ? FLUSH_BACKLOG_INTERVAL_MS : FLUSH_INTERVAL_MS;
     if (sentry_buffered_count() > 0 && nowMs - gLastFlushMs < interval) return;
     gLastFlushMs = nowMs;
     uint32_t delivered = sentry_flush(1);
     gLastFlushDelivered = delivered > 0;
+    if (clockIsSet()) gPendingLogs = 0;  // as in flushNow(): our count follows the ring
     // name() reports whichever route AutoTransport actually selected, so this says `wifi` or
     // `relay` rather than a generic "up" — which is the first thing you want to know when a
     // device that should be relaying through the phone quietly went out over WiFi instead.
@@ -854,6 +1063,7 @@ public:
     void *child(const char *, const char * = nullptr) { return nullptr; }
     void set(void *, const char *, int64_t) {}
     void finish(void *) {}
+    void finishNow() {}
 };
 inline void recordBoot(uint32_t) {}
 inline void noteFps(uint32_t) {}
@@ -863,6 +1073,10 @@ inline void otaBegin() {}
 inline void otaPhase(const char *) {}
 inline void otaSet(const char *, int64_t) {}
 inline void otaFinish(bool) {}
+inline void flushNow() {}
+template <typename... Args> inline void logInfo(const char *, Args...) {}
+template <typename... Args> inline void logWarn(const char *, Args...) {}
+template <typename... Args> inline void logError(const char *, Args...) {}
 inline void begin() {}
 inline void attachBleService(NimBLEService *) {}
 inline void setBleConnected(bool) {}

@@ -719,6 +719,11 @@ class ServerCallbacks: public NimBLEServerCallbacks {
         deviceConnected = false;
         SentryReporting::setBleConnected(false);
         SentryReporting::recordDisconnect();
+        // Warning, not info: on this device a disconnect is usually the app's problem to
+        // recover from, and the count alone has never been enough to tell a phone walking
+        // out of range from a link that dies while sitting still. The uptime is the tell.
+        SentryReporting::logWarn("BLE disconnect after %us up%s", (unsigned)(millis() / 1000),
+                                 ota_in_progress ? ", mid-OTA" : "");
         Serial.println("BLE Client Disconnected");
         logPatternState("disconnect");
         // If OTA was in progress and client disconnects, abort it to free resources
@@ -1023,6 +1028,7 @@ class OTADataCallbacks : public NimBLECharacteristicCallbacks {
             esp_err_t err = esp_ota_begin(update_partition, OTA_WITH_SEQUENTIAL_WRITES, &ota_handle);
             if (err != ESP_OK) {
                 Serial.printf("OTA Error: esp_ota_begin failed (%s)\n", esp_err_to_name(err));
+                SentryReporting::logError("OTA begin failed: %s", esp_err_to_name(err));
                 if (pOTAStatusCharacteristic) {
                     String errorMsg = "OTA_ERR_BEGIN_FAILED:" + String(esp_err_to_name(err));
                     pOTAStatusCharacteristic->setValue((uint8_t*)errorMsg.c_str(), errorMsg.length());
@@ -1046,6 +1052,11 @@ class OTADataCallbacks : public NimBLECharacteristicCallbacks {
             // again.
             Serial.printf("OTA: esp_ota_begin succeeded in %lu ms. Ready for firmware data.\n",
                           (unsigned long)(millis() - otaBeginStart));
+            // The erase duration, in the one place someone debugging a failed update will
+            // look. It was 1300 ms once, and the link did not survive it.
+            SentryReporting::logInfo("OTA start: slot 0x%x, erase %ums",
+                                     (unsigned)update_partition->address,
+                                     (unsigned)(millis() - otaBeginStart));
             SentryReporting::otaPhase("ota.transfer");
             if (pOTAStatusCharacteristic) {
                 const char* msg = "OTA_STARTED_READY";
@@ -1950,9 +1961,17 @@ void processReceivedLedConfig() {
         configMgr.saveConfiguration();
 
         Serial.println("LED Configuration updated successfully");
+        // Recorded inside the transaction above, so the SDK attaches this line to the same
+        // trace: in Sentry the operation and the sentence describing it sit together, which
+        // is the difference between "device.config.led took 240 ms" and knowing what changed.
+        SentryReporting::logInfo("LED config: %u strips, brightness %u",
+                                 (unsigned)ledMgr.getNumStrips(),
+                                 (unsigned)newConfig.globalBrightness);
 
     } catch (...) {
         Serial.println("Error parsing LED configuration MessagePack data");
+        SentryReporting::logError("LED config rejected: unparseable (%u bytes)",
+                                  (unsigned)ledConfigBufferSize);
     }
 
     mpack_reader_destroy(&reader);
@@ -2152,6 +2171,8 @@ void finalizeOtaIfReady() {
     if (!ota_skip_signature && !signature_verification_complete) {
         if (millis() - ota_finalize_start_ms >= 30000) {
             Serial.println("OTA Error: Signature verification timed out!");
+            SentryReporting::logError("OTA abort: signature verify timed out (%u bytes)",
+                                      (unsigned)ota_received_size);
             if (pOTAStatusCharacteristic) {
                 const char* msg = "OTA_ERR_SIG_TIMEOUT";
                 pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
@@ -2173,6 +2194,8 @@ void finalizeOtaIfReady() {
 
     if (!ota_skip_signature && !signature_verification_result) {
         Serial.println("OTA Error: Firmware signature verification FAILED!");
+        SentryReporting::logError("OTA abort: signature invalid (%u bytes)",
+                                  (unsigned)ota_received_size);
         if (pOTAStatusCharacteristic) {
             const char* msg = "OTA_ERR_SIG_INVALID";
             pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
@@ -2210,6 +2233,10 @@ void finalizeOtaIfReady() {
         err = esp_ota_set_boot_partition(update_partition);
         if (err == ESP_OK) {
             Serial.println("OTA: Boot partition updated successfully. Rebooting in 2 seconds...");
+            // Last line before the reboot, and the one that closes the story a failed update
+            // never gets to. otaFinish(true) below flushes it, since nothing runs after this.
+            SentryReporting::logInfo("OTA ok: %u bytes%s, rebooting", (unsigned)ota_received_size,
+                                     ota_skip_signature ? " (unsigned)" : "");
             if (pOTAStatusCharacteristic) {
                 const char* msg = "OTA_SUCCESS_REBOOTING";
                 pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
@@ -2223,6 +2250,7 @@ void finalizeOtaIfReady() {
             esp_restart();
         } else {
             Serial.printf("OTA Error: esp_ota_set_boot_partition failed! (%s)\n", esp_err_to_name(err));
+            SentryReporting::logError("OTA failed at set_boot: %s", esp_err_to_name(err));
             if (pOTAStatusCharacteristic) {
                 String errorMsg = "OTA_ERR_SET_BOOT:" + String(esp_err_to_name(err));
                 pOTAStatusCharacteristic->setValue((uint8_t*)errorMsg.c_str(), errorMsg.length());
@@ -2231,6 +2259,8 @@ void finalizeOtaIfReady() {
         }
     } else {
         Serial.printf("OTA Error: esp_ota_end failed! (%s)\n", esp_err_to_name(err));
+        SentryReporting::logError("OTA failed at end: %s (%u bytes)", esp_err_to_name(err),
+                                  (unsigned)ota_received_size);
         if (pOTAStatusCharacteristic) {
             String errorMsg = "OTA_ERR_END_FAILED:" + String(esp_err_to_name(err));
             pOTAStatusCharacteristic->setValue((uint8_t*)errorMsg.c_str(), errorMsg.length());
@@ -2358,6 +2388,7 @@ void processCommConfig() {
         }
     } else {
         Serial.println("[CommConfig] bad msgpack patch");
+        SentryReporting::logError("settings rejected: bad msgpack (%u bytes)", (unsigned)len);
     }
     mpack_tree_destroy(&tree);
     free(buf);
@@ -2371,6 +2402,13 @@ void processCommConfig() {
 #if CHROMABAY_WIFI
     if (transportChanged) {
         Serial.println("[CommConfig] transport change → rebooting in 400ms");
+        // Says why the device is about to disappear, which is otherwise indistinguishable
+        // from a crash at the far end. Sent before the reboot, not at scope exit: this
+        // function does not return.
+        SentryReporting::logWarn("settings: transport → %s, rebooting",
+                                 gSettings.commMode == DeviceSettings::COMM_WIFI ? "wifi" : "ble");
+        trace.finishNow();
+        SentryReporting::flushNow();
         delay(400); // give the BLE/TCP ack a moment to flush
         ESP.restart();
     }
@@ -2637,14 +2675,21 @@ namespace WifiLink {
             if (WiFi.status() != WL_CONNECTED) {
                 if (gSettings.wifiFallback == DeviceSettings::FB_AP) {
                     Serial.println("[WiFi] STA failed → SoftAP");
+                    SentryReporting::logWarn("wifi: '%s' failed (status %d) → SoftAP",
+                                             gSettings.wifiSsid.c_str(), (int)WiFi.status());
                     if (!startAp()) return false;
                 } else {
                     Serial.println("[WiFi] STA failed → reverting to BLE this boot");
+                    SentryReporting::logWarn("wifi: '%s' failed (status %d) → BLE this boot",
+                                             gSettings.wifiSsid.c_str(), (int)WiFi.status());
                     WiFi.mode(WIFI_OFF);
                     return false;
                 }
             } else {
                 Serial.printf("[WiFi] connected: %s\n", WiFi.localIP().toString().c_str());
+                // The SSID is broadcast anyway; the password is never logged, here or anywhere.
+                SentryReporting::logInfo("wifi: '%s' %ddBm, %ums", gSettings.wifiSsid.c_str(),
+                                         (int)WiFi.RSSI(), (unsigned)(millis() - start));
                 // Start SNTP so the device learns the time on its own (no app needed) — this
                 // is what lets a WiFi-only device run the on/off schedule after a power loss.
                 // UTC (offset 0); we apply the timezone offset ourselves for the schedule.
@@ -3142,6 +3187,11 @@ void setup() {
     // Recorded, not sent — it rides whenever the app next shows up. Metrics without a clock
     // are held rather than dropped, which is why boot numbers survive a cold start.
     SentryReporting::recordBoot(millis());
+    // The line that says which firmware this actually is. Everything else in the log stream
+    // is only interesting once you know that, and a device that has been updated four times
+    // cannot be asked.
+    SentryReporting::logInfo("boot: %s on %s, %ums, %u heap", FIRMWARE_VERSION, chipModelName(),
+                             (unsigned)millis(), (unsigned)ESP.getFreeHeap());
 }
 
 unsigned long lastHeapUpdateTime = 0;
