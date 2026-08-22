@@ -44,6 +44,7 @@
   }
 
   function setupCanvas() {
+    if (!canvasElement) return;
     if (fullscreen) {
       canvasElement.width = window.innerWidth;
       canvasElement.height = window.innerHeight;
@@ -61,15 +62,17 @@
     ctx = canvasElement.getContext('2d');
     setupCanvas();
     
+    let resize: (() => void) | undefined;
     if (fullscreen) {
-      const resize = () => setupCanvas();
+      resize = () => setupCanvas();
       window.addEventListener('resize', resize);
-      onDestroy(() => {
-        window.removeEventListener('resize', resize);
-      });
     }
     
     animate();
+
+    return () => {
+      if (resize) window.removeEventListener('resize', resize);
+    };
   });
 
   onDestroy(() => {
@@ -129,4 +132,4 @@
     touch-action: none;
     border-radius: 0;
   }
-</style> 
+</style>     
