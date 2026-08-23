@@ -4,7 +4,7 @@
   // Save button writes everything in a single patch; picking a different transport (the
   // Bluetooth/Wi-Fi radio) and saving reboots the device into it, so the link drops — we show
   // clear feedback for that.
-  import type { DeviceSettings, DeviceSettingsPatch, DeviceInfo } from '$lib/ble';
+  import { RT_PROTO, RT_CAPS_LEGACY, type DeviceSettings, type DeviceSettingsPatch, type DeviceInfo } from '$lib/ble';
   import { rememberWifiDevice } from '$lib/stores/wifiDeviceStore';
   import type { DeviceHandle } from '$lib/deviceHandle';
 
@@ -33,7 +33,7 @@
   let fallback = $state(0);
   let sleepMin = $state(0);
   let rgbTest = $state(true);
-  let rtProto = $state(0);
+  let rtProto = $state(0); // bitmask of RT_PROTO bits
   let rtUni = $state(0);
   let rtTimeout = $state(10);
   let rtLayout = $state(false);
@@ -45,6 +45,18 @@
   const toggleDay = (d: number) => { schedDays ^= (1 << d); };
   const minToStr = (m: number) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
   const strToMin = (s: string) => { const [h, m] = s.split(':').map(Number); return (((h || 0) * 60 + (m || 0)) % 1440 + 1440) % 1440; };
+
+  // Offer exactly the protocols this firmware speaks. Older builds don't report rtcaps, so
+  // they get the pair they've always had — DDP simply isn't listed until the device can do it.
+  const rtCaps = $derived(settings?.rtcaps ?? RT_CAPS_LEGACY);
+  const RT_OPTIONS = [
+    { bit: RT_PROTO.ARTNET, label: 'Art-Net' },
+    { bit: RT_PROTO.SACN, label: 'sACN (E1.31)' },
+    { bit: RT_PROTO.DDP, label: 'DDP' },
+  ];
+  const toggleProto = (bit: number) => { rtProto ^= bit; };
+  // The universe field is DMX-only; DDP addresses pixels by byte offset.
+  const usesUniverse = $derived((rtProto & (RT_PROTO.ARTNET | RT_PROTO.SACN)) !== 0);
 
   const activeMode = $derived(settings?.mode_active ?? deviceInfo?.mode ?? device.transport);
 
@@ -104,7 +116,7 @@
       rgbtest: rgbTest,
       sen: schedEnable, son: strToMin(schedOnStr), sof: strToMin(schedOffStr),
       sdw: schedDays & 0x7F, tz: -new Date().getTimezoneOffset(),
-      rtproto: rtProto, rtuni: Math.max(0, Math.floor(rtUni)),
+      rtproto: rtProto & rtCaps, rtuni: Math.max(0, Math.floor(rtUni)),
       rtto: Math.max(1, Math.floor(rtTimeout)), rtlayout: rtLayout,
     };
     if (pass) patch.pass = pass; // password left blank = unchanged
@@ -221,21 +233,24 @@
           <span>Startup R/G/B test flash</span>
         </label>
 
-        <div class="field row"><span class="lbl">Realtime streaming (Art-Net / sACN)</span></div>
-        <label class="field row">
-          <span>Protocol</span>
-          <select bind:value={rtProto}>
-            <option value={0}>Off</option>
-            <option value={1}>Art-Net</option>
-            <option value={2}>sACN (E1.31)</option>
-            <option value={3}>Both</option>
-          </select>
-        </label>
-        {#if rtProto !== 0}
-          <label class="field row">
-            <span>Start universe</span>
-            <input type="number" min="0" max="63999" bind:value={rtUni} />
-          </label>
+        <div class="field row"><span class="lbl">Realtime streaming</span></div>
+        {#each RT_OPTIONS as opt (opt.bit)}
+          {#if rtCaps & opt.bit}
+            <label class="field check">
+              <input type="checkbox" checked={(rtProto & opt.bit) !== 0} onchange={() => toggleProto(opt.bit)} />
+              <span>{opt.label}</span>
+            </label>
+          {/if}
+        {/each}
+        {#if rtProto === 0}
+          <p class="hint">Off — the device shows its own patterns. Tick a protocol to let a lighting controller drive the pixels live.</p>
+        {:else}
+          {#if usesUniverse}
+            <label class="field row">
+              <span>Start universe</span>
+              <input type="number" min="0" max="63999" bind:value={rtUni} />
+            </label>
+          {/if}
           <label class="field row">
             <span>Revert after (s)</span>
             <input type="number" min="1" max="120" bind:value={rtTimeout} />
@@ -247,7 +262,7 @@
               <option value={true}>Custom layout (reorder/skip)</option>
             </select>
           </label>
-          <p class="hint">Stream DMX to this device's IP{settings?.ip ? ` (${settings.ip})` : ''}. Takes over live and returns to the pattern {rtTimeout}s after the stream stops. Wi-Fi only.</p>
+          <p class="hint">Stream to this device's IP{settings?.ip ? ` (${settings.ip})` : ''}{usesUniverse ? '' : ' on UDP 4048'}. Takes over live and returns to the pattern {rtTimeout}s after the stream stops. Wi-Fi only.</p>
         {/if}
       {/if}
     </div>

@@ -102,6 +102,13 @@ export interface DeviceInfo {
   heap?: number;
 }
 
+// Realtime pixel-streaming protocols. A bitmask, so a device can listen for several at once:
+// Art-Net and sACN carry DMX universes, DDP (UDP 4048 — xLights, WLED, Falcon) addresses one
+// flat pixel array by byte offset and ignores the universe setting.
+export const RT_PROTO = { OFF: 0, ARTNET: 1, SACN: 2, DDP: 4 } as const;
+// What firmware without an `rtcaps` field (feat<3) supports.
+export const RT_CAPS_LEGACY = RT_PROTO.ARTNET | RT_PROTO.SACN;
+
 // Device settings (comm mode / WiFi creds / sleep timer / rgb-test), read as JSON from the
 // COMM_CONFIG characteristic; password is never returned (hasPass indicates whether one is set).
 export interface DeviceSettings {
@@ -111,8 +118,9 @@ export interface DeviceSettings {
   fallback: number;         // 0 = revert to BLE if WiFi fails, 1 = SoftAP
   sleep: number;            // minutes, 0 = off
   rgbtest: number;          // 1 = on
-  rtproto: number;          // realtime stream: 0 off, 1 Art-Net, 2 sACN, 3 both
-  rtuni: number;            // first DMX universe consumed
+  rtproto: number;          // realtime stream protocols, bitmask: 1 Art-Net, 2 sACN, 4 DDP (0 = off)
+  rtcaps?: number;          // protocols this firmware supports (same bits); absent = Art-Net|sACN only
+  rtuni: number;            // first DMX universe consumed (Art-Net/sACN only; DDP carries its own byte offset)
   rtto: number;             // realtime revert timeout (seconds)
   rtlayout: number;         // 1 = stream into custom layout, 0 = physical order
   // Daily on/off schedule (firmware feat>=2; may be absent on older builds)
@@ -133,7 +141,7 @@ export interface DeviceSettingsPatch {
   fallback?: number;
   sleep?: number;
   rgbtest?: boolean;
-  rtproto?: number;
+  rtproto?: number;         // bitmask, see RT_PROTO
   rtuni?: number;
   rtto?: number;
   rtlayout?: boolean;

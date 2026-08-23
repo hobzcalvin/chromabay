@@ -12,10 +12,21 @@ enum CommMode : uint8_t { COMM_BLE = 0, COMM_WIFI = 1 };
 // What to do if WiFi-mode STA connect fails at boot.
 enum WifiFallback : uint8_t { FB_BLE = 0, FB_AP = 1 };
 
-// Realtime pixel streaming (Art-Net / sACN) over WiFi. When enabled and packets arrive,
-// the device shows the streamed pixels and auto-reverts to its pattern/cycle after rtTimeout
-// seconds of silence. Only active in WiFi mode.
-enum RtProto : uint8_t { RT_OFF = 0, RT_ARTNET = 1, RT_SACN = 2, RT_BOTH = 3 };
+// Realtime pixel streaming (Art-Net / sACN / DDP) over WiFi. When enabled and packets
+// arrive, the device shows the streamed pixels and auto-reverts to its pattern/cycle after
+// rtTimeout seconds of silence. Only active in WiFi mode.
+//
+// rtProto is a BITMASK, so any combination of protocols can listen at once. RT_BOTH is kept
+// as the name for the Art-Net|sACN pair because that value (3) is already stored in NVS on
+// devices in the field; new protocols get the next free bit.
+enum RtProto : uint8_t {
+    RT_OFF    = 0,
+    RT_ARTNET = 1 << 0,
+    RT_SACN   = 1 << 1,
+    RT_BOTH   = RT_ARTNET | RT_SACN,
+    RT_DDP    = 1 << 2,
+    RT_ALL    = RT_ARTNET | RT_SACN | RT_DDP,
+};
 
 struct Settings {
     uint8_t  commMode     = COMM_BLE;
@@ -25,8 +36,8 @@ struct Settings {
     uint16_t sleepMinutes = 0;      // 0 = never sleep
     bool     rgbTest      = true;   // power-on R/G/B strip test
     // Realtime streaming (opt-in; inert unless rtProto != RT_OFF and on WiFi):
-    uint8_t  rtProto      = RT_OFF; // Art-Net / sACN / both / off
-    uint16_t rtUniverse   = 0;      // first universe this device consumes (0-based Art-Net / 1-based sACN handled in parse)
+    uint8_t  rtProto      = RT_OFF; // bitmask of RtProto bits (Art-Net / sACN / DDP)
+    uint16_t rtUniverse   = 0;      // first universe this device consumes (0-based Art-Net / 1-based sACN handled in parse); DMX only, DDP addresses pixels by byte offset
     uint16_t rtTimeoutSec = 10;     // revert to pattern after this much silence
     bool     rtLayout     = false;  // true = stream into the custom layout (reorder/skip); false = physical order
     // Daily on/off schedule (local wall-clock). Needs a synced clock (app TIMESTAMP_SYNC or,

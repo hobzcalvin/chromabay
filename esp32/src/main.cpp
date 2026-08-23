@@ -2293,6 +2293,9 @@ static String commSettingsJson() {
     j += "\"sleep\":" + String(gSettings.sleepMinutes) + ",";
     j += "\"rgbtest\":" + String(gSettings.rgbTest ? 1 : 0) + ",";
     j += "\"rtproto\":" + String(gSettings.rtProto) + ",";
+    // Which streaming protocols this build actually speaks, so the app offers exactly those
+    // (older firmware omits it — the app then assumes the original Art-Net|sACN pair).
+    j += "\"rtcaps\":" + String(DeviceSettings::RT_ALL) + ",";
     j += "\"rtuni\":" + String(gSettings.rtUniverse) + ",";
     j += "\"rtto\":" + String(gSettings.rtTimeoutSec) + ",";
     j += "\"rtlayout\":" + String(gSettings.rtLayout ? 1 : 0) + ",";
@@ -2749,28 +2752,39 @@ namespace WifiLink {
     }
 } // namespace WifiLink
 
-// ---- Art-Net / sACN realtime pixel streaming ------------------------------------------
-// Listens for DMX-over-Ethernet and drives pixels directly, taking over from the pattern
-// renderer while packets arrive and reverting after gSettings.rtTimeoutSec of silence.
-// Opt-in (rtProto != RT_OFF) and WiFi-only, so it's completely inert by default.
+// ---- Art-Net / sACN / DDP realtime pixel streaming --------------------------------------
+// Listens for DMX-over-Ethernet (Art-Net, sACN) and DDP, driving pixels directly: it takes
+// over from the pattern renderer while packets arrive and reverts after gSettings.rtTimeoutSec
+// of silence. Opt-in (rtProto != RT_OFF) and WiFi-only, so it's completely inert by default.
 namespace RtStream {
-    static WiFiUDP artnet, sacn;
+    static WiFiUDP artnet, sacn, ddp;
     static bool started = false;
-    static uint8_t buf[640]; // sACN max ≈ 126 + 512; Art-Net ≈ 18 + 512
+    // What the open sockets were opened for. Settings that change which ports we listen on
+    // (or which sACN groups we joined) take effect live, without a reboot, so tick() compares
+    // these against the current settings and reopens when they drift.
+    static uint8_t startedProto = DeviceSettings::RT_OFF;
+    static uint16_t startedUni = 0;
+    // DDP carries up to 1440 data bytes per packet (480 RGB pixels) vs. one 512-channel DMX
+    // universe for the others, so the shared buffer is sized for the largest of the three.
+    static uint8_t buf[1500];
     static const uint32_t PX_PER_UNIVERSE = 170; // 512 DMX channels / 3 (RGB)
+    static const uint16_t DDP_PORT = 4048;
 
     // sACN multicast group for a 1-based universe: 239.255.<hi>.<lo>.
     static IPAddress sacnGroup(uint16_t universe) { return IPAddress(239, 255, (universe >> 8) & 0xFF, universe & 0xFF); }
 
     static void begin() {
         uint8_t proto = gSettings.rtProto;
-        if (proto == DeviceSettings::RT_ARTNET || proto == DeviceSettings::RT_BOTH) artnet.begin(6454);
-        if (proto == DeviceSettings::RT_SACN   || proto == DeviceSettings::RT_BOTH) {
+        if (proto & DeviceSettings::RT_ARTNET) artnet.begin(6454);
+        if (proto & DeviceSettings::RT_SACN) {
             // Join a small window of universes starting at rtUniverse so multi-universe rigs work.
             uint16_t u0 = gSettings.rtUniverse == 0 ? 1 : gSettings.rtUniverse;
             for (uint16_t u = u0; u < u0 + 8; u++) sacn.beginMulticast(sacnGroup(u), 5568);
         }
+        if (proto & DeviceSettings::RT_DDP) ddp.begin(DDP_PORT);
         started = true;
+        startedProto = proto;
+        startedUni = gSettings.rtUniverse;
         Serial.printf("[RtStream] started proto=%u universe=%u timeout=%us layout=%u\n",
                       proto, gSettings.rtUniverse, gSettings.rtTimeoutSec, gSettings.rtLayout);
     }
@@ -2798,9 +2812,55 @@ namespace RtStream {
         for (uint16_t p = 0; p < px; p++) setGlobalPixel(base + p, dmx[p*3], dmx[p*3+1], dmx[p*3+2]);
     }
 
-    // Poll from loop() (WiFi mode). Lazily opens sockets so enabling streaming via settings
-    // takes effect without a reboot. Returns having applied any packets + refreshed the timeout.
+    // DDP (3waylabs Distributed Display Protocol), the transport xLights/WLED/Falcon speak on
+    // UDP 4048. Unlike DMX there are no universes: each packet carries a byte offset into one
+    // flat pixel array, which is exactly how setGlobalPixel() already indexes the strips.
+    //
+    // Header (10 bytes, 14 with a timecode):
+    //   0  flags   VVxT SRQP  — VV=01 is version 1, T=timecode present, S=storage,
+    //                            R=reply, Q=query, P=push
+    //   1  sequence number (0 = unused)
+    //   2  data type  CRTT TSSS — C=custom, TTT=1 RGB / 3 RGBW, SSS=pixel size
+    //   3  source/destination id (1 = the default display output; 250+ are control channels)
+    //   4-7 data offset in BYTES, big-endian
+    //   8-9 data length in bytes, big-endian
+    // Returns true if the packet painted pixels.
+    static bool applyDdp(const uint8_t* p, int r) {
+        if (r < 10) return false;
+        uint8_t flags = p[0];
+        if ((flags & 0xC0) != 0x40) return false;          // version 1 only
+        if (flags & 0x0E) return false;                    // storage / reply / query: not pixel data
+        // Control channels (JSON control 250, JSON config 251, DMX transit 254) aren't ours;
+        // anything else — the default output 1, a custom id, or the 255 broadcast — we paint.
+        if (p[3] >= 250 && p[3] != 255) return false;
+        // Channels per pixel from the data-type byte. Standard types only: a custom type (C
+        // set) has no defined layout, so treat it as plain RGB rather than guessing.
+        uint8_t cpp = (!(p[2] & 0x80) && ((p[2] >> 3) & 0x07) == 3) ? 4 : 3;
+        uint32_t off = ((uint32_t)p[4] << 24) | ((uint32_t)p[5] << 16) | ((uint32_t)p[6] << 8) | p[7];
+        uint16_t len = ((uint16_t)p[8] << 8) | p[9];
+        int hdr = (flags & 0x10) ? 14 : 10;                // timecode sits between header and data
+        if (r <= hdr) return false;
+        if (len > (uint16_t)(r - hdr)) len = r - hdr;
+        const uint8_t* d = p + hdr;
+        uint32_t first = off / cpp;                        // byte offset → pixel index
+        uint16_t px = len / cpp;
+        for (uint16_t i = 0; i < px; i++) {
+            const uint8_t* q = d + (uint32_t)i * cpp;
+            // A 4-channel source fed to an RGB strip: fold the white channel into all three
+            // with saturation. RGBW strips re-derive their own white from the RGB we set.
+            uint8_t w = cpp == 4 ? q[3] : 0;
+            setGlobalPixel(first + i, qadd8(q[0], w), qadd8(q[1], w), qadd8(q[2], w));
+        }
+        return px > 0;
+    }
+
+    // Poll from loop() (WiFi mode). Lazily opens (and reopens) sockets so protocol/universe
+    // changes take effect without a reboot. Returns having applied any packets + refreshed the timeout.
     static void tick() {
+        if (started && (gSettings.rtProto != startedProto || gSettings.rtUniverse != startedUni)) {
+            artnet.stop(); sacn.stop(); ddp.stop();
+            started = false;
+        }
         if (gSettings.rtProto == DeviceSettings::RT_OFF) return;
         if (!started) begin();
         bool got = false;
@@ -2830,6 +2890,10 @@ namespace RtStream {
                 applyDmx(uni, buf + 126, dlen);
                 got = true;
             }
+        }
+        while ((n = ddp.parsePacket()) > 0) {
+            int r = ddp.read(buf, sizeof(buf));
+            if (r > 0 && applyDdp(buf, r)) got = true;
         }
         if (got) {
             ledMgr.show();
