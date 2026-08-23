@@ -1,7 +1,7 @@
 {
-  "version": "1.1.318",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.318.zip",
-  "buildDate": "2026-08-20T21:45:33Z",
-  "commitHash": "a342c870ab40814dd42b5b1c311aedf424f51e6c",
-  "commitMessage": "Read the token check from env, which is where an if can see it"
+  "version": "1.1.319",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.319.zip",
+  "buildDate": "2026-08-23T20:45:04Z",
+  "commitHash": "8a365841aae59cb5d27a20c2d0d2a6b7b2ba7c91",
+  "commitMessage": "Speak DDP, the protocol the pixel-pushers actually default to"
 }
