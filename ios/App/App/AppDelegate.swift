@@ -1,6 +1,140 @@
 import UIKit
 import Capacitor
 
+@objc(BonjourDiscoveryPlugin)
+public class BonjourDiscoveryPlugin: CAPPlugin, CAPBridgedPlugin, NetServiceBrowserDelegate, NetServiceDelegate {
+    public let identifier = "BonjourDiscoveryPlugin"
+    public let jsName = "BonjourDiscovery"
+    public let pluginMethods: [CAPPluginMethod] = [
+        CAPPluginMethod(name: "startDiscovery", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "stopDiscovery", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "getDevices", returnType: CAPPluginReturnPromise)
+    ]
+
+    private var serviceBrowser: NetServiceBrowser?
+    private var services: [String: NetService] = [:]
+    private var devices: [String: [String: Any]] = [:]
+
+    @objc func startDiscovery(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            if self.serviceBrowser == nil {
+                let browser = NetServiceBrowser()
+                browser.delegate = self
+                self.serviceBrowser = browser
+                browser.searchForServices(ofType: "_chromabay._tcp.", inDomain: "local.")
+            }
+            call.resolve()
+        }
+    }
+
+    @objc func stopDiscovery(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            self.stop()
+            call.resolve()
+        }
+    }
+
+    @objc func getDevices(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            call.resolve(["devices": self.serializedDevices()])
+        }
+    }
+
+    private func key(for service: NetService) -> String {
+        "\(service.name)|\(service.type)|\(service.domain)"
+    }
+
+    private func stop() {
+        serviceBrowser?.stop()
+        serviceBrowser = nil
+        for service in services.values {
+            service.stop()
+            service.delegate = nil
+        }
+        services.removeAll()
+        devices.removeAll()
+        emitDevices()
+    }
+
+    private func serializedDevices() -> [[String: Any]] {
+        devices.values.sorted {
+            (($0["name"] as? String) ?? "").localizedCaseInsensitiveCompare(
+                ($1["name"] as? String) ?? ""
+            ) == .orderedAscending
+        }
+    }
+
+    private func emitDevices() {
+        notifyListeners("devicesChanged", data: ["devices": serializedDevices()])
+    }
+
+    private func displayName(for service: NetService) -> String {
+        guard let data = service.txtRecordData() else { return service.name }
+        let record = NetService.dictionary(fromTXTRecord: data)
+        guard let nameData = record["name"],
+              let name = String(data: nameData, encoding: .utf8),
+              !name.isEmpty else {
+            return service.name
+        }
+        return name
+    }
+
+    public func netServiceBrowser(
+        _ browser: NetServiceBrowser,
+        didFind service: NetService,
+        moreComing: Bool
+    ) {
+        let serviceKey = key(for: service)
+        services[serviceKey] = service
+        service.delegate = self
+        service.resolve(withTimeout: 5)
+    }
+
+    public func netServiceBrowser(
+        _ browser: NetServiceBrowser,
+        didRemove service: NetService,
+        moreComing: Bool
+    ) {
+        let serviceKey = key(for: service)
+        services.removeValue(forKey: serviceKey)?.stop()
+        devices.removeValue(forKey: serviceKey)
+        if !moreComing {
+            emitDevices()
+        }
+    }
+
+    public func netServiceBrowser(_ browser: NetServiceBrowser, didNotSearch errorDict: [String: NSNumber]) {
+        let code = errorDict[NetService.errorCode]?.intValue ?? -1
+        notifyListeners(
+            "discoveryError",
+            data: ["message": "Bonjour discovery failed (code \(code)). Check Local Network permission."]
+        )
+    }
+
+    public func netServiceDidResolveAddress(_ sender: NetService) {
+        let serviceKey = key(for: sender)
+        guard services[serviceKey] === sender, var host = sender.hostName else { return }
+        while host.hasSuffix(".") {
+            host.removeLast()
+        }
+        guard !host.isEmpty else { return }
+
+        devices[serviceKey] = [
+            "name": displayName(for: sender),
+            "host": host.lowercased(),
+            "port": sender.port
+        ]
+        emitDevices()
+    }
+
+}
+
+class MainViewController: CAPBridgeViewController {
+    override open func capacitorDidLoad() {
+        bridge?.registerPluginInstance(BonjourDiscoveryPlugin())
+    }
+}
+
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
 

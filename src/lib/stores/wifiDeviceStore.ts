@@ -1,22 +1,24 @@
 // Devices reachable over Wi-Fi.
 //
-// This store's only job is *finding* them: a browser cannot browse mDNS, so we keep a small
-// remembered list of `<name>.local` hosts (populated when you switch a device to Wi-Fi, or
-// when you add one by host) and resolve it through the OS.
+// This store's only job is *finding* them. The iOS app browses `_chromabay._tcp` with Bonjour;
+// browsers cannot browse mDNS, so there we keep a small remembered list of `<name>.local`
+// hosts (populated when you switch a device to Wi-Fi, or when you add one by host).
 //
 // Connecting is deliberately NOT special. A connected Wi-Fi device is registered as a
 // transport and put into the SAME `connectedDevices` store a Bluetooth device lands in, with
 // the id `wifi:<host>`. From that moment the devices page, the settings panel, OTA, the LED
 // editor and the crash relay all treat it as an ordinary device — there is no Wi-Fi branch
 // anywhere above this file.
-import { writable, get } from 'svelte/store';
+import { derived, writable, get } from 'svelte/store';
 import { browser } from '$app/environment';
 import { WifiTransport } from '$lib/wifiTransport';
 import { registerTransport, unregisterTransport, wifiIdFor } from '$lib/transport';
 import { addConnectedDevice, connectedDevices } from './deviceStore';
 import { disconnectFromDevice, handleDeviceDisconnected, initializeConnectedDevice } from '$lib/ble';
+import { watchBonjourDevices } from '$lib/bonjourDiscovery';
 
 export type KnownWifi = { name: string; host: string };
+export type WifiListEntry = KnownWifi & { discovered: boolean; remembered: boolean };
 const LS_KEY = 'chromabay.wifiDevices';
 
 function load(): KnownWifi[] {
@@ -26,6 +28,49 @@ function load(): KnownWifi[] {
 function persist(list: KnownWifi[]) { if (browser) try { localStorage.setItem(LS_KEY, JSON.stringify(list)); } catch { /* private mode */ } }
 
 export const knownWifi = writable<KnownWifi[]>(load());
+export const discoveredWifi = writable<KnownWifi[]>([]);
+
+/** One row per host, whether it was remembered, discovered nearby, or both. */
+export const wifiDevices = derived(
+  [knownWifi, discoveredWifi],
+  ([$known, $discovered]): WifiListEntry[] => {
+    const byHost = new Map<string, WifiListEntry>();
+    for (const device of $known) {
+      const host = device.host.toLowerCase();
+      byHost.set(host, { ...device, host, remembered: true, discovered: false });
+    }
+    for (const device of $discovered) {
+      const host = device.host.toLowerCase();
+      const remembered = byHost.get(host);
+      byHost.set(host, {
+        name: device.name || remembered?.name || host,
+        host,
+        remembered: remembered?.remembered ?? false,
+        discovered: true
+      });
+    }
+    return [...byHost.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }
+);
+
+export async function startWifiDiscovery(
+  onError: (message: string) => void
+): Promise<() => Promise<void>> {
+  const stop = await watchBonjourDevices(
+    (devices) => {
+      discoveredWifi.set(
+        devices
+          .filter((device) => device.host && device.name)
+          .map(({ name, host }) => ({ name, host: host.toLowerCase() }))
+      );
+    },
+    onError
+  );
+  return async () => {
+    await stop();
+    discoveredWifi.set([]);
+  };
+}
 
 /** Per-host connect progress. The connected device itself lives in `connectedDevices`. */
 export type WifiConnState = { state: 'idle' | 'connecting' | 'error'; error?: string };
@@ -51,10 +96,14 @@ export function rememberWifiDevice(name: string, host?: string) {
   });
 }
 
-export function forgetWifiDevice(name: string) {
-  const entry = get(knownWifi).find((d) => d.name === name);
+export function forgetWifiDevice(nameOrHost: string) {
+  const entry = get(knownWifi).find((d) => d.name === nameOrHost || d.host === nameOrHost);
   if (entry) void disconnectWifi(entry.host);
-  knownWifi.update((l) => { const n = l.filter((d) => d.name !== name); persist(n); return n; });
+  knownWifi.update((l) => {
+    const n = entry ? l.filter((d) => d.host !== entry.host) : l;
+    persist(n);
+    return n;
+  });
 }
 
 const setStatus = (host: string, s: WifiConnState) => wifiStatus.update((m) => ({ ...m, [host]: s }));

@@ -1,17 +1,23 @@
 <script lang="ts">
   // Finding devices on Wi-Fi — and nothing else.
   //
-  // A browser cannot browse mDNS, so this is the manual half of discovery: the remembered
-  // list of hosts, plus a box to add one by name or IP. Once connected, the device appears in
-  // the device list above with the SAME card, the same settings, the same OTA and the same
-  // LED editor as a Bluetooth device. There is deliberately no per-device control here — a
-  // second, lesser copy of the device card is exactly what this component used to be.
+  // iOS browses `_chromabay._tcp` and adds nearby devices to this list automatically. A
+  // browser cannot browse mDNS, so there this is the manual half of discovery: remembered
+  // hosts plus a box to add one by name or IP. Once connected, the device appears in the
+  // device list above with the SAME card, settings, OTA and LED editor as a Bluetooth device.
   //
   // Chrome 147+ can authorize cleartext ws:// to a .local/private address from the deployed
   // HTTPS site through its Local Network Access permission prompt. Other web engines cannot.
   import { onMount } from 'svelte';
   import { Capacitor } from '@capacitor/core';
-  import { knownWifi, wifiStatus, connectWifi, forgetWifiDevice, rememberWifiDevice } from '$lib/stores/wifiDeviceStore';
+  import {
+    wifiDevices,
+    wifiStatus,
+    connectWifi,
+    forgetWifiDevice,
+    rememberWifiDevice,
+    startWifiDiscovery
+  } from '$lib/stores/wifiDeviceStore';
   import { connectedDevices } from '$lib/stores/deviceStore';
   import { wifiIdFor } from '$lib/transport';
   import { canUseWebWifi } from '$lib/localNetworkAccess';
@@ -28,25 +34,54 @@
   const WIFI_MIN_VERSION = '1.1.0';
   let available = $state(false);
   let usesBrowserPermission = $state(false);
+  let usesBonjourDiscovery = $state(false);
+  let discoveryError = $state('');
   function cmpVer(a: string, b: string) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
     for (let i = 0; i < 3; i++) { const d = (pa[i] || 0) - (pb[i] || 0); if (d) return d; }
     return 0;
   }
-  onMount(async () => {
-    if (Capacitor.getPlatform() === 'web') {
-      const protocol = typeof location === 'undefined' ? '' : location.protocol;
-      const userAgent = typeof navigator === 'undefined' ? '' : navigator.userAgent;
-      available = canUseWebWifi(protocol, userAgent);
-      usesBrowserPermission = available && protocol === 'https:';
-      return;
-    }
-    try {
-      const { App } = await import('@capacitor/app');
-      const info = await App.getInfo();
-      available = cmpVer(info.version, WIFI_MIN_VERSION) >= 0 // store 1.1.0+
-        || cmpVer(info.version, '1.0.0') < 0;                // OR a sub-1.0 dev build (has keys)
-    } catch { available = false; }
+  onMount(() => {
+    let disposed = false;
+    let stopDiscovery: (() => Promise<void>) | undefined;
+
+    void (async () => {
+      const platform = Capacitor.getPlatform();
+      if (platform === 'web') {
+        const protocol = typeof location === 'undefined' ? '' : location.protocol;
+        const userAgent = typeof navigator === 'undefined' ? '' : navigator.userAgent;
+        available = canUseWebWifi(protocol, userAgent);
+        usesBrowserPermission = available && protocol === 'https:';
+        return;
+      }
+
+      try {
+        const { App } = await import('@capacitor/app');
+        const info = await App.getInfo();
+        available = cmpVer(info.version, WIFI_MIN_VERSION) >= 0 // store 1.1.0+
+          || cmpVer(info.version, '1.0.0') < 0;                // OR a sub-1.0 dev build (has keys)
+
+        // Native code ships in the binary, not a live-update bundle. Keep older 1.1.x
+        // installations usable if they receive this web bundle before the new binary.
+        if (
+          available
+          && platform === 'ios'
+          && Capacitor.isPluginAvailable('BonjourDiscovery')
+        ) {
+          usesBonjourDiscovery = true;
+          const stop = await startWifiDiscovery((message) => { discoveryError = message; });
+          if (disposed) await stop();
+          else stopDiscovery = stop;
+        }
+      } catch (error) {
+        discoveryError = error instanceof Error ? error.message : String(error);
+      }
+    })();
+
+    return () => {
+      disposed = true;
+      if (stopDiscovery) void stopDiscovery();
+    };
   });
 
   let manualHost = $state('');
@@ -73,9 +108,16 @@
     <p class="wifi-intro lna-note">
       Chrome will ask for Local Network Access the first time you connect. Choose Allow.
     </p>
+  {:else if usesBonjourDiscovery}
+    <p class="wifi-intro lna-note">
+      Nearby ChromaBay devices appear automatically.
+    </p>
+  {/if}
+  {#if discoveryError}
+    <p class="err">{discoveryError}</p>
   {/if}
 
-  {#each $knownWifi as d (d.name)}
+  {#each $wifiDevices as d (d.host)}
     {@const st = $wifiStatus[d.host]}
     {@const isConnected = $connectedDevices.has(wifiIdFor(d.host))}
     <div class="wifi-row">
@@ -90,7 +132,9 @@
           <span class="pill">Connecting…</span>
         {:else}
           <button class="btn primary small" onclick={() => connectWifi(d.name, d.host).catch(() => {})}>Connect</button>
-          <button class="btn small" onclick={() => forgetWifiDevice(d.name)}>Forget</button>
+          {#if d.remembered}
+            <button class="btn small" onclick={() => forgetWifiDevice(d.host)}>Forget</button>
+          {/if}
         {/if}
       </div>
     </div>
