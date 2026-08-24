@@ -1,7 +1,7 @@
 {
-  "version": "1.1.322",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.322.zip",
-  "buildDate": "2026-08-24T06:18:56Z",
-  "commitHash": "ce5e3aaebedf7ca57f483ee2b6d5855c306f73aa",
-  "commitMessage": "Make Wi-Fi live control and bulk transfers match Bluetooth"
+  "version": "1.1.323",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.323.zip",
+  "buildDate": "2026-08-24T06:25:00Z",
+  "commitHash": "70e7916d02aff83071aa138ddbc9e67c42676866",
+  "commitMessage": "Stop the keyboard rewriting Wi-Fi hostnames"
 }
