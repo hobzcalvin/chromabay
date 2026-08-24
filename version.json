@@ -1,7 +1,7 @@
 {
-  "version": "1.1.324",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.324.zip",
-  "buildDate": "2026-08-24T06:45:55Z",
-  "commitHash": "50d9caebc3307bb5ecb9e065b086e6ec0630c7b2",
-  "commitMessage": "Enable Chrome local-device permission on the web"
+  "version": "1.1.325",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.325.zip",
+  "buildDate": "2026-08-24T17:09:17Z",
+  "commitHash": "b2b44bf71c7557ea0165ebaa22bfccfa24fb0152",
+  "commitMessage": "Discover Wi-Fi devices automatically on iOS"
 }
