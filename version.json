@@ -1,7 +1,7 @@
 {
-  "version": "1.1.319",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.319.zip",
-  "buildDate": "2026-08-23T20:45:04Z",
-  "commitHash": "8a365841aae59cb5d27a20c2d0d2a6b7b2ba7c91",
-  "commitMessage": "Speak DDP, the protocol the pixel-pushers actually default to"
+  "version": "1.1.320",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.320.zip",
+  "buildDate": "2026-08-24T04:34:52Z",
+  "commitHash": "c4474ffd451900c08020b46e7d057dca32fe803f",
+  "commitMessage": "Give every colour in the editor the same wheel, and make the device honour it"
 }
