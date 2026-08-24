@@ -7,6 +7,7 @@ import { loadPatterns, currentPattern, patterns, switchToPattern } from '$lib/st
 import { loadSerializedPattern, initializeDefaultPattern, forceSyncCurrentPattern, 
          flowNodes, nodeParameters, getNodeDefinition, setNodeParameter, type Parameter } from '$lib/flowStore';
 import { interactiveParameters } from '$lib/stores/interactiveStore';
+import { findColorGroups, hexToHueSat, hueSatToHex } from '$lib/color';
 import { modulators, getModulator, setModulator, SHAPES, type ModField } from '$lib/stores/modulatorStore';
 import { exitCycle } from '$lib/stores/cycleStore';
 import type { Node } from '@xyflow/svelte';
@@ -28,7 +29,8 @@ import { get } from 'svelte/store';
     kind: 'knob' | 'color' | 'mod' | 'enum';   // color = hue+sat wheel; mod = automation field; enum = a select
     modField?: ModField;              // for kind 'mod': which automation field this knob drives
     labels?: string[];                // for enum knobs (select options, or automation envelope shapes)
-    satParamName?: string;
+    satParamName?: string;            // colour wheel over a hue+sat pair: the sat param it also drives
+    hexParam?: boolean;               // colour wheel over a single "#rrggbb" COLOR param
     satValue?: number;
   }
   
@@ -105,11 +107,22 @@ import { get } from 'svelte/store';
   
   // Track previous knob values to detect changes
   let previousKnobValues = new Map<string, number>();
+  let previousHexValues = new Map<string, string>();
   
   // Reactive statement to update parameters when knob values change
   $: {
     for (const knob of dynamicKnobs) {
       const key = `${knob.nodeId}-${knob.paramName}-${knob.kind}-${knob.modField ?? ''}`;
+      // A "#rrggbb" colour param: both wheel axes fold into one string, so compare the string
+      // rather than the hue alone — otherwise dragging the saturation never writes anything.
+      if (knob.kind === 'color' && knob.hexParam) {
+        const hex = hueSatToHex(knob.value, knob.satValue ?? 255);
+        if (previousHexValues.get(key) !== hex) {
+          setNodeParameter(knob.nodeId, knob.paramName, hex);
+          previousHexValues.set(key, hex);
+        }
+        continue;
+      }
       const previousValue = previousKnobValues.get(key);
 
       // Only update if the value actually changed
@@ -208,26 +221,34 @@ import { get } from 'svelte/store';
         const selOptions = (paramDef.type as string) === 'select' ? (paramDef.options ?? []) : null;
         if (selOptions) { min = 0; max = Math.max(0, selOptions.length - 1); step = 1; }
 
-        // A hue param on an operator that also has saturation → a colour wheel (controls both).
-        const satDef = nodeDefinition.params.find((p: Parameter) => p.name === 'saturation');
-        const isColor = paramName === 'hue' && !!satDef;
-        const satValue = satDef ? (nodeParams.get('saturation') ?? satDef.default) : 255;
+        // A colour param gets the editor's wheel, not a rotary knob: either a "#rrggbb" COLOR
+        // param or a hue that has a matching saturation (hue/saturation, start_hue/start_sat…).
+        const group = findColorGroups(nodeDefinition.params)
+          .find((g) => (g.hex ?? g.hue)?.name === paramName) ?? null;
+        const isColor = !!group;
+        const satDef = group?.sat ?? null;
+        const hexColor = group?.hex ? String(currentValue ?? group.hex.default ?? '#ffffff') : null;
+        const satValue = hexColor !== null
+          ? hexToHueSat(hexColor).sat
+          : (satDef ? (nodeParams.get(satDef.name) ?? satDef.default) : 255);
 
         const knob: InteractiveKnob = {
           nodeId,
           paramName,
-          paramLabel: isColor
-            ? `${node.data.label || nodeDefinition.name} Color`
-            : `${node.data.label || nodeDefinition.name} ${paramDef.label}`,
+          paramLabel: `${node.data.label || nodeDefinition.name} ${group ? group.label : paramDef.label}`,
           nodeType: node.data.type as string,
-          value: selOptions ? (Number(currentValue) || 0) : currentValue,
+          // A colour wheel's `value` is always the hue, whatever the param's own storage is.
+          value: hexColor !== null ? hexToHueSat(hexColor).hue
+               : selOptions ? (Number(currentValue) || 0)
+               : currentValue,
           min,
           max,
           step,
           order: 0, // Default order for now
           kind: isColor ? 'color' : (selOptions ? 'enum' : 'knob'),
           labels: selOptions ? selOptions.map((o) => o.label) : undefined,
-          satParamName: isColor ? 'saturation' : undefined,
+          satParamName: satDef ? satDef.name : undefined,
+          hexParam: hexColor !== null,
           satValue,
         };
         

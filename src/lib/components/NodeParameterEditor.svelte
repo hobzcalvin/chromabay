@@ -5,6 +5,7 @@
   import { modulators, getModulator, setModulator, clearModulator, modulatorSeed, SHAPES, type ModulatorConfig, type ModField } from '../stores/modulatorStore';
   import { flattenSvgPath, encodedToPath, PRESETS } from '../svgFlatten';
   import ColorWheel from './ColorWheel.svelte';
+  import { findColorGroups, colorGroupOwned, hexToHueSat, hueSatToHex, type ColorGroup } from '../color';
   import type { Node } from '@xyflow/svelte';
 
   export let node: Node;
@@ -170,11 +171,6 @@
     applySvgPath(param, PRESETS[name]);
   }
 
-  function handleColorChange(param: Parameter, event: Event) {
-    const input = event.target as HTMLInputElement;
-    updateParameter(param, input.value);
-  }
-
   function handleRangeChange(param: Parameter, event: Event) {
     const input = event.target as HTMLInputElement;
     const value = param.type === 'integer' ? parseInt(input.value) : parseFloat(input.value);
@@ -310,12 +306,23 @@
   const isSlider = (p: Parameter) => SLIDER_TYPES.has(p.type as string);
   // Interactive (a knob on the Interact page) also works for enums — the knob steps through the
   // options. Automation (an LFO) still only makes sense for a continuous slider.
-  const canInteract = (p: Parameter) => isSlider(p) || (p.type as string) === 'select';
+  const canInteract = (p: Parameter) => isSlider(p) || (p.type as string) === 'select' || p.type === 'color';
 
-  // Operators with a hue+saturation pair (both FLOAT params) get one combined colour wheel
-  // instead of two sliders. The two params stay underneath — so hue automation still works.
-  $: colorPair = !!nodeDefinition && nodeDefinition.params.some((p) => p.name === 'hue') && nodeDefinition.params.some((p) => p.name === 'saturation');
-  $: satParam = nodeDefinition?.params.find((p) => p.name === 'saturation') ?? null;
+  // Every colour an operator exposes gets the same wheel: a "#rrggbb" COLOR param, a hue+sat
+  // pair, or a prefixed set like Gradient's start_/end_. A group's *_val keeps its own slider
+  // (the wheel has no brightness axis) and the hue param stays automatable underneath.
+  $: colorGroups = nodeDefinition ? findColorGroups(nodeDefinition.params) : [];
+  $: colorOwned = colorGroupOwned(colorGroups);
+  // Where the wheel sits now, in hue/sat terms, whichever way the operator spells its colour.
+  function wheelPos(g: ColorGroup): { hue: number; sat: number } {
+    if (g.hex) return hexToHueSat(getParameterValue(g.hex));
+    return { hue: Number(getParameterValue(g.hue!)), sat: Number(getParameterValue(g.sat!)) };
+  }
+  function setWheel(g: ColorGroup, hue: number, sat: number) {
+    if (g.hex) { updateParameter(g.hex, hueSatToHex(hue, sat)); return; }
+    if (g.hue) updateParameter(g.hue, hue);
+    if (g.sat) updateParameter(g.sat, sat);
+  }
   // Convolve: the 9 kernel cells (k1..k9) are edited in a 3×3 grid, not as 9 sliders. Hide
   // them from the normal list, and show the grid only under the "Custom" preset (index 0).
   $: isConvolve = node?.data?.type === 'convolve';
@@ -324,18 +331,14 @@
   $: convolveCustom = isConvolve && presetParam
     ? String($nodeParameters.get(node.id)?.get('preset') ?? presetParam.default ?? 1) === '0'
     : false;
-  // Params to show, with the colour control forced to the BOTTOM — otherwise a param defined
-  // after `hue` (e.g. an "Angle") ends up hidden below the tall colour wheel.
-  $: isColorParam = (p: Parameter) => (colorPair && p.name === 'hue') || p.type === 'color';
+  // Plain params first; the colour wheels (each with its own value slider under it) render
+  // after them, because a param declared after a colour would otherwise sit below a tall wheel.
   $: visibleParams = nodeDefinition
-    ? (() => {
-        const shown = nodeDefinition.params.filter((p) => {
-          if (colorPair && p.name === 'saturation') return false;    // shown in the color wheel
-          if (isConvolve && /^k[1-9]$/.test(p.name)) return false;   // shown in the kernel grid
-          return true;
-        });
-        return [...shown.filter((p) => !isColorParam(p)), ...shown.filter(isColorParam)];
-      })()
+    ? nodeDefinition.params.filter((p) => {
+        if (colorOwned.has(p.name)) return false;                  // shown in / under a wheel
+        if (isConvolve && /^k[1-9]$/.test(p.name)) return false;   // shown in the kernel grid
+        return true;
+      })
     : [];
   // Reactive modulator lookup (subscribes to the store).
   $: getModReactive = (paramName: string): ModulatorConfig | null => $modulators.get(node.id)?.get(paramName) ?? null;
@@ -477,12 +480,13 @@
         {/if}
       </div>
     {:else if nodeDefinition && nodeDefinition.params.length > 0}
-      {#each visibleParams as param (param.name)}
+      <!-- One row per parameter. Rendered from the list below, and again for the value slider
+           that belongs under a colour wheel. -->
+      {#snippet paramRow(param: Parameter)}
         {@const inputId = getUniqueInputId(param.name)}
-        {@const isColor = colorPair && param.name === 'hue'}
         <div class="parameter-group">
           <div class="parameter-header">
-            <label class="parameter-label" for={inputId}>{isColor ? 'Color' : param.label}</label>
+            <label class="parameter-label" for={inputId}>{param.label}</label>
             <!-- Interact (🖐️) works for sliders AND enums (knob steps the options); Automate (🔄)
                  is slider-only (an LFO can't sensibly drive a bool/string/color). -->
             {#if canInteract(param)}
@@ -502,16 +506,7 @@
             {/if}
           </div>
           
-          {#if isColor}
-            {@const hv = Number(getParameterValue(param))}
-            {@const sv = Number(satParam ? getParameterValue(satParam) : 255)}
-            {@const hueMod = getModReactive('hue')}
-            <div class="color-wheel-wrap">
-              <ColorWheel hue={hv} sat={sv} size={150} disabled={!!hueMod}
-                on:change={(e) => { updateParameter(param, e.detail.hue); if (satParam) updateParameter(satParam, e.detail.sat); }} />
-              {#if hueMod}<span class="auto-tag">🔄 hue cycling · {SHAPES[hueMod.shape]} · {hueMod.period}s</span>{/if}
-            </div>
-          {:else if isSlider(param) && getModReactive(param.name)}
+          {#if isSlider(param) && getModReactive(param.name)}
             {@const cfg = getModReactive(param.name)!}
             <div class="automated-control" role="button" tabindex="0" title="Edit automation"
               onclick={() => openAutomation(param)} onkeydown={(e) => { if (e.key === 'Enter') openAutomation(param); }}>
@@ -586,16 +581,6 @@
               />
               <span class="value-display">{getParameterValue(param)}</span>
             </div>
-          {:else if param.type === 'color'}
-            <div class="color-control">
-              <input 
-                id={inputId}
-                type="color" 
-                value={getParameterValue(param)}
-                oninput={(e) => handleColorChange(param, e)}
-              />
-              <span class="color-value">{getParameterValue(param)}</span>
-            </div>
           {:else if param.type === 'hue'}
             <div class="hue-control">
               <input
@@ -660,6 +645,42 @@
             {/if}
           {/if}
         </div>
+      {/snippet}
+
+      {#each visibleParams as param (param.name)}
+        {@render paramRow(param)}
+      {/each}
+
+      {#each colorGroups as g (g.key)}
+        {@const pos = wheelPos(g)}
+        {@const anchor = g.hue ?? g.hex}
+        {@const hueMod = g.hue ? getModReactive(g.hue.name) : null}
+        <div class="parameter-group">
+          <div class="parameter-header">
+            <span class="parameter-label">{g.label}</span>
+            {#if anchor && canInteract(anchor)}
+              <div class="interactive-checkbox">
+                <input
+                  type="checkbox"
+                  id="interactive-{getUniqueInputId(g.key)}"
+                  checked={getParameterInteractiveReactive(node.id, anchor.name)}
+                  onchange={(e) => handleInteractiveToggle(anchor, e)}
+                />
+                <label for="interactive-{getUniqueInputId(g.key)}" class="hand-emoji" title="Interactive parameter (shows colour wheel on interact page)">🖐️</label>
+              </div>
+            {/if}
+            {#if g.hue}
+              <button type="button" class="automate-btn" class:active={!!hueMod}
+                title="Automate the hue (LFO / noise / random)" onclick={() => openAutomation(g.hue!)}>🔄</button>
+            {/if}
+          </div>
+          <div class="color-wheel-wrap">
+            <ColorWheel hue={pos.hue} sat={pos.sat} size={150} disabled={!!hueMod}
+              on:change={(e) => setWheel(g, e.detail.hue, e.detail.sat)} />
+            {#if hueMod}<span class="auto-tag">🔄 hue cycling · {SHAPES[hueMod.shape]} · {hueMod.period}s</span>{/if}
+          </div>
+        </div>
+        {#if g.val}{@render paramRow(g.val)}{/if}
       {/each}
       {#if isConvolve && convolveCustom}
         <div class="parameter-group">
@@ -979,28 +1000,6 @@
     color: #9ca3af;
     min-width: 40px;
     text-align: right;
-  }
-
-  .color-control {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .color-control input[type="color"] {
-    width: 32px;
-    height: 32px;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    background: none;
-    padding: 0; /* Ensure no extra padding affects size */
-  }
-
-  .color-value {
-    font-size: 11px;
-    color: #9ca3af;
-    font-family: monospace;
   }
 
   .select-control {

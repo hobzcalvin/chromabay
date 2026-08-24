@@ -3,11 +3,31 @@
 #include <new> // std::nothrow
 #include <cstring> // strcmp (operator-type compare for state-preserving pattern updates)
 
-// A SELECT enum's value travels as the integer option index, read with getInt(). New
-// patterns send an int directly; tolerate a string here too — either a numeric index
-// ("2") or a label ("Multiply") — for older patterns. Non-SELECT strings keep the raw
-// string. Mirrors the WASM binding so the preview and the device agree.
-static ParameterValue selectValueFor(const ParameterInfo& info, const char* value) {
+// What a string parameter value means depends on the parameter it lands on. Mirrors the WASM
+// bindings so the preview and the device agree:
+//
+//  - SELECT: the value is the integer option index, read with getInt(). New patterns send an
+//    int directly; tolerate a string here too — a numeric index ("2") or a label ("Multiply").
+//  - COLOR: the value is "#rrggbb", the same spelling the operator metadata reports for the
+//    default. Without this it stayed a STRING, getColor() saw the wrong type and handed back
+//    the default, and a colour param picked in the app rendered white on the device forever.
+//  - anything else: the raw string.
+static ParameterValue valueForString(const ParameterInfo& info, const char* value) {
+    if (info.type == ParameterInfo::COLOR) {
+        const char* h = (value[0] == '#') ? value + 1 : value;
+        uint32_t rgb = 0;
+        int n = 0;
+        for (; n < 6 && h[n]; n++) {
+            char c = h[n];
+            int d = (c >= '0' && c <= '9') ? c - '0'
+                  : (c >= 'a' && c <= 'f') ? c - 'a' + 10
+                  : (c >= 'A' && c <= 'F') ? c - 'A' + 10 : -1;
+            if (d < 0) break;
+            rgb = (rgb << 4) | (uint32_t)d;
+        }
+        if (n != 6) return info.defaultValue;  // not a colour we can read — keep the default
+        return ParameterValue(CRGB((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF));
+    }
     if (info.type == ParameterInfo::SELECT) {
         bool numeric = value[0] != '\0';
         for (const char* p = value; *p; ++p) if (*p < '0' || *p > '9') { numeric = false; break; }
@@ -607,10 +627,10 @@ bool PatternRendererBase::loadPatternFromMessagePack(const uint8_t* data, unsign
                                 bool value = mpack_node_bool(paramNode);
                                 node.parameters[j] = ParameterValue(value);
                             } else if (paramType == mpack_type_str) {
-                                // SELECT values arrive as the option label; store its index so
-                                // operators can read it with getInt(). Other strings kept as-is.
+                                // A string means what the parameter says it means: a SELECT
+                                // option, a "#rrggbb" colour, or free text.
                                 std::string vb = mpackFullStr(paramNode);
-                                node.parameters[j] = selectValueFor(paramInfo[j], vb.c_str());
+                                node.parameters[j] = valueForString(paramInfo[j], vb.c_str());
                             }
                             // For nil or unknown types, keep the default value
                         }
@@ -648,7 +668,7 @@ bool PatternRendererBase::loadPatternFromMessagePack(const uint8_t* data, unsign
                                             node.parameters[k] = ParameterValue(value);
                                         } else if (valueType == mpack_type_str) {
                                             std::string vb = mpackFullStr(valueNode);
-                                            node.parameters[k] = selectValueFor(paramInfo[k], vb.c_str());
+                                            node.parameters[k] = valueForString(paramInfo[k], vb.c_str());
                                         }
                                         // For nil or unknown types, keep default value
                                         break;
