@@ -39,9 +39,19 @@ const PROJECT_DIR = process.env.ESP32_DIR || path.resolve('esp32');
 const PIO = process.env.PIO || `${homedir()}/.platformio/penv/bin/pio`;
 const PYTHON = process.env.PYTHON || `${homedir()}/.platformio/penv/bin/python`;
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const DEVICE_NAME_RE = process.env.DEVICE_NAME_RE
-  ? new RegExp(process.env.DEVICE_NAME_RE, 'i')
-  : /chromabay|esp32|m5/i;
+// Which device to drive. This harness can OTA whatever it connects to, and several real
+// ChromaBay installations (Portal, Butterfly) are usually powered and in BLE range — so the
+// default must not be a pattern that matches "whichever one answers first". When no name is
+// given we take it from the USB device's own boot banner, which is the only thing that knows
+// which device is actually on the cable. DEVICE_NAME is an exact name; DEVICE_NAME_RE is
+// still honoured for the rare case you really do want a pattern.
+const DEVICE_NAME = process.env.DEVICE_NAME || null;
+const DEVICE_NAME_RE = process.env.DEVICE_NAME_RE ? new RegExp(process.env.DEVICE_NAME_RE, 'i') : null;
+let deviceMatches = DEVICE_NAME
+  ? (n) => (n || '').trim() === DEVICE_NAME
+  : DEVICE_NAME_RE
+    ? (n) => DEVICE_NAME_RE.test(n || '')
+    : null; // resolved from serial below
 const SERIAL_BAUD = '115200';
 const NO_FLASH = process.argv.includes('--no-flash');
 // By default we run the flow then EXIT 0/1 (so an automated loop gets a verdict).
@@ -156,6 +166,20 @@ try {
   // 2. Serial monitor when a USB UART is present (BLE itself does not require one).
   if (port) serial = startSerialMonitor(port);
 
+  // Resolve the target if it wasn't given. A reflash prints the banner already; otherwise
+  // wait for one (the device prints it on every boot). Refuse to guess.
+  if (!deviceMatches) {
+    if (!serial) {
+      throw new Error('No DEVICE_NAME and no serial port — refusing to guess which ChromaBay to drive. ' +
+                      'Set DEVICE_NAME=ChromaBay_XXXX (other devices on this bench may be live installations).');
+    }
+    log('reading the target name from the USB device…');
+    const line = await serial.waitFor(/^Device name: (\S+)/, 40000);
+    const name = line.match(/Device name: (\S+)/)[1];
+    log(green(`target device: ${name} (all other devices ignored)`));
+    deviceMatches = (n) => (n || '').trim() === name;
+  }
+
   // 3. Launch real Chrome (channel:'chrome' so Web Bluetooth has a real radio).
   log('launching Chrome…');
   browser = await chromium.launch({ channel: 'chrome', headless: false });
@@ -180,12 +204,12 @@ try {
     if (cancelTimer === null) {
       cancelTimer = setTimeout(async () => {
         if (!selectedDevice) {
-          log(red(`no device matched ${DEVICE_NAME_RE} within 25s; cancelling chooser`));
+          log(red('target device did not appear within 25s; cancelling chooser'));
           try { await cdp.send('DeviceAccess.cancelPrompt', { id: e.id }); } catch {}
         }
       }, 25000);
     }
-    const match = (e.devices || []).find((d) => DEVICE_NAME_RE.test(d.name || ''));
+    const match = (e.devices || []).find((d) => deviceMatches(d.name || ''));
     if (match) {
       selectedDevice = true;
       clearTimeout(cancelTimer);
@@ -193,7 +217,8 @@ try {
       try { await cdp.send('DeviceAccess.selectPrompt', { id: e.id, deviceId: match.id }); }
       catch (err) { log(red(`selectPrompt failed: ${err.message}`)); }
     } else {
-      log(`chooser: ${(e.devices || []).length} device(s), none matching yet — waiting…`);
+      const names = (e.devices || []).map((d) => d.name).filter(Boolean);
+      log(`chooser: ignoring ${names.length} non-target device(s)${names.length ? `: ${names.join(', ')}` : ''}`);
     }
   });
 

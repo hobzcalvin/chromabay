@@ -55,6 +55,13 @@
 #  endif
 #endif
 
+// Relay characteristics, continuing the service's UUID sequence (…fa was COMM_CONFIG).
+// TX notifies request frames to the app; RX takes the app's HELLO and STATUS frames; CONFIG
+// carries the DSN the app provisions.
+#define CHARACTERISTIC_UUID_SENTRY_TX     "a0be83fb-8dc9-47f0-ab40-b19721d20ed1"
+#define CHARACTERISTIC_UUID_SENTRY_RX     "a0be83fc-8dc9-47f0-ab40-b19721d20ed1"
+#define CHARACTERISTIC_UUID_SENTRY_CONFIG "a0be83fd-8dc9-47f0-ab40-b19721d20ed1"
+
 #if CHROMABAY_SENTRY
 
 // Whether the device may deliver its own reports over HTTPS, instead of always handing them
@@ -147,12 +154,6 @@
 #define ARDUINO_BOARD "unknown"
 #endif
 
-// Relay characteristics, continuing the service's UUID sequence (…fa was COMM_CONFIG).
-// TX notifies request frames to the app; RX takes the app's HELLO and STATUS frames; CONFIG
-// carries the DSN the app provisions.
-#define CHARACTERISTIC_UUID_SENTRY_TX     "a0be83fb-8dc9-47f0-ab40-b19721d20ed1"
-#define CHARACTERISTIC_UUID_SENTRY_RX     "a0be83fc-8dc9-47f0-ab40-b19721d20ed1"
-#define CHARACTERISTIC_UUID_SENTRY_CONFIG "a0be83fd-8dc9-47f0-ab40-b19721d20ed1"
 
 namespace SentryReporting {
 
@@ -812,18 +813,14 @@ inline void initSdk() {
  */
 inline void begin() { initSdk(); }
 
-/** Create the relay characteristics. Call from the BLE service setup, before start(). */
-inline void attachBleService(NimBLEService *service) {
-    if (!service) return;
-    gRelayTx = service->createCharacteristic(CHARACTERISTIC_UUID_SENTRY_TX,
-                                             NIMBLE_PROPERTY::NOTIFY);
-    NimBLECharacteristic *rx = service->createCharacteristic(
-        CHARACTERISTIC_UUID_SENTRY_RX, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR);
-    rx->setCallbacks(&gRelayRxCallbacks);
-    NimBLECharacteristic *config = service->createCharacteristic(
-        CHARACTERISTIC_UUID_SENTRY_CONFIG, NIMBLE_PROPERTY::WRITE);
-    config->setCallbacks(&gConfigCallbacks);
-}
+/**
+ * Hand over the notify characteristic for device→app relay frames.
+ *
+ * The relay's three characteristics are ordinary rows in main.cpp's endpoint table now, so
+ * they are created (and reachable over Wi-Fi) with everything else; this only gives the
+ * transport the pointer it pushes through, because it paces its own notifications.
+ */
+inline void setRelayTx(NimBLECharacteristic *c) { gRelayTx = c; }
 
 /**
  * Track whichever link the app is on. One that disconnects mid-relay must not be waited on.
@@ -1102,7 +1099,7 @@ template <typename... Args> inline void logInfo(const char *, Args...) {}
 template <typename... Args> inline void logWarn(const char *, Args...) {}
 template <typename... Args> inline void logError(const char *, Args...) {}
 inline void begin() {}
-inline void attachBleService(NimBLEService *) {}
+inline void setRelayTx(NimBLECharacteristic *) {}
 inline void setBleConnected(bool) {}
 inline void setWifiConnected(bool) {}
 inline void setWifiLink(FrameSink, void (*)()) {}

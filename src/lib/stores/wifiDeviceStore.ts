@@ -1,10 +1,20 @@
-// Known WiFi devices (persisted) + their live WebSocket connections. The browser can't
-// browse mDNS, so we connect to devices we KNOW by name via <name>.local — populated when the
-// user switches a device to WiFi (or adds one by host). The OS resolves .local via Bonjour.
+// Devices reachable over Wi-Fi.
+//
+// This store's only job is *finding* them: a browser cannot browse mDNS, so we keep a small
+// remembered list of `<name>.local` hosts (populated when you switch a device to Wi-Fi, or
+// when you add one by host) and resolve it through the OS.
+//
+// Connecting is deliberately NOT special. A connected Wi-Fi device is registered as a
+// transport and put into the SAME `connectedDevices` store a Bluetooth device lands in, with
+// the id `wifi:<host>`. From that moment the devices page, the settings panel, OTA, the LED
+// editor and the crash relay all treat it as an ordinary device — there is no Wi-Fi branch
+// anywhere above this file.
 import { writable, get } from 'svelte/store';
 import { browser } from '$app/environment';
-import { WifiDevice } from '$lib/wifiTransport';
-import type { DeviceInfo } from '$lib/ble';
+import { WifiTransport } from '$lib/wifiTransport';
+import { registerTransport, unregisterTransport, wifiIdFor } from '$lib/transport';
+import { addConnectedDevice, connectedDevices } from './deviceStore';
+import { disconnectFromDevice, handleDeviceDisconnected } from '$lib/ble';
 
 export type KnownWifi = { name: string; host: string };
 const LS_KEY = 'chromabay.wifiDevices';
@@ -13,18 +23,16 @@ function load(): KnownWifi[] {
   if (!browser) return [];
   try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch { return []; }
 }
-function persist(list: KnownWifi[]) { if (browser) try { localStorage.setItem(LS_KEY, JSON.stringify(list)); } catch {} }
+function persist(list: KnownWifi[]) { if (browser) try { localStorage.setItem(LS_KEY, JSON.stringify(list)); } catch { /* private mode */ } }
 
 export const knownWifi = writable<KnownWifi[]>(load());
 
-export type WifiConn = {
-  name: string; host: string; dev: WifiDevice | null;
-  state: 'idle' | 'connecting' | 'ready' | 'error'; info?: DeviceInfo; error?: string;
-  brightness?: number; // last device-reported brightness (button / schedule push)
-};
-export const wifiConns = writable<Record<string, WifiConn>>({});
+/** Per-host connect progress. The connected device itself lives in `connectedDevices`. */
+export type WifiConnState = { state: 'idle' | 'connecting' | 'error'; error?: string };
+export const wifiStatus = writable<Record<string, WifiConnState>>({});
 
 // Mirror the firmware's mDNS hostname sanitization (lowercase, [a-z0-9-], collapse others).
+// Keep this in step with the sanitizer in esp32/src/main.cpp's WifiLink::begin().
 export function hostForName(name: string): string {
   let h = '';
   for (const c of name.toLowerCase()) {
@@ -42,36 +50,51 @@ export function rememberWifiDevice(name: string, host?: string) {
     const n = [...l, { name, host: h }]; persist(n); return n;
   });
 }
+
 export function forgetWifiDevice(name: string) {
-  disconnectWifi(name);
+  const entry = get(knownWifi).find((d) => d.name === name);
+  if (entry) void disconnectWifi(entry.host);
   knownWifi.update((l) => { const n = l.filter((d) => d.name !== name); persist(n); return n; });
 }
 
-export async function connectWifi(name: string, host: string) {
-  wifiConns.update((m) => ({ ...m, [name]: { name, host, dev: null, state: 'connecting' } }));
-  const dev = new WifiDevice(host);
+const setStatus = (host: string, s: WifiConnState) => wifiStatus.update((m) => ({ ...m, [host]: s }));
+
+/**
+ * Connect, then hand the device to the shared store. `name` is only a display label; the id
+ * is derived from the host so it is stable across renames.
+ */
+export async function connectWifi(name: string, host: string): Promise<void> {
+  const id = wifiIdFor(host);
+  if (get(connectedDevices).has(id)) return;
+  setStatus(host, { state: 'connecting' });
+  const transport = new WifiTransport(host);
   try {
-    await dev.connect();
-    const info = await dev.getDeviceInfo();
-    dev.syncTime(); // give the device our clock (for cycle timing / the Clock node)
-    const brightness = await dev.readBrightness().catch(() => undefined); // seed the slider
-    // Only NOW wire onClose — during a failed connect the socket's close event would
-    // otherwise fire after we set 'error' and clobber it back to 'idle' (no feedback).
-    dev.onClose = () => wifiConns.update((m) => (m[name] ? { ...m, [name]: { ...m[name], state: 'idle', dev: null } } : m));
-    // Device-initiated brightness (button / schedule) → keep the card's slider in sync.
-    dev.onBrightness = (b) => wifiConns.update((m) => (m[name] ? { ...m, [name]: { ...m[name], brightness: b } } : m));
-    wifiConns.update((m) => ({ ...m, [name]: { name, host, dev, state: 'ready', info, brightness } }));
+    await transport.connect();
+    // Wire the close handler only after a successful connect: during a FAILED connect the
+    // socket's close event fires after we have already recorded the error, and would
+    // otherwise clobber it back to idle, leaving the user with no feedback.
+    // The same cleanup a dropped BLE link runs: clears the store and stops the per-device
+    // timers (timestamp sync would otherwise keep writing into a dead socket).
+    transport.onClose = () => {
+      unregisterTransport(id);
+      handleDeviceDisconnected(id);
+      setStatus(host, { state: 'idle' });
+    };
+    registerTransport(transport);
+    // Exactly what the BLE connect path does. Everything downstream keys off this.
+    addConnectedDevice({ deviceId: id, name, services: [], lastConnected: Date.now() });
+    setStatus(host, { state: 'idle' });
   } catch (e: any) {
-    dev.disconnect();
-    wifiConns.update((m) => ({ ...m, [name]: { name, host, dev: null, state: 'error', error: e?.message ?? String(e) } }));
+    await transport.disconnect();
+    unregisterTransport(id);
+    setStatus(host, { state: 'error', error: e?.message ?? String(e) });
+    throw e;
   }
 }
-// Optimistically record a brightness for a WiFi device (slider drag); device pushes use the
-// same field, so the readout is one source of truth.
-export function setWifiBrightness(name: string, b: number) {
-  wifiConns.update((m) => (m[name] ? { ...m, [name]: { ...m[name], brightness: b } } : m));
-}
-export function disconnectWifi(name: string) {
-  get(wifiConns)[name]?.dev?.disconnect();
-  wifiConns.update((m) => (m[name] ? { ...m, [name]: { ...m[name], state: 'idle', dev: null } } : m));
+
+export async function disconnectWifi(host: string) {
+  // Goes through the shared disconnect so the socket is actually closed and the store,
+  // timers and transport registry are cleaned up in one place.
+  await disconnectFromDevice(wifiIdFor(host)).catch(() => { /* already gone */ });
+  setStatus(host, { state: 'idle' });
 }

@@ -4,19 +4,23 @@
   // Save button writes everything in a single patch; picking a different transport (the
   // Bluetooth/Wi-Fi radio) and saving reboots the device into it, so the link drops — we show
   // clear feedback for that.
-  import { RT_PROTO, RT_CAPS_LEGACY, type DeviceSettings, type DeviceSettingsPatch, type DeviceInfo } from '$lib/ble';
+  import {
+    RT_PROTO, RT_CAPS_LEGACY, readDeviceSettings, writeDeviceSettings,
+    type DeviceSettings, type DeviceSettingsPatch, type DeviceInfo,
+  } from '$lib/ble';
   import { rememberWifiDevice } from '$lib/stores/wifiDeviceStore';
-  import type { DeviceHandle } from '$lib/deviceHandle';
+  import { isWifiId } from '$lib/transport';
 
-  // Transport-agnostic: the panel drives a DeviceHandle (BLE or Wi-Fi) — identical either way.
-  let { device, deviceInfo }: { device: DeviceHandle; deviceInfo: DeviceInfo | null } = $props();
+  // A device id is all this needs — the characteristic operations below go out over whatever
+  // link that device is on, so there is nothing transport-shaped in this component.
+  let { deviceId, deviceInfo }: { deviceId: string; deviceInfo: DeviceInfo | null } = $props();
 
-  const readSettingsFn = (): Promise<DeviceSettings | null> => device.readSettings();
-  const writeSettingsFn = (patch: DeviceSettingsPatch): Promise<void> => device.writeSettings(patch);
-  const key = $derived(device.id);
+  const readSettingsFn = (): Promise<DeviceSettings | null> => readDeviceSettings(deviceId);
+  const writeSettingsFn = (patch: DeviceSettingsPatch): Promise<void> => writeDeviceSettings(deviceId, patch);
+  const key = $derived(deviceId);
 
-  // Wi-Fi only exists on feat>=2 firmware, so a Wi-Fi handle implies supported.
-  const supported = $derived(device.transport === 'wifi' || (deviceInfo?.feat ?? 1) >= 2);
+  // Wi-Fi only exists on feat>=2 firmware, so reaching a device over Wi-Fi implies supported.
+  const supported = $derived(isWifiId(deviceId) || (deviceInfo?.feat ?? 1) >= 2);
 
   let settings = $state<DeviceSettings | null>(null);
   let loading = $state(false);
@@ -58,7 +62,7 @@
   // The universe field is DMX-only; DDP addresses pixels by byte offset.
   const usesUniverse = $derived((rtProto & (RT_PROTO.ARTNET | RT_PROTO.SACN)) !== 0);
 
-  const activeMode = $derived(settings?.mode_active ?? deviceInfo?.mode ?? device.transport);
+  const activeMode = $derived(settings?.mode_active ?? deviceInfo?.mode ?? (isWifiId(deviceId) ? 'wifi' : 'ble'));
 
   function applySnapshot(s: DeviceSettings) {
     ssid = s.ssid || '';
@@ -73,7 +77,7 @@
     if (s.son != null) schedOnStr = minToStr(s.son);
     if (s.sof != null) schedOffStr = minToStr(s.sof);
     if (s.sdw != null) schedDays = s.sdw;
-    transport = s.mode_active ?? deviceInfo?.mode ?? device.transport;
+    transport = s.mode_active ?? deviceInfo?.mode ?? (isWifiId(deviceId) ? 'wifi' : 'ble');
   }
 
   async function load() {
@@ -97,7 +101,7 @@
       loading = false;
     }
   }
-  $effect(() => { if (supported && device) load(); });
+  $effect(() => { if (supported && deviceId) load(); });
 
   function setMsg(text: string, kind: 'ok' | 'err' | 'info' = 'info') { msg = text; msgKind = kind; }
 

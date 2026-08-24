@@ -1,40 +1,49 @@
-// WiFi control transport: talk to a ChromaBay device over WebSocket (ws://<host>:8080/),
-// mirroring the firmware's channel protocol. Each WS binary message is [u8 channel][payload]
-// — the exact same channels + payloads the BLE path uses, so the device behaves identically
-// whether reached over BLE or WiFi.
+// Wi-Fi carriage for the ChromaBay characteristic protocol.
 //
-// Browser reality: raw TCP is impossible in a browser, but WebSocket is native. On the iOS
-// app (WKWebView) ws:// to a LAN device works with an ATS exception; in local dev (http) it
-// works too. The deployed https site can't (mixed content) — WiFi control is native + dev.
-import * as msgpack from '@msgpack/msgpack';
-import type { DeviceInfo, DeviceSettings, DeviceSettingsPatch, LedConfiguration } from './ble';
-import { encodeLedConfig } from './ble';
-import type { SerializedPattern } from './patternSerializer';
+// This file knows about WebSockets and nothing else. It does not know what a pattern is, what
+// OTA means, or what any characteristic does — it moves bytes for the same read/write/notify
+// operations Bluetooth offers, so every high-level operation in ble.ts works over it unchanged.
+//
+// Wire format: one WS binary message per operation, [u8 channel][u8 op][payload].
+//   channel — derived from the characteristic UUID (see channelForUuid); never hand-assigned.
+//   op      — WRITE / READ / VALUE, mirroring what BLE can do to a characteristic.
+// WebSocket gives message boundaries, so there is no length prefix; TCP gives ordering, so
+// chunked writes arrive in the order they were sent exactly as they do over a serialized
+// BLE queue.
+//
+// Browser reality: raw TCP is impossible in a browser but WebSocket is native. In the iOS app
+// (WKWebView) ws:// to a LAN device works with an ATS exception; local dev (http) works too.
+// The deployed https site cannot (mixed content), so Wi-Fi control is native + dev only.
+import { OP, channelForUuid, wifiIdFor, type Transport } from './transport';
 
 export const WIFI_PORT = 8080;
 
-// Channels — must match TcpChannel in esp32/src/main.cpp.
-export const CH = {
-  DEVICE_INFO: 1, LED_CONFIG_GET: 2, LED_CONFIG_SET: 3, BRIGHTNESS: 4,
-  PATTERN_SYNC: 5, PLAYLIST_SYNC: 6, TIMESTAMP_SYNC: 7, LIBRARY_CMD: 8,
-  LIBRARY_DUMP: 9, DEVICE_NAME: 10, COMM_CONFIG: 11,
-  SENTRY_RELAY: 12, SENTRY_CONFIG: 13,
-} as const;
+type NotifyCb = (v: DataView) => void;
 
-const td = new TextDecoder();
-const te = new TextEncoder();
-
-export class WifiDevice {
-  host: string;                 // "chromabay-ed30.local" or an IP
-  private ws: WebSocket | null = null;
+export class WifiTransport implements Transport {
+  readonly kind = 'wifi' as const;
+  readonly id: string;
+  host: string;
   connected = false;
-  private pending = new Map<number, (data: Uint8Array) => void>();
-  private dump: { entries: SerializedPattern[]; resolve?: (v: SerializedPattern[]) => void } | null = null;
-  onClose?: () => void;
-  onBrightness?: (b: number) => void; // device-initiated brightness (button / schedule)
-  onSentryFrame?: (payload: Uint8Array) => void; // crash-relay frames (see sentryRelay.ts)
+  /**
+   * WebSocket messages are not limited the way an ATT write is. Callers still chunk to their
+   * own constants so the device sees byte-identical framing on both links; this is here so a
+   * caller that genuinely benefits (bulk OTA) can opt into bigger writes without any part of
+   * the protocol above changing shape.
+   */
+  readonly maxWriteLen = 8192;
 
-  constructor(host: string) { this.host = host; }
+  private ws: WebSocket | null = null;
+  // Reads are queued per channel: BLE allows a read to be outstanding per characteristic, and
+  // a device VALUE frame answers the oldest waiter on that channel.
+  private pendingReads = new Map<number, Array<(v: DataView) => void>>();
+  private notifiers = new Map<number, NotifyCb>();
+  onClose?: () => void;
+
+  constructor(host: string) {
+    this.host = host;
+    this.id = wifiIdFor(host);
+  }
 
   connect(timeoutMs = 6000): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -44,103 +53,100 @@ export class WifiDevice {
       try { ws = new WebSocket(url); } catch (e) { reject(e); return; }
       ws.binaryType = 'arraybuffer';
       this.ws = ws;
-      const t = setTimeout(() => { if (!done) { done = true; try { ws.close(); } catch {} reject(new Error('WiFi connect timed out')); } }, timeoutMs);
+      const t = setTimeout(() => {
+        if (done) return;
+        done = true;
+        try { ws.close(); } catch { /* already gone */ }
+        reject(new Error('Wi-Fi connect timed out'));
+      }, timeoutMs);
       ws.onopen = () => { if (done) return; done = true; clearTimeout(t); this.connected = true; resolve(); };
       ws.onerror = () => { if (!done) { done = true; clearTimeout(t); reject(new Error(`Could not reach ${url}`)); } };
-      ws.onclose = () => { this.connected = false; this.ws = null; this.pending.clear(); this.onClose?.(); };
+      ws.onclose = () => {
+        this.connected = false;
+        this.ws = null;
+        // Fail every waiter rather than leaving callers hanging until their own timeout.
+        for (const q of this.pendingReads.values()) q.length = 0;
+        this.pendingReads.clear();
+        this.onClose?.();
+      };
       ws.onmessage = (e) => this.onMessage(new Uint8Array(e.data as ArrayBuffer));
     });
   }
 
-  disconnect() { try { this.ws?.close(); } catch {} this.ws = null; this.connected = false; }
-
-  private onMessage(buf: Uint8Array) {
-    if (buf.length < 1) return;
-    const ch = buf[0];
-    const payload = buf.subarray(1);
-    if (ch === CH.LIBRARY_DUMP && this.dump) {
-      if (payload.length === 0) { const r = this.dump.resolve; const out = this.dump.entries; this.dump = null; r?.(out); return; } // done
-      const z = payload.indexOf(0);
-      const mp = z >= 0 ? payload.subarray(z + 1) : payload;
-      try { this.dump.entries.push(msgpack.decode(mp) as SerializedPattern); } catch { /* skip bad entry */ }
-      return;
-    }
-    const p = this.pending.get(ch);
-    if (p) { this.pending.delete(ch); p(payload); return; }
-    // Unsolicited (no pending request): the device pushes brightness on button/schedule changes.
-    if (ch === CH.BRIGHTNESS && payload.length >= 1) this.onBrightness?.(payload[0]);
-    // Crash-report relay: the device asks us to make an HTTP request on its behalf. Handled
-    // above the `pending` lookup would be wrong — these arrive unprompted, in bursts.
-    else if (ch === CH.SENTRY_RELAY) this.onSentryFrame?.(payload);
+  async disconnect(): Promise<void> {
+    try { this.ws?.close(); } catch { /* already gone */ }
+    this.ws = null;
+    this.connected = false;
   }
 
-  private send(ch: number, payload: Uint8Array = new Uint8Array(0)) {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) throw new Error('WiFi device not connected');
-    const m = new Uint8Array(1 + payload.length);
-    m[0] = ch; m.set(payload, 1);
+  private onMessage(buf: Uint8Array) {
+    if (buf.length < 2) return;
+    const ch = buf[0], op = buf[1];
+    if (op !== OP.VALUE) return; // devices only ever send VALUE
+    // Copy: the payload is a view into a buffer we do not own past this callback.
+    const body = buf.slice(2);
+    const dv = new DataView(body.buffer, body.byteOffset, body.byteLength);
+    // A read reply answers the oldest waiter; anything else is an unsolicited notify. BLE
+    // cannot distinguish these either — a read response and a notification look the same to
+    // the app — so resolving the waiter first is exactly the BLE behaviour.
+    const q = this.pendingReads.get(ch);
+    if (q && q.length) { q.shift()!(dv); return; }
+    this.notifiers.get(ch)?.(dv);
+  }
+
+  private frame(ch: number, op: number, payload?: DataView): Uint8Array {
+    const n = payload ? payload.byteLength : 0;
+    const m = new Uint8Array(2 + n);
+    m[0] = ch; m[1] = op;
+    if (payload && n) m.set(new Uint8Array(payload.buffer, payload.byteOffset, n), 2);
+    return m;
+  }
+
+  private sendRaw(m: Uint8Array) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) throw new Error('Wi-Fi device not connected');
     this.ws.send(m);
   }
 
-  private request(ch: number, payload?: Uint8Array, timeoutMs = 4000): Promise<Uint8Array> {
-    return new Promise((resolve, reject) => {
-      const t = setTimeout(() => { this.pending.delete(ch); reject(new Error(`WiFi request ${ch} timed out`)); }, timeoutMs);
-      this.pending.set(ch, (d) => { clearTimeout(t); resolve(d); });
-      try { this.send(ch, payload); } catch (e) { clearTimeout(t); this.pending.delete(ch); reject(e as Error); }
+  async read(_service: string, characteristic: string, timeoutMs = 6000): Promise<DataView> {
+    const ch = channelForUuid(characteristic);
+    return new Promise<DataView>((resolve, reject) => {
+      const q = this.pendingReads.get(ch) ?? [];
+      const timer = setTimeout(() => {
+        const i = q.indexOf(waiter);
+        if (i >= 0) q.splice(i, 1);
+        reject(new Error(`Wi-Fi read of ${characteristic} timed out`));
+      }, timeoutMs);
+      const waiter = (v: DataView) => { clearTimeout(timer); resolve(v); };
+      q.push(waiter);
+      this.pendingReads.set(ch, q);
+      try { this.sendRaw(this.frame(ch, OP.READ)); }
+      catch (e) { clearTimeout(timer); const i = q.indexOf(waiter); if (i >= 0) q.splice(i, 1); reject(e as Error); }
     });
   }
 
-  // ---- High-level ops (same wire format as the BLE path) ----
-  async getDeviceInfo(): Promise<DeviceInfo> {
-    return JSON.parse(td.decode(await this.request(CH.DEVICE_INFO)));
+  async write(_service: string, characteristic: string, value: DataView): Promise<void> {
+    this.sendRaw(this.frame(channelForUuid(characteristic), OP.WRITE, value));
   }
-  async getLedConfig(): Promise<LedConfiguration> {
-    const raw: any = msgpack.decode(await this.request(CH.LED_CONFIG_GET));
-    const strips = (raw.strips ?? []).map((s: any) => ({
-      chipset: s.cs, pin: s.pin, clockPin: s.clk ?? 0, numLeds: s.num, colorOrder: s.co,
-      rmtChannel: s.rmt ?? 0, width: s.w ?? 0, height: s.h ?? 0, orientation: s.ort ?? 0,
-    }));
-    return { globalBrightness: raw.gb ?? 255, strips } as unknown as LedConfiguration;
-  }
-  // Same bytes the BLE LED_CONFIG_SET characteristic receives — the firmware's WS dispatch
-  // routes channel 3 into the identical stageLedConfigBytes() path.
-  setLedConfig(config: LedConfiguration) { this.send(CH.LED_CONFIG_SET, encodeLedConfig(config)); }
-  setBrightness(v: number) { this.send(CH.BRIGHTNESS, Uint8Array.of(Math.max(0, Math.min(255, Math.round(v))))); }
-  async readBrightness(): Promise<number> { const d = await this.request(CH.BRIGHTNESS); return d[0]; }
 
-  sendPattern(pattern: SerializedPattern) {
-    const clean = { ...pattern, meta: { name: pattern?.meta?.name, output: pattern?.meta?.output ?? 1 }, lib: true };
-    this.send(CH.PATTERN_SYNC, msgpack.encode(clean) as Uint8Array);
+  // Nothing to bypass: there is no queue in front of a WebSocket send, and TCP already
+  // preserves order. Bulk writes are ordinary writes here.
+  async writeStream(service: string, characteristic: string, value: DataView): Promise<void> {
+    return this.write(service, characteristic, value);
   }
-  setCycle(intervalMs: number, enabled: boolean) {
-    const b = new Uint8Array(5); const dv = new DataView(b.buffer);
-    dv.setUint32(0, intervalMs, true); b[4] = enabled ? 1 : 0;
-    this.send(CH.PLAYLIST_SYNC, b);
-  }
-  syncTime(epochMs = Date.now()) {
-    // [u64 frame-clock ms (performance.now)][u64 wall-epoch ms (Date.now)] — see ble.ts.
-    const frameMs = Math.floor(performance.now());
-    const b = new Uint8Array(16); const dv = new DataView(b.buffer);
-    dv.setUint32(0, frameMs >>> 0, true);  dv.setUint32(4, Math.floor(frameMs / 4294967296), true);
-    dv.setUint32(8, epochMs >>> 0, true);  dv.setUint32(12, Math.floor(epochMs / 4294967296), true);
-    this.send(CH.TIMESTAMP_SYNC, b);
-  }
-  async getName(): Promise<string> { return td.decode(await this.request(CH.DEVICE_NAME)); }
-  setName(name: string) { this.send(CH.DEVICE_NAME, te.encode(name)); }
-  async readSettings(): Promise<DeviceSettings> { return JSON.parse(td.decode(await this.request(CH.COMM_CONFIG))); }
-  writeSettings(patch: DeviceSettingsPatch) { this.send(CH.COMM_CONFIG, msgpack.encode(patch) as Uint8Array); }
-  // Crash relay: HELLO/STATUS back to the device, and the DSN it should report to. Raw
-  // frames — sentryRelay.ts owns the protocol, this only carries bytes (same as BLE).
-  sendSentry(frame: Uint8Array) { this.send(CH.SENTRY_RELAY, frame); }
-  sendSentryConfig(dsn: Uint8Array) { this.send(CH.SENTRY_CONFIG, dsn); }
-  clearLibrary() { this.send(CH.LIBRARY_CMD, Uint8Array.of(0x00)); }
-  deletePattern(name: string) { const nb = te.encode(name); const m = new Uint8Array(1 + nb.length); m[0] = 0x01; m.set(nb, 1); this.send(CH.LIBRARY_CMD, m); }
 
-  dumpLibrary(timeoutMs = 8000): Promise<SerializedPattern[]> {
-    return new Promise((resolve, reject) => {
-      this.dump = { entries: [], resolve };
-      const t = setTimeout(() => { const out = this.dump?.entries ?? []; this.dump = null; resolve(out); }, timeoutMs);
-      const orig = resolve; this.dump.resolve = (v) => { clearTimeout(t); orig(v); };
-      try { this.send(CH.LIBRARY_DUMP); } catch (e) { clearTimeout(t); this.dump = null; reject(e as Error); }
-    });
+  // TCP is reliable and ordered, so "without response" is the same operation here. The
+  // distinction is a BLE flow-control detail, not part of the protocol.
+  async writeWithoutResponse(service: string, characteristic: string, value: DataView): Promise<void> {
+    return this.write(service, characteristic, value);
+  }
+
+  async startNotifications(_service: string, characteristic: string, cb: NotifyCb): Promise<void> {
+    // No subscribe handshake: the device pushes on the channel whenever it has something,
+    // exactly as it notifies a subscribed BLE characteristic. Registering the sink is enough.
+    this.notifiers.set(channelForUuid(characteristic), cb);
+  }
+
+  async stopNotifications(_service: string, characteristic: string): Promise<void> {
+    this.notifiers.delete(channelForUuid(characteristic));
   }
 }

@@ -25,6 +25,7 @@
 #include "esp_ota_ops.h" // For OTA updates
 #include "esp_chip_info.h" // Report which ESP32 variant we're running on (device-info JSON)
 #include "device_settings.h" // NVS-backed comm mode / WiFi creds / sleep timer / rgb-test
+#include "endpoints.h"      // one endpoint table, carried by BLE or Wi-Fi alike
 #include <time.h>           // wall-clock: time()/localtime for the on/off schedule
 #include <sys/time.h>       // settimeofday() — feed the system clock from app sync / NTP
 
@@ -166,25 +167,13 @@ NimBLEServer* pServer = nullptr;
 // Handle of the current central connection (captured in onConnect), so we can request a
 // faster connection interval during OTA. 0xFFFF = none.
 static uint16_t currentConnHandle = 0xFFFF;
-NimBLECharacteristic* pCommConfigCharacteristic = nullptr;
 // Original RX/TX Characteristics
-NimBLECharacteristic* pTxCharacteristic = nullptr;
 // OTA Characteristics
-NimBLECharacteristic* pDeviceInfoCharacteristic = nullptr;
-NimBLECharacteristic* pOTAControlCharacteristic = nullptr;
-NimBLECharacteristic* pOTADataCharacteristic = nullptr;
-NimBLECharacteristic* pOTAStatusCharacteristic = nullptr;
-NimBLECharacteristic* pOTASignatureCharacteristic = nullptr;
 
 // Pattern Sync Characteristic
-NimBLECharacteristic* pPatternSyncCharacteristic = nullptr;
 
 // LED Configuration Characteristics
-NimBLECharacteristic* pLedConfigGetCharacteristic = nullptr;
-NimBLECharacteristic* pLedConfigSetCharacteristic = nullptr;
-NimBLECharacteristic* pLayoutGetCharacteristic = nullptr; // read back a strip's layout (notify-chunked)
 static volatile int layoutGetRequest = -1;                // strip index requested via LAYOUT_GET write, -1 = none
-NimBLECharacteristic* pLibraryDumpCharacteristic = nullptr; // read the stored library back to the app
 static volatile bool libraryDumpRequest = false;           // set by LIBRARY_DUMP write, served from loop()
 
 // Auto-layout calibration: when active, strips flash a structured-light sequence so the app
@@ -210,23 +199,17 @@ static uint32_t calibStartMs = 0;
 static const uint32_t CALIB_FRAME_MS = 220;
 
 // Timestamp Sync Characteristic
-NimBLECharacteristic* pTimestampSyncCharacteristic = nullptr;
 
 // Playlist Sync Characteristic (pattern cycling)
-NimBLECharacteristic* pPlaylistSyncCharacteristic = nullptr;
 
 // Brightness Characteristic (live global brightness)
-NimBLECharacteristic* pBrightnessCharacteristic = nullptr;
 
 // Device Name Characteristic (user-settable BLE name; defaults to a MAC-suffixed name)
-NimBLECharacteristic* pDeviceNameCharacteristic = nullptr;
 static String deviceName;
 static const char* DEVICE_NAME_FILE = "/device_name.txt";
 
 // Button (physical control). First pass: a single, debounced click steps brightness.
 // Polled in loop() (no ISR yet) to stay clear of the BLE host task. -1 = no button.
-NimBLECharacteristic* pButtonPinCharacteristic = nullptr;
-NimBLECharacteristic* pButtonEventCharacteristic = nullptr;
 static const char* BUTTON_PIN_FILE = "/button_pin.txt";
 static int buttonPin = -1;
 static int buttonLastReading = HIGH;   // INPUT_PULLUP idle = HIGH
@@ -603,13 +586,15 @@ String buildDeviceInfoJson() {
     return j;
 }
 
+static void onDeviceInfoRead(Endpoints::Link& link) {
+    link.send(buildDeviceInfoJson());
+}
+
 void updateDeviceInfoCharacteristic() {
-    if (!pDeviceInfoCharacteristic) return; // BLE not running (WiFi mode) — nothing to update
-    String deviceInfoJson = buildDeviceInfoJson();
-    // IMPORTANT: Always use setValue with explicit length for strings with NimBLE
-    // to avoid issues with strlen or incomplete data transmission.
-    // The NimBLE setValue(const char*) overload has proven unreliable.
-    pDeviceInfoCharacteristic->setValue((uint8_t*)deviceInfoJson.c_str(), deviceInfoJson.length());
+    // Seeds the value a BLE read answers from, and pushes the change to whichever link is
+    // attached. (Always an explicit length: NimBLE's setValue(const char*) has proven
+    // unreliable for strings.)
+    Endpoints::notify(CHARACTERISTIC_UUID_DEVICE_INFO, buildDeviceInfoJson());
 }
 
 // --- Shared staging/serialization helpers (used by BOTH the BLE callbacks and the WiFi
@@ -737,19 +722,15 @@ class ServerCallbacks: public NimBLEServerCallbacks {
             ota_handle = 0;
             signature_received = false; // Reset signature status
             ota_skip_signature = false;
-            if (pOTAStatusCharacteristic) {
-                const char* msg = "OTA_ERR_DISCONNECTED";
-                pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
-                pOTAStatusCharacteristic->notify();
-            }
+                Endpoints::notify(CHARACTERISTIC_UUID_OTA_STATUS, "OTA_ERR_DISCONNECTED");
         }
     }
 };
 
 // NimBLE Characteristic Callbacks (for original RX characteristic)
-class CharacteristicCallbacks: public NimBLECharacteristicCallbacks {
-    void onWrite(NimBLECharacteristic* pCharacteristic) {
-        std::string rxValue = pCharacteristic->getValue();
+static void onRxWrite(const uint8_t* data, size_t len, Endpoints::Link& link) {
+    (void)data; (void)len; (void)link;
+        std::string rxValue((const char*)data, len);
         
         if (rxValue.length() > 0) {
             receivedData = "";
@@ -763,51 +744,35 @@ class CharacteristicCallbacks: public NimBLECharacteristicCallbacks {
                 String response = "LEDs: " + String(ledMgr.getNumStrips() > 0 ? ledMgr.getStrip(0)->getLength() : 0) + 
                                 ", Brightness: " + String(ledMgr.getGlobalBrightness()) + 
                                 ", Free Heap: " + String(ESP.getFreeHeap());
-                if (pTxCharacteristic) {
-                    pTxCharacteristic->setValue((uint8_t*)response.c_str(), response.length());
-                    pTxCharacteristic->notify();
-                }
+                    Endpoints::notify(CHARACTERISTIC_UUID_TX, response);
             } else if (receivedData == "info") {
                 String response = "ChromaBay ESP32 - LedManager Rainbow Demo (NimBLE)";
-                 if (pTxCharacteristic) {
-                    pTxCharacteristic->setValue((uint8_t*)response.c_str(), response.length());
-                    pTxCharacteristic->notify();
-                }
+                    Endpoints::notify(CHARACTERISTIC_UUID_TX, response);
             }
         }
     }
-};
 
 // Callback for OTA Signature Characteristic (Write)
-class OTASignatureCallbacks : public NimBLECharacteristicCallbacks {
-    void onWrite(NimBLECharacteristic* pCharacteristic) {
-        std::string value = pCharacteristic->getValue();
+static void onOtaSignatureWrite(const uint8_t* data, size_t len, Endpoints::Link& link) {
+    (void)data; (void)len; (void)link;
+        std::string value((const char*)data, len);
         if (value.length() == FIRMWARE_SIGNATURE_LENGTH) {
             memcpy(received_signature, value.data(), FIRMWARE_SIGNATURE_LENGTH);
             signature_received = true;
             Serial.printf("OTA signature received (%d bytes)\n", value.length());
-            if (pOTAStatusCharacteristic) {
-                const char* msg = "OTA_SIG_RECEIVED";
-                pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
-                pOTAStatusCharacteristic->notify();
-            }
+                Endpoints::notify(CHARACTERISTIC_UUID_OTA_STATUS, "OTA_SIG_RECEIVED");
         } else {
             Serial.printf("OTA Error: Invalid signature length %d bytes (expected %d)\n", value.length(), FIRMWARE_SIGNATURE_LENGTH);
             signature_received = false; 
-            if (pOTAStatusCharacteristic) {
-                const char* msg = "OTA_ERR_SIG_LEN";
-                pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
-                pOTAStatusCharacteristic->notify();
-            }
+                Endpoints::notify(CHARACTERISTIC_UUID_OTA_STATUS, "OTA_ERR_SIG_LEN");
         }
     }
-};
 
 
 // Callback for OTA Control Characteristic (Write)
-class OTAControlCallbacks : public NimBLECharacteristicCallbacks {
-    void onWrite(NimBLECharacteristic* pCharacteristic) {
-        std::string value_str = pCharacteristic->getValue();
+static void onOtaControlWrite(const uint8_t* data, size_t len, Endpoints::Link& link) {
+    (void)data; (void)len; (void)link;
+        std::string value_str((const char*)data, len);
         const char* value = value_str.c_str(); 
         if (strlen(value) > 0) {
             Serial.printf("OTA Control: %s\n", value);
@@ -815,22 +780,14 @@ class OTAControlCallbacks : public NimBLECharacteristicCallbacks {
             if (strcmp(value, "END_OTA") == 0) {
                 if (!ota_in_progress || ota_handle == 0) {
                     Serial.println("OTA Error: END_OTA received but no OTA process was active or handle invalid.");
-                    if (pOTAStatusCharacteristic) {
-                        const char* msg = "OTA_ERR_NO_ACTIVE_OTA";
-                        pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
-                        pOTAStatusCharacteristic->notify();
-                    }
+                        Endpoints::notify(CHARACTERISTIC_UUID_OTA_STATUS, "OTA_ERR_NO_ACTIVE_OTA");
                     signature_received = false; 
                     return;
                 }
 
                 if (!signature_received) {
                     Serial.println("OTA Error: END_OTA received but no signature was provided.");
-                    if (pOTAStatusCharacteristic) {
-                        const char* msg = "OTA_ERR_NO_SIGNATURE";
-                        pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
-                        pOTAStatusCharacteristic->notify();
-                    }
+                        Endpoints::notify(CHARACTERISTIC_UUID_OTA_STATUS, "OTA_ERR_NO_SIGNATURE");
                     esp_ota_abort(ota_handle);
                     ota_in_progress = false;
                     ota_handle = 0;
@@ -846,11 +803,7 @@ class OTAControlCallbacks : public NimBLECharacteristicCallbacks {
                 SignatureVerificationData* verif_data = (SignatureVerificationData*)malloc(sizeof(SignatureVerificationData));
                 if (!verif_data) {
                     Serial.println("OTA Error: Failed to allocate memory for signature verification!");
-                    if (pOTAStatusCharacteristic) {
-                        const char* msg = "OTA_ERR_MEMORY";
-                        pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
-                        pOTAStatusCharacteristic->notify();
-                    }
+                        Endpoints::notify(CHARACTERISTIC_UUID_OTA_STATUS, "OTA_ERR_MEMORY");
                     esp_ota_abort(ota_handle);
                     ota_in_progress = false;
                     ota_handle = 0;
@@ -881,11 +834,7 @@ class OTAControlCallbacks : public NimBLECharacteristicCallbacks {
                 if (task_created != pdPASS) {
                     Serial.println("OTA Error: Failed to create signature verification task!");
                     free(verif_data);
-                    if (pOTAStatusCharacteristic) {
-                        const char* msg = "OTA_ERR_TASK_CREATE";
-                        pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
-                        pOTAStatusCharacteristic->notify();
-                    }
+                        Endpoints::notify(CHARACTERISTIC_UUID_OTA_STATUS, "OTA_ERR_TASK_CREATE");
                     esp_ota_abort(ota_handle);
                     ota_in_progress = false;
                     ota_handle = 0;
@@ -915,22 +864,14 @@ class OTAControlCallbacks : public NimBLECharacteristicCallbacks {
                 // updates. Requires an active OTA just like END_OTA; no signature needed.
                 if (!ota_in_progress || ota_handle == 0) {
                     Serial.println("OTA Error: END_OTA_UNSIGNED received but no OTA process was active or handle invalid.");
-                    if (pOTAStatusCharacteristic) {
-                        const char* msg = "OTA_ERR_NO_ACTIVE_OTA";
-                        pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
-                        pOTAStatusCharacteristic->notify();
-                    }
+                        Endpoints::notify(CHARACTERISTIC_UUID_OTA_STATUS, "OTA_ERR_NO_ACTIVE_OTA");
                     signature_received = false;
                     ota_skip_signature = false;
                     return;
                 }
 
                 Serial.println("OTA: END_OTA_UNSIGNED received — finalizing without signature verification.");
-                if (pOTAStatusCharacteristic) {
-                    const char* msg = "OTA_UNSIGNED_ACCEPTED";
-                    pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
-                    pOTAStatusCharacteristic->notify();
-                }
+                    Endpoints::notify(CHARACTERISTIC_UUID_OTA_STATUS, "OTA_UNSIGNED_ACCEPTED");
                 // Defer the finalize to loop() (same as END_OTA) but flagged to skip
                 // signature verification — see finalizeOtaIfReady().
                 ota_skip_signature = true;
@@ -949,18 +890,10 @@ class OTAControlCallbacks : public NimBLECharacteristicCallbacks {
                     ota_received_size = 0;
                     signature_received = false;
                     ota_skip_signature = false;
-                    if (pOTAStatusCharacteristic) {
-                        const char* msg = "OTA_ABORTED_CMD";
-                        pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
-                        pOTAStatusCharacteristic->notify();
-                    }
+                        Endpoints::notify(CHARACTERISTIC_UUID_OTA_STATUS, "OTA_ABORTED_CMD");
                 } else {
                     Serial.println("Abort command received, but no OTA in progress.");
-                     if (pOTAStatusCharacteristic) {
-                        const char* msg = "OTA_WARN_NO_OTA_TO_ABORT";
-                        pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
-                        pOTAStatusCharacteristic->notify();
-                    }
+                        Endpoints::notify(CHARACTERISTIC_UUID_OTA_STATUS, "OTA_WARN_NO_OTA_TO_ABORT");
                 }
             } else if (strncmp(value, "TOTAL_SIZE:", 11) == 0) { 
                 // Optional: Client can send total firmware size
@@ -969,12 +902,11 @@ class OTAControlCallbacks : public NimBLECharacteristicCallbacks {
             Serial.println("(empty)");
         }
     }
-};
 
 // Callback for OTA Data Characteristic (Write Without Response, with Notify for ACK)
-class OTADataCallbacks : public NimBLECharacteristicCallbacks {
-    void onWrite(NimBLECharacteristic* pCharacteristic) {
-        std::string value = pCharacteristic->getValue();
+static void onOtaDataWrite(const uint8_t* data, size_t len, Endpoints::Link& link) {
+    (void)data; (void)len; (void)link;
+        std::string value((const char*)data, len);
         size_t length = value.length();
 
         if (length == 0) {
@@ -990,11 +922,7 @@ class OTADataCallbacks : public NimBLECharacteristicCallbacks {
             update_partition = esp_ota_get_next_update_partition(NULL);
             if (update_partition == NULL) {
                 Serial.println("OTA Error: No valid update partition found!");
-                if (pOTAStatusCharacteristic) {
-                    const char* msg = "OTA_ERR_NO_PARTITION";
-                    pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
-                    pOTAStatusCharacteristic->notify();
-                }
+                    Endpoints::notify(CHARACTERISTIC_UUID_OTA_STATUS, "OTA_ERR_NO_PARTITION");
                 return;
             }
             Serial.printf("OTA: Writing to partition subtype %d at offset 0x%x\n",
@@ -1029,11 +957,8 @@ class OTADataCallbacks : public NimBLECharacteristicCallbacks {
             if (err != ESP_OK) {
                 Serial.printf("OTA Error: esp_ota_begin failed (%s)\n", esp_err_to_name(err));
                 SentryReporting::logError("OTA begin failed: %s", esp_err_to_name(err));
-                if (pOTAStatusCharacteristic) {
-                    String errorMsg = "OTA_ERR_BEGIN_FAILED:" + String(esp_err_to_name(err));
-                    pOTAStatusCharacteristic->setValue((uint8_t*)errorMsg.c_str(), errorMsg.length());
-                    pOTAStatusCharacteristic->notify();
-                }
+                String errorMsg = "OTA_ERR_BEGIN_FAILED:" + String(esp_err_to_name(err));
+                Endpoints::notify(CHARACTERISTIC_UUID_OTA_STATUS, errorMsg);
                 ota_handle = 0; 
                 return;
             }
@@ -1058,22 +983,15 @@ class OTADataCallbacks : public NimBLECharacteristicCallbacks {
                                      (unsigned)update_partition->address,
                                      (unsigned)(millis() - otaBeginStart));
             SentryReporting::otaPhase("ota.transfer");
-            if (pOTAStatusCharacteristic) {
-                const char* msg = "OTA_STARTED_READY";
-                pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
-                pOTAStatusCharacteristic->notify();
-            }
+                Endpoints::notify(CHARACTERISTIC_UUID_OTA_STATUS, "OTA_STARTED_READY");
         }
 
         // Write received data to OTA partition
         esp_err_t err = esp_ota_write(ota_handle, value.data(), length);
         if (err != ESP_OK) {
             Serial.printf("OTA Error: esp_ota_write failed (%s)\n", esp_err_to_name(err));
-            if (pOTAStatusCharacteristic) {
-                String errorMsg = "OTA_ERR_WRITE:" + String(esp_err_to_name(err));
-                pOTAStatusCharacteristic->setValue((uint8_t*)errorMsg.c_str(), errorMsg.length());
-                pOTAStatusCharacteristic->notify();
-            }
+            String errorMsg = "OTA_ERR_WRITE:" + String(esp_err_to_name(err));
+            Endpoints::notify(CHARACTERISTIC_UUID_OTA_STATUS, errorMsg);
             esp_ota_abort(ota_handle); 
             ota_in_progress = false;
             ota_handle = 0;
@@ -1093,44 +1011,40 @@ class OTADataCallbacks : public NimBLECharacteristicCallbacks {
 
         // Acknowledge chunk receipt by notifying on the same characteristic (flow control)
         uint8_t ack_payload[1] = { (uint8_t)(ota_received_size % 256) }; // Simple ACK
-        pCharacteristic->setValue(ack_payload, 1); 
-        pCharacteristic->notify();
+        link.send(ack_payload, 1);
     }
-};
 
 // LED Config Get Callbacks - for reading LED strip configuration
-class LedConfigGetCallbacks : public NimBLECharacteristicCallbacks {
-    void onRead(NimBLECharacteristic* pCharacteristic) {
+static void onLedConfigGetRead(Endpoints::Link& link) {
+    (void)link;
         size_t sz = 0;
         uint8_t* buf = serializeLedConfigMpack(&sz);
         if (buf) {
-            pCharacteristic->setValue(buf, sz);
+            link.send(buf, sz);
             Serial.printf("LED Config sent: %d bytes\n", (int)sz);
             free(buf);
         } else {
             Serial.println("Failed to serialize LED config");
         }
     }
-};
 
 // LED Config Set Callbacks - for writing LED strip configuration
-class LedConfigSetCallbacks : public NimBLECharacteristicCallbacks {
-    void onWrite(NimBLECharacteristic* pCharacteristic) {
+static void onLedConfigSetWrite(const uint8_t* data, size_t len, Endpoints::Link& link) {
+    (void)data; (void)len; (void)link;
         // Stage the raw MessagePack for the render loop to apply (never apply here — this
         // runs on the BLE host task and would race update()/render()). See stageLedConfigBytes.
-        std::string value = pCharacteristic->getValue();
+        std::string value((const char*)data, len);
         if (value.length() > 0) {
             Serial.printf("LED Config update received: %d bytes\n", (int)value.length());
             stageLedConfigBytes((const uint8_t*)value.data(), value.length());
         }
     }
-};
 
 // Layout Set Callbacks - receive an arbitrary pixel layout (WLED ledmap) for one strip.
 // Payload: [u8 stripIndex][u16 W][u16 H][u16 count][count × i16 ledIndex]. Staged for loop().
-class LayoutSetCallbacks : public NimBLECharacteristicCallbacks {
-    void onWrite(NimBLECharacteristic* pCharacteristic) {
-        std::string value = pCharacteristic->getValue();
+static void onLayoutSetWrite(const uint8_t* data, size_t len, Endpoints::Link& link) {
+    (void)data; (void)len; (void)link;
+        std::string value((const char*)data, len);
         if (value.length() < 4) return; // need [u16 totalLen][u16 offset]
         const uint8_t* d = (const uint8_t*)value.data();
         uint16_t totalLen = (uint16_t)(d[0] | (d[1] << 8));
@@ -1149,26 +1063,22 @@ class LayoutSetCallbacks : public NimBLECharacteristicCallbacks {
         layoutAccumLen = (size_t)offset + dataLen; // writes are serialized + in order
         if (layoutAccumLen >= layoutBufferSize) newLayoutAvailable = true;
     }
-};
 
 // Layout Get Callbacks - app writes a u8 strip index; loop() notifies that strip's layout.
-class LayoutGetCallbacks : public NimBLECharacteristicCallbacks {
-    void onWrite(NimBLECharacteristic* pCharacteristic) {
-        std::string value = pCharacteristic->getValue();
+static void onLayoutGetWrite(const uint8_t* data, size_t len, Endpoints::Link& link) {
+    (void)data; (void)len; (void)link;
+        std::string value((const char*)data, len);
         if (value.length() >= 1) layoutGetRequest = (uint8_t)value[0];
     }
-};
 
 // Library Dump Callbacks - app writes any byte; loop() notifies the whole stored library back.
-class LibraryDumpCallbacks : public NimBLECharacteristicCallbacks {
-    void onWrite(NimBLECharacteristic* /*pCharacteristic*/) { libraryDumpRequest = true; }
-};
+
 
 // Library Command Callbacks - stage a [op][payload] command; processLibraryCommand() (loop
 // task) does the flash work so we never touch LittleFS from the BLE host task.
-class LibraryCmdCallbacks : public NimBLECharacteristicCallbacks {
-    void onWrite(NimBLECharacteristic* pCharacteristic) {
-        std::string value = pCharacteristic->getValue();
+static void onLibraryCmdWrite(const uint8_t* data, size_t len, Endpoints::Link& link) {
+    (void)data; (void)len; (void)link;
+        std::string value((const char*)data, len);
         if (value.empty()) return;
         size_t n = value.length();
         if (n > sizeof(libCmdBuf)) n = sizeof(libCmdBuf);
@@ -1176,12 +1086,11 @@ class LibraryCmdCallbacks : public NimBLECharacteristicCallbacks {
         libCmdLen = n;
         newLibCmdAvailable = true;
     }
-};
 
 // Calibration Callbacks - start/stop the auto-layout structured-light flash sequence.
-class CalibrationCallbacks : public NimBLECharacteristicCallbacks {
-    void onWrite(NimBLECharacteristic* pCharacteristic) {
-        std::string v = pCharacteristic->getValue();
+static void onCalibrationWrite(const uint8_t* data, size_t len, Endpoints::Link& link) {
+    (void)data; (void)len; (void)link;
+        std::string v((const char*)data, len);
         if (v.length() < 1) return;
         uint8_t cmd = (uint8_t)v[0];
         uint8_t strip = (v.length() >= 2) ? (uint8_t)v[1] : 0xFF;
@@ -1202,12 +1111,11 @@ class CalibrationCallbacks : public NimBLECharacteristicCallbacks {
             Serial.println("[Calib] STOP");
         }
     }
-};
 
 // Pattern Sync Callbacks - for receiving messagepack-encoded patterns
-class PatternSyncCallbacks : public NimBLECharacteristicCallbacks {
-    void onWrite(NimBLECharacteristic* pCharacteristic) {
-        std::string value = pCharacteristic->getValue();
+static void onPatternSyncWrite(const uint8_t* data, size_t len, Endpoints::Link& link) {
+    (void)data; (void)len; (void)link;
+        std::string value((const char*)data, len);
         if (value.length() < 4) return; // need [u16 totalLen][u16 offset]
         const uint8_t* d = (const uint8_t*)value.data();
         uint16_t totalLen = (uint16_t)(d[0] | (d[1] << 8));
@@ -1234,13 +1142,12 @@ class PatternSyncCallbacks : public NimBLECharacteristicCallbacks {
         patternRxBuf = nullptr; patternRxSize = 0; patternRxAccum = 0;
         stageCompletePattern(full, fullLen);
     }
-};
 
 // Cycle Control Callbacks - receives the cycling on/off + interval. Payload is
 // [u32 intervalMs LE][u8 enabled]. Staged here; applied/persisted on the loop task.
-class CycleControlCallbacks : public NimBLECharacteristicCallbacks {
-    void onWrite(NimBLECharacteristic* pCharacteristic) {
-        std::string v = pCharacteristic->getValue();
+static void onPlaylistSyncWrite(const uint8_t* data, size_t len, Endpoints::Link& link) {
+    (void)data; (void)len; (void)link;
+        std::string v((const char*)data, len);
         if (v.length() < 5) return;
         uint32_t iv = 0;
         memcpy(&iv, v.data(), 4);
@@ -1249,12 +1156,11 @@ class CycleControlCallbacks : public NimBLECharacteristicCallbacks {
         newCycleControlAvailable = true;
         noteActivity();
     }
-};
 
 // Timestamp Sync Callbacks - for receiving timestamp synchronization from mobile app
-class TimestampSyncCallbacks : public NimBLECharacteristicCallbacks {
-    void onWrite(NimBLECharacteristic* pCharacteristic) {
-        std::string value = pCharacteristic->getValue();
+static void onTimestampSyncWrite(const uint8_t* data, size_t len, Endpoints::Link& link) {
+    (void)data; (void)len; (void)link;
+        std::string value((const char*)data, len);
         // Bytes 0-7 = the frame-sync clock (monotonic ms, matches the browser preview) → drives
         // animation timing. Bytes 8-15 (optional) = the Unix epoch ms → the WALL clock for the
         // Clock node + on/off schedule. These are DIFFERENT clocks: the frame clock is
@@ -1285,21 +1191,24 @@ class TimestampSyncCallbacks : public NimBLECharacteristicCallbacks {
             Serial.printf("Invalid timestamp sync length: %d bytes\n", value.length());
         }
     }
-};
 
 // Live global brightness. The app writes a single byte (0-255) on each slider tick.
 // We only stage it here; applying touches the LED strips and must run on the loop
 // task (see processReceivedBrightness).
-class BrightnessCallbacks : public NimBLECharacteristicCallbacks {
-    void onWrite(NimBLECharacteristic* pCharacteristic) {
-        std::string value = pCharacteristic->getValue();
+static void onBrightnessRead(Endpoints::Link& link) {
+    uint8_t b = ledMgr.getGlobalBrightness();
+    link.send(&b, 1);
+}
+
+static void onBrightnessWrite(const uint8_t* data, size_t len, Endpoints::Link& link) {
+    (void)data; (void)len; (void)link;
+        std::string value((const char*)data, len);
         if (value.length() >= 1) {
             pendingBrightness = (uint8_t)value[0];
             newBrightnessAvailable = true;
             noteActivity();
         }
     }
-};
 
 // Load the device name from flash, or build a default that's unique out of the box
 // (ChromaBay_<MAC suffix>). Call after LittleFS is mounted and before NimBLEDevice::init.
@@ -1330,18 +1239,19 @@ static void saveDeviceName(const String& name) {
 
 // Read/write the user-facing BLE device name. Write persists it, updates the GAP name
 // and the advertised name (so future scans show it), and refreshes device info.
-class DeviceNameCallbacks : public NimBLECharacteristicCallbacks {
-    void onRead(NimBLECharacteristic* pCharacteristic) {
-        pCharacteristic->setValue((uint8_t*)deviceName.c_str(), deviceName.length());
+static void onDeviceNameRead(Endpoints::Link& link) {
+    (void)link;
+        link.send((const uint8_t*)deviceName.c_str(), deviceName.length());
     }
-    void onWrite(NimBLECharacteristic* pCharacteristic) {
+
+static void onDeviceNameWrite(const uint8_t* data, size_t len, Endpoints::Link& link) {
+    (void)data; (void)len; (void)link;
         // Stage only — the flash write + advertising update happen on the loop task
         // (processDeviceName) so they don't race the loop's other flash writes.
-        std::string value = pCharacteristic->getValue();
+        std::string value((const char*)data, len);
         pendingDeviceName = String(value.c_str());
         deviceNamePending = true;
     }
-};
 
 // Apply a staged rename from the loop task: persist to flash, update the GAP +
 // advertised name, refresh device info.
@@ -1441,11 +1351,8 @@ static void onButtonDoubleClick() {
             lastCycleIndex = (int)((getSynchronizedTime() / cycleIntervalMs) % (unsigned long)libOrder.size());
         }
     }
-    if (pButtonEventCharacteristic) {
-        const char* ev = "next";
-        pButtonEventCharacteristic->setValue((uint8_t*)ev, 4);
-        pButtonEventCharacteristic->notify();
-    }
+    const char* ev = "next";
+    Endpoints::notify(CHARACTERISTIC_UUID_BUTTON_EVENT, (const uint8_t*)ev, 4);
 }
 
 // Poll + debounce the button on the loop task, then classify clicks: a second press
@@ -1477,21 +1384,22 @@ static void processButton() {
     }
 }
 
-class ButtonPinCallbacks : public NimBLECharacteristicCallbacks {
-    void onRead(NimBLECharacteristic* pCharacteristic) {
+static void onButtonPinRead(Endpoints::Link& link) {
+    (void)link;
         String s = String(buttonPin);
-        pCharacteristic->setValue((uint8_t*)s.c_str(), s.length());
+        link.send((const uint8_t*)s.c_str(), s.length());
     }
-    void onWrite(NimBLECharacteristic* pCharacteristic) {
+
+static void onButtonPinWrite(const uint8_t* data, size_t len, Endpoints::Link& link) {
+    (void)data; (void)len; (void)link;
         // Stage only; persist + (re)configure the pin on the loop task.
-        std::string value = pCharacteristic->getValue();
+        std::string value((const char*)data, len);
         String s = String(value.c_str());
         s.trim();
         int p = s.length() > 0 ? s.toInt() : -1;
         pendingButtonPin = (p >= 0 && p <= 39) ? p : -1;
         buttonPinPending = true;
     }
-};
 
 // Apply a staged button-pin change from the loop task (persist + reconfigure GPIO).
 void processButtonPinUpdate() {
@@ -2027,7 +1935,7 @@ void processReceivedLayout() {
 // means "no layout" (grid mapping). Runs from loop() so file IO doesn't block the BLE task.
 void processLayoutGetRequest() {
     int idx = layoutGetRequest;
-    if (idx < 0 || !pLayoutGetCharacteristic) return;
+    if (idx < 0) return;
     layoutGetRequest = -1;
 
     char path[24];
@@ -2050,8 +1958,7 @@ void processLayoutGetRequest() {
     const size_t CH = 180;
     if (len == 0) {
         uint8_t hdr[4] = {0, 0, 0, 0}; // totalLen 0
-        pLayoutGetCharacteristic->setValue(hdr, 4);
-        pLayoutGetCharacteristic->notify();
+        Endpoints::notify(CHARACTERISTIC_UUID_LAYOUT_GET, hdr, 4);
     } else {
         for (size_t off = 0; off < len; off += CH) {
             size_t n = (len - off < CH) ? (len - off) : CH;
@@ -2059,13 +1966,19 @@ void processLayoutGetRequest() {
             frame[0] = len & 0xFF; frame[1] = (len >> 8) & 0xFF;
             frame[2] = off & 0xFF; frame[3] = (off >> 8) & 0xFF;
             memcpy(frame + 4, data + off, n);
-            pLayoutGetCharacteristic->setValue(frame, 4 + n);
-            pLayoutGetCharacteristic->notify();
-            delay(8); // small gap so the stack doesn't drop back-to-back notifications
+            Endpoints::notify(CHARACTERISTIC_UUID_LAYOUT_GET, frame, 4 + n);
+            delay(8); // small gap so the BLE stack doesn't drop back-to-back notifications
         }
     }
     if (data) free(data);
     Serial.printf("[Layout] Strip %d read-back sent (%u bytes)\n", idx, (unsigned)len);
+}
+
+// A dump is served from loop(), not here: reading every pattern off the filesystem inside a
+// BLE callback would block the host task for as long as the flash takes.
+static void onLibraryDumpWrite(const uint8_t* data, size_t len, Endpoints::Link& link) {
+    (void)data; (void)len; (void)link;
+    libraryDumpRequest = true;
 }
 
 // Respond to a LIBRARY_DUMP request: NOTIFY every stored pattern's MessagePack back to the app,
@@ -2073,7 +1986,7 @@ void processLayoutGetRequest() {
 // from loop() (file IO off the BLE task). The msgpack already carries meta.name, so the file's
 // name header is skipped.
 void processLibraryDumpRequest() {
-    if (!libraryDumpRequest || !pLibraryDumpCharacteristic) return;
+    if (!libraryDumpRequest) return;
     libraryDumpRequest = false;
     const size_t CH = 180;
     size_t sent = 0;
@@ -2100,16 +2013,14 @@ void processLibraryDumpRequest() {
             frame[1] = mpLen & 0xFF; frame[2] = (mpLen >> 8) & 0xFF;
             frame[3] = off & 0xFF;   frame[4] = (off >> 8) & 0xFF;
             memcpy(frame + 5, data + off, n);
-            pLibraryDumpCharacteristic->setValue(frame, 5 + n);
-            pLibraryDumpCharacteristic->notify();
+            Endpoints::notify(CHARACTERISTIC_UUID_LIBRARY_DUMP, frame, 5 + n);
             delay(8);
         }
         free(data);
         sent++;
     }
     uint8_t done[5] = {0xFF, 0, 0, 0, 0};
-    pLibraryDumpCharacteristic->setValue(done, 5);
-    pLibraryDumpCharacteristic->notify();
+    Endpoints::notify(CHARACTERISTIC_UUID_LIBRARY_DUMP, done, 5);
     Serial.printf("[LibDump] sent %u/%u patterns\n", (unsigned)sent, (unsigned)libNames.size());
 }
 
@@ -2173,11 +2084,7 @@ void finalizeOtaIfReady() {
             Serial.println("OTA Error: Signature verification timed out!");
             SentryReporting::logError("OTA abort: signature verify timed out (%u bytes)",
                                       (unsigned)ota_received_size);
-            if (pOTAStatusCharacteristic) {
-                const char* msg = "OTA_ERR_SIG_TIMEOUT";
-                pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
-                pOTAStatusCharacteristic->notify();
-            }
+                Endpoints::notify(CHARACTERISTIC_UUID_OTA_STATUS, "OTA_ERR_SIG_TIMEOUT");
             SentryReporting::otaFinish(false);
             esp_ota_abort(ota_handle);
             ota_finalizing = false;
@@ -2196,11 +2103,7 @@ void finalizeOtaIfReady() {
         Serial.println("OTA Error: Firmware signature verification FAILED!");
         SentryReporting::logError("OTA abort: signature invalid (%u bytes)",
                                   (unsigned)ota_received_size);
-        if (pOTAStatusCharacteristic) {
-            const char* msg = "OTA_ERR_SIG_INVALID";
-            pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
-            pOTAStatusCharacteristic->notify();
-        }
+            Endpoints::notify(CHARACTERISTIC_UUID_OTA_STATUS, "OTA_ERR_SIG_INVALID");
         SentryReporting::otaFinish(false);
         esp_ota_abort(ota_handle);
         ota_in_progress = false;
@@ -2222,12 +2125,9 @@ void finalizeOtaIfReady() {
     esp_err_t err = esp_ota_end(ota_handle);
     if (err == ESP_OK) {
         Serial.println("OTA: Firmware write completed successfully.");
-        if (pOTAStatusCharacteristic) {
-            const char* msg = "OTA_VALIDATING";
-            pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
-            pOTAStatusCharacteristic->notify();
-            delay(10); // Allow BLE notification to send
-        }
+        const char* msg = "OTA_VALIDATING";
+        Endpoints::notify(CHARACTERISTIC_UUID_OTA_STATUS, msg);
+        delay(10); // Allow BLE notification to send
 
         Serial.println("OTA: Setting new firmware as boot partition...");
         err = esp_ota_set_boot_partition(update_partition);
@@ -2237,12 +2137,9 @@ void finalizeOtaIfReady() {
             // never gets to. otaFinish(true) below flushes it, since nothing runs after this.
             SentryReporting::logInfo("OTA ok: %u bytes%s, rebooting", (unsigned)ota_received_size,
                                      ota_skip_signature ? " (unsigned)" : "");
-            if (pOTAStatusCharacteristic) {
-                const char* msg = "OTA_SUCCESS_REBOOTING";
-                pOTAStatusCharacteristic->setValue((uint8_t*)msg, strlen(msg));
-                pOTAStatusCharacteristic->notify();
-                delay(100); // Allow BLE notification to send before reboot
-            }
+            const char* msg = "OTA_SUCCESS_REBOOTING";
+            Endpoints::notify(CHARACTERISTIC_UUID_OTA_STATUS, msg);
+            delay(100); // Allow BLE notification to send before reboot
             // Before the reboot, not after: a restart is not a flush, and this transaction
             // is the record of the update that just succeeded.
             SentryReporting::otaFinish(true);
@@ -2251,21 +2148,15 @@ void finalizeOtaIfReady() {
         } else {
             Serial.printf("OTA Error: esp_ota_set_boot_partition failed! (%s)\n", esp_err_to_name(err));
             SentryReporting::logError("OTA failed at set_boot: %s", esp_err_to_name(err));
-            if (pOTAStatusCharacteristic) {
-                String errorMsg = "OTA_ERR_SET_BOOT:" + String(esp_err_to_name(err));
-                pOTAStatusCharacteristic->setValue((uint8_t*)errorMsg.c_str(), errorMsg.length());
-                pOTAStatusCharacteristic->notify();
-            }
+            String errorMsg = "OTA_ERR_SET_BOOT:" + String(esp_err_to_name(err));
+            Endpoints::notify(CHARACTERISTIC_UUID_OTA_STATUS, errorMsg);
         }
     } else {
         Serial.printf("OTA Error: esp_ota_end failed! (%s)\n", esp_err_to_name(err));
         SentryReporting::logError("OTA failed at end: %s (%u bytes)", esp_err_to_name(err),
                                   (unsigned)ota_received_size);
-        if (pOTAStatusCharacteristic) {
-            String errorMsg = "OTA_ERR_END_FAILED:" + String(esp_err_to_name(err));
-            pOTAStatusCharacteristic->setValue((uint8_t*)errorMsg.c_str(), errorMsg.length());
-            pOTAStatusCharacteristic->notify();
-        }
+        String errorMsg = "OTA_ERR_END_FAILED:" + String(esp_err_to_name(err));
+        Endpoints::notify(CHARACTERISTIC_UUID_OTA_STATUS, errorMsg);
     }
 
     // Reset OTA state after attempting to end (unless we already rebooted).
@@ -2421,35 +2312,27 @@ void processCommConfig() {
 }
 
 // COMM_CONFIG BLE characteristic: read returns settings JSON; write stages an msgpack patch.
-class CommConfigCallbacks : public NimBLECharacteristicCallbacks {
-    void onRead(NimBLECharacteristic* pCharacteristic) {
+static void onCommConfigRead(Endpoints::Link& link) {
+    (void)link;
         String j = commSettingsJson();
-        pCharacteristic->setValue((uint8_t*)j.c_str(), j.length());
+        link.send((const uint8_t*)j.c_str(), j.length());
     }
-    void onWrite(NimBLECharacteristic* pCharacteristic) {
-        std::string v = pCharacteristic->getValue();
+
+static void onCommConfigWrite(const uint8_t* data, size_t len, Endpoints::Link& link) {
+    (void)data; (void)len; (void)link;
+        std::string v((const char*)data, len);
         if (!v.empty()) stageCommConfig((const uint8_t*)v.data(), v.length());
     }
-};
 
 #if CHROMABAY_WIFI
-// ---- TCP transport --------------------------------------------------------------------
-// Framed protocol: [u8 channel][u32 len LE][payload]. Channels mirror BLE characteristics.
-enum TcpChannel : uint8_t {
-    CH_DEVICE_INFO    = 1,  // req(empty) → JSON reply
-    CH_LED_CONFIG_GET = 2,  // req(empty) → mpack reply
-    CH_LED_CONFIG_SET = 3,  // mpack payload
-    CH_BRIGHTNESS     = 4,  // 1 byte (write); empty req → 1-byte reply
-    CH_PATTERN_SYNC   = 5,  // full pattern msgpack (no chunk header over TCP)
-    CH_PLAYLIST_SYNC  = 6,  // [u32 intervalMs LE][u8 enabled]
-    CH_TIMESTAMP_SYNC = 7,  // [u64 ms LE]
-    CH_LIBRARY_CMD    = 8,  // [op][payload]
-    CH_LIBRARY_DUMP   = 9,  // req(empty) → one frame per pattern: [name\0][mpack]; then empty frame = done
-    CH_DEVICE_NAME    = 10, // write utf8 name; empty req → name reply
-    CH_COMM_CONFIG    = 11, // write mpack patch; empty req → settings JSON reply
-    CH_SENTRY_RELAY   = 12, // crash-report relay frames, both directions (see sentry_reporting.h)
-    CH_SENTRY_CONFIG  = 13, // write the DSN the device reports to
-};
+// ---- Wi-Fi carriage -------------------------------------------------------------------
+// Framed protocol: one WebSocket binary message per operation, [u8 channel][u8 op][payload].
+// The channel is DERIVED from the characteristic UUID and the op mirrors BLE's read/write/
+// notify, so a message routes into the same handler its characteristic would have called.
+//
+// There is deliberately no channel enum here any more. There used to be one — 11 entries
+// against 22 characteristics — and it was the reason Wi-Fi silently lacked OTA, layouts,
+// calibration, the button and the crash relay. See esp32/src/endpoints.h.
 
 // WebSocket control transport (hand-rolled over WiFiServer — the browser can only speak
 // WebSocket, and iOS's webview does too with no native plugin). Each WS binary message is
@@ -2474,125 +2357,33 @@ namespace WifiLink {
         client.write(hdr, h);
         if (len && data) client.write(data, len);
     }
-    // A control message is [u8 channel][payload]; wrap it in one WS binary frame.
-    static void sendFrame(uint8_t channel, const uint8_t* data, uint32_t len) {
-        static std::vector<uint8_t> buf;
-        buf.clear(); buf.reserve(1 + len);
-        buf.push_back(channel);
-        if (len && data) buf.insert(buf.end(), data, data + len);
-        wsSendBinary(buf.data(), buf.size());
-    }
-    static void sendStr(uint8_t channel, const String& s) {
-        sendFrame(channel, (const uint8_t*)s.c_str(), s.length());
-    }
+
     // True when a WS client is connected + handshaked — safe to push unsolicited frames.
     inline bool clientReady() { return wsReady && client && client.connected(); }
-    // Push a brightness update to the connected WS client (mirror of the BLE notify).
-    inline void pushBrightness(uint8_t b) { if (clientReady()) sendFrame(CH_BRIGHTNESS, &b, 1); }
+
+    // The one function that puts an endpoint frame on the wire. Registered with Endpoints so
+    // every handler, notify() and crash-relay push reaches Wi-Fi without knowing it exists.
+    static bool sendEndpointFrame(uint8_t channel, uint8_t op, const uint8_t* data, size_t len) {
+        if (!clientReady()) return false;
+        static std::vector<uint8_t> buf;
+        buf.clear(); buf.reserve(2 + len);
+        buf.push_back(channel);
+        buf.push_back(op);
+        if (len && data) buf.insert(buf.end(), data, data + len);
+        wsSendBinary(buf.data(), buf.size());
+        return true;
+    }
 
     // Hand a crash-relay frame to the app over Wi-Fi — the mirror of notifying the BLE TX
     // characteristic. Registered with SentryReporting as a function pointer at startup;
     // returning false tells the relay the host is gone, which keeps the report buffered.
     static bool sendSentryFrame(const uint8_t* frame, size_t len) {
-        if (!clientReady()) return false;
-        sendFrame(CH_SENTRY_RELAY, frame, (uint32_t)len);
-        return true;
+        return Endpoints::sendWifi(CHARACTERISTIC_UUID_SENTRY_TX, frame, len);
     }
 
-    // Stream the stored library: one frame per pattern on CH_LIBRARY_DUMP, payload =
-    // NUL-terminated name followed by the raw pattern msgpack; an empty frame signals done.
-    static void dumpLibrary() {
-        for (size_t i = 0; i < libNames.size() && i < 255; i++) {
-            File f = LittleFS.open(libPath((int)i), FILE_READ);
-            if (!f) continue;
-            if (f.available() < 2) { f.close(); continue; }
-            uint8_t lo = (uint8_t)f.read(), hi = (uint8_t)f.read();
-            uint16_t nameLen = (uint16_t)lo | ((uint16_t)hi << 8);
-            size_t total = f.size();
-            if (total <= (size_t)(2 + nameLen)) { f.close(); continue; }
-            size_t mpLen = total - (2 + nameLen);
-            if (mpLen > MAX_FRAME) { f.close(); continue; }
-            // name
-            char nameBuf[64]; size_t nb = nameLen < sizeof(nameBuf) - 1 ? nameLen : sizeof(nameBuf) - 1;
-            f.readBytes(nameBuf, nb); nameBuf[nb] = 0;
-            if (nameLen > nb) f.seek(2 + nameLen); // skip any overflow
-            uint8_t* mp = (uint8_t*)malloc(mpLen);
-            if (!mp) { f.close(); continue; }
-            bool ok = (f.readBytes((char*)mp, mpLen) == mpLen);
-            f.close();
-            if (!ok) { free(mp); continue; }
-            // frame = name + '\0' + mpack
-            size_t frameLen = nb + 1 + mpLen;
-            uint8_t* frame = (uint8_t*)malloc(frameLen);
-            if (frame) {
-                memcpy(frame, nameBuf, nb); frame[nb] = 0; memcpy(frame + nb + 1, mp, mpLen);
-                sendFrame(CH_LIBRARY_DUMP, frame, frameLen);
-                free(frame);
-            }
-            free(mp);
-        }
-        sendFrame(CH_LIBRARY_DUMP, nullptr, 0); // done
-    }
-
-    static void dispatch(uint8_t ch, const uint8_t* p, uint32_t len) {
+    static void dispatch(uint8_t ch, uint8_t op, const uint8_t* p, uint32_t len) {
         noteActivity();
-        switch (ch) {
-            case CH_DEVICE_INFO: sendStr(CH_DEVICE_INFO, buildDeviceInfoJson()); break;
-            case CH_LED_CONFIG_GET: {
-                size_t sz = 0; uint8_t* b = serializeLedConfigMpack(&sz);
-                if (b) { sendFrame(CH_LED_CONFIG_GET, b, sz); free(b); }
-                break;
-            }
-            case CH_LED_CONFIG_SET: stageLedConfigBytes(p, len); break;
-            case CH_BRIGHTNESS:
-                if (len >= 1) { pendingBrightness = p[0]; newBrightnessAvailable = true; }
-                else { uint8_t b = ledMgr.getGlobalBrightness(); sendFrame(CH_BRIGHTNESS, &b, 1); }
-                break;
-            case CH_PATTERN_SYNC: {
-                if (len == 0 || len > MAX_FRAME) break;
-                uint8_t* full = (uint8_t*)malloc(len);
-                if (full) { memcpy(full, p, len); stageCompletePattern(full, len); }
-                break;
-            }
-            case CH_PLAYLIST_SYNC:
-                if (len >= 5) { memcpy(&pendingCycleIntervalMs, p, 4); pendingCycleEnabled = (p[4] != 0); newCycleControlAvailable = true; }
-                break;
-            case CH_TIMESTAMP_SYNC:
-                // [u64 frame-clock ms][u64 wall-epoch ms(optional)] — see the BLE handler.
-                if (len >= 8) {
-                    uint64_t frameMs = 0; memcpy(&frameMs, p, 8);
-                    syncedTimestampMs = (unsigned long)frameMs; syncedLocalTime = millis(); timestampSynced = true;
-                    if (patternRenderer) patternRenderer->setSynchronizedTime(syncedTimestampMs, syncedLocalTime);
-                    if (len >= 16) {
-                        uint64_t epochMs = 0; memcpy(&epochMs, p + 8, 8);
-                        if (epochMs > 1704067200000ULL) {
-                            syncedEpochMs = epochMs; syncedEpochLocalMs = (uint32_t)syncedLocalTime;
-                            struct timeval tv = { (time_t)(epochMs / 1000ULL), (suseconds_t)((epochMs % 1000ULL) * 1000ULL) };
-                            settimeofday(&tv, nullptr);
-                        }
-                    }
-                }
-                break;
-            case CH_LIBRARY_CMD: {
-                size_t n = len > sizeof(libCmdBuf) ? sizeof(libCmdBuf) : len;
-                memcpy(libCmdBuf, p, n); libCmdLen = n; newLibCmdAvailable = true;
-                break;
-            }
-            case CH_LIBRARY_DUMP: dumpLibrary(); break;
-            case CH_DEVICE_NAME:
-                if (len > 0) { pendingDeviceName = String(); for (uint32_t i = 0; i < len; i++) pendingDeviceName += (char)p[i]; deviceNamePending = true; }
-                else sendStr(CH_DEVICE_NAME, deviceName);
-                break;
-            case CH_COMM_CONFIG:
-                if (len > 0) stageCommConfig(p, len);
-                else sendStr(CH_COMM_CONFIG, commSettingsJson());
-                break;
-            // Same two handlers the BLE characteristics call — the relay protocol and the
-            // DSN host check live in sentry_reporting.h and are not reimplemented here.
-            case CH_SENTRY_RELAY:  SentryReporting::onHostFrame(p, len); break;
-            case CH_SENTRY_CONFIG: SentryReporting::onConfigWrite(p, len); break;
-            default: Serial.printf("[TCP] unknown channel %u\n", ch); break;
-        }
+        Endpoints::dispatchWifi(ch, op, p, len);
     }
 
     // Complete the HTTP→WebSocket upgrade once the request headers are fully buffered in `rx`.
@@ -2645,7 +2436,7 @@ namespace WifiLink {
                 uint8_t ph[2] = { 0x8A, (uint8_t)p.size() }; client.write(ph, 2); if (p.size()) client.write(p.data(), p.size());
             } else if (op == 0x0 || op == 0x1 || op == 0x2) { // continuation / text / binary
                 for (uint64_t i = 0; i < len; i++) msg.push_back(masked ? (rx[hp+i]^mask[i&3]) : rx[hp+i]);
-                if (fin) { if (msg.size() >= 1) dispatch(msg[0], msg.data()+1, (uint32_t)(msg.size()-1)); msg.clear(); }
+                if (fin) { if (msg.size() >= 2) dispatch(msg[0], msg[1], msg.data()+2, (uint32_t)(msg.size()-2)); msg.clear(); }
             }
             pos = hp + len;
         }
@@ -2904,6 +2695,58 @@ namespace RtStream {
 } // namespace RtStream
 #endif // CHROMABAY_WIFI
 
+
+// The relay's protocol and the DSN host check live in sentry_reporting.h; these only carry
+// bytes into it, so both links reach the identical code.
+static void onSentryRxWrite(const uint8_t* data, size_t len, Endpoints::Link& link) {
+    (void)link;
+    SentryReporting::onHostFrame(data, len);
+}
+static void onSentryConfigWrite(const uint8_t* data, size_t len, Endpoints::Link& link) {
+    (void)link;
+    SentryReporting::onConfigWrite(data, len);
+}
+
+// ── The protocol ────────────────────────────────────────────────────────────────────────
+// One row per endpoint. Bluetooth creates a characteristic from each row; Wi-Fi routes a
+// channel (derived from the UUID) into the same handler. Adding a row is the whole of adding
+// a capability — there is no second list to update, and no way for a link to fall behind.
+//
+// Order does not matter. props are the BLE properties; they also tell the Wi-Fi side whether
+// a read means anything.
+static const Endpoints::Endpoint ENDPOINTS[] = {
+    // uuid,                              props,                                                          onWrite,               onRead
+    { CHARACTERISTIC_UUID_RX,             NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR,              onRxWrite,             nullptr },
+    { CHARACTERISTIC_UUID_TX,             NIMBLE_PROPERTY::NOTIFY,                                        nullptr,               nullptr },
+    { CHARACTERISTIC_UUID_DEVICE_INFO,    NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY,                 nullptr,               onDeviceInfoRead },
+    { CHARACTERISTIC_UUID_OTA_CONTROL,    NIMBLE_PROPERTY::WRITE,                                         onOtaControlWrite,     nullptr },
+    { CHARACTERISTIC_UUID_OTA_DATA,       NIMBLE_PROPERTY::WRITE_NR | NIMBLE_PROPERTY::NOTIFY,             onOtaDataWrite,        nullptr },
+    { CHARACTERISTIC_UUID_OTA_STATUS,     NIMBLE_PROPERTY::NOTIFY,                                        nullptr,               nullptr },
+    { CHARACTERISTIC_UUID_OTA_SIGNATURE,  NIMBLE_PROPERTY::WRITE,                                         onOtaSignatureWrite,   nullptr },
+    { CHARACTERISTIC_UUID_PATTERN_SYNC,   NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY,                onPatternSyncWrite,    nullptr },
+    { CHARACTERISTIC_UUID_LED_CONFIG_GET, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY,                 nullptr,               onLedConfigGetRead },
+    { CHARACTERISTIC_UUID_LED_CONFIG_SET, NIMBLE_PROPERTY::WRITE,                                         onLedConfigSetWrite,   nullptr },
+    { CHARACTERISTIC_UUID_TIMESTAMP_SYNC, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY,                onTimestampSyncWrite,  nullptr },
+    { CHARACTERISTIC_UUID_PLAYLIST_SYNC,  NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY,                onPlaylistSyncWrite,   nullptr },
+    { CHARACTERISTIC_UUID_BRIGHTNESS,     NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR |
+                                          NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY,                 onBrightnessWrite,     onBrightnessRead },
+    { CHARACTERISTIC_UUID_DEVICE_NAME,    NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE,                  onDeviceNameWrite,     onDeviceNameRead },
+    { CHARACTERISTIC_UUID_BUTTON_PIN,     NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE,                  onButtonPinWrite,      onButtonPinRead },
+    { CHARACTERISTIC_UUID_BUTTON_EVENT,   NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY,                 nullptr,               nullptr },
+    { CHARACTERISTIC_UUID_LAYOUT_SET,     NIMBLE_PROPERTY::WRITE,                                         onLayoutSetWrite,      nullptr },
+    { CHARACTERISTIC_UUID_LAYOUT_GET,     NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY,                onLayoutGetWrite,      nullptr },
+    { CHARACTERISTIC_UUID_CALIBRATION,    NIMBLE_PROPERTY::WRITE,                                         onCalibrationWrite,    nullptr },
+    { CHARACTERISTIC_UUID_LIBRARY_CMD,    NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR,              onLibraryCmdWrite,     nullptr },
+    { CHARACTERISTIC_UUID_LIBRARY_DUMP,   NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY,                onLibraryDumpWrite,    nullptr },
+    { CHARACTERISTIC_UUID_COMM_CONFIG,    NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE,                  onCommConfigWrite,     onCommConfigRead },
+    // Crash relay. These are the rows the old hand-mirrored Wi-Fi table had to grow by hand
+    // (commit b6743a0); here they are ordinary endpoints like any other.
+    { CHARACTERISTIC_UUID_SENTRY_TX,      NIMBLE_PROPERTY::NOTIFY,                                        nullptr,               nullptr },
+    { CHARACTERISTIC_UUID_SENTRY_RX,      NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR,              onSentryRxWrite,       nullptr },
+    { CHARACTERISTIC_UUID_SENTRY_CONFIG,  NIMBLE_PROPERTY::WRITE,                                         onSentryConfigWrite,   nullptr },
+};
+
+
 void setup() {
     Serial.begin(115200);
     delay(1000);
@@ -3086,6 +2929,13 @@ void setup() {
     Serial.printf("Device name: %s\n", deviceName.c_str());
     loadButtonPin(); // configure the physical button GPIO (if any)
 
+    // The endpoint table is the protocol, so it is installed before either transport starts —
+    // not inside the BLE branch, which on a Wi-Fi boot would leave the dispatcher empty.
+    Endpoints::install(ENDPOINTS, sizeof(ENDPOINTS) / sizeof(ENDPOINTS[0]));
+#if CHROMABAY_WIFI
+    Endpoints::setWifiSender(&WifiLink::sendEndpointFrame);
+#endif
+
     // --- Transport selection -----------------------------------------------------------
     // WiFi mode: try to bring up the TCP transport. If it succeeds we run WiFi-only (BLE
     // stays off to avoid sharing the radio and to save RAM). If STA connect fails with the
@@ -3129,80 +2979,20 @@ void setup() {
             Serial.println("ERROR: Failed to create BLE service!");
             criticalSystemsOK = false;
         } else {
-            // Create characteristics
-            pTxCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_TX, NIMBLE_PROPERTY::NOTIFY);
-            NimBLECharacteristic* pRxCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_RX, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR);
-            pRxCharacteristic->setCallbacks(new CharacteristicCallbacks());
+            // Every characteristic comes from ENDPOINTS — see the table above. This block
+            // used to be ~70 lines of hand-written createCharacteristic + setCallbacks pairs,
+            // which is precisely where the Wi-Fi side fell behind: adding one here was easy,
+            // and remembering to add the matching Wi-Fi channel was not.
+            Endpoints::attachBle(pService);
 
-            // OTA Characteristics
-            pDeviceInfoCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_DEVICE_INFO, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY);
-            pOTAControlCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_OTA_CONTROL, NIMBLE_PROPERTY::WRITE);
-            pOTAControlCharacteristic->setCallbacks(new OTAControlCallbacks());
-            pOTADataCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_OTA_DATA, NIMBLE_PROPERTY::WRITE_NR | NIMBLE_PROPERTY::NOTIFY);
-            pOTADataCharacteristic->setCallbacks(new OTADataCallbacks());
-            pOTAStatusCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_OTA_STATUS, NIMBLE_PROPERTY::NOTIFY);
-            pOTASignatureCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_OTA_SIGNATURE, NIMBLE_PROPERTY::WRITE);
-            pOTASignatureCharacteristic->setCallbacks(new OTASignatureCallbacks());
-            
-            // Pattern Sync Characteristic
-            pPatternSyncCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_PATTERN_SYNC, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY);
-            pPatternSyncCharacteristic->setCallbacks(new PatternSyncCallbacks());
-            
-            // LED Configuration Characteristics
-            pLedConfigGetCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_LED_CONFIG_GET, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY);
-            pLedConfigGetCharacteristic->setCallbacks(new LedConfigGetCallbacks());
-            pLedConfigSetCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_LED_CONFIG_SET, NIMBLE_PROPERTY::WRITE);
-            pLedConfigSetCharacteristic->setCallbacks(new LedConfigSetCallbacks());
+            // A few endpoints answer BLE reads from a stored value, so seed them.
+            Endpoints::setValue(CHARACTERISTIC_UUID_DEVICE_NAME, deviceName);
+            Endpoints::setValue(CHARACTERISTIC_UUID_BUTTON_PIN, String(buttonPin));
+            Endpoints::setValue(CHARACTERISTIC_UUID_BUTTON_EVENT, String(""));
 
-            // Arbitrary pixel layout (WLED ledmap) upload, per strip.
-            NimBLECharacteristic* pLayoutSetCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_LAYOUT_SET, NIMBLE_PROPERTY::WRITE);
-            pLayoutSetCharacteristic->setCallbacks(new LayoutSetCallbacks());
-            pLayoutGetCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_LAYOUT_GET, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY);
-            pLayoutGetCharacteristic->setCallbacks(new LayoutGetCallbacks());
-
-            NimBLECharacteristic* pLibraryCmdCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_LIBRARY_CMD, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR);
-            pLibraryCmdCharacteristic->setCallbacks(new LibraryCmdCallbacks());
-
-            pLibraryDumpCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_LIBRARY_DUMP, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY);
-            pLibraryDumpCharacteristic->setCallbacks(new LibraryDumpCallbacks());
-            NimBLECharacteristic* pCalibrationCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_CALIBRATION, NIMBLE_PROPERTY::WRITE);
-            pCalibrationCharacteristic->setCallbacks(new CalibrationCallbacks());
-            
-            // Timestamp Sync Characteristic
-            pTimestampSyncCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_TIMESTAMP_SYNC, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY);
-            pTimestampSyncCharacteristic->setCallbacks(new TimestampSyncCallbacks());
-
-            pPlaylistSyncCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_PLAYLIST_SYNC, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY);
-            pPlaylistSyncCharacteristic->setCallbacks(new CycleControlCallbacks());
-
-            // Brightness Characteristic (live global brightness, single byte)
-            pBrightnessCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_BRIGHTNESS, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR | NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY);
-            pBrightnessCharacteristic->setCallbacks(new BrightnessCallbacks());
-
-            // Device Name Characteristic (read current name / write to rename)
-            pDeviceNameCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_DEVICE_NAME, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE);
-            pDeviceNameCharacteristic->setValue((uint8_t*)deviceName.c_str(), deviceName.length());
-            pDeviceNameCharacteristic->setCallbacks(new DeviceNameCallbacks());
-
-            // Button Pin Characteristic (read current pin / write to set; -1 = none)
-            pButtonPinCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_BUTTON_PIN, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE);
-            {
-                String bp = String(buttonPin);
-                pButtonPinCharacteristic->setValue((uint8_t*)bp.c_str(), bp.length());
-            }
-            pButtonPinCharacteristic->setCallbacks(new ButtonPinCallbacks());
-
-            // Button Event Characteristic (NOTIFY — app acts on gestures like "next")
-            pButtonEventCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_BUTTON_EVENT, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY);
-            pButtonEventCharacteristic->setValue((uint8_t*)"", 0);
-
-            // Comm/Device settings (read JSON / write msgpack patch) — WiFi provisioning + mode switch.
-            pCommConfigCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_COMM_CONFIG, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE);
-            pCommConfigCharacteristic->setCallbacks(new CommConfigCallbacks());
-
-            // Crash-report relay: the device hands the app a fully-formed HTTP request and the
-            // app performs it. No-op in a build without sentry-micro.
-            SentryReporting::attachBleService(pService);
+            // The crash relay pushes frames with its own pacing, so it holds the
+            // characteristic directly rather than going through notify().
+            SentryReporting::setRelayTx(Endpoints::characteristicFor(CHARACTERISTIC_UUID_SENTRY_TX));
 
             pService->start();
             updateDeviceInfoCharacteristic();
@@ -3349,13 +3139,7 @@ void loop() {
         uint8_t cur = ledMgr.getGlobalBrightness();
         if (cur != lastNotifiedBri) {
             lastNotifiedBri = cur;
-            if (deviceConnected && pBrightnessCharacteristic) {
-                pBrightnessCharacteristic->setValue(&cur, 1);
-                pBrightnessCharacteristic->notify();
-            }
-#if CHROMABAY_WIFI
-            WifiLink::pushBrightness(cur);
-#endif
+            if (deviceConnected) Endpoints::notify(CHARACTERISTIC_UUID_BRIGHTNESS, &cur, 1);
         }
     }
 

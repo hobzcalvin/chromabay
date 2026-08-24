@@ -27,6 +27,22 @@ Env overrides: `APP_URL` (default `http://localhost:5173/devices`), `ESP32_DIR`
 Output is colour-tagged: `[drive]` orchestration, `[esp32]` serial, `[browser]`
 page console.
 
+## Which device it drives (read this before running)
+
+Several real ChromaBay installations — **Portal**, **Butterfly** — are usually powered and in
+BLE range of this bench. This harness connects to a device and can flash firmware to it, so it
+targets **exactly one** device and ignores the rest:
+
+- By default the target is the device on the USB cable, identified by the `Device name: X`
+  line it prints on boot. A BLE scan cannot tell which device is on the cable; the banner can.
+- `DEVICE_NAME=ChromaBay_ED30` overrides it with an exact name.
+- `DEVICE_NAME_RE=...` still takes a pattern, for when you genuinely want one.
+- With no name and no serial port it refuses to run rather than pick whichever device answers
+  the scan first.
+
+The chooser logs every device it declines, so "it never connected" can never be confused with
+"it connected to something else".
+
 ## How the hands-free BLE connect works
 
 Web Bluetooth's `navigator.bluetooth.requestDevice()` requires a user gesture and

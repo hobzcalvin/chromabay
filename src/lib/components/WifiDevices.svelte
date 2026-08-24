@@ -1,19 +1,21 @@
 <script lang="ts">
-  // Control ChromaBay devices over WiFi (WebSocket). Lists devices you've switched to WiFi
-  // (or add one by host/IP), connects to ws://<host>:8080/, and drives brightness / pushes
-  // the current pattern / cycle — the WiFi equivalent of the BLE device cards. Only works
-  // where cleartext ws:// to a LAN device is allowed: the native app + local dev (not the
-  // deployed https site — mixed content).
+  // Finding devices on Wi-Fi — and nothing else.
+  //
+  // A browser cannot browse mDNS, so this is the manual half of discovery: the remembered
+  // list of hosts, plus a box to add one by name or IP. Once connected, the device appears in
+  // the device list above with the SAME card, the same settings, the same OTA and the same
+  // LED editor as a Bluetooth device. There is deliberately no per-device control here — a
+  // second, lesser copy of the device card is exactly what this component used to be.
+  //
+  // Only works where cleartext ws:// to a LAN device is allowed: the native app + local dev
+  // (not the deployed https site — mixed content).
   import { onMount } from 'svelte';
-  import { get } from 'svelte/store';
   import { Capacitor } from '@capacitor/core';
-  import { knownWifi, wifiConns, connectWifi, disconnectWifi, forgetWifiDevice, rememberWifiDevice, hostForName, setWifiBrightness } from '$lib/stores/wifiDeviceStore';
-  import { currentPattern } from '$lib/stores/patternsStore';
-  import DeviceSettingsPanel from '$lib/components/DeviceSettingsPanel.svelte';
-  import LedConfigurationComponent from '$lib/components/LedConfiguration.svelte';
-  import { wifiHandle } from '$lib/deviceHandle';
+  import { knownWifi, wifiStatus, connectWifi, forgetWifiDevice, rememberWifiDevice } from '$lib/stores/wifiDeviceStore';
+  import { connectedDevices } from '$lib/stores/deviceStore';
+  import { wifiIdFor } from '$lib/transport';
 
-  // WiFi needs the Local Network Privacy keys (NSLocalNetworkUsageDescription +
+  // Wi-Fi needs the Local Network Privacy keys (NSLocalNetworkUsageDescription +
   // NSBonjourServices) in the native build; iOS silently blocks LAN on builds without them.
   // Those keys shipped in the 1.1.0 store build, so store builds need >= 1.1.0. But LOCAL dev
   // builds carry MARKETING_VERSION 0.0.1 (kept below the hot-update line so they always update)
@@ -41,45 +43,6 @@
   });
 
   let manualHost = $state('');
-  let cycleOn = $state<Record<string, boolean>>({});
-  let msg = $state<Record<string, string>>({});
-  // LED-strip config editor state, per device (same LedConfiguration component as BLE, via the
-  // handle). Custom layouts are gated off over Wi-Fi (need a LAYOUT WS channel — not added yet).
-  let showLed = $state<Record<string, boolean>>({});
-  let ledState = $state<Record<string, any>>({});
-
-  async function toggleLed(name: string) {
-    showLed[name] = !showLed[name];
-    if (showLed[name] && !ledState[name]) await loadLed(name);
-  }
-  async function loadLed(name: string) {
-    const c = $wifiConns[name];
-    if (!c?.dev) return;
-    ledState[name] = { ledConfig: null, deviceInfo: c.info, ledConfigLoading: true };
-    try {
-      ledState[name] = { ledConfig: await wifiHandle(c.dev, name).getLedConfig(), deviceInfo: c.info, ledConfigLoading: false };
-    } catch (e: any) {
-      ledState[name] = { ledConfig: null, deviceInfo: c.info, ledConfigLoading: false };
-      msg[name] = 'Couldn’t read LED config: ' + (e?.message ?? e);
-    }
-  }
-  async function saveLed(name: string) {
-    const c = $wifiConns[name]; const s = ledState[name];
-    if (!c?.dev || !s?.ledConfig) return;
-    s.ledConfigLoading = true;
-    try { await wifiHandle(c.dev, name).setLedConfig(s.ledConfig); msg[name] = 'LED config saved.'; }
-    catch (e: any) { msg[name] = 'Save failed: ' + (e?.message ?? e); }
-    finally { s.ledConfigLoading = false; }
-  }
-  function addStripLed(name: string) {
-    const s = ledState[name]; if (!s?.ledConfig) return;
-    s.ledConfig.strips = [...s.ledConfig.strips,
-      { chipset: 22, pin: 2, clockPin: 0, numLeds: 30, colorOrder: 0, rmtChannel: 0, width: 0, height: 0, orientation: 0, gamma: 1, dither: true }];
-  }
-  function removeStripLed(name: string, index: number) {
-    const s = ledState[name]; if (!s?.ledConfig) return;
-    s.ledConfig.strips = s.ledConfig.strips.filter((_: any, i: number) => i !== index);
-  }
 
   function addManual() {
     const h = manualHost.trim();
@@ -87,93 +50,39 @@
     const name = h.replace(/\.local$/i, '');
     rememberWifiDevice(name, h);
     manualHost = '';
-    connectWifi(name, h);
-  }
-
-  function pushCurrent(name: string) {
-    const c = $wifiConns[name]; const p = get(currentPattern);
-    if (c?.dev && p) { c.dev.sendPattern(p); msg[name] = `Pushed “${p.meta?.name ?? 'pattern'}”`; }
-    else msg[name] = p ? 'Not connected' : 'No current pattern';
-  }
-  function onBri(name: string, v: number) {
-    // Optimistically update the conn's brightness (single source of truth, shared with the
-    // device's own brightness pushes) so the readout reflects drags AND schedule/button changes.
-    setWifiBrightness(name, v);
-    $wifiConns[name]?.dev?.setBrightness(v);
-  }
-  function toggleCycle(name: string) {
-    const on = !(cycleOn[name] ?? false); cycleOn[name] = on;
-    $wifiConns[name]?.dev?.setCycle(30000, on);
+    void connectWifi(name, h).catch(() => { /* status store carries the error */ });
   }
 </script>
 
 {#if available}
 <section class="wifi-section">
-  <h2 class="wifi-title">WiFi devices</h2>
-  <p class="wifi-intro">Devices switched to WiFi. Control them over your network (works in the app + local dev).</p>
+  <h2 class="wifi-title">Wi-Fi devices</h2>
+  <p class="wifi-intro">
+    Connect one and it joins the list above — same card, same settings as Bluetooth.
+  </p>
 
   {#each $knownWifi as d (d.name)}
-    {@const c = $wifiConns[d.name]}
-    <div class="wifi-card">
-      <div class="wifi-head">
-        <div class="wifi-id">
-          <strong>{d.name}</strong>
-          <span class="wifi-host">{c?.info?.ip ? c.info.ip : d.host}</span>
-        </div>
-        <div class="wifi-actions">
-          {#if c?.state === 'ready'}
-            <button class="btn danger small" onclick={() => disconnectWifi(d.name)}>Disconnect</button>
-          {:else if c?.state === 'connecting'}
-            <span class="pill">Connecting…</span>
-          {:else}
-            <button class="btn primary small" onclick={() => connectWifi(d.name, d.host)}>Connect</button>
-            <button class="btn small" onclick={() => forgetWifiDevice(d.name)}>Forget</button>
-          {/if}
-        </div>
+    {@const st = $wifiStatus[d.host]}
+    {@const isConnected = $connectedDevices.has(wifiIdFor(d.host))}
+    <div class="wifi-row">
+      <div class="wifi-id">
+        <strong>{d.name}</strong>
+        <span class="wifi-host">{d.host}</span>
       </div>
-
-      {#if c?.state === 'error'}
-        <p class="err">Couldn’t connect: {c.error}. Is the device on WiFi and on this network?</p>
-      {/if}
-
-      {#if c?.state === 'ready' && c.dev}
-        <div class="wifi-body">
-          <div class="row"><span class="lbl">Chip</span><span>{c.info?.chip ?? '—'} · fw {c.info?.fw_ver ?? '—'}</span></div>
-          <label class="row">
-            <span class="lbl">Brightness</span>
-            <input type="range" min="0" max="255" value={c.brightness ?? 128}
-              oninput={(e) => onBri(d.name, parseInt(e.currentTarget.value))} />
-            <span class="val">{c.brightness ?? 128}</span>
-          </label>
-          <div class="btn-row">
-            <button class="btn small" onclick={() => pushCurrent(d.name)}>Push current pattern</button>
-            <button class="btn small" class:on={cycleOn[d.name]} onclick={() => toggleCycle(d.name)}>
-              {cycleOn[d.name] ? '⏸ Cycle on' : '▶ Cycle'}
-            </button>
-          </div>
-          {#if msg[d.name]}<p class="ok">{msg[d.name]}</p>{/if}
-          <!-- Same settings panel as BLE devices — incl. the transport radio to switch back to
-               Bluetooth, the on/off schedule, sleep timer, streaming. -->
-          <div class="wifi-settings">
-            <DeviceSettingsPanel device={wifiHandle(c.dev, d.name)} deviceInfo={c.info ?? null} />
-          </div>
-          <div class="wifi-settings">
-            <button class="btn small" onclick={() => toggleLed(d.name)}>{showLed[d.name] ? '▾ LED strip setup' : '▸ LED strip setup'}</button>
-            {#if showLed[d.name] && ledState[d.name]?.ledConfig}
-              <LedConfigurationComponent
-                settings={ledState[d.name]}
-                deviceId={d.name}
-                layoutSupported={false}
-                onAddStrip={() => addStripLed(d.name)}
-                onRemoveStrip={(_, i) => removeStripLed(d.name, i)}
-                onSaveConfig={() => saveLed(d.name)} />
-            {:else if showLed[d.name]}
-              <p class="ok">Reading LED config…</p>
-            {/if}
-          </div>
-        </div>
-      {/if}
+      <div class="wifi-actions">
+        {#if isConnected}
+          <span class="pill on">Connected ↑</span>
+        {:else if st?.state === 'connecting'}
+          <span class="pill">Connecting…</span>
+        {:else}
+          <button class="btn primary small" onclick={() => connectWifi(d.name, d.host).catch(() => {})}>Connect</button>
+          <button class="btn small" onclick={() => forgetWifiDevice(d.name)}>Forget</button>
+        {/if}
+      </div>
     </div>
+    {#if st?.state === 'error' && !isConnected}
+      <p class="err">Couldn’t connect: {st.error}. Is the device on Wi-Fi and on this network?</p>
+    {/if}
   {/each}
 
   <div class="wifi-add">
@@ -188,25 +97,19 @@
   .wifi-section { margin-top: 1.5rem; }
   .wifi-title { font-size: 1.1rem; margin: 0 0 0.25rem; }
   .wifi-intro { font-size: 0.82rem; opacity: 0.7; margin: 0 0 0.75rem; }
-  .wifi-card { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); border-radius: 12px; padding: 0.75rem 1rem; margin-bottom: 0.6rem; }
-  .wifi-head { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; }
+  .wifi-row {
+    display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 12px; padding: 0.6rem 1rem; margin-bottom: 0.5rem;
+  }
   .wifi-id strong { font-size: 1rem; } .wifi-host { display: block; font-size: 0.75rem; opacity: 0.6; }
   .wifi-actions { display: flex; gap: 0.4rem; align-items: center; }
-  .wifi-body { margin-top: 0.6rem; display: flex; flex-direction: column; gap: 0.5rem; }
-  .row { display: flex; align-items: center; gap: 0.6rem; font-size: 0.85rem; }
-  .lbl { opacity: 0.7; min-width: 5.5rem; }
-  .row input[type=range] { flex: 1; }
-  .val { min-width: 2.2rem; text-align: right; font-variant-numeric: tabular-nums; }
-  .btn-row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
   .btn { padding: 0.4rem 0.8rem; border-radius: 8px; border: 1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.08); color: #fff; cursor: pointer; font-size: 0.85rem; }
   .btn.small { padding: 0.3rem 0.6rem; font-size: 0.8rem; }
   .btn.primary { background: rgba(59,130,246,0.5); border-color: rgba(59,130,246,0.7); }
-  .btn.danger { background: rgba(239,68,68,0.4); }
-  .btn.on { background: rgba(16,185,129,0.35); border-color: rgba(52,211,153,0.6); }
   .pill { font-size: 0.8rem; opacity: 0.8; }
-  .err { color: #fca5a5; font-size: 0.82rem; margin: 0.4rem 0 0; }
-  .ok { color: #86efac; font-size: 0.8rem; margin: 0.3rem 0 0; }
-  .wifi-settings { margin-top: 0.75rem; padding-top: 0.7rem; border-top: 1px solid rgba(255,255,255,0.12); }
+  .pill.on { color: #86efac; opacity: 1; }
+  .err { color: #fca5a5; font-size: 0.82rem; margin: 0 0 0.5rem; }
   .wifi-add { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
   .wifi-add input { flex: 1; padding: 0.4rem 0.6rem; border-radius: 8px; border: 1px solid rgba(255,255,255,0.15); background: rgba(0,0,0,0.25); color: #fff; }
 </style>
