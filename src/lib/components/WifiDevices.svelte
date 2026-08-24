@@ -45,7 +45,9 @@
   let manualHost = $state('');
 
   function addManual() {
-    const h = manualHost.trim();
+    // DNS/mDNS hostnames are case-insensitive and the firmware advertises a lowercase name.
+    // Canonicalizing also prevents duplicate remembered entries that differ only by case.
+    const h = manualHost.trim().toLowerCase();
     if (!h) return;
     const name = h.replace(/\.local$/i, '');
     rememberWifiDevice(name, h);
@@ -86,7 +88,9 @@
   {/each}
 
   <div class="wifi-add">
-    <input type="text" placeholder="device.local or 192.168.x.x" bind:value={manualHost}
+    <input type="text" inputmode="url" autocapitalize="none" autocomplete="off"
+      autocorrect="off" spellcheck={false} enterkeyhint="go"
+      placeholder="device.local or 192.168.x.x" bind:value={manualHost}
       onkeydown={(e) => { if (e.key === 'Enter') addManual(); }} />
     <button class="btn small" onclick={addManual}>Connect</button>
   </div>
