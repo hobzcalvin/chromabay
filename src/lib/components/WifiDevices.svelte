@@ -7,13 +7,14 @@
   // LED editor as a Bluetooth device. There is deliberately no per-device control here — a
   // second, lesser copy of the device card is exactly what this component used to be.
   //
-  // Only works where cleartext ws:// to a LAN device is allowed: the native app + local dev
-  // (not the deployed https site — mixed content).
+  // Chrome 147+ can authorize cleartext ws:// to a .local/private address from the deployed
+  // HTTPS site through its Local Network Access permission prompt. Other web engines cannot.
   import { onMount } from 'svelte';
   import { Capacitor } from '@capacitor/core';
   import { knownWifi, wifiStatus, connectWifi, forgetWifiDevice, rememberWifiDevice } from '$lib/stores/wifiDeviceStore';
   import { connectedDevices } from '$lib/stores/deviceStore';
   import { wifiIdFor } from '$lib/transport';
+  import { canUseWebWifi } from '$lib/localNetworkAccess';
 
   // Wi-Fi needs the Local Network Privacy keys (NSLocalNetworkUsageDescription +
   // NSBonjourServices) in the native build; iOS silently blocks LAN on builds without them.
@@ -21,9 +22,12 @@
   // builds carry MARKETING_VERSION 0.0.1 (kept below the hot-update line so they always update)
   // and are always built from current code — so anything BELOW 1.0.0 is a dev build that has
   // the keys. Hide only the genuine pre-1.1.0 STORE builds (the 1.0.x range).
-  // On web we only show it in local dev (http); deployed https can't do cleartext ws://.
+  // On web, local HTTP development works directly. Production HTTPS is available only in a
+  // Chromium version that puts local WebSockets behind a user permission instead of blocking
+  // them as mixed content.
   const WIFI_MIN_VERSION = '1.1.0';
   let available = $state(false);
+  let usesBrowserPermission = $state(false);
   function cmpVer(a: string, b: string) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
     for (let i = 0; i < 3; i++) { const d = (pa[i] || 0) - (pb[i] || 0); if (d) return d; }
@@ -31,7 +35,10 @@
   }
   onMount(async () => {
     if (Capacitor.getPlatform() === 'web') {
-      available = typeof location !== 'undefined' && location.protocol === 'http:'; // local dev only
+      const protocol = typeof location === 'undefined' ? '' : location.protocol;
+      const userAgent = typeof navigator === 'undefined' ? '' : navigator.userAgent;
+      available = canUseWebWifi(protocol, userAgent);
+      usesBrowserPermission = available && protocol === 'https:';
       return;
     }
     try {
@@ -62,6 +69,11 @@
   <p class="wifi-intro">
     Connect one and it joins the list above — same card, same settings as Bluetooth.
   </p>
+  {#if usesBrowserPermission}
+    <p class="wifi-intro lna-note">
+      Chrome will ask for Local Network Access the first time you connect. Choose Allow.
+    </p>
+  {/if}
 
   {#each $knownWifi as d (d.name)}
     {@const st = $wifiStatus[d.host]}
@@ -83,7 +95,10 @@
       </div>
     </div>
     {#if st?.state === 'error' && !isConnected}
-      <p class="err">Couldn’t connect: {st.error}. Is the device on Wi-Fi and on this network?</p>
+      <p class="err">
+        Couldn’t connect: {st.error}. Is the device on Wi-Fi and on this network?
+        {#if usesBrowserPermission} Also check that Local Network Access is allowed in Chrome’s site settings.{/if}
+      </p>
     {/if}
   {/each}
 
@@ -101,6 +116,7 @@
   .wifi-section { margin-top: 1.5rem; }
   .wifi-title { font-size: 1.1rem; margin: 0 0 0.25rem; }
   .wifi-intro { font-size: 0.82rem; opacity: 0.7; margin: 0 0 0.75rem; }
+  .lna-note { color: #bfdbfe; opacity: 0.9; }
   .wifi-row {
     display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;
     background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
