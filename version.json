@@ -1,7 +1,7 @@
 {
-  "version": "1.1.320",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.320.zip",
-  "buildDate": "2026-08-24T04:34:52Z",
-  "commitHash": "c4474ffd451900c08020b46e7d057dca32fe803f",
-  "commitMessage": "Give every colour in the editor the same wheel, and make the device honour it"
+  "version": "1.1.321",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.321.zip",
+  "buildDate": "2026-08-24T04:43:28Z",
+  "commitHash": "02c6a2a6f959039a8b8e2e917c6ff8f37f2752f0",
+  "commitMessage": "Make Wi-Fi a carriage for the protocol, not a second protocol"
 }
