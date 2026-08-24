@@ -32,6 +32,7 @@ export class WifiTransport implements Transport {
    * the protocol above changing shape.
    */
   readonly maxWriteLen = 8192;
+  readonly maxStreamWriteLen = 8192;
 
   private ws: WebSocket | null = null;
   // Reads are queued per channel: BLE allows a read to be outstanding per characteristic, and

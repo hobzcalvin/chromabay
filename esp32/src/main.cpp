@@ -314,6 +314,7 @@ static volatile bool newLedConfigAvailable = false;
 static uint8_t* layoutBuffer = nullptr;
 static size_t layoutBufferSize = 0;     // == totalLen once the first chunk arrives
 static size_t layoutAccumLen = 0;       // bytes received so far (in-order)
+static uint8_t layoutRxStripIndex = 0xFF;
 static volatile bool newLayoutAvailable = false;
 
 bool deviceConnected = false;
@@ -1043,22 +1044,42 @@ static void onLedConfigSetWrite(const uint8_t* data, size_t len, Endpoints::Link
 // Layout Set Callbacks - receive an arbitrary pixel layout (WLED ledmap) for one strip.
 // Payload: [u8 stripIndex][u16 W][u16 H][u16 count][count × i16 ledIndex]. Staged for loop().
 static void onLayoutSetWrite(const uint8_t* data, size_t len, Endpoints::Link& link) {
-    (void)data; (void)len; (void)link;
         std::string value((const char*)data, len);
         if (value.length() < 4) return; // need [u16 totalLen][u16 offset]
         const uint8_t* d = (const uint8_t*)value.data();
         uint16_t totalLen = (uint16_t)(d[0] | (d[1] << 8));
         uint16_t offset   = (uint16_t)(d[2] | (d[3] << 8));
         size_t dataLen = value.length() - 4;
-        if (totalLen == 0 || totalLen > 16384) return; // sanity (64x64 map ≈ 8 KB)
+        uint8_t stripIndex = offset == 0 && dataLen > 0 ? d[4] : layoutRxStripIndex;
+        auto status = [&](uint8_t code) {
+            uint8_t reply[2] = {code, stripIndex};
+            link.send(reply, sizeof(reply));
+        };
+        if (totalLen == 0 || totalLen > 16384) {
+            status(1); // invalid/unsupported size
+            return;
+        }
 
         if (offset == 0) { // first chunk: (re)allocate the reassembly buffer
+            // A new generation supersedes any completed-but-not-yet-committed upload. Never
+            // let processReceivedLayout() mistake this new partial buffer for the old complete
+            // one just because the completion flag was still set.
+            newLayoutAvailable = false;
             if (layoutBuffer) { free(layoutBuffer); layoutBuffer = nullptr; }
             layoutBuffer = (uint8_t*)malloc(totalLen);
             layoutBufferSize = layoutBuffer ? totalLen : 0;
             layoutAccumLen = 0;
+            layoutRxStripIndex = stripIndex;
+            if (!layoutBuffer) {
+                status(2); // allocation failure
+                return;
+            }
         }
-        if (!layoutBuffer || (size_t)offset + dataLen > layoutBufferSize) return; // out of order / overrun
+        if (!layoutBuffer || (size_t)offset + dataLen > layoutBufferSize ||
+            (size_t)offset != layoutAccumLen) {
+            status(3); // out of order / overrun
+            return;
+        }
         memcpy(layoutBuffer + offset, d + 4, dataLen);
         layoutAccumLen = (size_t)offset + dataLen; // writes are serialized + in order
         if (layoutAccumLen >= layoutBufferSize) newLayoutAvailable = true;
@@ -1907,27 +1928,37 @@ void processReceivedLayout() {
 
     bool clear = (layoutBufferSize < 7); // need at least W,H,count after the index byte
     uint16_t count = clear ? 0 : (uint16_t)(layoutBuffer[5] | (layoutBuffer[6] << 8));
+    bool committed = false;
     if (clear || count == 0) {
         LittleFS.remove(path);
+        committed = true; // already absent is also a successful clear
         Serial.printf("[Layout] Strip %u layout cleared\n", (unsigned)stripIndex);
     } else {
         File f = LittleFS.open(path, FILE_WRITE);
         if (f) {
-            f.write(layoutBuffer + 1, layoutBufferSize - 1);
+            size_t expected = layoutBufferSize - 1;
+            committed = f.write(layoutBuffer + 1, expected) == expected;
             f.close();
-            Serial.printf("[Layout] Strip %u layout saved (%u bytes)\n",
-                          (unsigned)stripIndex, (unsigned)(layoutBufferSize - 1));
+            Serial.printf("[Layout] Strip %u layout %s (%u bytes)\n",
+                          (unsigned)stripIndex, committed ? "saved" : "write incomplete",
+                          (unsigned)expected);
         } else {
             Serial.println("[Layout] Failed to open layout file for writing");
         }
     }
-    configMgr.loadStripLayouts(); // apply live across all strips
+    if (committed) configMgr.loadStripLayouts(); // apply live across all strips
+
+    // LAYOUT_SET is notify-capable: code 0 means the bytes are now on flash and applied, so
+    // the app may safely read back immediately. Code 4 is a commit failure.
+    uint8_t status[2] = {committed ? (uint8_t)0 : (uint8_t)4, stripIndex};
+    Endpoints::notify(CHARACTERISTIC_UUID_LAYOUT_SET, status, sizeof(status));
 
     newLayoutAvailable = false;
     free(layoutBuffer);
     layoutBuffer = nullptr;
     layoutBufferSize = 0;
     layoutAccumLen = 0;
+    layoutRxStripIndex = 0xFF;
 }
 
 // Respond to a LAYOUT_GET request: NOTIFY the requested strip's /layout_<i>.bin back to the
@@ -1955,19 +1986,21 @@ void processLayoutGetRequest() {
         }
     }
 
-    const size_t CH = 180;
+    // BLE needs small, paced notifications. A WebSocket is reliable and ordered, so sending
+    // multi-kilobyte frames avoids dozens of packets and removes the delay from Wi-Fi reads.
+    const size_t CH = gWifiMode ? 4096 : 180;
     if (len == 0) {
         uint8_t hdr[4] = {0, 0, 0, 0}; // totalLen 0
         Endpoints::notify(CHARACTERISTIC_UUID_LAYOUT_GET, hdr, 4);
     } else {
+        static uint8_t frame[4 + 4096];
         for (size_t off = 0; off < len; off += CH) {
             size_t n = (len - off < CH) ? (len - off) : CH;
-            uint8_t frame[4 + 180];
             frame[0] = len & 0xFF; frame[1] = (len >> 8) & 0xFF;
             frame[2] = off & 0xFF; frame[3] = (off >> 8) & 0xFF;
             memcpy(frame + 4, data + off, n);
             Endpoints::notify(CHARACTERISTIC_UUID_LAYOUT_GET, frame, 4 + n);
-            delay(8); // small gap so the BLE stack doesn't drop back-to-back notifications
+            if (!gWifiMode) delay(8); // BLE stack can drop back-to-back notifications
         }
     }
     if (data) free(data);
@@ -2733,7 +2766,7 @@ static const Endpoints::Endpoint ENDPOINTS[] = {
     { CHARACTERISTIC_UUID_DEVICE_NAME,    NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE,                  onDeviceNameWrite,     onDeviceNameRead },
     { CHARACTERISTIC_UUID_BUTTON_PIN,     NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE,                  onButtonPinWrite,      onButtonPinRead },
     { CHARACTERISTIC_UUID_BUTTON_EVENT,   NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY,                 nullptr,               nullptr },
-    { CHARACTERISTIC_UUID_LAYOUT_SET,     NIMBLE_PROPERTY::WRITE,                                         onLayoutSetWrite,      nullptr },
+    { CHARACTERISTIC_UUID_LAYOUT_SET,     NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY,              onLayoutSetWrite,      nullptr },
     { CHARACTERISTIC_UUID_LAYOUT_GET,     NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY,                onLayoutGetWrite,      nullptr },
     { CHARACTERISTIC_UUID_CALIBRATION,    NIMBLE_PROPERTY::WRITE,                                         onCalibrationWrite,    nullptr },
     { CHARACTERISTIC_UUID_LIBRARY_CMD,    NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR,              onLibraryCmdWrite,     nullptr },

@@ -99,6 +99,37 @@ describe('BLE/Wi-Fi protocol parity', () => {
     expect(offenders, 'these bypass the transport and will fail over Wi-Fi').toEqual([]);
   });
 
+  it('all-device live actions enumerate the shared device store, not BLE GATT state', () => {
+    // A Wi-Fi connection is registered in deviceStore but intentionally has no BLE/GATT
+    // entry. Using the private BLE map here made a pattern-card tap silently skip Wi-Fi while
+    // the explicit per-device "Sync" button worked.
+    const src = read('src/lib/ble.ts');
+    const listFn = src.slice(
+      src.indexOf('export function getConnectedDevices()'),
+      src.indexOf('export function getConnectedDeviceCount()'),
+    );
+    const liveSyncFn = src.slice(
+      src.indexOf('export async function syncPatternToAllDevices()'),
+      src.indexOf('export async function setCycleOnDevice'),
+    );
+    expect(listFn).toContain('connectedDeviceStore');
+    expect(listFn).not.toContain('bleConnections');
+    expect(liveSyncFn).toContain('getConnectedDevices()');
+    expect(liveSyncFn).not.toContain('bleConnections');
+  });
+
+  it('Wi-Fi connection initialization and layout commit acknowledgements stay symmetric', () => {
+    const wifiStore = read('src/lib/stores/wifiDeviceStore.ts');
+    const app = read('src/lib/ble.ts');
+    const firmware = read('esp32/src/main.cpp');
+    expect(wifiStore).toContain('await initializeConnectedDevice(id)');
+    expect(app).toContain('CHARACTERISTIC_UUID_LAYOUT_SET, (reply)');
+    expect(firmware).toMatch(
+      /\{\s*CHARACTERISTIC_UUID_LAYOUT_SET,\s*NIMBLE_PROPERTY::WRITE\s*\|\s*NIMBLE_PROPERTY::NOTIFY/,
+    );
+    expect(firmware).toContain('Endpoints::notify(CHARACTERISTIC_UUID_LAYOUT_SET, status');
+  });
+
   it('the firmware has no hand-maintained channel list left', () => {
     // The specific thing that rotted. If someone reintroduces a second source of truth for
     // channel identity, this fails.

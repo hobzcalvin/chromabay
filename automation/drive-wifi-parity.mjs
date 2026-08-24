@@ -22,6 +22,8 @@ const arg = (n, d) => { const i = process.argv.indexOf(`--${n}`); return i > 0 ?
 const SSID = arg('ssid', 'Mud Loci');
 const PASS = arg('pass', 'kittylicksalot');
 const KEEP_OPEN = process.argv.includes('--keep-open');
+// Leave the device on Wi-Fi instead of restoring Bluetooth — for follow-on wire-level tests.
+const LEAVE_ON_WIFI = process.argv.includes('--leave-on-wifi');
 
 // The EXACT device to drive. Never a pattern.
 //
@@ -231,7 +233,7 @@ try {
   check('no bespoke Wi-Fi device controls remain', legacy === 0, legacy ? `${legacy} found` : '');
 
   // ---- 4. Restore ---------------------------------------------------------------------
-  if (startMode === 'ble' && !KEEP_OPEN) {
+  if (startMode === 'ble' && !KEEP_OPEN && !LEAVE_ON_WIFI) {
     log('switching the device back to Bluetooth…');
     try {
       await page.getByRole('button', { name: 'Bluetooth', exact: true }).first().click();

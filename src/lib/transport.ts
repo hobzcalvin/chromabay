@@ -22,11 +22,18 @@ export interface Transport {
   readonly kind: 'ble' | 'wifi';
   readonly connected: boolean;
   /**
-   * Largest payload that may be handed to a single write. Callers that chunk MUST respect
-   * this rather than assuming BLE's limit — it is the one place a transport is allowed to
-   * be faster than the other, because the framing above it is unchanged either way.
+   * Largest payload that may be handed to a normal, acknowledged write. Callers that chunk
+   * MUST respect this rather than assuming BLE's limit. BLE keeps this conservative because
+   * long acknowledged writes have proved unreliable on real devices; WebSocket can use a
+   * much larger frame.
    */
   readonly maxWriteLen: number;
+  /**
+   * Largest payload for writeStream(), where the caller supplies its own flow control. OTA
+   * uses this: BLE can safely use its full write-without-response size, while WebSocket can
+   * send a flash-friendly multi-kilobyte block.
+   */
+  readonly maxStreamWriteLen: number;
   read(service: string, characteristic: string): Promise<DataView>;
   write(service: string, characteristic: string, value: DataView): Promise<void>;
   writeWithoutResponse(service: string, characteristic: string, value: DataView): Promise<void>;

@@ -50,8 +50,8 @@ shows a native chooser you can't dismiss from the page. The harness sidesteps it
 with the Chrome DevTools Protocol `DeviceAccess` domain:
 
 - `DeviceAccess.enable` on a **browser-level** CDP session.
-- On `DeviceAccess.deviceRequestPrompted`, pick the device whose name matches
-  `DEVICE_NAME_RE` (`/chromabay|esp32|m5/i`) and answer with
+- On `DeviceAccess.deviceRequestPrompted`, pick only the exact USB-derived device name
+  (unless an explicit `DEVICE_NAME_RE` override was supplied) and answer with
   `DeviceAccess.selectPrompt`.
 - The harness clicks the app's **"Select ESP32 Device"** button — that click is
   the required user gesture; the CDP handler answers the chooser. The app
@@ -79,3 +79,20 @@ const line = await serial.waitFor(/your expected firmware log/i, 10000);
 `serial.waitFor(regex, timeoutMs)` resolves when a matching line appears on the
 ESP32 console (history is checked first), so you can assert that a UI action
 actually reached the device.
+
+## Wi-Fi bulk-transfer checks
+
+After identifying the USB device and its IP from that device's own serial boot banner:
+
+```bash
+# Generated sizes avoid needing a saved ledmap. Use a disposable/empty strip and clean up.
+node automation/layout-roundtrip.mjs 192.168.x.x --strip=1 --clear-after 8x8 48x22
+
+# Full image transfer + reboot. Exact DEVICE_INFO name is mandatory; unsigned is explicit.
+node automation/wifi-ota.mjs 192.168.x.x esp32/.pio/build/esp32-s3/firmware.bin \
+  --expect-name=ChromaBay_ED30 --unsigned
+```
+
+Neither script discovers or picks a network device. The host must come from the USB target's
+serial banner; `wifi-ota.mjs` additionally refuses to write unless `DEVICE_INFO.name` is the
+exact expected name.

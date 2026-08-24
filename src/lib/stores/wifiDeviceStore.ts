@@ -14,7 +14,7 @@ import { browser } from '$app/environment';
 import { WifiTransport } from '$lib/wifiTransport';
 import { registerTransport, unregisterTransport, wifiIdFor } from '$lib/transport';
 import { addConnectedDevice, connectedDevices } from './deviceStore';
-import { disconnectFromDevice, handleDeviceDisconnected } from '$lib/ble';
+import { disconnectFromDevice, handleDeviceDisconnected, initializeConnectedDevice } from '$lib/ble';
 
 export type KnownWifi = { name: string; host: string };
 const LS_KEY = 'chromabay.wifiDevices';
@@ -83,6 +83,7 @@ export async function connectWifi(name: string, host: string): Promise<void> {
     registerTransport(transport);
     // Exactly what the BLE connect path does. Everything downstream keys off this.
     addConnectedDevice({ deviceId: id, name, services: [], lastConnected: Date.now() });
+    await initializeConnectedDevice(id);
     setStatus(host, { state: 'idle' });
   } catch (e: any) {
     await transport.disconnect();

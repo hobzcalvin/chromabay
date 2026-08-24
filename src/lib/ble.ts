@@ -2,6 +2,7 @@ import { BleClient, numbersToDataView, dataViewToNumbers, dataViewToText, textTo
 import { Capacitor } from '@capacitor/core';
 // @ts-ignore - MessagePack types issue
 import * as msgpack from '@msgpack/msgpack';
+import { get } from 'svelte/store';
 const msgpackEncode = msgpack.encode;
 const msgpackDecode = msgpack.decode;
 import { serializeCurrentPattern } from './flowStore';
@@ -18,8 +19,9 @@ function isWeb(): boolean {
   return Capacitor.getPlatform() === 'web';
 }
 
-// Store connected devices and their GATT servers (internal BLE tracking)
-const connectedDevices = new Map<string, any>();
+// BLE-only GATT state. This is deliberately NOT the app's connected-device list: Wi-Fi
+// devices have no GATT server, but are still ordinary connected devices at the protocol layer.
+const bleConnections = new Map<string, any>();
 
 // Serialize discrete BLE request/response operations across ALL devices. iOS
 // CoreBluetooth (via the Capacitor plugin) drops or mis-routes operations that
@@ -56,8 +58,21 @@ function bleSerial<T>(op: () => Promise<T>): Promise<T> {
   return run;
 }
 
+// Reassembly protocols (patterns/layouts) span several characteristic writes. Serialize the
+// whole sequence per device so two UI actions cannot interleave chunks on a fast WebSocket.
+const bulkWriteChains = new Map<string, Promise<unknown>>();
+function serializeDeviceBulk<T>(deviceId: string, op: () => Promise<T>): Promise<T> {
+  const previous = bulkWriteChains.get(deviceId) ?? Promise.resolve();
+  const run = previous.then(op, op);
+  bulkWriteChains.set(deviceId, run.then(() => {}, () => {}));
+  return run;
+}
+
 // Import device store for UI state management
-import { removeConnectedDevice, addConnectedDevice, updateDeviceInfo } from './stores/deviceStore';
+import {
+  removeConnectedDevice, addConnectedDevice, updateDeviceInfo,
+  connectedDevices as connectedDeviceStore,
+} from './stores/deviceStore';
 
 // ChromaBay LED Service UUID - the only service we care about for general commands
 export const LED_SERVICE_UUID = 'a0be83e4-8dc9-47f0-ab40-b19721d20ed1';
@@ -232,7 +247,7 @@ export async function initBle(): Promise<void> {
     if (isWeb() && !unloadHandlerRegistered && typeof window !== 'undefined') {
       unloadHandlerRegistered = true;
       window.addEventListener('pagehide', () => {
-        for (const [id, info] of connectedDevices.entries()) {
+        for (const [id, info] of bleConnections.entries()) {
           noReconnect.add(id); // page is dying — don't let the disconnect event schedule a reconnect
           try { info?.gattServer?.disconnect?.(); } catch { /* already gone */ }
         }
@@ -379,7 +394,7 @@ const RECONNECT_MAX_ATTEMPTS = 12;                 // ~2 min of trying, then sto
 
 function scheduleReconnect(deviceId: string, attempt: number): void {
   if (noReconnect.has(deviceId)) return;            // user asked to disconnect
-  if (connectedDevices.has(deviceId)) return;       // already back
+  if (bleConnections.has(deviceId)) return;         // already back
   if (reconnectTimers.has(deviceId)) return;        // one already in flight
   if (!reconnectDevices.has(deviceId)) return;      // nothing to reconnect to
   if (attempt >= RECONNECT_MAX_ATTEMPTS) {
@@ -391,7 +406,7 @@ function scheduleReconnect(deviceId: string, attempt: number): void {
   console.log(`[reconnect] ${deviceId} attempt ${attempt + 1}/${RECONNECT_MAX_ATTEMPTS} in ${delay}ms`);
   const timer = setTimeout(async () => {
     reconnectTimers.delete(deviceId);
-    if (noReconnect.has(deviceId) || connectedDevices.has(deviceId)) return;
+    if (noReconnect.has(deviceId) || bleConnections.has(deviceId)) return;
     const device = reconnectDevices.get(deviceId);
     if (!device) return;
     try {
@@ -418,13 +433,13 @@ function cancelReconnect(deviceId: string): void {
 // disconnect / unload) suppresses auto-reconnect; any other drop schedules one.
 export function handleDeviceDisconnected(deviceId: string, intentional = false): void {
   console.log(`Device ${deviceId} disconnected — cleaning up${intentional ? ' (intentional)' : ''}`);
-  const info = connectedDevices.get(deviceId);
+  const info = bleConnections.get(deviceId);
   // Remove the web disconnect listener so it doesn't accumulate across reconnects
   // (the underlying BluetoothDevice object persists).
   if (info?.device && info.onDisconnect && typeof info.device.removeEventListener === 'function') {
     info.device.removeEventListener('gattserverdisconnected', info.onDisconnect);
   }
-  connectedDevices.delete(deviceId);
+  bleConnections.delete(deviceId);
   clearWebCharCache(deviceId); // stale GATT objects after a reconnect would write into nothing
   removeConnectedDevice(deviceId);
   // Critical: stop the timestamp-sync interval, otherwise it keeps writing to a
@@ -454,14 +469,14 @@ export async function connectToDevice(device: any): Promise<void> {
 
       // Replace any stale listener from a previous connect before adding a new
       // one, and keep a reference so it can be removed on disconnect.
-      const prev = connectedDevices.get(device.deviceId);
+      const prev = bleConnections.get(device.deviceId);
       if (prev?.onDisconnect) {
         device.webDevice.removeEventListener('gattserverdisconnected', prev.onDisconnect);
       }
       const onDisconnect = () => handleDeviceDisconnected(device.deviceId);
       device.webDevice.addEventListener('gattserverdisconnected', onDisconnect);
 
-      connectedDevices.set(device.deviceId, {
+      bleConnections.set(device.deviceId, {
         device: device.webDevice,
         gattServer: gattServer,
         services: null,
@@ -469,8 +484,6 @@ export async function connectToDevice(device: any): Promise<void> {
       });
       console.log('Connected to device via Web Bluetooth');
 
-      // Start timestamp synchronization for this device
-      startTimestampSync(device.deviceId);
     } else {
       // Pass an onDisconnect callback so native disconnects (out of range, OTA
       // reboot, power loss) are detected and cleaned up — previously they were
@@ -478,11 +491,9 @@ export async function connectToDevice(device: any): Promise<void> {
       await bleSerial(() => BleClient.connect(device.deviceId, (disconnectedId: string) => {
         handleDeviceDisconnected(disconnectedId);
       }));
-      connectedDevices.set(device.deviceId, { device: device }); // Store native device info
+      bleConnections.set(device.deviceId, { device: device }); // Store native device info
       console.log('Connected to device via Capacitor');
 
-      // Start timestamp synchronization for this device
-      startTimestampSync(device.deviceId);
     }
     
     // Add to device store for UI state management
@@ -494,15 +505,7 @@ export async function connectToDevice(device: any): Promise<void> {
       lastConnected: Date.now()
     });
     
-    // Sync current pattern to newly connected device
-    console.log('Syncing current pattern to newly connected device...');
-    try {
-      await syncPatternToAllDevices();
-      console.log('Initial pattern sync completed');
-    } catch (error) {
-      console.error('Failed to sync initial pattern to device:', error);
-      // Don't throw here - connection was successful, pattern sync can be retried
-    }
+    await initializeConnectedDevice(device.deviceId);
   } catch (error) {
     console.error('Error connecting to device:', error);
     throw error;
@@ -526,7 +529,7 @@ export async function disconnectFromDevice(deviceId: string): Promise<void> {
   cancelReconnect(deviceId);
   try {
     if (isWeb()) {
-      const deviceInfo = connectedDevices.get(deviceId);
+      const deviceInfo = bleConnections.get(deviceId);
       if (deviceInfo?.gattServer) {
         deviceInfo.gattServer.disconnect();
       }
@@ -548,13 +551,13 @@ export async function disconnectFromDevice(deviceId: string): Promise<void> {
 }
 
 export function isDeviceConnected(deviceId: string): boolean {
-  return connectedDevices.has(deviceId);
+  return get(connectedDeviceStore).has(deviceId);
 }
 
 export async function discoverServices(deviceId: string): Promise<any[]> {
   try {
     if (isWeb()) {
-      const deviceInfo = connectedDevices.get(deviceId);
+      const deviceInfo = bleConnections.get(deviceId);
       if (!deviceInfo?.gattServer) {
         throw new Error('Device not connected');
       }
@@ -604,7 +607,7 @@ async function webCharacteristic(deviceId: string, serviceUuid: string, characte
   let pending = webCharCache.get(key);
   if (!pending) {
     pending = (async () => {
-      const deviceInfo = connectedDevices.get(deviceId);
+      const deviceInfo = bleConnections.get(deviceId);
       if (!deviceInfo?.gattServer) throw new Error('Device not connected');
       const service = await deviceInfo.gattServer.getPrimaryService(serviceUuid);
       return service.getCharacteristic(characteristicUuid);
@@ -627,10 +630,14 @@ function bleTransportFor(deviceId: string): Transport {
   t = {
     id: deviceId,
     kind: 'ble',
-    get connected() { return connectedDevices.has(deviceId); },
+    get connected() { return bleConnections.has(deviceId); },
     // An ATT write has to fit the negotiated MTU; callers chunk to their own (smaller)
     // constants and this is the ceiling they must never exceed.
-    maxWriteLen: MAX_BLE_CHUNK_SIZE,
+    // Ordinary acknowledged writes near 500 B proved unreliable on real devices. 184 B
+    // (180 B body + a 4 B chunk header) fits comfortably across negotiated MTUs.
+    maxWriteLen: 184,
+    // OTA uses write-without-response plus characteristic ACKs, so it can use the full size.
+    maxStreamWriteLen: MAX_BLE_CHUNK_SIZE,
 
     read: (serviceUuid, characteristicUuid) => bleSerial(async () => {
       if (isWeb()) return (await webCharacteristic(deviceId, serviceUuid, characteristicUuid)).readValue();
@@ -764,11 +771,24 @@ export async function stopNotifications(deviceId: string, serviceUuid: string, c
 }
 
 export function getConnectedDevices(): string[] {
-  return Array.from(connectedDevices.keys());
+  return Array.from(get(connectedDeviceStore).keys());
 }
 
 export function getConnectedDeviceCount(): number {
-  return connectedDevices.size;
+  return get(connectedDeviceStore).size;
+}
+
+/** Start the link-independent session work after either BLE or Wi-Fi joins deviceStore. */
+export async function initializeConnectedDevice(deviceId: string): Promise<void> {
+  startTimestampSync(deviceId);
+  console.log(`Syncing current pattern after ${deviceId} connected...`);
+  try {
+    await syncPatternToAllDevices();
+    console.log('Initial pattern sync completed');
+  } catch (error) {
+    console.error('Failed to sync initial pattern to device:', error);
+    // The link is still valid; a later edit/tap retries the live sync.
+  }
 }
 
 // --- New OTA Functions ---
@@ -1169,15 +1189,20 @@ async function streamFirmwareOverBle(
     let offset = 0;
     let sentChunks = 0;
     const totalSize = firmwareBuffer.byteLength;
-    const totalChunks = Math.ceil(totalSize / MAX_BLE_CHUNK_SIZE);
+    const streamChunkSize = getTransport(deviceId).maxStreamWriteLen;
+    // The ESP32 WebSocket parser caps its inbound buffer at ~64 KiB. With Wi-Fi's 8 KiB
+    // writes, the old fixed window of eight could put just over that on the wire once frame
+    // headers were included. Keep the byte window below 60 KiB; BLE remains at eight.
+    const streamWindow = Math.max(1, Math.min(OTA_WINDOW, Math.floor((60 * 1024) / streamChunkSize)));
+    const totalChunks = Math.ceil(totalSize / streamChunkSize);
     progressCallback({ statusMessage: 'Sending firmware data...', progress: 0 });
 
     while (offset < totalSize) {
       // Wait until the window has room (bounded chunks awaiting ACK).
-      while (sentChunks - ackedChunks >= OTA_WINDOW) {
+      while (sentChunks - ackedChunks >= streamWindow) {
         await waitForAck(15000);
       }
-      const chunkEnd = Math.min(offset + MAX_BLE_CHUNK_SIZE, totalSize);
+      const chunkEnd = Math.min(offset + streamChunkSize, totalSize);
       await writeChunkNoWait(deviceId, firmwareBuffer.slice(offset, chunkEnd));
       offset = chunkEnd;
       sentChunks++;
@@ -1245,7 +1270,8 @@ async function streamFirmwareOverBle(
 export async function syncPatternToAllDevices(): Promise<void> {
   console.log('Syncing current pattern to all connected devices...');
   
-  if (connectedDevices.size === 0) {
+  const deviceIds = getConnectedDevices();
+  if (deviceIds.length === 0) {
     console.log('No devices connected, skipping pattern sync');
     return;
   }
@@ -1262,7 +1288,7 @@ export async function syncPatternToAllDevices(): Promise<void> {
     console.log(`Pattern serialized: ${msgpackData.byteLength} bytes`);
 
     // Send to all connected devices
-    const syncPromises = Array.from(connectedDevices.keys()).map(async (deviceId) => {
+    const syncPromises = deviceIds.map(async (deviceId) => {
       try {
         console.log(`Sending pattern to device ${deviceId}`);
         await sendPatternChunked(deviceId, msgpackData);
@@ -1323,17 +1349,19 @@ async function sendPatternChunked(deviceId: string, msgpackData: Uint8Array): Pr
   const total = msgpackData.byteLength;
   if (total === 0) return;
   const HEADER = 4;
-  const MAX_PAYLOAD = MAX_BLE_CHUNK_SIZE - HEADER; // keep each write under the MTU cap
-  for (let offset = 0; offset < total; offset += MAX_PAYLOAD) {
-    const payloadLen = Math.min(MAX_PAYLOAD, total - offset);
-    const frame = new Uint8Array(HEADER + payloadLen);
-    const dv = new DataView(frame.buffer);
-    dv.setUint16(0, total, true);  // totalLen LE
-    dv.setUint16(2, offset, true); // offset LE
-    frame.set(msgpackData.subarray(offset, offset + payloadLen), HEADER);
-    const view = new DataView(frame.buffer, 0, frame.byteLength);
-    await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_PATTERN_SYNC, view);
-  }
+  const MAX_PAYLOAD = getTransport(deviceId).maxWriteLen - HEADER;
+  await serializeDeviceBulk(deviceId, async () => {
+    for (let offset = 0; offset < total; offset += MAX_PAYLOAD) {
+      const payloadLen = Math.min(MAX_PAYLOAD, total - offset);
+      const frame = new Uint8Array(HEADER + payloadLen);
+      const dv = new DataView(frame.buffer);
+      dv.setUint16(0, total, true);  // totalLen LE
+      dv.setUint16(2, offset, true); // offset LE
+      frame.set(msgpackData.subarray(offset, offset + payloadLen), HEADER);
+      const view = new DataView(frame.buffer, 0, frame.byteLength);
+      await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_PATTERN_SYNC, view);
+    }
+  });
 }
 
 // === ON-DEVICE PATTERN LIBRARY MAINTENANCE ===
@@ -1357,13 +1385,14 @@ export async function deletePatternOnDevice(deviceId: string, name: string): Pro
 
 /** Best-effort clear on every connected device. */
 export async function clearLibraryOnAllDevices(): Promise<void> {
-  await Promise.allSettled(Array.from(connectedDevices.keys()).map((id) => clearDeviceLibrary(id)));
+  await Promise.allSettled(getConnectedDevices().map((id) => clearDeviceLibrary(id)));
 }
 
 /** Best-effort delete-by-name on every connected device (wired to in-app pattern deletes). */
 export async function deletePatternOnAllDevices(name: string): Promise<void> {
-  if (connectedDevices.size === 0) return;
-  await Promise.allSettled(Array.from(connectedDevices.keys()).map((id) => deletePatternOnDevice(id, name)));
+  const deviceIds = getConnectedDevices();
+  if (deviceIds.length === 0) return;
+  await Promise.allSettled(deviceIds.map((id) => deletePatternOnDevice(id, name)));
 }
 
 /**
@@ -1656,9 +1685,17 @@ export async function uploadStripLayout(
   const map = layout?.map ?? [];
   const clearing = !layout || W <= 0 || H <= 0 || map.length === 0;
   const count = clearing ? 0 : Math.min(map.length, W * H);
+  const total = 1 + 6 + count * 2;
+  if (total > 16384) {
+    const maxCells = Math.floor((16384 - 7) / 2);
+    throw new Error(
+      `Layout is ${total} bytes (${count} cells), but this firmware accepts at most ` +
+      `16,384 bytes (${maxCells} cells). Reduce the layout dimensions or gaps.`,
+    );
+  }
 
   // Logical payload the device reassembles: [u8 stripIndex][u16 W][u16 H][u16 count][count×i16].
-  const payload = new Uint8Array(1 + 6 + count * 2);
+  const payload = new Uint8Array(total);
   const dv = new DataView(payload.buffer);
   dv.setUint8(0, stripIndex & 0xff);
   dv.setUint16(1, clearing ? 0 : W, true);
@@ -1671,20 +1708,60 @@ export async function uploadStripLayout(
 
   // Chunk it: each frame is [u16 totalLen][u16 offset][bytes]. Writes are serialized via
   // bleSerial, so the device reassembles in order. Lifts the single-write size limit.
-  const total = payload.byteLength;
-  // Conservative chunk so each frame is a single ATT write across MTUs (long writes proved
-  // unreliable for ~500B here). 180B data + 4B header fits comfortably under common MTUs.
-  const CHUNK = 180;
-  for (let off = 0; off < total; off += CHUNK) {
-    const slice = payload.subarray(off, Math.min(off + CHUNK, total));
-    const frame = new Uint8Array(4 + slice.length);
-    const fdv = new DataView(frame.buffer);
-    fdv.setUint16(0, total, true);
-    fdv.setUint16(2, off, true);
-    frame.set(slice, 4);
-    await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_LAYOUT_SET,
-      new DataView(frame.buffer));
-  }
+  // The transport owns its safe write size: BLE stays at the proven 180 B body, while Wi-Fi
+  // uses an 8188 B body and turns a maximum layout from ~90 WebSocket messages into two.
+  const CHUNK = getTransport(deviceId).maxWriteLen - 4;
+  await serializeDeviceBulk(deviceId, async () => {
+    let statusResolve: ((code: number) => void) | null = null;
+    const statusPromise = new Promise<number>((resolve) => { statusResolve = resolve; });
+    let statusNotifications = false;
+    try {
+      // New firmware acknowledges only after LittleFS commit + live apply. Older firmware did
+      // not expose NOTIFY here; keep a timeout fallback so updating the app does not strand it.
+      try {
+        await startBinaryNotifications(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_LAYOUT_SET, (reply) => {
+          if (reply.byteLength >= 2 && reply.getUint8(1) === (stripIndex & 0xff)) {
+            statusResolve?.(reply.getUint8(0));
+            statusResolve = null;
+          }
+        });
+        statusNotifications = true;
+      } catch {
+        // Legacy characteristic was write-only.
+      }
+
+      for (let off = 0; off < total; off += CHUNK) {
+        const slice = payload.subarray(off, Math.min(off + CHUNK, total));
+        const frame = new Uint8Array(4 + slice.length);
+        const fdv = new DataView(frame.buffer);
+        fdv.setUint16(0, total, true);
+        fdv.setUint16(2, off, true);
+        frame.set(slice, 4);
+        await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_LAYOUT_SET,
+          new DataView(frame.buffer));
+      }
+
+      const status = statusNotifications
+        ? await Promise.race<number | null>([
+            statusPromise,
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500)),
+          ])
+        : null;
+      if (status != null && status !== 0) {
+        const reason = ['ok', 'unsupported size', 'out of memory', 'out-of-order chunk', 'flash write failed'][status]
+          ?? `device error ${status}`;
+        throw new Error(`Layout rejected: ${reason}`);
+      }
+      if (status == null) {
+        // Legacy fallback: its write resolves before the loop task commits the file.
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+    } finally {
+      if (statusNotifications) {
+        await stopNotifications(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_LAYOUT_SET).catch(() => {});
+      }
+    }
+  });
   console.log(`[Layout] strip ${stripIndex}: ${clearing ? 'cleared' : `${W}x${H}, ${count} cells`} sent (${total}B)`);
 }
 
@@ -1899,7 +1976,7 @@ function startTimestampSync(deviceId: string): void {
         // dropped (iOS often never fires the disconnect callback). Run the normal
         // disconnect cleanup so the UI leaves its stale "connected" state instead of
         // sitting in a zombie connection until the user manually reconnects.
-        if (fails >= SYNC_FAILURE_LIMIT && connectedDevices.has(deviceId)) {
+        if (fails >= SYNC_FAILURE_LIMIT && bleConnections.has(deviceId)) {
           console.warn(`Device ${deviceId} unresponsive after ${fails} syncs — treating as disconnected`);
           handleDeviceDisconnected(deviceId);
         }
