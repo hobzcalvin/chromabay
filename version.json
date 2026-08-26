@@ -1,7 +1,7 @@
 {
-  "version": "1.1.331",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.331.zip",
-  "buildDate": "2026-08-26T17:23:18Z",
-  "commitHash": "14db573a860b6ac21759bb274aafe6b95d673c37",
-  "commitMessage": "Give the render buffers back for the duration of an update"
+  "version": "1.1.332",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.332.zip",
+  "buildDate": "2026-08-26T18:53:19Z",
+  "commitHash": "7f0fa9d79e691a2072b095b4e40a248de27c6fda",
+  "commitMessage": "Dispatch a whole-message frame straight out of the read buffer"
 }
