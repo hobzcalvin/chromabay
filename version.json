@@ -1,7 +1,7 @@
 {
-  "version": "1.1.329",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.329.zip",
-  "buildDate": "2026-08-26T14:18:21Z",
-  "commitHash": "d2d4e8d8be598672fe326322100ca5e9725cac23",
-  "commitMessage": "Add a Bluetooth OTA path, for the device Wi-Fi cannot update"
+  "version": "1.1.330",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.330.zip",
+  "buildDate": "2026-08-26T16:51:05Z",
+  "commitHash": "eb458be729e80d665f1e0880ce7b450127c88615",
+  "commitMessage": "The OTA stall was a bad_alloc abort in the WebSocket reader"
 }
