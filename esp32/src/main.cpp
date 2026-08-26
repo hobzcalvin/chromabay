@@ -382,9 +382,11 @@ struct SignatureVerificationData {
 // lives as long as the OTA state around it cannot be leaked by an abort path.
 SignatureVerificationData ota_verify_data = {};
 
-// Set when an OTA ends without a verification (abort, or the unsigned finalize path) so
-// the parked task can wake, skip the work, and give its 16 KB stack back.
-volatile bool ota_verify_cancelled = false;
+// What a released verifier is being told to do. Carried in the task notification VALUE rather
+// than a shared global: a task standing down and a task freshly started for the next update
+// must not be able to read each other's intent.
+static const uint32_t OTA_VERIFY_RUN        = 1;
+static const uint32_t OTA_VERIFY_STAND_DOWN = 2;
 
 // Timestamp synchronization variables
 unsigned long syncedTimestampMs = 0;    // The synchronized timestamp from mobile app
@@ -542,9 +544,10 @@ void signatureVerificationTask(void* parameter) {
     (void)parameter;
 
     // Released by otaVerifyTaskRelease(), either to do the work or to stand down.
-    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    uint32_t order = OTA_VERIFY_STAND_DOWN;
+    xTaskNotifyWait(0, UINT32_MAX, &order, portMAX_DELAY);
 
-    if (!ota_verify_cancelled) {
+    if (order == OTA_VERIFY_RUN) {
         Serial.println("OTA: Starting signature verification on dedicated task...");
 
         // Call the PSA signature verification with large stack
@@ -564,11 +567,15 @@ void signatureVerificationTask(void* parameter) {
         Serial.println("OTA: signature verification task standing down (not needed).");
     }
 
-    // Cleared before the delete so a following OTA sees the slot free. FreeRTOS reclaims
-    // the stack itself once the idle task runs, which is why nothing is freed by hand.
-    signature_task_handle = nullptr;
+    // The handle was already claimed by whoever released us, so there is nothing to clear
+    // here — and nothing that can still be holding a pointer to this task. FreeRTOS reclaims
+    // the stack once the idle task runs, which is why nothing is freed by hand.
     vTaskDelete(nullptr);
 }
+
+static void otaVerifyTaskRelease(bool cancelled);  // defined below; stands a parked task down
+
+static void otaVerifyTaskRelease(bool cancelled);  // defined below; stands a parked task down
 
 // What we are willing to give the verifier, best first.
 //
@@ -586,15 +593,10 @@ static const uint32_t OTA_VERIFY_STACKS[] = { 12288, 8192, 6144 };
 // fit, which the caller reports BEFORE a megabyte is transferred rather than after. Any
 // leftover task from a previous aborted OTA is given a moment to finish dying.
 static bool otaVerifyTaskStart() {
-    for (int i = 0; i < 20 && signature_task_handle != nullptr; i++) {
-        delay(5);
-    }
-    if (signature_task_handle != nullptr) {
-        Serial.println("OTA Error: previous signature verification task is still running.");
-        return false;
-    }
+    // A verifier still parked from an earlier update should not exist by the time we get
+    // here, but stand it down rather than strand it if it does.
+    if (signature_task_handle != nullptr) otaVerifyTaskRelease(true);
 
-    ota_verify_cancelled = false;
     signature_verification_complete = false;
     signature_verification_result = false;
 
@@ -619,12 +621,20 @@ static bool otaVerifyTaskStart() {
 }
 
 // Wake the parked task: cancelled=false to verify, cancelled=true to have it exit and
-// return its stack. Safe to call when no task is parked.
+// return its stack. Safe to call when no task is parked, and safe to call repeatedly.
+//
+// The handle is CLAIMED before the notify, and that is the whole point rather than tidiness.
+// The Wi-Fi lost-link cleanup runs on every tick that finds no client, and the verifier is a
+// low-priority task that may not be scheduled for many milliseconds. A release that merely
+// READ the handle therefore re-fired on every one of those ticks — and the moment the task
+// reached vTaskDelete, the next notify wrote into a freed TCB. That is heap corruption on the
+// loop task, and it is how a device went dark after a burst of abandoned updates.
 static void otaVerifyTaskRelease(bool cancelled) {
     TaskHandle_t handle = signature_task_handle;
     if (handle == nullptr) return;
-    ota_verify_cancelled = cancelled;
-    xTaskNotifyGive(handle);
+    signature_task_handle = nullptr;  // claimed: exactly one release can ever reach this task
+    xTaskNotify(handle, cancelled ? OTA_VERIFY_STAND_DOWN : OTA_VERIFY_RUN,
+                eSetValueWithOverwrite);
 }
 
 // The link carrying an update went away.
@@ -636,7 +646,9 @@ static void otaVerifyTaskRelease(bool cancelled) {
 // true beside a handle about to be zeroed, so loop() would hand esp_ota_end() a dead handle.
 // Nothing reset any of it short of a reboot.
 //
-// Idempotent, because the Wi-Fi caller runs on every tick that finds no client.
+// Genuinely idempotent, which matters because the Wi-Fi caller runs on EVERY tick that finds
+// no client: the first call clears every flag it tests and otaVerifyTaskRelease() claims the
+// task handle, so the guard below is true forever after until another update starts.
 static void abortOtaForLostLink(const char *why) {
     if (!ota_in_progress && signature_task_handle == nullptr && !ota_finalizing) return;
     Serial.printf("%s during OTA. Aborting OTA.\n", why);
