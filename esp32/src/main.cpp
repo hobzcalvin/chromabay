@@ -606,6 +606,34 @@ static void otaVerifyTaskRelease(bool cancelled) {
     xTaskNotifyGive(handle);
 }
 
+// The link carrying an update went away.
+//
+// One function because there is more than one way to lose a link and they must all clean up
+// identically. Bluetooth did this inline and Wi-Fi did not do it at all, which is the bug: a
+// Wi-Fi client that vanished mid-update left `ota_in_progress` set, the OTA handle open, a
+// 16 KB verifier parked forever, and — if it vanished during the finalize — `ota_finalizing`
+// true beside a handle about to be zeroed, so loop() would hand esp_ota_end() a dead handle.
+// Nothing reset any of it short of a reboot.
+//
+// Idempotent, because the Wi-Fi caller runs on every tick that finds no client.
+static void abortOtaForLostLink(const char *why) {
+    if (!ota_in_progress && signature_task_handle == nullptr && !ota_finalizing) return;
+    Serial.printf("%s during OTA. Aborting OTA.\n", why);
+    SentryReporting::logWarn("OTA abort: %s", why);
+    if (ota_handle != 0) esp_ota_abort(ota_handle);
+    otaVerifyTaskRelease(true);
+    SentryReporting::otaFinish(false);
+    // ota_finalizing FIRST: it is the one flag that, left set beside a zeroed handle, turns a
+    // lost link into esp_ota_end(0) on the loop task.
+    ota_finalizing = false;
+    ota_in_progress = false;
+    ota_handle = 0;
+    ota_received_size = 0;
+    signature_received = false;
+    ota_skip_signature = false;
+    Endpoints::notify(CHARACTERISTIC_UUID_OTA_STATUS, "OTA_ERR_DISCONNECTED");
+}
+
 
 // Function to update the Device Info characteristic
 // This should be called periodically or when relevant info changes (e.g., heap on connect)
@@ -779,19 +807,7 @@ class ServerCallbacks: public NimBLEServerCallbacks {
         Serial.println("BLE Client Disconnected");
         logPatternState("disconnect");
         // If OTA was in progress and client disconnects, abort it to free resources
-        if (ota_in_progress) {
-            Serial.println("Client disconnected during OTA. Aborting OTA.");
-            SentryReporting::otaFinish(false);
-            if (ota_handle != 0) { 
-                 esp_ota_abort(ota_handle); 
-            }
-            otaVerifyTaskRelease(true);
-            ota_in_progress = false;
-            ota_handle = 0;
-            signature_received = false; // Reset signature status
-            ota_skip_signature = false;
-                Endpoints::notify(CHARACTERISTIC_UUID_OTA_STATUS, "OTA_ERR_DISCONNECTED");
-        }
+        abortOtaForLostLink("BLE client disconnected");
     }
 };
 
@@ -2458,6 +2474,18 @@ namespace WifiLink {
     static std::vector<uint8_t> msg;           // reassembled WS message payload (across fragments)
     static const size_t MAX_FRAME = 64 * 1024;
 
+    // clear() empties a vector but KEEPS its capacity, and these two grow to tens of KB
+    // under an update's 8 KiB writes. That retained capacity never came back, which on a
+    // classic ESP32 with ~75 KB free is most of the heap — it is why a failed update left
+    // the device ~32 KB poorer than before it started, and why the RETRY then had nowhere
+    // to put the 16 KB verifier and died with OTA_ERR_TASK_CREATE. swap-with-empty is the
+    // only way to actually hand the pages back. Called when the link is idle or restarting,
+    // never mid-frame: a live transfer regrows this once and keeps it for its duration.
+    static void releaseWsBuffers() {
+        if (rx.capacity()) std::vector<uint8_t>().swap(rx);
+        if (msg.capacity()) std::vector<uint8_t>().swap(msg);
+    }
+
     // Send a WS binary frame (server→client: unmasked, opcode 0x2).
     static void wsSendBinary(const uint8_t* data, size_t len) {
         if (!client || !client.connected()) return;
@@ -2540,7 +2568,7 @@ namespace WifiLink {
             else if (len == 127) { if (rx.size() - pos < 10) break; len = 0; for (int i = 0; i < 8; i++) len = (len << 8) | rx[hp+i]; hp += 8; }
             uint8_t mask[4] = {0,0,0,0};
             if (masked) { if (rx.size() < hp + 4) break; for (int i = 0; i < 4; i++) mask[i] = rx[hp+i]; hp += 4; }
-            if (len > MAX_FRAME) { client.stop(); rx.clear(); msg.clear(); return; }
+            if (len > MAX_FRAME) { client.stop(); releaseWsBuffers(); return; }
             if (rx.size() - hp < len) break; // wait for full payload
             if (op == 0x8) { client.stop(); return; } // close
             if (op == 0x9) { // ping → pong (echo payload, unmasked)
@@ -2632,13 +2660,15 @@ namespace WifiLink {
             WiFiClient nc = server.available();
             if (nc) {
                 if (client && client.connected()) { nc.stop(); } // one client at a time
-                else { client = nc; client.setNoDelay(true); rx.clear(); msg.clear(); wsReady = false;
+                else { client = nc; client.setNoDelay(true); releaseWsBuffers(); wsReady = false;
                        SentryReporting::setWifiConnected(false);  // not until the handshake
                        Serial.printf("[WS] TCP client %s\n", client.remoteIP().toString().c_str()); }
             }
         }
         if (!client || !client.connected()) {
             if (deviceConnected && gWifiMode) { deviceConnected = false; wsReady = false; }
+            abortOtaForLostLink("Wi-Fi client disconnected");
+            releaseWsBuffers();
             SentryReporting::setWifiConnected(false);
             return;
         }
@@ -2647,7 +2677,11 @@ namespace WifiLink {
             uint8_t b[512]; int n = client.read(b, sizeof(b));
             if (n <= 0) break;
             rx.insert(rx.end(), b, b + n);
-            if (rx.size() > MAX_FRAME + 64) { client.stop(); rx.clear(); msg.clear(); return; }
+            if (rx.size() > MAX_FRAME + 64) {
+                client.stop(); releaseWsBuffers();
+                abortOtaForLostLink("Wi-Fi frame overrun");
+                return;
+            }
             av = client.available();
         }
         if (!wsReady) doHandshake();
