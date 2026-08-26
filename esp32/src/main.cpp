@@ -351,7 +351,9 @@ bool signature_received = false;
 
 // Signature verification task variables.
 // volatile: written by the verification task, read by loop() on the Arduino task.
-TaskHandle_t signature_task_handle = nullptr;
+// volatile too: the task clears this itself just before deleting, and the Arduino/BLE
+// tasks read it to decide whether a verifier is parked.
+volatile TaskHandle_t signature_task_handle = nullptr;
 volatile bool signature_verification_complete = false;
 volatile bool signature_verification_result = false;
 
@@ -373,6 +375,15 @@ struct SignatureVerificationData {
     const esp_partition_t* partition;
     size_t firmware_size;
 };
+
+// Inputs for the parked verifier task. A plain global rather than a malloc handed to
+// xTaskCreate: the task now outlives the call that fills this in, and one struct that
+// lives as long as the OTA state around it cannot be leaked by an abort path.
+SignatureVerificationData ota_verify_data = {};
+
+// Set when an OTA ends without a verification (abort, or the unsigned finalize path) so
+// the parked task can wake, skip the work, and give its 16 KB stack back.
+volatile bool ota_verify_cancelled = false;
 
 // Timestamp synchronization variables
 unsigned long syncedTimestampMs = 0;    // The synchronized timestamp from mobile app
@@ -519,25 +530,80 @@ bool verifyFirmwareSignature(const uint8_t* signature, size_t sigLen, const esp_
     return verification_result;
 }
 
-// Signature verification task (runs on separate thread with large stack)
+// Signature verification task (runs on separate thread with large stack).
+//
+// Created at the START of an OTA and parked here until the finalize wakes it. It used to
+// be created at the finalize instead, which is the worst possible moment: 16 KB is the
+// largest single allocation an update makes, and the heap is at its thinnest once the
+// transfer's in-flight buffers have been through it. A real update failed exactly there —
+// all 1.4 MB pushed, then OTA_ERR_TASK_CREATE. See otaVerifyTaskStart().
 void signatureVerificationTask(void* parameter) {
-    SignatureVerificationData* data = (SignatureVerificationData*)parameter;
-    
-    Serial.println("OTA: Starting signature verification on dedicated task...");
-    
-    // Call the PSA signature verification with large stack
-    signature_verification_result = verifyFirmwareSignature(
-        data->signature, 
-        FIRMWARE_SIGNATURE_LENGTH, 
-        data->partition, 
-        data->firmware_size
-    );
-    
-    signature_verification_complete = true;
-    
-    // Clean up and delete this task
-    free(data);
+    (void)parameter;
+
+    // Released by otaVerifyTaskRelease(), either to do the work or to stand down.
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+    if (!ota_verify_cancelled) {
+        Serial.println("OTA: Starting signature verification on dedicated task...");
+
+        // Call the PSA signature verification with large stack
+        signature_verification_result = verifyFirmwareSignature(
+            ota_verify_data.signature,
+            FIRMWARE_SIGNATURE_LENGTH,
+            ota_verify_data.partition,
+            ota_verify_data.firmware_size
+        );
+
+        signature_verification_complete = true;
+    } else {
+        Serial.println("OTA: signature verification task standing down (not needed).");
+    }
+
+    // Cleared before the delete so a following OTA sees the slot free. FreeRTOS reclaims
+    // the stack itself once the idle task runs, which is why nothing is freed by hand.
+    signature_task_handle = nullptr;
     vTaskDelete(nullptr);
+}
+
+// Reserve the verifier task (and its 16 KB stack) up front. Returns false if the heap
+// cannot spare it, which the caller reports BEFORE a megabyte is transferred rather than
+// after. Any leftover task from a previous aborted OTA is given a moment to finish dying.
+static bool otaVerifyTaskStart() {
+    for (int i = 0; i < 20 && signature_task_handle != nullptr; i++) {
+        delay(5);
+    }
+    if (signature_task_handle != nullptr) {
+        Serial.println("OTA Error: previous signature verification task is still running.");
+        return false;
+    }
+
+    ota_verify_cancelled = false;
+    signature_verification_complete = false;
+    signature_verification_result = false;
+
+    TaskHandle_t handle = nullptr;
+    BaseType_t created = xTaskCreate(
+        signatureVerificationTask,
+        "sig_verify",
+        16384,  // 16KB stack size (much larger than BLE callback stack)
+        nullptr,
+        1,      // Priority
+        &handle
+    );
+    if (created != pdPASS) {
+        return false;
+    }
+    signature_task_handle = handle;
+    return true;
+}
+
+// Wake the parked task: cancelled=false to verify, cancelled=true to have it exit and
+// return its stack. Safe to call when no task is parked.
+static void otaVerifyTaskRelease(bool cancelled) {
+    TaskHandle_t handle = signature_task_handle;
+    if (handle == nullptr) return;
+    ota_verify_cancelled = cancelled;
+    xTaskNotifyGive(handle);
 }
 
 
@@ -719,6 +785,7 @@ class ServerCallbacks: public NimBLEServerCallbacks {
             if (ota_handle != 0) { 
                  esp_ota_abort(ota_handle); 
             }
+            otaVerifyTaskRelease(true);
             ota_in_progress = false;
             ota_handle = 0;
             signature_received = false; // Reset signature status
@@ -783,6 +850,8 @@ static void onOtaControlWrite(const uint8_t* data, size_t len, Endpoints::Link& 
                     Serial.println("OTA Error: END_OTA received but no OTA process was active or handle invalid.");
                         Endpoints::notify(CHARACTERISTIC_UUID_OTA_STATUS, "OTA_ERR_NO_ACTIVE_OTA");
                     signature_received = false; 
+                    otaVerifyTaskRelease(true);
+                    SentryReporting::otaFinish(false);
                     return;
                 }
 
@@ -790,6 +859,8 @@ static void onOtaControlWrite(const uint8_t* data, size_t len, Endpoints::Link& 
                     Serial.println("OTA Error: END_OTA received but no signature was provided.");
                         Endpoints::notify(CHARACTERISTIC_UUID_OTA_STATUS, "OTA_ERR_NO_SIGNATURE");
                     esp_ota_abort(ota_handle);
+                    otaVerifyTaskRelease(true);
+                    SentryReporting::otaFinish(false);
                     ota_in_progress = false;
                     ota_handle = 0;
                     ota_received_size = 0;
@@ -799,50 +870,31 @@ static void onOtaControlWrite(const uint8_t* data, size_t len, Endpoints::Link& 
 
                 // Real firmware signature verification - BEFORE esp_ota_end()
                 Serial.println("OTA: Verifying firmware signature...");
-                
-                // Create signature verification data structure
-                SignatureVerificationData* verif_data = (SignatureVerificationData*)malloc(sizeof(SignatureVerificationData));
-                if (!verif_data) {
-                    Serial.println("OTA Error: Failed to allocate memory for signature verification!");
-                        Endpoints::notify(CHARACTERISTIC_UUID_OTA_STATUS, "OTA_ERR_MEMORY");
+
+                // The task was reserved at OTA start, back when the heap could still spare
+                // 16 KB; all that is left to do here is hand it the inputs and wake it.
+                if (signature_task_handle == nullptr) {
+                    Serial.println("OTA Error: no signature verification task was reserved!");
+                        Endpoints::notify(CHARACTERISTIC_UUID_OTA_STATUS, "OTA_ERR_TASK_CREATE");
                     esp_ota_abort(ota_handle);
+                    SentryReporting::otaFinish(false);
                     ota_in_progress = false;
                     ota_handle = 0;
                     ota_received_size = 0;
                     signature_received = false;
                     return;
                 }
-                
+
                 // Copy verification data
-                memcpy(verif_data->signature, received_signature, FIRMWARE_SIGNATURE_LENGTH);
-                verif_data->partition = update_partition;
-                verif_data->firmware_size = ota_received_size;
-                
+                memcpy(ota_verify_data.signature, received_signature, FIRMWARE_SIGNATURE_LENGTH);
+                ota_verify_data.partition = update_partition;
+                ota_verify_data.firmware_size = ota_received_size;
+
                 // Reset verification status
                 signature_verification_complete = false;
                 signature_verification_result = false;
-                
-                // Create signature verification task with large stack (16KB)
-                BaseType_t task_created = xTaskCreate(
-                    signatureVerificationTask,
-                    "sig_verify",
-                    16384,  // 16KB stack size (much larger than BLE callback stack)
-                    verif_data,
-                    1,      // Priority
-                    &signature_task_handle
-                );
-                
-                if (task_created != pdPASS) {
-                    Serial.println("OTA Error: Failed to create signature verification task!");
-                    free(verif_data);
-                        Endpoints::notify(CHARACTERISTIC_UUID_OTA_STATUS, "OTA_ERR_TASK_CREATE");
-                    esp_ota_abort(ota_handle);
-                    ota_in_progress = false;
-                    ota_handle = 0;
-                    ota_received_size = 0;
-                    signature_received = false;
-                    return;
-                }
+
+                otaVerifyTaskRelease(false);
                 
                 // Signature verification runs on its own task. Do NOT block the
                 // BLE host task waiting for it: spinning here for up to 30s
@@ -868,11 +920,17 @@ static void onOtaControlWrite(const uint8_t* data, size_t len, Endpoints::Link& 
                         Endpoints::notify(CHARACTERISTIC_UUID_OTA_STATUS, "OTA_ERR_NO_ACTIVE_OTA");
                     signature_received = false;
                     ota_skip_signature = false;
+                    otaVerifyTaskRelease(true);
+                    SentryReporting::otaFinish(false);
                     return;
                 }
 
                 Serial.println("OTA: END_OTA_UNSIGNED received — finalizing without signature verification.");
                     Endpoints::notify(CHARACTERISTIC_UUID_OTA_STATUS, "OTA_UNSIGNED_ACCEPTED");
+                // Nothing to verify — let the parked task exit so esp_ota_end() runs with
+                // its 16 KB back rather than against it.
+                otaVerifyTaskRelease(true);
+
                 // Defer the finalize to loop() (same as END_OTA) but flagged to skip
                 // signature verification — see finalizeOtaIfReady().
                 ota_skip_signature = true;
@@ -886,6 +944,8 @@ static void onOtaControlWrite(const uint8_t* data, size_t len, Endpoints::Link& 
                     if (ota_handle != 0) {
                         esp_ota_abort(ota_handle); 
                     }
+                    otaVerifyTaskRelease(true);
+                    SentryReporting::otaFinish(false);
                     ota_in_progress = false;
                     ota_handle = 0;
                     ota_received_size = 0;
@@ -929,6 +989,21 @@ static void onOtaDataWrite(const uint8_t* data, size_t len, Endpoints::Link& lin
             Serial.printf("OTA: Writing to partition subtype %d at offset 0x%x\n",
                           update_partition->subtype, update_partition->address);
 
+            // Reserve the 16 KB verification task NOW, before a single byte is accepted.
+            // It is the largest allocation an update makes, and it used to be made at the
+            // finalize — by which point the transfer's in-flight buffers have ground the
+            // heap down and there may be nothing like 16 KB left. An update really did die
+            // that way, at 100 %, with OTA_ERR_TASK_CREATE after pushing all 1.4 MB. Doing
+            // it here means a device too short on memory to finish says so in the first
+            // second, and a device that starts an update can always finish one.
+            if (!otaVerifyTaskStart()) {
+                Serial.println("OTA Error: not enough memory to reserve signature verification!");
+                SentryReporting::logError("OTA begin refused: no heap for sig_verify (free %u)",
+                                          (unsigned)ESP.getFreeHeap());
+                Endpoints::notify(CHARACTERISTIC_UUID_OTA_STATUS, "OTA_ERR_MEMORY");
+                return;
+            }
+
             // Ask for a link that can survive the transfer, BEFORE touching flash. The
             // previous request (6, 12, 0, 400) asked for a 7.5 ms interval, which violates
             // Apple's rules twice over — interval min must be >= 15 ms, and max must be at
@@ -960,6 +1035,8 @@ static void onOtaDataWrite(const uint8_t* data, size_t len, Endpoints::Link& lin
                 SentryReporting::logError("OTA begin failed: %s", esp_err_to_name(err));
                 String errorMsg = "OTA_ERR_BEGIN_FAILED:" + String(esp_err_to_name(err));
                 Endpoints::notify(CHARACTERISTIC_UUID_OTA_STATUS, errorMsg);
+                otaVerifyTaskRelease(true);
+                SentryReporting::otaFinish(false);
                 ota_handle = 0; 
                 return;
             }
@@ -994,6 +1071,8 @@ static void onOtaDataWrite(const uint8_t* data, size_t len, Endpoints::Link& lin
             String errorMsg = "OTA_ERR_WRITE:" + String(esp_err_to_name(err));
             Endpoints::notify(CHARACTERISTIC_UUID_OTA_STATUS, errorMsg);
             esp_ota_abort(ota_handle); 
+            otaVerifyTaskRelease(true);
+            SentryReporting::otaFinish(false);
             ota_in_progress = false;
             ota_handle = 0;
             signature_received = false;

@@ -1190,10 +1190,16 @@ async function streamFirmwareOverBle(
     let sentChunks = 0;
     const totalSize = firmwareBuffer.byteLength;
     const streamChunkSize = getTransport(deviceId).maxStreamWriteLen;
-    // The ESP32 WebSocket parser caps its inbound buffer at ~64 KiB. With Wi-Fi's 8 KiB
-    // writes, the old fixed window of eight could put just over that on the wire once frame
-    // headers were included. Keep the byte window below 60 KiB; BLE remains at eight.
-    const streamWindow = Math.max(1, Math.min(OTA_WINDOW, Math.floor((60 * 1024) / streamChunkSize)));
+    // The binding constraint is the device's HEAP, not the WebSocket parser's ~64 KiB
+    // inbound buffer. A classic ESP32 running a real installation has ~75 KB free, and
+    // every byte in flight is a byte of it: a 60 KiB window left so little behind that the
+    // update transferred all 1.4 MB and then died at the finalize, unable to allocate the
+    // 16 KB signature-verification task (OTA_ERR_TASK_CREATE). Firmware now reserves that
+    // task up front, but keeping the window small is the other half — it leaves the device
+    // room to render, receive and write while the transfer runs. 24 KiB is three of Wi-Fi's
+    // 8 KiB writes, still ~3x fewer round-trips than stop-and-wait; BLE (500 B) stays at eight.
+    const OTA_MAX_IN_FLIGHT_BYTES = 24 * 1024;
+    const streamWindow = Math.max(1, Math.min(OTA_WINDOW, Math.floor(OTA_MAX_IN_FLIGHT_BYTES / streamChunkSize)));
     const totalChunks = Math.ceil(totalSize / streamChunkSize);
     progressCallback({ statusMessage: 'Sending firmware data...', progress: 0 });
 
