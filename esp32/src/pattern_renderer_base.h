@@ -92,6 +92,19 @@ public:
     
     // Configuration
     void updateMatrixConfig(); // Call when LED config changes
+
+    // Render buffers, around a firmware update.
+    //
+    // These are the biggest display-proportional allocation in the firmware — NUM_BUFFERS
+    // full-grid CRGB buffers, so 4 * width * height * 3 bytes — and they are large CONTIGUOUS
+    // blocks, which is the currency an update actually needs. Rendering is already suspended
+    // for the duration of an update, so holding them through one buys nothing and costs
+    // exactly the memory the update is short of. The bigger the installation, the more this
+    // frees, which is the right way round: big displays are the ones that struggle to update.
+    void releaseBuffers();          // give the grid buffers back (rendering must be suspended)
+    void reacquireBuffers();        // take them again afterwards
+    bool buffersReady() const { return buffersAllocated; }
+    uint32_t bufferBytes() const;   // what releaseBuffers() would return
     
     // Timestamp synchronization
     void setSynchronizedTime(unsigned long syncTimestamp, unsigned long localTime);

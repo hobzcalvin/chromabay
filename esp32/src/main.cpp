@@ -1096,6 +1096,23 @@ static void onOtaDataWrite(const uint8_t* data, size_t len, Endpoints::Link& lin
             }
             ota_in_progress = true;
 
+            // Hand back the render buffers for the duration of the update. Rendering is
+            // already suspended (ota_in_progress gates it in loop()), so these are pure dead
+            // weight from here until the reboot — and they are the largest contiguous
+            // allocation the firmware holds, which is exactly the currency an update is short
+            // of on a big installation. loop() takes them back if the update fails.
+            if (patternRenderer) {
+                const uint32_t freed = patternRenderer->bufferBytes();
+                if (freed) {
+                    patternRenderer->releaseBuffers();
+                    Serial.printf("OTA: released %u bytes of render buffers "
+                                  "(free %u, largest block %u)\n",
+                                  (unsigned)freed, (unsigned)ESP.getFreeHeap(),
+                                  (unsigned)heap_caps_get_largest_free_block(
+                                      MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+                }
+            }
+
             // Turn off LEDs during OTA to save power and avoid interference
             if (ledMgr.getNumStrips() > 0 && ledMgr.getStrip(0)) {
                 for(int i = 0; i < ledMgr.getStrip(0)->getLength(); i++) { 
@@ -3420,6 +3437,16 @@ void loop() {
 
     // WiFi/TCP transport: accept + read + dispatch framed messages (no-op in BLE mode).
 #if CHROMABAY_WIFI
+    // Take the render buffers back once an update is no longer in flight. Done here rather
+    // than on each abort path because there are many ways for an update to end and only one
+    // of them is tidy; a single condition cannot be forgotten by a future one. (The success
+    // path never reaches this — it reboots.)
+    if (!ota_in_progress && !ota_finalizing && patternRenderer && !patternRenderer->buffersReady()) {
+        patternRenderer->reacquireBuffers();
+        Serial.printf("OTA over: render buffers reacquired (%s)\n",
+                      patternRenderer->buffersReady() ? "ok" : "FAILED — dark until reboot");
+    }
+
     if (gWifiMode) { WifiLink::tick(); RtStream::tick(); }
 #endif
 

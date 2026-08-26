@@ -94,6 +94,20 @@ void PatternRendererBase::allocateBuffers() {
     buffersAllocated = true;
 }
 
+uint32_t PatternRendererBase::bufferBytes() const {
+    return buffersAllocated ? (uint32_t)NUM_BUFFERS * getTotalPixels() * (uint32_t)sizeof(CRGB) : 0;
+}
+
+void PatternRendererBase::releaseBuffers() {
+    if (!buffersAllocated) return;
+    deallocateBuffers();
+}
+
+void PatternRendererBase::reacquireBuffers() {
+    if (buffersAllocated) return;
+    allocateBuffers();
+}
+
 void PatternRendererBase::deallocateBuffers() {
     if (buffersAllocated && buffers) {
         for (int i = 0; i < NUM_BUFFERS; i++) {
