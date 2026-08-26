@@ -1219,7 +1219,11 @@ async function streamFirmwareOverBle(
     // task up front, but keeping the window small is the other half — it leaves the device
     // room to render, receive and write while the transfer runs. 24 KiB is three of Wi-Fi's
     // 8 KiB writes, still ~3x fewer round-trips than stop-and-wait; BLE (500 B) stays at eight.
-    const OTA_MAX_IN_FLIGHT_BYTES = 24 * 1024;
+    // 8 KiB. Measured on a classic ESP32 ballasted to ~64 KB free: 4 KiB writes three deep
+    // failed every time and two deep succeeded every time, because the socket buffer has to
+    // hold whatever is in flight and mid-update the largest contiguous block is only ~8 KB.
+    // Costs about 6 s on a 1.4 MB image and buys updates that finish on the small chip.
+    const OTA_MAX_IN_FLIGHT_BYTES = 8 * 1024;
     const streamWindow = Math.max(1, Math.min(OTA_WINDOW, Math.floor(OTA_MAX_IN_FLIGHT_BYTES / streamChunkSize)));
     const totalChunks = Math.ceil(totalSize / streamChunkSize);
     progressCallback({ statusMessage: 'Sending firmware data...', progress: 0 });

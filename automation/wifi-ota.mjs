@@ -38,11 +38,12 @@ const CH = { DEVICE_INFO: 0xe7, OTA_CONTROL: 0xe8, OTA_DATA: 0xe9, OTA_STATUS: 0
 //     all, while every 4 KiB run at least reached OTA_STARTED_READY. The evidence is thin and
 //     the mechanism is unidentified (MAX_FRAME is 64 KiB, so it is not that); an S3 takes
 //     8 KiB happily. Treat this as a hedge, not a diagnosis.
-//   - three in flight because the device's HEAP is what a deep window eats, not the
-//     firmware's frame cap. A seven-deep window starved a finalize outright.
+//   - two in flight because whatever is in flight has to sit in the device's socket buffer,
+//     and mid-update the largest contiguous block on a tight classic ESP32 is only ~8 KB.
+//     Measured at ~64 KB free: three deep failed every time, two deep succeeded every time.
 // Keep in step with maxStreamWriteLen and OTA_MAX_IN_FLIGHT_BYTES in the app.
 const CHUNK = Number(process.env.CHUNK ?? 4096);
-const WINDOW = Number(process.env.WINDOW ?? 3);
+const WINDOW = Number(process.env.WINDOW ?? 2);
 
 // A classic ESP32 intermittently ignores the opening chunk of an update: no ACK, sometimes not
 // even a status, while the device stays up and answers pings throughout. Measured on one real

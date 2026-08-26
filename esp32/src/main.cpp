@@ -2594,6 +2594,38 @@ namespace WifiLink {
         Serial.printf("[WS] handshake OK: %s\n", client.remoteIP().toString().c_str());
     }
 
+    // Make room for `extra` more bytes, or say no.
+    //
+    // This is the fix for what looked for a long time like an "OTA stall". Growing `msg` one
+    // byte at a time made an 8 KiB frame reallocate about thirteen times, and at the last
+    // doubling it held the old buffer AND the new one at once. On a memory-tight classic
+    // ESP32 that allocation fails — and a failed `operator new` here does not return null, it
+    // throws std::bad_alloc, which nothing catches, so the device calls abort() mid-frame.
+    // It never hung: it died and rebooted, and the sender saw an update that simply never
+    // answered. Reproduced 4/4 by ballasting a roomy devkit down to ~64 KB free.
+    //
+    // So: reserve once, exactly, and refuse a frame we cannot hold rather than terminating
+    // over it. Never take more than half the largest contiguous block — the rest of the
+    // firmware still has to run, and a WebSocket frame is not worth the whole heap.
+    static bool ensureRoom(std::vector<uint8_t> &v, size_t extra) {
+        const size_t want = v.size() + extra;
+        if (want <= v.capacity()) return true;
+        // Leave a fixed slice of the largest block rather than a fraction of it. Halving was
+        // the obvious guard and the wrong one: mid-update the largest block is only ~9 KB, so
+        // "half" refused a 5 KB reserve that fits with room to spare, and the device turned a
+        // crash into a refusal without turning it into a working update.
+        static const size_t WS_ALLOC_HEADROOM = 3072;
+        const size_t largest =
+            heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        if (want + WS_ALLOC_HEADROOM > largest) {
+            Serial.printf("[WS] refusing a %u-byte frame: largest free block is %u\n",
+                          (unsigned)want, (unsigned)largest);
+            return false;
+        }
+        v.reserve(want);
+        return true;
+    }
+
     // Parse buffered WS frames; dispatch each complete (FIN) data message. Client→server
     // frames are always masked; we unmask into `msg` and handle continuation/ping/close.
     static void parseFrames() {
@@ -2610,9 +2642,14 @@ namespace WifiLink {
             if (rx.size() - hp < len) break; // wait for full payload
             if (op == 0x8) { client.stop(); return; } // close
             if (op == 0x9) { // ping → pong (echo payload, unmasked)
-                std::vector<uint8_t> p; for (uint64_t i = 0; i < len; i++) p.push_back(masked ? (rx[hp+i]^mask[i&3]) : rx[hp+i]);
-                uint8_t ph[2] = { 0x8A, (uint8_t)p.size() }; client.write(ph, 2); if (p.size()) client.write(p.data(), p.size());
+                // RFC 6455: a control frame's payload is at most 125 bytes. Enforcing it keeps
+                // this path off the heap entirely instead of trusting a length off the wire.
+                if (len > 125) { client.stop(); releaseWsBuffers(); return; }
+                uint8_t p[125];
+                for (uint64_t i = 0; i < len; i++) p[i] = masked ? (rx[hp+i]^mask[i&3]) : rx[hp+i];
+                uint8_t ph[2] = { 0x8A, (uint8_t)len }; client.write(ph, 2); if (len) client.write(p, (size_t)len);
             } else if (op == 0x0 || op == 0x1 || op == 0x2) { // continuation / text / binary
+                if (!ensureRoom(msg, (size_t)len)) { client.stop(); releaseWsBuffers(); return; }
                 for (uint64_t i = 0; i < len; i++) msg.push_back(masked ? (rx[hp+i]^mask[i&3]) : rx[hp+i]);
                 if (fin) { if (msg.size() >= 2) dispatch(msg[0], msg[1], msg.data()+2, (uint32_t)(msg.size()-2)); msg.clear(); }
             }
@@ -2714,6 +2751,7 @@ namespace WifiLink {
         while (av > 0) {
             uint8_t b[512]; int n = client.read(b, sizeof(b));
             if (n <= 0) break;
+            if (!ensureRoom(rx, (size_t)n)) { client.stop(); releaseWsBuffers(); return; }
             rx.insert(rx.end(), b, b + n);
             if (rx.size() > MAX_FRAME + 64) {
                 client.stop(); releaseWsBuffers();
