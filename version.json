@@ -1,7 +1,7 @@
 {
-  "version": "1.1.327",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.327.zip",
-  "buildDate": "2026-08-26T06:14:19Z",
-  "commitHash": "9242f8940caf41cefdf9fdd4ae9b732ece6057fb",
-  "commitMessage": "Give the memory back when a Wi-Fi update goes away"
+  "version": "1.1.328",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.328.zip",
+  "buildDate": "2026-08-26T06:27:39Z",
+  "commitHash": "47f33abd9ab4f4bb8433f3faf3d237810eae5c0e",
+  "commitMessage": "Let the device say why it stopped an update, and stop refusing them"
 }
