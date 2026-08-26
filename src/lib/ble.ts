@@ -982,9 +982,21 @@ const OTA_WINDOW = 8;
 // device report update_partition->size in device-info so this isn't hard-coded.
 const OTA_APP_SLOT_BYTES = 0x1c0000; // 1,835,008 (1.75 MB)
 
+/**
+ * The last OTA_ERR_* the device reported, or null.
+ *
+ * The device refusing an update and the device going quiet look identical to a sender that
+ * only watches ACKs: it keeps waiting for chunk acknowledgements that are never coming, and
+ * fails 15 s later with "Timeout waiting for OTA ACK" — which names the symptom and hides
+ * the cause. A real device refused an update with OTA_ERR_MEMORY on its very first chunk and
+ * this is what the user saw. The device says why; read it.
+ */
+let otaDeviceFault: string | null = null;
+
 export async function startOTAStatusNotifications(deviceId: string, callback: (status: OTAUpdateStatus) => void): Promise<void> {
   console.log(`[OTA] Starting status notifications for ${deviceId}`);
   await startNotifications(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_OTA_STATUS, (stringValue) => {
+    if (stringValue.startsWith('OTA_ERR')) otaDeviceFault = stringValue;
     callback({ statusMessage: stringValue });
   });
 }
@@ -1172,10 +1184,19 @@ async function streamFirmwareOverBle(
       ackedChunks++;
       if (ackWaiter) { const w = ackWaiter; ackWaiter = null; w(); }
     };
-    // Resolves on the next ACK, or rejects after a timeout (a stalled transfer).
+    // A refusal from the device ends the transfer now, with the device's own reason.
+    otaDeviceFault = null;
+    const throwIfDeviceRefused = () => {
+      if (otaDeviceFault) throw new Error(`Device stopped the update: ${otaDeviceFault}`);
+    };
+    // Resolves on the next ACK; rejects on a device refusal, or after a timeout (a stall).
     const waitForAck = (timeoutMs: number) => new Promise<void>((resolve, reject) => {
-      const t = setTimeout(() => { ackWaiter = null; reject(new Error('Timeout waiting for OTA ACK')); }, timeoutMs);
-      ackWaiter = () => { clearTimeout(t); resolve(); };
+      const done = (fn: () => void) => { clearTimeout(t); clearInterval(poll); ackWaiter = null; fn(); };
+      const t = setTimeout(() => done(() => reject(new Error('Timeout waiting for OTA ACK'))), timeoutMs);
+      const poll = setInterval(() => {
+        if (otaDeviceFault) done(() => reject(new Error(`Device stopped the update: ${otaDeviceFault}`)));
+      }, 100);
+      ackWaiter = () => done(resolve);
     });
 
     // The device ACKs each chunk by notifying OTA_DATA. Over Wi-Fi that is the same
@@ -1208,6 +1229,7 @@ async function streamFirmwareOverBle(
       while (sentChunks - ackedChunks >= streamWindow) {
         await waitForAck(15000);
       }
+      throwIfDeviceRefused();
       const chunkEnd = Math.min(offset + streamChunkSize, totalSize);
       await writeChunkNoWait(deviceId, firmwareBuffer.slice(offset, chunkEnd));
       offset = chunkEnd;

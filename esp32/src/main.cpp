@@ -23,6 +23,7 @@
 #include <mbedtls/base64.h>
 #endif
 #include "esp_ota_ops.h" // For OTA updates
+#include "esp_heap_caps.h" // largest contiguous block — the number that decides an OTA
 #include "esp_chip_info.h" // Report which ESP32 variant we're running on (device-info JSON)
 #include "device_settings.h" // NVS-backed comm mode / WiFi creds / sleep timer / rgb-test
 #include "endpoints.h"      // one endpoint table, carried by BLE or Wi-Fi alike
@@ -555,6 +556,10 @@ void signatureVerificationTask(void* parameter) {
         );
 
         signature_verification_complete = true;
+        // The number that justifies the sizes in OTA_VERIFY_STACKS. Printed every time so it
+        // stays honest as mbedtls/PSA changes underneath us.
+        Serial.printf("OTA: sig_verify stack headroom left: %u bytes\n",
+                      (unsigned)uxTaskGetStackHighWaterMark(nullptr));
     } else {
         Serial.println("OTA: signature verification task standing down (not needed).");
     }
@@ -565,9 +570,21 @@ void signatureVerificationTask(void* parameter) {
     vTaskDelete(nullptr);
 }
 
-// Reserve the verifier task (and its 16 KB stack) up front. Returns false if the heap
-// cannot spare it, which the caller reports BEFORE a megabyte is transferred rather than
-// after. Any leftover task from a previous aborted OTA is given a moment to finish dying.
+// What we are willing to give the verifier, best first.
+//
+// A task stack must come from ONE contiguous run of internal 8-bit DRAM, which is a far
+// scarcer thing than the free-heap total implies. Butterfly — a classic ESP32 driving a real
+// installation — reported 70 KB free and still could not place 16 KB, so asking once and
+// giving up meant refusing to update the device at all. Ask for the comfortable size, then
+// settle. 16 KB was a guess and a costly one: measured on hardware, the verification leaves
+// 12,956 of 16,384 bytes untouched, so it actually uses about 3.4 KB. Every size below keeps
+// well over twice that, and the headroom is logged on every run so this stays a measurement
+// rather than a new guess.
+static const uint32_t OTA_VERIFY_STACKS[] = { 12288, 8192, 6144 };
+
+// Reserve the verifier task up front. Returns false only if even the smallest stack won't
+// fit, which the caller reports BEFORE a megabyte is transferred rather than after. Any
+// leftover task from a previous aborted OTA is given a moment to finish dying.
 static bool otaVerifyTaskStart() {
     for (int i = 0; i < 20 && signature_task_handle != nullptr; i++) {
         delay(5);
@@ -581,20 +598,24 @@ static bool otaVerifyTaskStart() {
     signature_verification_complete = false;
     signature_verification_result = false;
 
-    TaskHandle_t handle = nullptr;
-    BaseType_t created = xTaskCreate(
-        signatureVerificationTask,
-        "sig_verify",
-        16384,  // 16KB stack size (much larger than BLE callback stack)
-        nullptr,
-        1,      // Priority
-        &handle
-    );
-    if (created != pdPASS) {
-        return false;
+    for (size_t i = 0; i < sizeof(OTA_VERIFY_STACKS) / sizeof(OTA_VERIFY_STACKS[0]); i++) {
+        TaskHandle_t handle = nullptr;
+        BaseType_t created = xTaskCreate(
+            signatureVerificationTask, "sig_verify", OTA_VERIFY_STACKS[i], nullptr, 1, &handle);
+        if (created == pdPASS) {
+            if (i > 0) {
+                Serial.printf("OTA: verifier placed with a %u-byte stack (%u would not fit)\n",
+                              (unsigned)OTA_VERIFY_STACKS[i], (unsigned)OTA_VERIFY_STACKS[0]);
+            }
+            signature_task_handle = handle;
+            return true;
+        }
     }
-    signature_task_handle = handle;
-    return true;
+    // Free heap alone never explained this failure; the largest contiguous block does.
+    Serial.printf("OTA: no room for a verify task — free %u, largest internal block %u\n",
+                  (unsigned)ESP.getFreeHeap(),
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    return false;
 }
 
 // Wake the parked task: cancelled=false to verify, cancelled=true to have it exit and
@@ -887,10 +908,11 @@ static void onOtaControlWrite(const uint8_t* data, size_t len, Endpoints::Link& 
                 // Real firmware signature verification - BEFORE esp_ota_end()
                 Serial.println("OTA: Verifying firmware signature...");
 
-                // The task was reserved at OTA start, back when the heap could still spare
-                // 16 KB; all that is left to do here is hand it the inputs and wake it.
-                if (signature_task_handle == nullptr) {
-                    Serial.println("OTA Error: no signature verification task was reserved!");
+                // Normally the task was reserved at OTA start, back when the heap could
+                // still place it, and all that is left is to hand it the inputs and wake it.
+                // If that reservation missed, this is the second and last chance.
+                if (signature_task_handle == nullptr && !otaVerifyTaskStart()) {
+                    Serial.println("OTA Error: no signature verification task could be created!");
                         Endpoints::notify(CHARACTERISTIC_UUID_OTA_STATUS, "OTA_ERR_TASK_CREATE");
                     esp_ota_abort(ota_handle);
                     SentryReporting::otaFinish(false);
@@ -1012,12 +1034,16 @@ static void onOtaDataWrite(const uint8_t* data, size_t len, Endpoints::Link& lin
             // that way, at 100 %, with OTA_ERR_TASK_CREATE after pushing all 1.4 MB. Doing
             // it here means a device too short on memory to finish says so in the first
             // second, and a device that starts an update can always finish one.
+            // Reserving early is an optimisation, NOT a precondition. Refusing the update
+            // when it failed was worse than the bug it guarded: a classic ESP32 whose heap
+            // had no contiguous 16 KB in it answered every chunk with OTA_ERR_MEMORY and
+            // could no longer be updated over the air at all. If the reservation misses,
+            // say so and carry on — the finalize will try again, which is exactly the
+            // behaviour that shipped updates for years.
             if (!otaVerifyTaskStart()) {
-                Serial.println("OTA Error: not enough memory to reserve signature verification!");
-                SentryReporting::logError("OTA begin refused: no heap for sig_verify (free %u)",
-                                          (unsigned)ESP.getFreeHeap());
-                Endpoints::notify(CHARACTERISTIC_UUID_OTA_STATUS, "OTA_ERR_MEMORY");
-                return;
+                Serial.println("OTA: could not reserve the verifier up front; will retry at finalize.");
+                SentryReporting::logWarn("OTA: sig_verify not reserved (free %u)",
+                                         (unsigned)ESP.getFreeHeap());
             }
 
             // Ask for a link that can survive the transfer, BEFORE touching flash. The

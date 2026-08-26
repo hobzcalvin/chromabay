@@ -38,6 +38,7 @@ const frames = new Map();
 let acked = 0;
 let ackWake = null;
 let finalStatus = '';
+let deviceFault = null;
 let resolveSuccess;
 const successStatus = new Promise((resolve) => { resolveSuccess = resolve; });
 ws.addEventListener('message', (event) => {
@@ -55,6 +56,9 @@ ws.addEventListener('message', (event) => {
       finalStatus = new TextDecoder().decode(body);
       console.log(`[status] ${finalStatus}`);
       if (finalStatus === 'OTA_SUCCESS_REBOOTING') resolveSuccess();
+      // A refusal and a silent device look the same to a sender watching only ACKs — it
+      // waits out the ACK timeout and reports a stall instead of the reason. Read the reason.
+      if (finalStatus.startsWith('OTA_ERR')) deviceFault = finalStatus;
     }
   }
 });
@@ -76,10 +80,15 @@ async function take(channel, timeoutMs) {
 }
 
 function waitForAck(previous, timeoutMs = 15000) {
+  if (deviceFault) return Promise.reject(new Error(`device stopped the update: ${deviceFault}`));
   if (acked > previous) return Promise.resolve();
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => { ackWake = null; reject(new Error('timeout waiting for OTA ACK')); }, timeoutMs);
-    ackWake = () => { clearTimeout(timer); resolve(); };
+    const done = (fn) => { clearTimeout(timer); clearInterval(poll); ackWake = null; fn(); };
+    const timer = setTimeout(() => done(() => reject(new Error('timeout waiting for OTA ACK'))), timeoutMs);
+    const poll = setInterval(() => {
+      if (deviceFault) done(() => reject(new Error(`device stopped the update: ${deviceFault}`)));
+    }, 100);
+    ackWake = () => done(resolve);
   });
 }
 
