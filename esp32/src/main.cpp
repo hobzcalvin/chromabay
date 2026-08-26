@@ -2666,9 +2666,22 @@ namespace WifiLink {
                 for (uint64_t i = 0; i < len; i++) p[i] = masked ? (rx[hp+i]^mask[i&3]) : rx[hp+i];
                 uint8_t ph[2] = { 0x8A, (uint8_t)len }; client.write(ph, 2); if (len) client.write(p, (size_t)len);
             } else if (op == 0x0 || op == 0x1 || op == 0x2) { // continuation / text / binary
-                if (!ensureRoom(msg, (size_t)len)) { client.stop(); releaseWsBuffers(); return; }
-                for (uint64_t i = 0; i < len; i++) msg.push_back(masked ? (rx[hp+i]^mask[i&3]) : rx[hp+i]);
-                if (fin) { if (msg.size() >= 2) dispatch(msg[0], msg[1], msg.data()+2, (uint32_t)(msg.size()-2)); msg.clear(); }
+                // A whole message in a single frame is not a special case, it is every message
+                // the app sends. Reassembling it into `msg` allocated a second full-size copy
+                // of a frame we already hold — and on a memory-tight device that second copy
+                // is the one that fails. Unmask in place and dispatch straight out of `rx`.
+                // Safe because these bytes are consumed either way: the frame is erased from
+                // `rx` at the bottom of this loop, and nothing a handler does appends to `rx`
+                // (reads from the socket happen in tick(), before parseFrames runs).
+                if (fin && op != 0x0 && msg.empty()) {
+                    if (masked) for (uint64_t i = 0; i < len; i++) rx[hp+i] ^= mask[i&3];
+                    if (len >= 2) dispatch(rx[hp], rx[hp+1], rx.data()+hp+2, (uint32_t)(len-2));
+                } else {
+                    // Genuinely fragmented: reassemble, as before.
+                    if (!ensureRoom(msg, (size_t)len)) { client.stop(); releaseWsBuffers(); return; }
+                    for (uint64_t i = 0; i < len; i++) msg.push_back(masked ? (rx[hp+i]^mask[i&3]) : rx[hp+i]);
+                    if (fin) { if (msg.size() >= 2) dispatch(msg[0], msg[1], msg.data()+2, (uint32_t)(msg.size()-2)); msg.clear(); }
+                }
             }
             pos = hp + len;
         }
