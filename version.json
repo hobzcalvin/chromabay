@@ -1,7 +1,7 @@
 {
-  "version": "1.1.328",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.328.zip",
-  "buildDate": "2026-08-26T06:27:39Z",
-  "commitHash": "47f33abd9ab4f4bb8433f3faf3d237810eae5c0e",
-  "commitMessage": "Let the device say why it stopped an update, and stop refusing them"
+  "version": "1.1.329",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.329.zip",
+  "buildDate": "2026-08-26T14:18:21Z",
+  "commitHash": "d2d4e8d8be598672fe326322100ca5e9725cac23",
+  "commitMessage": "Add a Bluetooth OTA path, for the device Wi-Fi cannot update"
 }
