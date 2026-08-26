@@ -1,7 +1,7 @@
 {
-  "version": "1.1.330",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.330.zip",
-  "buildDate": "2026-08-26T16:51:05Z",
-  "commitHash": "eb458be729e80d665f1e0880ce7b450127c88615",
-  "commitMessage": "The OTA stall was a bad_alloc abort in the WebSocket reader"
+  "version": "1.1.331",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.331.zip",
+  "buildDate": "2026-08-26T17:23:18Z",
+  "commitHash": "14db573a860b6ac21759bb274aafe6b95d673c37",
+  "commitMessage": "Give the render buffers back for the duration of an update"
 }
