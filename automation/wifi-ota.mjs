@@ -95,12 +95,15 @@ if (info.name !== EXPECT_NAME) {
   ws.close();
   throw new Error(`refusing ${HOST}: expected "${EXPECT_NAME}", DEVICE_INFO says "${info.name}"`);
 }
-console.log(`verified ${info.name} at ${HOST} (${info.chip}, ${info.fw_ver})`);
+console.log(`verified ${info.name} at ${HOST} (${info.chip}, ${info.fw_ver}, heap ${info.heap})`);
 
 // 8 KiB turns this S3 image into ~157 WebSocket messages instead of ~2570 BLE-sized ones.
-// Keep at most seven in flight: the firmware caps its inbound WS buffer near 64 KiB.
-const CHUNK = 8192;
-const WINDOW = 7;
+// Only three in flight, though — 24 KiB. The limit that bites is the device's HEAP, not the
+// firmware's ~64 KiB inbound WS buffer: on a classic ESP32 with ~75 KB free, a seven-deep
+// window starved the finalize outright (all 1.4 MB transferred, then OTA_ERR_TASK_CREATE).
+// Matches OTA_MAX_IN_FLIGHT_BYTES in src/lib/ble.ts — keep the two in step.
+const CHUNK = Number(process.env.CHUNK ?? 8192);
+const WINDOW = Number(process.env.WINDOW ?? 3);
 let sent = 0;
 let offset = 0;
 const started = Date.now();
