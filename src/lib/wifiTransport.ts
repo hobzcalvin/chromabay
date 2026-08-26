@@ -32,7 +32,20 @@ export class WifiTransport implements Transport {
    * the protocol above changing shape.
    */
   readonly maxWriteLen = 8192;
-  readonly maxStreamWriteLen = 8192;
+  /**
+   * 4 KiB, not 8. An 8 KiB WebSocket message is never dispatched by a classic ESP32 — the
+   * frame simply never reaches a handler, so the device answers nothing at all and a sender
+   * watching for ACKs calls it a stall. Reproduced on demand against a real installation:
+   * every 8 KiB update died on its first chunk with no status; every 4 KiB update of the
+   * same image, over the same link, in the same minute, transferred all 1.45 MB and booted.
+   * An ESP32-S3 handles 8 KiB fine, which is exactly why this hid for so long — it fails
+   * only on the smaller part, which is the part most installations are built on.
+   *
+   * The firmware-side mechanism is NOT identified (MAX_FRAME is 64 KiB, so it is not that
+   * check); the suspicion is the classic chip's tighter default lwip receive buffers. Raising
+   * this again needs that understood first, and a classic ESP32 to prove it on.
+   */
+  readonly maxStreamWriteLen = 4096;
 
   private ws: WebSocket | null = null;
   // Reads are queued per channel: BLE allows a read to be outstanding per characteristic, and
