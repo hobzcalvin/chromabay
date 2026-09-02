@@ -16,6 +16,7 @@
   let canvasElement: HTMLCanvasElement;
   let ctx: CanvasRenderingContext2D | null = null;
   let animationFrame: number | null = null;
+  let resizeHandler: (() => void) | null = null;
 
   // Offscreen canvas for scaling the output
   const offscreen = document.createElement('canvas');
@@ -44,6 +45,7 @@
   }
 
   function setupCanvas() {
+    if (!canvasElement) return;
     if (fullscreen) {
       canvasElement.width = window.innerWidth;
       canvasElement.height = window.innerHeight;
@@ -62,11 +64,8 @@
     setupCanvas();
     
     if (fullscreen) {
-      const resize = () => setupCanvas();
-      window.addEventListener('resize', resize);
-      onDestroy(() => {
-        window.removeEventListener('resize', resize);
-      });
+      resizeHandler = () => setupCanvas();
+      window.addEventListener('resize', resizeHandler);
     }
     
     animate();
@@ -74,6 +73,10 @@
 
   onDestroy(() => {
     if (animationFrame) cancelAnimationFrame(animationFrame);
+    if (resizeHandler) {
+      window.removeEventListener('resize', resizeHandler);
+      resizeHandler = null;
+    }
     // Reset render config when component is destroyed
     resetToDefaultDimensions();
   });
@@ -129,4 +132,4 @@
     touch-action: none;
     border-radius: 0;
   }
-</style> 
+</style>                 
