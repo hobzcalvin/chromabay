@@ -1,7 +1,7 @@
 {
-  "version": "1.1.332",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.332.zip",
-  "buildDate": "2026-08-26T18:53:19Z",
-  "commitHash": "7f0fa9d79e691a2072b095b4e40a248de27c6fda",
-  "commitMessage": "Dispatch a whole-message frame straight out of the read buffer"
+  "version": "1.1.333",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.333.zip",
+  "buildDate": "2026-09-18T04:45:49Z",
+  "commitHash": "ae681990447ec0a744f67bf500d1a819f4d50bfd",
+  "commitMessage": "Dissolve one pattern into the next in cycle mode"
 }
