@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include <new> // std::nothrow
 #include <cstring> // strcmp (operator-type compare for state-preserving pattern updates)
+#include "esp_heap_caps.h" // largest contiguous block — the number that decides a crossfade
 
 // What a string parameter value means depends on the parameter it lands on. Mirrors the WASM
 // bindings so the preview and the device agree:
@@ -110,19 +111,57 @@ void PatternRendererBase::releaseBuffers() {
 // crossfades does it on every cycle boundary, and allocating/freeing a full-grid contiguous
 // block every interval is exactly the churn that fragments the heap. deallocateBuffers()
 // gives it back with the rest, so an OTA still gets all of it.
+//
+// Asking for it is gated on the LARGEST CONTIGUOUS BLOCK, not on free heap, and not on
+// whether the allocation happens to succeed. Succeeding is the dangerous case: on a big
+// grid this buffer is tens of KB of contiguous DRAM, and there is no PSRAM here — so a
+// crossfade that quietly takes the last large block leaves a pattern upload, a ledmap or a
+// WebSocket frame reserve to fail instead, and those are the control path. A dissolve is a
+// luxury; it yields to them rather than competing with them.
+//
+// A fixed slice of headroom rather than a fraction of the block, for the reason the
+// WebSocket reader already documents: mid-pressure the largest block is small enough that
+// "half" refuses allocations that would have fit comfortably.
+static const uint32_t FADE_ALLOC_HEADROOM = 16384; // room left for a pattern/ledmap upload
+
 bool PatternRendererBase::ensureFadeBuffer() {
+    // The lanes have to exist for there to be anything to fade. This also means a released
+    // set of buffers (an update in flight) can never be re-grown into by a crossfade —
+    // enforced here rather than trusting the caller's OTA gate to stay where it is.
+    if (!buffersAllocated) return false;
+
     uint32_t totalPixels = getTotalPixels();
     if (totalPixels == 0) return false;
     if (fadeBuffer && fadeBufferPixels == totalPixels) return true;
     releaseFadeBuffer();
-    fadeBuffer = new (std::nothrow) CRGB[totalPixels];
-    if (!fadeBuffer) {
-        // Not fatal: without the hold buffer there is nothing to fade FROM, so the caller
-        // cuts instead. Better a hard switch than a failed render.
-        Serial.printf("PatternRenderer: no memory for a %u-pixel crossfade buffer; cutting instead\n",
-                      (unsigned)totalPixels);
+
+    const uint32_t need = totalPixels * (uint32_t)sizeof(CRGB);
+    const uint32_t largest =
+        heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (need + FADE_ALLOC_HEADROOM > largest) {
+        // Warn once, not on every cycle boundary: while memory stays tight this is asked
+        // and refused every interval, and a line a minute forever buries everything else.
+        if (!fadeLowMemoryWarned) {
+            fadeLowMemoryWarned = true;
+            Serial.printf("PatternRenderer: crossfade wants %u bytes, largest free block is %u "
+                          "— cutting instead until there is room\n",
+                          (unsigned)need, (unsigned)largest);
+        }
         return false;
     }
+
+    fadeBuffer = new (std::nothrow) CRGB[totalPixels];
+    if (!fadeBuffer) {
+        // Passed the headroom check and still failed — the heap moved under us. Same
+        // outcome: cut. Better a hard switch than a failed render.
+        if (!fadeLowMemoryWarned) {
+            fadeLowMemoryWarned = true;
+            Serial.printf("PatternRenderer: no memory for a %u-pixel crossfade buffer; cutting instead\n",
+                          (unsigned)totalPixels);
+        }
+        return false;
+    }
+    fadeLowMemoryWarned = false; // room came back; say so if it goes away again
     fadeBufferPixels = totalPixels;
     return true;
 }

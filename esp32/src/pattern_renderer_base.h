@@ -86,6 +86,7 @@ protected:
     bool hasOutgoing = false;
     CRGB* fadeBuffer = nullptr;              // holds the outgoing frame, then the blended result
     uint32_t fadeBufferPixels = 0;           // what fadeBuffer was sized for (realloc if the grid changes)
+    bool fadeLowMemoryWarned = false;        // so a tight heap doesn't log once per cycle boundary, forever
     std::unique_ptr<BaseOperator> fadeOp;    // a real "blend" operator — same code path as a Blend node
     std::vector<ParameterValue> fadeParams;  // [opacity, mode=Normal], refreshed per frame
     bool fadeArmed = false;                  // a crossfade was requested; the next setPattern() starts it
