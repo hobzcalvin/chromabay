@@ -278,12 +278,16 @@ static uint32_t brightnessChangedAtMs = 0;
 // /lib library below). Cycling is just an auto-advance through that set in a stable
 // name-sorted order, driven by the SYNCED clock so connected devices step together.
 // Cycling on/off is independent of the stored patterns — turning it off only stops
-// advancing. The control payload is [u32 intervalMs][u8 enabled], staged from the BLE
-// task and applied (with flash persistence) on the loop task.
+// advancing. The control payload is [u32 intervalMs][u8 enabled][u32 crossfadeMs], staged
+// from the BLE task and applied (with flash persistence) on the loop task. The crossfade
+// tail is optional so an older app, which sends only the first five bytes, still works.
 static uint32_t cycleIntervalMs = 30000; // default 30s
+static uint32_t cycleCrossfadeMs = 0;    // 0 = cut between patterns (the behaviour before this existed)
 static bool cyclingActive = false;
 static int lastCycleIndex = -1;
 static uint32_t pendingCycleIntervalMs = 0;
+static uint32_t pendingCycleCrossfadeMs = 0;
+static bool pendingCycleHasCrossfade = false;
 static bool pendingCycleEnabled = false;
 static bool newCycleControlAvailable = false;
 
@@ -1314,8 +1318,11 @@ static void onPatternSyncWrite(const uint8_t* data, size_t len, Endpoints::Link&
         stageCompletePattern(full, fullLen);
     }
 
-// Cycle Control Callbacks - receives the cycling on/off + interval. Payload is
-// [u32 intervalMs LE][u8 enabled]. Staged here; applied/persisted on the loop task.
+// Cycle Control Callbacks - receives the cycling on/off + interval + crossfade. Payload is
+// [u32 intervalMs LE][u8 enabled][u32 crossfadeMs LE]. The crossfade word is optional: an
+// app built before crossfading existed sends five bytes, and the device keeps whatever
+// crossfade it already had rather than silently turning it off. Staged here;
+// applied/persisted on the loop task.
 static void onPlaylistSyncWrite(const uint8_t* data, size_t len, Endpoints::Link& link) {
     (void)data; (void)len; (void)link;
         std::string v((const char*)data, len);
@@ -1324,6 +1331,12 @@ static void onPlaylistSyncWrite(const uint8_t* data, size_t len, Endpoints::Link
         memcpy(&iv, v.data(), 4);
         pendingCycleIntervalMs = iv;
         pendingCycleEnabled = ((uint8_t)v[4] != 0);
+        pendingCycleHasCrossfade = (v.length() >= 9);
+        if (pendingCycleHasCrossfade) {
+            uint32_t xf = 0;
+            memcpy(&xf, v.data() + 5, 4);
+            pendingCycleCrossfadeMs = xf;
+        }
         newCycleControlAvailable = true;
         noteActivity();
     }
@@ -1589,7 +1602,7 @@ void processButtonPinUpdate() {
 // remembered in LIB_CURRENT_FILE so the device resumes it on boot.
 static const char* LIB_DIR = "/lib";
 static const char* LIB_CURRENT_FILE = "/lib_current.txt";
-static const char* CYCLE_FILE = "/cycle.bin"; // [u32 intervalMs][u8 enabled]
+static const char* CYCLE_FILE = "/cycle.bin"; // [u32 intervalMs][u8 enabled][u32 crossfadeMs]
 // The last pattern SHOWN (raw msgpack), regardless of whether it's a library/cycle member.
 // A Live ("current only") pattern lands here so the device resumes it on power-on without it
 // joining the cycle. Written on every applied pattern; read at boot when not cycling.
@@ -1788,13 +1801,17 @@ static bool libSetActiveByOrderPos(int pos) {
     return true;
 }
 
-// Cycle on/off + interval persistence (so a device resumes cycling after a reboot).
+// Cycle on/off + interval + crossfade persistence (so a device resumes cycling after a
+// reboot). The crossfade word was appended to an existing 5-byte file, so a file written by
+// older firmware is still read — it just has no crossfade, which is the old behaviour.
 static void saveCycleState() {
     File f = LittleFS.open(CYCLE_FILE, FILE_WRITE);
     if (!f) return;
     uint32_t iv = cycleIntervalMs;
     f.write((const uint8_t*)&iv, 4);
     f.write((uint8_t)(cyclingActive ? 1 : 0));
+    uint32_t xf = cycleCrossfadeMs;
+    f.write((const uint8_t*)&xf, 4);
     f.close();
 }
 static void restoreCycleState() {
@@ -1808,16 +1825,31 @@ static void restoreCycleState() {
         if (iv >= 1) cycleIntervalMs = iv;
         cyclingActive = (en != 0);
         lastCycleIndex = -1;
+        if (f.available() >= 4) {
+            uint32_t xf = 0;
+            f.read((uint8_t*)&xf, 4);
+            cycleCrossfadeMs = xf;
+        }
     }
     f.close();
+}
+
+// How long the dissolve into the next pattern should last, in ms. Clamped to half the
+// interval: a crossfade as long as the interval never finishes before the next one starts,
+// and the display would never settle on a pattern at all. 0 = cut.
+static uint32_t effectiveCrossfadeMs() {
+    if (cycleCrossfadeMs == 0 || cycleIntervalMs == 0) return 0;
+    uint32_t maxMs = cycleIntervalMs / 2;
+    return (cycleCrossfadeMs > maxMs) ? maxMs : cycleCrossfadeMs;
 }
 
 // Diagnostic: report how many patterns the device currently has in its library and
 // whether it's auto-cycling. Handy for tracing the count from the serial monitor.
 static void logPatternState(const char* when) {
-    Serial.printf("[PatternState @ %s] libraryPatterns=%u  cyclingActive=%d  intervalMs=%lu  current='%s'\n",
+    Serial.printf("[PatternState @ %s] libraryPatterns=%u  cyclingActive=%d  intervalMs=%lu  crossfadeMs=%lu  current='%s'\n",
                   when, (unsigned)libNames.size(), (int)cyclingActive,
                   (unsigned long)cycleIntervalMs,
+                  (unsigned long)cycleCrossfadeMs,
                   patternRenderer ? patternRenderer->getCurrentPatternName() : "");
 }
 
@@ -1826,10 +1858,13 @@ void processReceivedCycleControl() {
     if (!newCycleControlAvailable) return;
     newCycleControlAvailable = false;
     if (pendingCycleIntervalMs >= 1) cycleIntervalMs = pendingCycleIntervalMs;
+    if (pendingCycleHasCrossfade) cycleCrossfadeMs = pendingCycleCrossfadeMs;
     cyclingActive = pendingCycleEnabled;
     lastCycleIndex = -1; // re-apply on next updateCycle
     saveCycleState();
-    Serial.printf("Cycle control: %s, %lu ms\n", cyclingActive ? "ON" : "OFF", (unsigned long)cycleIntervalMs);
+    Serial.printf("Cycle control: %s, %lu ms, crossfade %lu ms\n",
+                  cyclingActive ? "ON" : "OFF", (unsigned long)cycleIntervalMs,
+                  (unsigned long)effectiveCrossfadeMs());
 }
 
 // When cycling, advance through the name-sorted library on the SYNCED clock so every
@@ -1843,9 +1878,24 @@ void updateCycle() {
     if (index != lastCycleIndex) {
         lastCycleIndex = index;
         int fileIdx = libOrder[index];
+        // Arm the dissolve BEFORE loading: the renderer starts it when the new pattern
+        // lands, because that is when both graphs exist. Anchor it to the boundary we just
+        // crossed rather than to now — reading and parsing the pattern takes a different
+        // amount of time on every device, and anchoring to the boundary keeps devices
+        // sharing a clock in step through the fade instead of staggered by their flash.
+        uint32_t crossfadeMs = effectiveCrossfadeMs();
+        if (crossfadeMs > 0) {
+            unsigned long boundary = (t / cycleIntervalMs) * (unsigned long)cycleIntervalMs;
+            patternRenderer->armCrossfade(boundary, crossfadeMs);
+        }
         if (libLoadIndex(fileIdx)) {
             libSaveCurrentName(libNames[fileIdx]);
-            Serial.printf("Cycle -> '%s' (%d/%u) @ %lu ms\n", libNames[fileIdx].c_str(), index, (unsigned)count, t);
+            Serial.printf("Cycle -> '%s' (%d/%u) @ %lu ms%s\n", libNames[fileIdx].c_str(), index,
+                          (unsigned)count, t, crossfadeMs ? " (crossfading)" : "");
+        } else if (crossfadeMs > 0) {
+            // The load failed, so setPattern() never came — disarm, or the next pattern to
+            // arrive (a live push, say) would inherit a fade it never asked for.
+            patternRenderer->cancelCrossfade();
         }
     }
 }

@@ -11,15 +11,28 @@ import { setCycleOnDevice } from '$lib/ble';
 
 export const cycleEnabled = writable(false);
 export const cycleSeconds = writable(30);
+// Seconds to dissolve one pattern into the next. 0 = cut, which is how cycling behaved
+// before crossfading existed, so it stays the default.
+export const cycleCrossfadeSeconds = writable(0);
 
-/** Push the current cycle state (on/off + interval) to every connected device. */
-export async function applyCycle() {
+// The device clamps a crossfade to half the interval (a fade as long as the interval never
+// finishes before the next one starts), so clamp here too and write the clamped value back
+// — otherwise the box would keep showing a number the devices aren't honouring.
+function normalizedCycleSettings() {
   const secs = Math.max(1, Math.floor(get(cycleSeconds) || 1));
+  const fade = Math.min(Math.max(0, get(cycleCrossfadeSeconds) || 0), secs / 2);
+  return { secs, fade };
+}
+
+/** Push the current cycle state (on/off + interval + crossfade) to every connected device. */
+export async function applyCycle() {
+  const { secs, fade } = normalizedCycleSettings();
   cycleSeconds.set(secs);
+  cycleCrossfadeSeconds.set(fade);
   const on = get(cycleEnabled);
   for (const d of getConnectedDevicesList(get(connectedDevices))) {
     try {
-      await setCycleOnDevice(d.deviceId, on, secs);
+      await setCycleOnDevice(d.deviceId, on, secs, fade);
     } catch (e) {
       console.error('[cycle] apply failed for', d.deviceId, e);
     }
@@ -44,10 +57,10 @@ connectedDevices.subscribe((map) => {
   if (fresh.length === 0) return;
   setTimeout(() => {
     const on = get(cycleEnabled);
-    const secs = Math.max(1, Math.floor(get(cycleSeconds) || 1));
+    const { secs, fade } = normalizedCycleSettings();
     for (const id of fresh) {
       if (!get(connectedDevices).has(id)) continue; // dropped again before we applied
-      setCycleOnDevice(id, on, secs).catch((e) => console.error('[cycle] apply-on-connect failed', id, e));
+      setCycleOnDevice(id, on, secs, fade).catch((e) => console.error('[cycle] apply-on-connect failed', id, e));
     }
   }, 1500);
 });

@@ -10,7 +10,7 @@
   import { currentPattern } from '$lib/stores/patternsStore';
   import { connectedDevices, getConnectedDevicesList } from '$lib/stores/deviceStore';
   import { authUser } from '$lib/stores/authStore';
-  import { cycleEnabled, cycleSeconds, applyCycle, exitCycle } from '$lib/stores/cycleStore';
+  import { cycleEnabled, cycleSeconds, cycleCrossfadeSeconds, applyCycle, exitCycle } from '$lib/stores/cycleStore';
   import { browseGallery, importGalleryPattern, publishPattern, type GalleryPattern } from '$lib/gallery';
   import { get } from 'svelte/store';
   let patternsList: SerializedPattern[] = [];
@@ -401,6 +401,14 @@
       <span class="cycle-text">Cycle synced patterns</span>
       <span class="cycle-sub">every</span>
       <input class="cycle-secs" type="number" min="1" step="1" bind:value={$cycleSeconds} disabled={!$cycleEnabled} onchange={applyCycle} />
+      <span class="cycle-sub">seconds</span>
+    </label>
+    <!-- Separate label: inside the one above, clicking "crossfading" would toggle Cycle.
+         Capped at half the interval — the device clamps it there anyway, because a fade
+         longer than that would still be running when the next one starts. 0 = hard cut. -->
+    <label class="cycle-control">
+      <span class="cycle-sub">crossfading</span>
+      <input class="cycle-secs" type="number" min="0" max={$cycleSeconds / 2} step="0.5" bind:value={$cycleCrossfadeSeconds} disabled={!$cycleEnabled} onchange={applyCycle} />
       <span class="cycle-sub">seconds</span>
     </label>
     {#if $cycleEnabled}

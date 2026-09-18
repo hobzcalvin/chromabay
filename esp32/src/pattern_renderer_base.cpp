@@ -95,12 +95,42 @@ void PatternRendererBase::allocateBuffers() {
 }
 
 uint32_t PatternRendererBase::bufferBytes() const {
-    return buffersAllocated ? (uint32_t)NUM_BUFFERS * getTotalPixels() * (uint32_t)sizeof(CRGB) : 0;
+    if (!buffersAllocated) return 0;
+    uint32_t bytes = (uint32_t)NUM_BUFFERS * getTotalPixels() * (uint32_t)sizeof(CRGB);
+    bytes += fadeBufferPixels * (uint32_t)sizeof(CRGB); // released alongside them
+    return bytes;
 }
 
 void PatternRendererBase::releaseBuffers() {
     if (!buffersAllocated) return;
     deallocateBuffers();
+}
+
+// The crossfade hold buffer, sized like any other lane. Kept once allocated: a device that
+// crossfades does it on every cycle boundary, and allocating/freeing a full-grid contiguous
+// block every interval is exactly the churn that fragments the heap. deallocateBuffers()
+// gives it back with the rest, so an OTA still gets all of it.
+bool PatternRendererBase::ensureFadeBuffer() {
+    uint32_t totalPixels = getTotalPixels();
+    if (totalPixels == 0) return false;
+    if (fadeBuffer && fadeBufferPixels == totalPixels) return true;
+    releaseFadeBuffer();
+    fadeBuffer = new (std::nothrow) CRGB[totalPixels];
+    if (!fadeBuffer) {
+        // Not fatal: without the hold buffer there is nothing to fade FROM, so the caller
+        // cuts instead. Better a hard switch than a failed render.
+        Serial.printf("PatternRenderer: no memory for a %u-pixel crossfade buffer; cutting instead\n",
+                      (unsigned)totalPixels);
+        return false;
+    }
+    fadeBufferPixels = totalPixels;
+    return true;
+}
+
+void PatternRendererBase::releaseFadeBuffer() {
+    delete[] fadeBuffer;
+    fadeBuffer = nullptr;
+    fadeBufferPixels = 0;
 }
 
 void PatternRendererBase::reacquireBuffers() {
@@ -109,6 +139,8 @@ void PatternRendererBase::reacquireBuffers() {
 }
 
 void PatternRendererBase::deallocateBuffers() {
+    endCrossfade();          // the outgoing graph renders into these lanes; it can't outlive them
+    releaseFadeBuffer();
     if (buffersAllocated && buffers) {
         for (int i = 0; i < NUM_BUFFERS; i++) {
             delete[] buffers[i];
@@ -245,6 +277,42 @@ const CRGB* PatternRendererBase::getBuffer(int bufferIndex) const {
 }
 
 void PatternRendererBase::setPattern(Pattern&& pattern) {
+    // An armed crossfade turns this from a replacement into a dissolve: the pattern that is
+    // showing becomes the OUTGOING graph — moved, not copied, so it keeps the very operator
+    // instances it has been running, and a Fire or Moving-Blobs fades out still burning
+    // rather than restarting for its own funeral.
+    //
+    // The state-preserving path below is deliberately skipped: the outgoing graph owns those
+    // operators now, and the incoming pattern needs its own. A crossfade is always between
+    // two different library entries anyway, so there was nothing to preserve.
+    if (fadeArmed) {
+        fadeArmed = false;
+        if (hasPattern && !currentPattern.nodes.empty() && ensureFadeBuffer()) {
+            outgoingPattern = std::move(currentPattern);
+            hasOutgoing = true;
+            fadeActive = true;
+            fadeProgress = 0.0f;
+            if (!fadeOp) fadeOp = OperatorRegistry::getInstance().createOperator("blend");
+            if (!fadeOp) {
+                // No blend operator registered — nothing to dissolve with, so cut.
+                endCrossfade();
+            }
+        } else {
+            endCrossfade(); // nothing to fade from, or no memory: cut
+        }
+        const bool dissolving = fadeActive; // false if the fade was refused above
+        currentPattern = std::move(pattern);
+        hasPattern = true;
+        Serial.printf("Pattern set: %u node(s), %s\n", (unsigned)currentPattern.nodes.size(),
+                      dissolving ? "crossfading in" : "cut in (crossfade unavailable)");
+        return;
+    }
+
+    // Not a cycle step — a live push from the app, or a boot restore. "Here's your pattern
+    // now" means now: abandon any dissolve still in flight rather than blending the new
+    // pattern in from a frame the user has already moved on from.
+    endCrossfade();
+
     // If the incoming pattern has the SAME structure as the current one (same operator
     // types + same buffer wiring — only parameters differ), reuse the existing operator
     // instances so STATEFUL operators don't reset. The app resends the whole pattern on
@@ -290,8 +358,33 @@ void PatternRendererBase::setPattern(Pattern&& pattern) {
 }
 
 void PatternRendererBase::clearPattern() {
+    endCrossfade();
     hasPattern = false;
     currentPattern.nodes.clear();
+}
+
+void PatternRendererBase::armCrossfade(unsigned long startTime, uint32_t durationMs) {
+    if (durationMs == 0) { cancelCrossfade(); return; }
+    fadeArmed = true;
+    fadeStartTime = startTime;
+    fadeDurationMs = durationMs;
+}
+
+void PatternRendererBase::cancelCrossfade() {
+    fadeArmed = false;
+    endCrossfade();
+}
+
+// Drop the outgoing graph. The hold buffer is kept (see ensureFadeBuffer) — the next cycle
+// boundary wants it again, and re-allocating a full-grid block every interval is the churn
+// this avoids. deallocateBuffers() is what actually gives it back.
+void PatternRendererBase::endCrossfade() {
+    fadeActive = false;
+    fadeProgress = 0.0f;
+    if (hasOutgoing) {
+        outgoingPattern.nodes.clear();
+        hasOutgoing = false;
+    }
 }
 
 unsigned long PatternRendererBase::getCurrentTime() {
@@ -340,12 +433,26 @@ void PatternRendererBase::update() {
     frameFloatDelta = deltaTime;
 
     lastFrameTime = currentTime;
+
+    // Advance the dissolve on the same clock the cycle boundary was measured against, so
+    // devices that share a time sync are at the same point in the fade on the same frame.
+    if (fadeActive) {
+        long elapsed = (long)(currentTime - fadeStartTime); // signed: a sync can move the clock back
+        if (fadeDurationMs == 0 || elapsed >= (long)fadeDurationMs) {
+            // Fully arrived. Ending the fade here means this frame renders the incoming
+            // graph alone, which is what progress 1.0 composites to anyway — and stops the
+            // device paying for two graphs a frame longer than it has to.
+            endCrossfade();
+        } else {
+            fadeProgress = (elapsed <= 0) ? 0.0f : ((float)elapsed / (float)fadeDurationMs);
+        }
+    }
 }
 
-void PatternRendererBase::renderGraphAt(uint16_t width, uint16_t height) {
+void PatternRendererBase::renderGraphAt(const Pattern& pattern, uint16_t width, uint16_t height) {
     // Run every operator node into the shared buffers at the given canvas size.
     const size_t totalPixels = (size_t)width * (size_t)height;
-    for (const auto& node : currentPattern.nodes) {
+    for (const auto& node : pattern.nodes) {
         if (!node.op) continue;
         CRGB* inputBuffer1 = (node.inputBuffer >= 0) ? getBufferPtr(node.inputBuffer) : nullptr;
         CRGB* inputBuffer2 = (node.secondInputBuffer >= 0) ? getBufferPtr(node.secondInputBuffer) : nullptr;
@@ -385,14 +492,63 @@ void PatternRendererBase::renderGraphAt(uint16_t width, uint16_t height) {
     }
 }
 
+// Render both graphs for one canvas size and leave the dissolve between them in fadeBuffer.
+//
+// This is the joined graph the crossfade is described as — outgoing and incoming feeding a
+// Blend node — evaluated in the order that lets them share lanes. The outgoing graph runs
+// first and its result is lifted out to the hold buffer; every lane is then free for the
+// incoming graph to use as if it were alone, which it effectively is.
+void PatternRendererBase::renderCrossfadeAt(uint16_t width, uint16_t height) {
+    const uint32_t totalPixels = (uint32_t)width * (uint32_t)height;
+
+    // 1. The graph on its way out, lifted into the hold buffer.
+    renderGraphAt(outgoingPattern, width, height);
+    const CRGB* outgoingOut = getBuffer(outgoingPattern.outputBuffer);
+    if (outgoingOut) {
+        memcpy(fadeBuffer, outgoingOut, totalPixels * sizeof(CRGB));
+    } else {
+        for (uint32_t i = 0; i < totalPixels; i++) fadeBuffer[i] = CRGB::Black;
+    }
+
+    // 2. The graph on its way in, free to use every lane.
+    renderGraphAt(currentPattern, width, height);
+    CRGB* incomingOut = getBufferPtr(currentPattern.outputBuffer);
+    if (!incomingOut) {
+        // Nothing wired to Output on the incoming pattern: it shows black, so fade TO black.
+        // Scratch is idle between graph renders, which is exactly what it's for.
+        incomingOut = getBufferPtr(SCRATCH_BUFFER);
+        if (incomingOut) {
+            for (uint32_t i = 0; i < totalPixels; i++) incomingOut[i] = CRGB::Black;
+        } else {
+            return; // no scratch either: leave the outgoing frame standing for this frame
+        }
+    }
+
+    // 3. Blend them. Mode 0 (Normal) is out*(1-t) + in*t, strictly per-pixel at one index —
+    //    which is why writing the result back over input1 is safe and saves a buffer.
+    fadeParams.resize(2);
+    fadeParams[0] = ParameterValue(fadeProgress);
+    fadeParams[1] = ParameterValue((int)0); // Normal
+    fadeOp->render(fadeBuffer, incomingOut, fadeBuffer,
+                   width, height, frameFloatTime, frameFloatDelta, fadeParams);
+}
+
 void PatternRendererBase::render() {
     if (!hasPattern || !ledManager || !buffersAllocated) return;
     if (ledManager->getNumStrips() == 0) return;
 
+    // A dissolve needs both graphs and somewhere to hold the outgoing frame. Anything
+    // missing (buffers released for an OTA, a blend operator that failed to construct)
+    // falls back to showing the incoming pattern alone, which is where the fade was headed.
+    const bool fading = fadeActive && hasOutgoing && fadeBuffer && fadeOp &&
+                        fadeBufferPixels == getTotalPixels();
+
     // Nothing wired to the Output node: meta.output is the sentinel -1 (or otherwise
     // out of range). Show black rather than whatever a node happens to leave in a lane
-    // buffer, so disconnected nodes can't "bleed" onto the LEDs.
-    if (currentPattern.outputBuffer < 0 || currentPattern.outputBuffer >= NUM_BUFFERS) {
+    // buffer, so disconnected nodes can't "bleed" onto the LEDs. While fading, the
+    // composite handles this instead — an unwired incoming pattern fades to black rather
+    // than cutting to it.
+    if (!fading && (currentPattern.outputBuffer < 0 || currentPattern.outputBuffer >= NUM_BUFFERS)) {
         for (size_t s = 0; s < ledManager->getNumStrips(); s++) {
             LedConfig::LedBus* strip = ledManager->getStrip(s);
             if (!strip) continue;
@@ -432,11 +588,13 @@ void PatternRendererBase::render() {
         }
 
         if (!haveRender || w != lastRenderW || h != lastRenderH) {
-            renderGraphAt(w, h);
+            if (fading) renderCrossfadeAt(w, h); else renderGraphAt(currentPattern, w, h);
             lastRenderW = w; lastRenderH = h; haveRender = true;
         }
 
-        const CRGB* patternBuffer = getBuffer(currentPattern.outputBuffer);
+        // While fading, the composite in the hold buffer IS the frame — the lanes hold the
+        // two halves it was made from.
+        const CRGB* patternBuffer = fading ? fadeBuffer : getBuffer(currentPattern.outputBuffer);
         if (!patternBuffer) continue;
 
         if (strip->hasLayout()) {

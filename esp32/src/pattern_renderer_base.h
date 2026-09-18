@@ -7,6 +7,9 @@
 
 #define NUM_BUFFERS 4 // Three lanes for patterns (0/1/2) + one scratch (3)
 #define SCRATCH_BUFFER 3 // Internal: render here when output aliases an input, then copy back
+// The crossfade hold buffer is deliberately NOT one of these. It is allocated on demand
+// (see armCrossfade) so a device that never crossfades pays nothing, and so patterns —
+// which are validated against NUM_BUFFERS — can never address it.
 
 // Define ESP32 build to disable emscripten includes
 #define ESP32_BUILD
@@ -70,6 +73,33 @@ protected:
     
     bool buffersAllocated = false;
 
+    // ── Crossfade ───────────────────────────────────────────────────────────────────────
+    // Cycle mode can dissolve one pattern into the next instead of cutting. Conceptually
+    // this is the two patterns' graphs joined under a single Blend node, which is exactly
+    // what it renders — but the two graphs are NOT given disjoint lanes. They don't have to
+    // coexist in space, only within one frame: the outgoing graph runs first and its output
+    // lane is copied into the hold buffer, at which point every lane is dead and the
+    // incoming graph reuses all three. So a crossfade costs ONE extra full-grid buffer,
+    // not the three a literally-joined graph would need.
+    Pattern outgoingPattern;                 // the graph being faded OUT (owns its own operators,
+                                             // so its stateful ones keep running while it fades)
+    bool hasOutgoing = false;
+    CRGB* fadeBuffer = nullptr;              // holds the outgoing frame, then the blended result
+    uint32_t fadeBufferPixels = 0;           // what fadeBuffer was sized for (realloc if the grid changes)
+    std::unique_ptr<BaseOperator> fadeOp;    // a real "blend" operator — same code path as a Blend node
+    std::vector<ParameterValue> fadeParams;  // [opacity, mode=Normal], refreshed per frame
+    bool fadeArmed = false;                  // a crossfade was requested; the next setPattern() starts it
+    bool fadeActive = false;
+    unsigned long fadeStartTime = 0;         // on the SYNCED clock, so all devices dissolve together
+    uint32_t fadeDurationMs = 0;
+    float fadeProgress = 0.0f;               // 0 = all outgoing, 1 = all incoming (recomputed in update())
+
+    bool ensureFadeBuffer();                 // allocate/resize the hold buffer; false = no crossfade
+    void releaseFadeBuffer();
+    void endCrossfade();                     // drop the outgoing graph and its buffer
+    // Render the crossfade composite for one canvas size, leaving it in fadeBuffer.
+    void renderCrossfadeAt(uint16_t width, uint16_t height);
+
     // Helper functions
     void clearBuffer(int bufferIndex);
     CRGB* getBufferPtr(int bufferIndex);
@@ -77,9 +107,9 @@ protected:
     void deallocateBuffers();
     void initializeFromLedConfig();
     unsigned long getCurrentTime(); // Get current time (synced or local)
-    // Run the whole operator graph into the shared buffers at the given canvas size.
+    // Run a whole operator graph into the shared buffers at the given canvas size.
     // Called once per strip from render() so each strip gets its own native render.
-    void renderGraphAt(uint16_t width, uint16_t height);
+    void renderGraphAt(const Pattern& pattern, uint16_t width, uint16_t height);
     
     // Get current dimensions from LED config (single source of truth)
     uint16_t getMatrixWidth() const;
@@ -114,6 +144,25 @@ public:
     void setPattern(Pattern&& pattern);
     void clearPattern();
     bool loadPatternFromMessagePack(const uint8_t* data, unsigned int size);
+
+    // Crossfade the pattern that is loaded NEXT over the one showing now.
+    //
+    // Arms only — the fade starts when the next setPattern() lands, because that is the
+    // moment there are two graphs to blend. So the caller arms, then loads; if the load
+    // fails it must cancelCrossfade(), or the arm would attach to whatever pattern arrives
+    // after it. Anything that sets a pattern WITHOUT arming first (a live push from the
+    // app) cancels a pending or running fade and cuts, which is what "here's your pattern
+    // now" should do.
+    //
+    // startTime is on the synchronized clock and is the cycle BOUNDARY, not "now": every
+    // device crosses that boundary together but reaches this call a different number of
+    // milliseconds later (flash read, msgpack parse), and anchoring to the boundary keeps
+    // them dissolving in step. A boundary already further back than durationMs simply
+    // yields progress >= 1 on the first frame — a cut, which is the honest outcome for a
+    // device that joined late.
+    void armCrossfade(unsigned long startTime, uint32_t durationMs);
+    void cancelCrossfade();
+    bool isCrossfading() const { return fadeActive; }
     
     // Rendering
     void update();

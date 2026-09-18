@@ -130,6 +130,35 @@ describe('BLE/Wi-Fi protocol parity', () => {
     expect(firmware).toContain('Endpoints::notify(CHARACTERISTIC_UUID_LAYOUT_SET, status');
   });
 
+  it('the cycle-control payload agrees end to end, and still accepts the old short form', () => {
+    // [u32 intervalMs][u8 enabled][u32 crossfadeMs]. The crossfade word was appended to a
+    // payload already in the field, so two things have to stay true at once: the app writes
+    // the long form, and the firmware still accepts the short one from an app that predates
+    // it. Getting the offset wrong here would read the enabled byte as part of the duration.
+    const app = read('src/lib/ble.ts');
+    const firmware = read('esp32/src/main.cpp');
+    const sendFn = app.slice(
+      app.indexOf('export async function setCycleOnDevice'),
+      app.indexOf('export async function sendSinglePatternToDevice'),
+    );
+    expect(sendFn).toContain('new Uint8Array(9)');
+    expect(sendFn).toContain('dv.setUint32(0, intervalMs, true)');
+    expect(sendFn).toContain('dv.setUint8(4, enabled ? 1 : 0)');
+    expect(sendFn).toContain('dv.setUint32(5, crossfadeMs, true)');
+
+    const recvFn = firmware.slice(
+      firmware.indexOf('static void onPlaylistSyncWrite'),
+      firmware.indexOf('// Timestamp Sync Callbacks'),
+    );
+    expect(recvFn).toContain('if (v.length() < 5) return;');        // short form still lands
+    expect(recvFn).toContain('v.length() >= 9');                    // long form detected, not assumed
+    expect(recvFn).toContain('memcpy(&xf, v.data() + 5, 4)');       // same offset the app writes
+
+    // A device told nothing about crossfading must keep what it had rather than silently
+    // losing it, so the read is gated on the flag rather than defaulting to zero.
+    expect(firmware).toContain('if (pendingCycleHasCrossfade) cycleCrossfadeMs = pendingCycleCrossfadeMs;');
+  });
+
   it('the firmware has no hand-maintained channel list left', () => {
     // The specific thing that rotted. If someone reintroduces a second source of truth for
     // channel identity, this fails.

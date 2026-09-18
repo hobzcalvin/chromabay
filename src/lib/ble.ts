@@ -1345,15 +1345,26 @@ export async function syncPatternToAllDevices(): Promise<void> {
  * pattern library (sorted by name) on its SYNCHRONIZED clock, so connected devices
  * with the same patterns switch together. Cycling is independent of the stored set —
  * toggling it off just stops advancing. Payload (matches firmware
- * CycleControlCallbacks): [u32 intervalMs][u8 enabled], little-endian.
+ * CycleControlCallbacks): [u32 intervalMs][u8 enabled][u32 crossfadeMs], little-endian.
+ *
+ * crossfadeSeconds dissolves each pattern into the next instead of cutting; 0 cuts, as
+ * before. Firmware older than feat 4 ignores the trailing word — it reads the first five
+ * bytes and stops — so sending it unconditionally is safe and costs nothing.
  */
-export async function setCycleOnDevice(deviceId: string, enabled: boolean, intervalSeconds: number): Promise<void> {
+export async function setCycleOnDevice(
+  deviceId: string,
+  enabled: boolean,
+  intervalSeconds: number,
+  crossfadeSeconds: number = 0
+): Promise<void> {
   const intervalMs = Math.max(1, Math.round(intervalSeconds * 1000));
-  const out = new Uint8Array(5);
+  const crossfadeMs = Math.max(0, Math.round(crossfadeSeconds * 1000));
+  const out = new Uint8Array(9);
   const dv = new DataView(out.buffer);
   dv.setUint32(0, intervalMs, true);
   dv.setUint8(4, enabled ? 1 : 0);
-  console.log(`[Cycle] ${enabled ? 'ON' : 'OFF'} @ ${intervalMs}ms -> ${deviceId}`);
+  dv.setUint32(5, crossfadeMs, true);
+  console.log(`[Cycle] ${enabled ? 'ON' : 'OFF'} @ ${intervalMs}ms, crossfade ${crossfadeMs}ms -> ${deviceId}`);
   await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_PLAYLIST_SYNC, dv);
 }
 

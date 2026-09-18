@@ -27,7 +27,8 @@
 //   1  baseline (BLE control, OTA, library, cycle, layouts, calibration)
 //   2  WiFi/TCP transport + comm-mode switching, sleep timer, RGB-test toggle, time node
 //   3  DDP realtime streaming (rtProto is a bitmask; settings report rtcaps)
-#define FIRMWARE_FEATURES 3
+//   4  cycle crossfade (cycle-control payload carries a trailing [u32 crossfadeMs])
+#define FIRMWARE_FEATURES 4
 
 // --- Firmware Signature Verification ---
 // ECDSA P-256 Public Key (Raw 64-byte format: 32-byte X + 32-byte Y coordinates)
