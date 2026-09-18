@@ -1,7 +1,7 @@
 {
-  "version": "1.1.333",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.333.zip",
-  "buildDate": "2026-09-18T04:45:49Z",
-  "commitHash": "ae681990447ec0a744f67bf500d1a819f4d50bfd",
-  "commitMessage": "Dissolve one pattern into the next in cycle mode"
+  "version": "1.1.334",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.334.zip",
+  "buildDate": "2026-09-18T04:58:22Z",
+  "commitHash": "0f81ac602e73ff3020d750deb1757699e51c239f",
+  "commitMessage": "Let the control path outbid the crossfade for a contiguous block"
 }
