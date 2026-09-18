@@ -1,7 +1,7 @@
 {
-  "version": "1.1.334",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.334.zip",
-  "buildDate": "2026-09-18T04:58:22Z",
-  "commitHash": "0f81ac602e73ff3020d750deb1757699e51c239f",
-  "commitMessage": "Let the control path outbid the crossfade for a contiguous block"
+  "version": "1.1.335",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.335.zip",
+  "buildDate": "2026-09-18T05:04:41Z",
+  "commitHash": "0da6cb28311c9d3b8469f9416923bc01dc040236",
+  "commitMessage": "Fetch FastLED from git, at the same 3.7.7 it was already pinned to"
 }
