@@ -495,21 +495,30 @@ void PatternRendererBase::update() {
     }
 }
 
-void PatternRendererBase::renderGraphAt(const Pattern& pattern, uint16_t width, uint16_t height) {
+void PatternRendererBase::renderGraphAt(const Pattern& pattern, uint16_t width, uint16_t height,
+                                       const LaneAssignment* lanes) {
     // Run every operator node into the shared buffers at the given canvas size.
     const size_t totalPixels = (size_t)width * (size_t)height;
-    for (const auto& node : pattern.nodes) {
+    // An assignment is indexed by node, so one built for a different graph would read off the
+    // end of it. Cheap to rule out, and the alternative is corrupting memory.
+    if (lanes && lanes->out.size() != pattern.nodes.size()) lanes = nullptr;
+    for (size_t idx = 0; idx < pattern.nodes.size(); idx++) {
+        const PatternNode& node = pattern.nodes[idx];
         if (!node.op) continue;
-        CRGB* inputBuffer1 = (node.inputBuffer >= 0) ? getBufferPtr(node.inputBuffer) : nullptr;
-        CRGB* inputBuffer2 = (node.secondInputBuffer >= 0) ? getBufferPtr(node.secondInputBuffer) : nullptr;
-        CRGB* outputBuffer = getBufferPtr(node.outputBuffer);
+        // A re-packed graph runs on lanes other than the ones it was drawn on. The
+        // connections are identical, and the connections are the whole of what it means.
+        const int inLane   = lanes ? (int)lanes->in1[idx] : node.inputBuffer;
+        const int in2Lane  = lanes ? (int)lanes->in2[idx] : node.secondInputBuffer;
+        const int outLane  = lanes ? (int)lanes->out[idx] : node.outputBuffer;
+        CRGB* inputBuffer1 = (inLane  >= 0) ? getBufferPtr(inLane)  : nullptr;
+        CRGB* inputBuffer2 = (in2Lane >= 0) ? getBufferPtr(in2Lane) : nullptr;
+        CRGB* outputBuffer = getBufferPtr(outLane);
         if (!outputBuffer) continue;
 
         // A same-lane chain makes the output buffer alias an input. Spatial operators
         // (scroll/mirror/tile/glitch) must not render in-place — they'd read pixels they
         // already overwrote. Render into the scratch buffer, then copy back to the lane.
-        bool aliases = (node.outputBuffer == node.inputBuffer) ||
-                       (node.outputBuffer == node.secondInputBuffer);
+        bool aliases = (outLane == inLane) || (outLane == in2Lane);
         CRGB* renderOut = aliases ? getBufferPtr(SCRATCH_BUFFER) : outputBuffer;
         if (!renderOut) renderOut = outputBuffer; // scratch unavailable -> in-place fallback
 
@@ -538,62 +547,52 @@ void PatternRendererBase::renderGraphAt(const Pattern& pattern, uint16_t width, 
     }
 }
 
-// Which of the three lanes a graph touches at all — read or written, plus the lane it
-// displays from. Reads count: a lane holding the other graph's frame must not be read by
-// this one either, or it would sample a pattern that isn't its own.
-//
-// Anything referencing a buffer outside the three lanes (the scratch buffer, a malformed
-// index) returns "all three", which routes the crossfade to the hold buffer rather than
-// reasoning about a lane this never meant to cover.
-static uint8_t lanesUsedBy(const Pattern& pattern) {
-    const uint8_t ALL = 0x07;
-    uint8_t mask = 0;
-    auto note = [&](int buf) -> bool {         // false = not a lane, give up
-        if (buf < 0) return true;              // -1 is "no input", not a lane
-        if (buf > 2) return false;
-        mask |= (uint8_t)(1u << buf);
-        return true;
-    };
-    for (const auto& node : pattern.nodes) {
-        if (!node.op) continue;
-        if (!note(node.inputBuffer) || !note(node.secondInputBuffer) || !note(node.outputBuffer)) {
-            return ALL;
-        }
+// Feed a Pattern to the lane re-packer (lane_repack.h), which is deliberately ignorant of
+// Pattern, FastLED and Arduino so it can be tested on a host.
+static bool repackPattern(const Pattern& pattern, uint8_t allowedMask, LaneAssignment& plan) {
+    const size_t n = pattern.nodes.size();
+    if (n == 0) return false;
+    std::vector<int> in1(n), in2(n), out(n);
+    for (size_t i = 0; i < n; i++) {
+        // renderGraphAt skips a node with no operator, which would make the value flow the
+        // re-packer derives a fiction. Patterns never load such a node; refuse if one exists.
+        if (!pattern.nodes[i].op) return false;
+        in1[i] = pattern.nodes[i].inputBuffer;
+        in2[i] = pattern.nodes[i].secondInputBuffer;
+        out[i] = pattern.nodes[i].outputBuffer;
     }
-    if (!note(pattern.outputBuffer)) return ALL;
-    return mask;
+    return repackLanes(in1.data(), in2.data(), out.data(), n, pattern.outputBuffer, allowedMask, plan);
 }
 
 // Settle, once per crossfade, how the two graphs will share the lanes.
 //
-// The graph rendered SECOND is the one that has to spare a lane, so pick whichever of the
-// two can — preferring the natural order (outgoing held, incoming second) and falling back
-// to holding the incoming one when it is the greedier of the pair. Only when neither leaves
-// a lane free does this need memory the lanes can't provide.
+// One graph's frame is parked in a lane; the other is re-packed onto the two that remain.
+// Which lane is parked in is arbitrary — the other graph is being re-packed around it either
+// way — so park in the first graph's OWN output lane, and the copy to get it there disappears
+// as well. Try the natural order first (outgoing parked, incoming second), then the other,
+// because it is whichever graph runs second that has to fit in two lanes.
 bool PatternRendererBase::planCrossfade() {
-    const uint8_t ALL = 0x07;
-    const uint8_t incomingMask = lanesUsedBy(currentPattern);
-    const uint8_t outgoingMask = lanesUsedBy(outgoingPattern);
-
-    uint8_t secondMask = ALL;
-    if (incomingMask != ALL) {
-        fadeHoldIsIncoming = false;            // hold the outgoing frame, render incoming second
-        secondMask = incomingMask;
-    } else if (outgoingMask != ALL) {
-        fadeHoldIsIncoming = true;             // the incoming graph is the greedy one — hold it
-        secondMask = outgoingMask;
-    }
-
-    if (secondMask != ALL) {
-        for (int lane = 0; lane < 3; lane++) {
-            if (!(secondMask & (1u << lane))) { fadeHoldLane = lane; return true; }
+    for (int attempt = 0; attempt < 2; attempt++) {
+        const bool holdIncoming = (attempt == 1);
+        const Pattern& first  = holdIncoming ? currentPattern  : outgoingPattern;
+        const Pattern& second = holdIncoming ? outgoingPattern : currentPattern;
+        int lane = first.outputBuffer;
+        if (lane < 0 || lane > 2) lane = 0;
+        const uint8_t allowed = (uint8_t)(0x07u & ~(1u << lane));
+        if (repackPattern(second, allowed, fadeSecondLanes)) {
+            fadeHoldLane = lane;
+            fadeHoldIsIncoming = holdIncoming;
+            fadeSecondRepacked = true;
+            return true;
         }
     }
 
-    // Both graphs occupy all three lanes. No ordering helps; this is the case that needs a
-    // fourth place to put a frame.
+    // Neither graph fits in two lanes: both keep three values alive at once, which no
+    // ordering or re-packing can reduce. This is the case that needs a fourth frame's worth
+    // of memory, and the only one that does.
     fadeHoldLane = -1;
     fadeHoldIsIncoming = false;
+    fadeSecondRepacked = false;
     return ensureFadeBuffer();
 }
 
@@ -612,8 +611,10 @@ const CRGB* PatternRendererBase::renderCrossfadeAt(uint16_t width, uint16_t heig
     const Pattern& first  = fadeHoldIsIncoming ? currentPattern  : outgoingPattern;
     const Pattern& second = fadeHoldIsIncoming ? outgoingPattern : currentPattern;
 
-    // Where the first graph's frame waits: a lane the second graph never touches, or the
-    // hold buffer when the two of them leave no lane free.
+    // Where the first graph's frame waits: a lane the re-packed second graph was kept out
+    // of, or the hold buffer when neither graph could be packed into two lanes. The second
+    // graph cannot read it by accident either — the re-packer refuses any graph that reads a
+    // lane it has not written itself, so it can never sample the frame parked beside it.
     CRGB* held = (fadeHoldLane >= 0) ? getBufferPtr(fadeHoldLane) : fadeBuffer;
     if (!held) return nullptr;
 
@@ -625,10 +626,11 @@ const CRGB* PatternRendererBase::renderCrossfadeAt(uint16_t width, uint16_t heig
         else for (uint32_t i = 0; i < totalPixels; i++) held[i] = CRGB::Black;
     }
 
-    // 2. The other graph, wired to lanes that by construction exclude the held one — so it
-    //    runs exactly as it would alone, with no remapping and nothing to restore after.
-    renderGraphAt(second, width, height);
-    CRGB* secondOut = getBufferPtr(second.outputBuffer);
+    // 2. The other graph, re-packed onto the lanes the held frame leaves — same connections,
+    //    different columns, so it computes exactly what it would alone.
+    const LaneAssignment* secondLanes = fadeSecondRepacked ? &fadeSecondLanes : nullptr;
+    renderGraphAt(second, width, height, secondLanes);
+    CRGB* secondOut = getBufferPtr(secondLanes ? (int)secondLanes->display : second.outputBuffer);
     if (!secondOut) {
         // Nothing wired to Output on that pattern: it shows black, so fade to/from black.
         // Scratch is idle between graph renders, which is exactly what it's for.

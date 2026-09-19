@@ -4,6 +4,7 @@
 #include <vector>
 #include "led_manager.h"
 #include "mpack.h"
+#include "lane_repack.h"
 
 #define NUM_BUFFERS 4 // Three lanes for patterns (0/1/2) + one scratch (3)
 #define SCRATCH_BUFFER 3 // Internal: render here when output aliases an input, then copy back
@@ -89,11 +90,16 @@ protected:
     // memory, which is the common case. No remapping is needed either; the held frame is
     // simply parked in a lane the second graph was never wired to.
     //
-    // The exception is real and is the reason the hold buffer still exists: when BOTH
-    // patterns occupy all three lanes there is no free lane, and no ordering fixes it. That
-    // is the classic register-allocation result — two subtrees each needing three registers,
-    // combined under a binary operator, need four. Then, and only then, a crossfade costs
-    // one extra full-grid buffer.
+    // "Uses fewer lanes" means what the graph NEEDS, not where its nodes were drawn. Lane
+    // identity carries no meaning, so the second graph is re-packed onto whatever lanes are
+    // left (see lane_repack.h) — two generators blended across three columns only ever have
+    // two values alive and fit in two lanes.
+    //
+    // The exception is real and is why the hold buffer still exists: a graph with three
+    // values alive at once cannot be packed into two, and if BOTH patterns are like that, no
+    // ordering or re-packing fixes it. That is the register-allocation result — two subtrees
+    // each needing three registers, combined under a binary operator, need four. Then, and
+    // only then, a crossfade costs one extra full-grid buffer.
     Pattern outgoingPattern;                 // the graph being faded OUT (owns its own operators,
                                              // so its stateful ones keep running while it fades)
     bool hasOutgoing = false;
@@ -103,6 +109,10 @@ protected:
     // Which lane holds the first-rendered frame while the other graph runs, or -1 when the
     // two graphs between them leave no lane free and the hold buffer is needed instead.
     int fadeHoldLane = -1;
+    // Where the second graph's nodes actually run. Its authored lanes are only where the
+    // editor put them; re-packed, the same connections fit in the lanes the held frame leaves.
+    LaneAssignment fadeSecondLanes;
+    bool fadeSecondRepacked = false;
     // Whether the INCOMING graph is the one rendered first (and so the one being held). The
     // graph rendered second is whichever can spare a lane; that is not always the incoming one.
     bool fadeHoldIsIncoming = false;
@@ -135,7 +145,11 @@ protected:
     unsigned long getCurrentTime(); // Get current time (synced or local)
     // Run a whole operator graph into the shared buffers at the given canvas size.
     // Called once per strip from render() so each strip gets its own native render.
-    void renderGraphAt(const Pattern& pattern, uint16_t width, uint16_t height);
+    // `lanes`, when given, overrides the graph's authored lane numbers with a re-packed
+    // assignment. Same connections, different columns — which is no change at all to what
+    // the graph computes.
+    void renderGraphAt(const Pattern& pattern, uint16_t width, uint16_t height,
+                       const LaneAssignment* lanes = nullptr);
     
     // Get current dimensions from LED config (single source of truth)
     uint16_t getMatrixWidth() const;
