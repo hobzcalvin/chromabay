@@ -1,7 +1,7 @@
 {
-  "version": "1.1.335",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.335.zip",
-  "buildDate": "2026-09-18T05:04:41Z",
-  "commitHash": "0da6cb28311c9d3b8469f9416923bc01dc040236",
-  "commitMessage": "Fetch FastLED from git, at the same 3.7.7 it was already pinned to"
+  "version": "1.1.336",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.336.zip",
+  "buildDate": "2026-09-19T15:53:32Z",
+  "commitHash": "867128f0d5560dc8c50e3192f87831403c5e0c1d",
+  "commitMessage": "Hold the first frame in a spare lane, not a fourth buffer"
 }
