@@ -74,19 +74,38 @@ protected:
     bool buffersAllocated = false;
 
     // ── Crossfade ───────────────────────────────────────────────────────────────────────
-    // Cycle mode can dissolve one pattern into the next instead of cutting. Conceptually
-    // this is the two patterns' graphs joined under a single Blend node, which is exactly
-    // what it renders — but the two graphs are NOT given disjoint lanes. They don't have to
-    // coexist in space, only within one frame: the outgoing graph runs first and its output
-    // lane is copied into the hold buffer, at which point every lane is dead and the
-    // incoming graph reuses all three. So a crossfade costs ONE extra full-grid buffer,
-    // not the three a literally-joined graph would need.
+    // Cycle mode can dissolve one pattern into the next instead of cutting: the two
+    // patterns' graphs joined under a single Blend node, which is what it renders.
+    //
+    // Two graphs under one Blend node do NOT need two graphs' worth of lanes. Run them
+    // sequentially and only ONE value has to survive across the join — the first graph's
+    // result. The second graph then needs nothing but lanes the first isn't holding. So the
+    // question is not "do six lanes fit in three", it is "does the second graph leave one
+    // lane free", and lanes here are editor columns: a pattern only occupies three of them
+    // if someone actually placed nodes in all three.
+    //
+    // Hence: whichever graph uses fewer lanes goes SECOND, the other's frame is held in a
+    // lane it doesn't touch, and the blend composites the two — three lanes, no extra
+    // memory, which is the common case. No remapping is needed either; the held frame is
+    // simply parked in a lane the second graph was never wired to.
+    //
+    // The exception is real and is the reason the hold buffer still exists: when BOTH
+    // patterns occupy all three lanes there is no free lane, and no ordering fixes it. That
+    // is the classic register-allocation result — two subtrees each needing three registers,
+    // combined under a binary operator, need four. Then, and only then, a crossfade costs
+    // one extra full-grid buffer.
     Pattern outgoingPattern;                 // the graph being faded OUT (owns its own operators,
                                              // so its stateful ones keep running while it fades)
     bool hasOutgoing = false;
     CRGB* fadeBuffer = nullptr;              // holds the outgoing frame, then the blended result
     uint32_t fadeBufferPixels = 0;           // what fadeBuffer was sized for (realloc if the grid changes)
     bool fadeLowMemoryWarned = false;        // so a tight heap doesn't log once per cycle boundary, forever
+    // Which lane holds the first-rendered frame while the other graph runs, or -1 when the
+    // two graphs between them leave no lane free and the hold buffer is needed instead.
+    int fadeHoldLane = -1;
+    // Whether the INCOMING graph is the one rendered first (and so the one being held). The
+    // graph rendered second is whichever can spare a lane; that is not always the incoming one.
+    bool fadeHoldIsIncoming = false;
     std::unique_ptr<BaseOperator> fadeOp;    // a real "blend" operator — same code path as a Blend node
     std::vector<ParameterValue> fadeParams;  // [opacity, mode=Normal], refreshed per frame
     bool fadeArmed = false;                  // a crossfade was requested; the next setPattern() starts it
@@ -98,8 +117,14 @@ protected:
     bool ensureFadeBuffer();                 // allocate/resize the hold buffer; false = no crossfade
     void releaseFadeBuffer();
     void endCrossfade();                     // drop the outgoing graph and its buffer
-    // Render the crossfade composite for one canvas size, leaving it in fadeBuffer.
-    void renderCrossfadeAt(uint16_t width, uint16_t height);
+    // Render the crossfade composite for one canvas size. Returns the buffer holding it —
+    // a lane when the two graphs fit the lanes between them, the hold buffer when they
+    // don't — or nullptr if it could not be built this frame.
+    const CRGB* renderCrossfadeAt(uint16_t width, uint16_t height);
+    // Decide how this crossfade will be rendered, once, when it starts. Sets fadeHoldLane /
+    // fadeHoldIsIncoming and allocates the hold buffer only if the lanes can't do it.
+    // False = no way to fade these two (cut instead).
+    bool planCrossfade();
 
     // Helper functions
     void clearBuffer(int bufferIndex);
