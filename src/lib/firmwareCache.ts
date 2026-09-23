@@ -111,6 +111,6 @@ async function prune(db: IDBDatabase): Promise<void> {
   if (all.length <= MAX_CACHED) return;
   const toDelete = all.sort((a, b) => b.cachedAt - a.cachedAt).slice(MAX_CACHED);
   for (const fw of toDelete) {
-    await tx(db, 'readwrite', (s) => s.delete(fw.version));
+    await tx(db, 'readwrite', (s) => s.delete(fw.key));
   }
 }
