@@ -10,7 +10,7 @@
   import { Capacitor } from '@capacitor/core';
   import { listCachedFirmware, getFirmware } from '$lib/firmwareCache';
   import { flashFirmwareViaWledHttp, WLED_AP_SSID, WLED_AP_PASS } from '$lib/wledOta';
-  import { fetchFirmwareRegistry, resolveFirmware, prefetchFirmware } from '$lib/ble';
+  import { fetchFirmwareRegistry, resolveFirmware, prefetchFirmware, firmwareCacheKey } from '$lib/ble';
   import FirmwareDownloads from './FirmwareDownloads.svelte';
 
   const isNative = Capacitor.getPlatform() !== 'web';
@@ -19,7 +19,17 @@
   let open = $state(false);
   let cached = $state<{ key: string; version: string; date: string; cachedAt: number }[]>([]);
   let preparing = $state(false);
-  let ready = $derived(cached.length > 0);
+  // Cache key of the image resolved for a WLED board (set once the registry is reachable).
+  let targetKey = $state<string | null>(null);
+  // The cache holds every chip and both Wi-Fi variants (the startup prefetch fills it), so pick
+  // the classic-ESP32 image explicitly: the one just resolved, or offline the newest cached
+  // classic-ESP32 no-Wi-Fi build (paths are …/<version>/<chip>/firmware-nowifi.bin).
+  let target = $derived(
+    cached.find((c) => c.key === targetKey) ??
+      cached.find((c) => c.key.endsWith('/esp32/firmware-nowifi.bin')) ??
+      null
+  );
+  let ready = $derived(target !== null);
   let busy = $state(false);
   let message = $state('');
   let result = $state<'idle' | 'sent' | 'confirmed' | 'error'>('idle');
@@ -42,6 +52,7 @@
       if (entry) {
         const base = 'https://chromabay.app';
         await prefetchFirmware(entry.version, entry.date, `${base}/${entry.path}`, `${base}/${entry.signaturePath}`);
+        targetKey = firmwareCacheKey(entry.version, `${base}/${entry.path}`);
       }
       cached = await listCachedFirmware();
     } catch { /* offline / registry unreachable — the readiness note tells the user */ }
@@ -49,9 +60,8 @@
   }
 
   async function convert() {
-    const latest = cached[0]; // newest by cachedAt
-    if (!latest) { message = 'Firmware not ready. Connect to the internet and reopen this section.'; result = 'error'; return; }
-    const fw = await getFirmware(latest.version, latest.key);
+    if (!target) { message = 'Firmware not ready. Connect to the internet and reopen this section.'; result = 'error'; return; }
+    const fw = await getFirmware(target.version, target.key);
     if (!fw) { message = 'Firmware could not be read. Connect to the internet and reopen this section.'; result = 'error'; return; }
 
     busy = true; result = 'idle'; message = '';
