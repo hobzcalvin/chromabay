@@ -50,7 +50,7 @@ export class WifiTransport implements Transport {
   private ws: WebSocket | null = null;
   // Reads are queued per channel: BLE allows a read to be outstanding per characteristic, and
   // a device VALUE frame answers the oldest waiter on that channel.
-  private pendingReads = new Map<number, Array<(v: DataView) => void>>();
+  private pendingReads = new Map<number, Array<{ ok: (v: DataView) => void; fail: (e: Error) => void }>>();
   private notifiers = new Map<number, NotifyCb>();
   onClose?: () => void;
 
@@ -79,8 +79,9 @@ export class WifiTransport implements Transport {
         this.connected = false;
         this.ws = null;
         // Fail every waiter rather than leaving callers hanging until their own timeout.
-        for (const q of this.pendingReads.values()) q.length = 0;
+        const waiters = [...this.pendingReads.values()].flat();
         this.pendingReads.clear();
+        for (const w of waiters) w.fail(new Error('Wi-Fi link closed'));
         this.onClose?.();
       };
       ws.onmessage = (e) => this.onMessage(new Uint8Array(e.data as ArrayBuffer));
@@ -104,7 +105,7 @@ export class WifiTransport implements Transport {
     // cannot distinguish these either — a read response and a notification look the same to
     // the app — so resolving the waiter first is exactly the BLE behaviour.
     const q = this.pendingReads.get(ch);
-    if (q && q.length) { q.shift()!(dv); return; }
+    if (q && q.length) { q.shift()!.ok(dv); return; }
     this.notifiers.get(ch)?.(dv);
   }
 
@@ -130,7 +131,10 @@ export class WifiTransport implements Transport {
         if (i >= 0) q.splice(i, 1);
         reject(new Error(`Wi-Fi read of ${characteristic} timed out`));
       }, timeoutMs);
-      const waiter = (v: DataView) => { clearTimeout(timer); resolve(v); };
+      const waiter = {
+        ok: (v: DataView) => { clearTimeout(timer); resolve(v); },
+        fail: (e: Error) => { clearTimeout(timer); reject(e); },
+      };
       q.push(waiter);
       this.pendingReads.set(ch, q);
       try { this.sendRaw(this.frame(ch, OP.READ)); }

@@ -66,6 +66,13 @@ describe('WifiTransport framing', () => {
     expect(sock.sent.map((m) => m[1])).toEqual([OP.WRITE, OP.WRITE]);
   });
 
+  it('a read still waiting when the link closes fails at once, not at its timeout', async () => {
+    const t = await connected();
+    const p = t.read(SERVICE, DEVICE_INFO, 60_000);
+    sock.close();
+    await expect(p).rejects.toThrow('Wi-Fi link closed');
+  });
+
   it('an unsolicited VALUE goes to the notify sink, not to a read', async () => {
     const t = await connected();
     const seen: number[] = [];
