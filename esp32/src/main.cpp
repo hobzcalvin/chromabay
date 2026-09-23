@@ -2076,26 +2076,38 @@ void processReceivedLedConfig() {
         }
         mpack_done_map(&reader);
 
-        // Apply the new configuration. Safe here: we are on the loop task and run
-        // outside update()/render(), so nothing else touches the renderer buffers
-        // or LED strips while we reallocate/recreate them.
-        configMgr.applyConfiguration(newConfig);
+        // mpack never throws: a wrong-typed field (e.g. a nil "pin" from a blank box in the
+        // app) puts the reader in an error state, after which every read returns 0 and the
+        // strips parse as empty. Applying that would turn every strip off and SAVE it, so
+        // reject the whole message instead and keep the running configuration.
+        mpack_error_t parseError = mpack_reader_error(&reader);
+        if (parseError != mpack_ok) {
+            Serial.printf("LED config rejected: %s\n", mpack_error_to_string(parseError));
+            SentryReporting::logError("LED config rejected: %s (%u bytes)",
+                                      mpack_error_to_string(parseError),
+                                      (unsigned)ledConfigBufferSize);
+        } else {
+            // Apply the new configuration. Safe here: we are on the loop task and run
+            // outside update()/render(), so nothing else touches the renderer buffers
+            // or LED strips while we reallocate/recreate them.
+            configMgr.applyConfiguration(newConfig);
 
-        // Update pattern renderer matrix config
-        if (patternRenderer) {
-            patternRenderer->updateMatrixConfig();
+            // Update pattern renderer matrix config
+            if (patternRenderer) {
+                patternRenderer->updateMatrixConfig();
+            }
+
+            // Save configuration to file
+            configMgr.saveConfiguration();
+
+            Serial.println("LED Configuration updated successfully");
+            // Recorded inside the transaction above, so the SDK attaches this line to the same
+            // trace: in Sentry the operation and the sentence describing it sit together, which
+            // is the difference between "device.config.led took 240 ms" and knowing what changed.
+            SentryReporting::logInfo("LED config: %u strips, brightness %u",
+                                     (unsigned)ledMgr.getNumStrips(),
+                                     (unsigned)newConfig.globalBrightness);
         }
-
-        // Save configuration to file
-        configMgr.saveConfiguration();
-
-        Serial.println("LED Configuration updated successfully");
-        // Recorded inside the transaction above, so the SDK attaches this line to the same
-        // trace: in Sentry the operation and the sentence describing it sit together, which
-        // is the difference between "device.config.led took 240 ms" and knowing what changed.
-        SentryReporting::logInfo("LED config: %u strips, brightness %u",
-                                 (unsigned)ledMgr.getNumStrips(),
-                                 (unsigned)newConfig.globalBrightness);
 
     } catch (...) {
         Serial.println("Error parsing LED configuration MessagePack data");
