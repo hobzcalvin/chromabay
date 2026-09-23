@@ -768,9 +768,10 @@ bool PatternRendererBase::loadPatternFromMessagePack(const uint8_t* data, unsign
             mpack_node_t nameNode = mpack_node_map_cstr(metaNode, "name");
             mpack_type_t nameType = mpack_node_type(nameNode);
             if (nameType == mpack_type_str) {
-                char nameBuffer[64];
-                mpack_node_copy_cstr(nameNode, nameBuffer, sizeof(nameBuffer));
-                pattern.name = String(nameBuffer);
+                // Read in full: copying into a fixed buffer flags mpack_error_too_big on the
+                // WHOLE tree for a name of 64+ bytes (~21 Cyrillic/CJK characters), after which
+                // every later read returns nothing and the pattern loads with no nodes.
+                pattern.name = String(mpackFullStr(nameNode).c_str());
             } else if (nameType == mpack_type_nil) {
                 pattern.name = ""; // Default to empty string for null values
             } else {
