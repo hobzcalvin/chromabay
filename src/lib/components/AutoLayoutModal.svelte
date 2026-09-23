@@ -76,6 +76,9 @@
     (async () => {
       try {
         stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } } });
+        // Closed while the permission prompt was up: the cleanup below already ran (with no
+        // stream to stop), so release the camera here and don't start calibrating the LEDs.
+        if (!alive) { stream.getTracks().forEach((t) => t.stop()); return; }
         if (video) { video.srcObject = stream; await video.play().catch(() => {}); }
         videoTrack = stream.getVideoTracks()[0] ?? null;
         const caps: any = videoTrack?.getCapabilities?.() ?? {};
