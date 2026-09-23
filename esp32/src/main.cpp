@@ -793,7 +793,10 @@ uint8_t* serializeLedConfigMpack(size_t* outLen) {
     mpack_write_cstr(&writer, "strips");
     mpack_start_array(&writer, cfg.strips.size());
     for (const auto& strip : cfg.strips) {
-        mpack_start_map(&writer, 9);
+        // Every field the config file stores, keys shared with ConfigKeys. The app reads
+        // gm/wp/de back and writes them on the next save, so omitting them here reset gamma,
+        // white point and dither to defaults whenever any LED setting was saved.
+        mpack_start_map(&writer, 14);
         mpack_write_cstr(&writer, "cs");  mpack_write_u8(&writer, static_cast<uint8_t>(strip.chipset));
         mpack_write_cstr(&writer, "pin"); mpack_write_u8(&writer, strip.pin);
         mpack_write_cstr(&writer, "clk"); mpack_write_u8(&writer, strip.clockPin);
@@ -803,6 +806,11 @@ uint8_t* serializeLedConfigMpack(size_t* outLen) {
         mpack_write_cstr(&writer, "w");   mpack_write_u16(&writer, strip.width);
         mpack_write_cstr(&writer, "h");   mpack_write_u16(&writer, strip.height);
         mpack_write_cstr(&writer, "ort"); mpack_write_u8(&writer, strip.orientation);
+        mpack_write_cstr(&writer, LedConfig::ConfigKeys::GAMMA);       mpack_write_u16(&writer, (uint16_t)(strip.gamma * 100.0f + 0.5f));
+        mpack_write_cstr(&writer, LedConfig::ConfigKeys::WHITE_POINT); mpack_write_u32(&writer, ((uint32_t)strip.wpR << 16) | ((uint32_t)strip.wpG << 8) | (uint32_t)strip.wpB);
+        mpack_write_cstr(&writer, LedConfig::ConfigKeys::DITHER);      mpack_write_bool(&writer, strip.ditherEnable);
+        mpack_write_cstr(&writer, LedConfig::ConfigKeys::AUTO_WHITE);  mpack_write_u8(&writer, strip.autoWhiteMode);
+        mpack_write_cstr(&writer, LedConfig::ConfigKeys::W_LED_COLOR); mpack_write_u32(&writer, ((uint32_t)strip.wLedR << 16) | ((uint32_t)strip.wLedG << 8) | (uint32_t)strip.wLedB);
         mpack_finish_map(&writer);
     }
     mpack_finish_array(&writer);
