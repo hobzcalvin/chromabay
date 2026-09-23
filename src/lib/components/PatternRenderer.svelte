@@ -61,15 +61,14 @@
     ctx = canvasElement.getContext('2d');
     setupCanvas();
     
-    if (fullscreen) {
-      const resize = () => setupCanvas();
-      window.addEventListener('resize', resize);
-      onDestroy(() => {
-        window.removeEventListener('resize', resize);
-      });
-    }
-    
+    // Cleanup is returned from onMount: onDestroy can only be registered during component
+    // init, so one called in here never ran and the listener outlived the page, throwing on
+    // every resize once the canvas was gone.
+    const resize = () => setupCanvas();
+    if (fullscreen) window.addEventListener('resize', resize);
+
     animate();
+    return () => window.removeEventListener('resize', resize);
   });
 
   onDestroy(() => {
