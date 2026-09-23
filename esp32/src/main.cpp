@@ -2885,12 +2885,16 @@ namespace RtStream {
     // sACN multicast group for a 1-based universe: 239.255.<hi>.<lo>.
     static IPAddress sacnGroup(uint16_t universe) { return IPAddress(239, 255, (universe >> 8) & 0xFF, universe & 0xFF); }
 
+    // sACN has no universe 0, so a start universe of 0 means "from sACN universe 1" — the same
+    // window begin() joins. Art-Net universes are 0-based and use rtUniverse as-is.
+    static uint16_t sacnFirstUniverse() { return gSettings.rtUniverse == 0 ? 1 : gSettings.rtUniverse; }
+
     static void begin() {
         uint8_t proto = gSettings.rtProto;
         if (proto & DeviceSettings::RT_ARTNET) artnet.begin(6454);
         if (proto & DeviceSettings::RT_SACN) {
             // Join a small window of universes starting at rtUniverse so multi-universe rigs work.
-            uint16_t u0 = gSettings.rtUniverse == 0 ? 1 : gSettings.rtUniverse;
+            uint16_t u0 = sacnFirstUniverse();
             for (uint16_t u = u0; u < u0 + 8; u++) sacn.beginMulticast(sacnGroup(u), 5568);
         }
         if (proto & DeviceSettings::RT_DDP) ddp.begin(DDP_PORT);
@@ -2917,9 +2921,10 @@ namespace RtStream {
         }
     }
 
-    static void applyDmx(uint16_t universe, const uint8_t* dmx, uint16_t len) {
-        if (universe < gSettings.rtUniverse) return;
-        uint32_t base = (uint32_t)(universe - gSettings.rtUniverse) * PX_PER_UNIVERSE;
+    // `first` is the universe that lands on pixel 0.
+    static void applyDmx(uint16_t universe, uint16_t first, const uint8_t* dmx, uint16_t len) {
+        if (universe < first) return;
+        uint32_t base = (uint32_t)(universe - first) * PX_PER_UNIVERSE;
         uint16_t px = len / 3;
         for (uint16_t p = 0; p < px; p++) setGlobalPixel(base + p, dmx[p*3], dmx[p*3+1], dmx[p*3+2]);
     }
@@ -2985,7 +2990,7 @@ namespace RtStream {
                     uint16_t uni  = (uint16_t)buf[14] | ((uint16_t)buf[15] << 8);
                     uint16_t dlen = ((uint16_t)buf[16] << 8) | buf[17]; // big-endian
                     if (dlen > (uint16_t)(r - 18)) dlen = r - 18;
-                    applyDmx(uni, buf + 18, dlen);
+                    applyDmx(uni, gSettings.rtUniverse, buf + 18, dlen);
                     got = true;
                 }
             }
@@ -2993,13 +2998,14 @@ namespace RtStream {
         while ((n = sacn.parsePacket()) > 0) {
             int r = sacn.read(buf, sizeof(buf));
             // E1.31: ACN PID at offset 4; universe at 113-114; DMP property count at 123-124
-            // (includes the 1-byte DMX start code at 125); channel data at 126.
-            if (r >= 126 && memcmp(buf + 4, "ASC-E1.17", 9) == 0) {
+            // (includes the 1-byte DMX start code at 125); channel data at 126. Only start code
+            // 0 is dimmer/pixel data; others (e.g. 0xDD per-address priority) are not pixels.
+            if (r >= 126 && memcmp(buf + 4, "ASC-E1.17", 9) == 0 && buf[125] == 0) {
                 uint16_t uni  = ((uint16_t)buf[113] << 8) | buf[114];
                 uint16_t pcnt = ((uint16_t)buf[123] << 8) | buf[124];
                 uint16_t dlen = pcnt > 0 ? pcnt - 1 : 0;
                 if (dlen > (uint16_t)(r - 126)) dlen = r - 126;
-                applyDmx(uni, buf + 126, dlen);
+                applyDmx(uni, sacnFirstUniverse(), buf + 126, dlen);
                 got = true;
             }
         }
