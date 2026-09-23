@@ -37,7 +37,9 @@ class FireOperator : public BaseOperator {
     }
     inline uint8_t rndRange(uint8_t lo, uint8_t hi) {
         if (hi <= lo) return lo;
-        return (uint8_t)(lo + (rnd8() % (uint8_t)(hi - lo + 1)));
+        // Span in int: the full range 0..255 is 256 wide, which a uint8_t cast turns into
+        // `% 0` (a crash on the device and in the WASM preview).
+        return (uint8_t)(lo + (rnd8() % ((int)hi - (int)lo + 1)));
     }
     // Random index in [0, n) using the full 32-bit state. rnd8() only spans 0..255, so
     // `rnd8() % w` would cap spark columns at 256 — leaving wide canvases (e.g. the
