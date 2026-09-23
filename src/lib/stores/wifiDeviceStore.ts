@@ -97,10 +97,14 @@ export function rememberWifiDevice(name: string, host?: string) {
 }
 
 export function forgetWifiDevice(nameOrHost: string) {
-  const entry = get(knownWifi).find((d) => d.name === nameOrHost || d.host === nameOrHost);
+  // Hosts compare case-insensitively: the list shows them lowercased, but entries remembered
+  // before hostnames were normalised can still be stored as typed (e.g. "Kitchen.local").
+  const key = nameOrHost.toLowerCase();
+  const entry = get(knownWifi).find((d) => d.name === nameOrHost || d.host.toLowerCase() === key);
   if (entry) void disconnectWifi(entry.host);
   knownWifi.update((l) => {
-    const n = entry ? l.filter((d) => d.host !== entry.host) : l;
+    const host = entry?.host.toLowerCase();
+    const n = host ? l.filter((d) => d.host.toLowerCase() !== host) : l;
     persist(n);
     return n;
   });
