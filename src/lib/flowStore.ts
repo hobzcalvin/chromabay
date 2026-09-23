@@ -1,7 +1,7 @@
 import { writable, get } from 'svelte/store';
 import type { Node, Edge, Connection } from '@xyflow/svelte';
 import { clearNodeInteractiveParameters } from './stores/interactiveStore';
-import { getModulator, modulatorSeed } from './stores/modulatorStore';
+import { getModulator, modulatorSeedFor } from './stores/modulatorStore';
 import { renderConfig, type RenderConfig } from './renderConfig';
 import { operatorInputCount } from './operatorArity';
 
@@ -562,7 +562,7 @@ class WasmOperatorManager {
           if (modCfg) {
             // seed decorrelates Random/Perlin per automation instance; same value the device gets.
             this.wasmModule.ccall('setOperatorModulator', null, ['number', 'number', 'number', 'number', 'number', 'number', 'number'],
-              [instanceId, i, modCfg.shape, modCfg.min, modCfg.max, modCfg.period, modulatorSeed(nodeId, paramInfo.name)]);
+              [instanceId, i, modCfg.shape, modCfg.min, modCfg.max, modCfg.period, modulatorSeedFor(nodeId, paramInfo.name, modCfg)]);
           } else {
             this.wasmModule.ccall('clearOperatorModulator', null, ['number', 'number'], [instanceId, i]);
           }

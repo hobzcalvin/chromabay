@@ -19,6 +19,7 @@ export interface ModulatorConfig {
   max: number;
   period: number; // seconds per cycle (for Random: seconds between jumps)
   interactive?: ModField[]; // fields exposed as live controls on the Interact page (any subset)
+  seed?: number;  // the saved pattern's `sd`; absent for a new automation (see modulatorSeedFor)
 }
 
 // nodeId -> paramName -> config
@@ -34,6 +35,10 @@ export function getModulator(nodeId: string, paramName: string): ModulatorConfig
 // — since the app hands this same value to BOTH the WASM preview and the firmware — the device
 // and browser stay bit-identical. Capped at 24 bits so it survives the mpack wire (read as a
 // float on-device) with no precision loss. Feeds native/Modulation.h's `seed` argument.
+//
+// Node ids are regenerated on every load (they embed Date.now()), so this is only the seed an
+// automation is BORN with: it is saved as `sd` and read back into cfg.seed, and every consumer
+// goes through modulatorSeedFor() so the saved value wins from then on.
 export function modulatorSeed(nodeId: string, paramName: string): number {
   const s = `${nodeId}:${paramName}`;
   let h = 0x811c9dc5;
@@ -42,6 +47,11 @@ export function modulatorSeed(nodeId: string, paramName: string): number {
     h = Math.imul(h, 0x01000193);
   }
   return (h >>> 0) & 0xffffff; // 24-bit, exactly representable as float32 on the device
+}
+
+/** The seed an automation actually uses: its saved one, else the one derived for a new one. */
+export function modulatorSeedFor(nodeId: string, paramName: string, cfg: ModulatorConfig): number {
+  return typeof cfg.seed === 'number' ? cfg.seed : modulatorSeed(nodeId, paramName);
 }
 
 // `silent` skips the autosave side-effect. Deserialize (global load AND isolated

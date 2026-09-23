@@ -17,7 +17,7 @@ import {
   getNodeBuffer
 } from './flowStore';
 import { interactiveParameters, setParameterInteractive } from './stores/interactiveStore';
-import { modulators, setModulator, modulatorSeed } from './stores/modulatorStore';
+import { modulators, setModulator, modulatorSeedFor } from './stores/modulatorStore';
 import { get } from 'svelte/store';
 
 /**
@@ -505,7 +505,7 @@ export function serializePattern(
       const m: Record<string, { s: number; lo: number; hi: number; pr: number; sd: number; iv?: string[] }> = {};
       for (const [paramName, cfg] of nodeMods.entries()) {
         m[paramName] = { s: cfg.shape, lo: cfg.min, hi: cfg.max, pr: cfg.period,
-          sd: modulatorSeed(node.id, paramName),
+          sd: modulatorSeedFor(node.id, paramName, cfg),
           ...(cfg.interactive && cfg.interactive.length ? { iv: cfg.interactive } : {}) };
       }
       serializedNode.m = m;
@@ -802,7 +802,12 @@ export function deserializePattern(
           : (typeof c.iv === 'number' && c.iv ? ['period'] : undefined);
         // silent: bulk load, not a user edit — must not trigger the global autosave
         // (a preview deserialize doing so re-wrote localStorage and looped the list).
-        setModulator(nodeId, paramName, { shape: c.s, min: c.lo, max: c.hi, period: c.pr, interactive: interactive as any }, true);
+        setModulator(nodeId, paramName, {
+          shape: c.s, min: c.lo, max: c.hi, period: c.pr, interactive: interactive as any,
+          // Keep the saved seed: node ids are new on every load, so re-deriving it would change
+          // every Random/Perlin automation on reload (and between previews and the device).
+          ...(typeof c.sd === 'number' ? { seed: c.sd } : {}),
+        }, true);
       }
     }
 

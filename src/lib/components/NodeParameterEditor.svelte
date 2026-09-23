@@ -2,7 +2,7 @@
   import { onMount, onDestroy, tick } from 'svelte';
   import { getNodeDefinition, setNodeParameter, getNodeParameter, deleteNode, nodeParameters, type Parameter } from '../flowStore';
   import { getParameterInteractive, setParameterInteractive, MAX_INTERACTIVE_PARAMS, interactiveParameters } from '../stores/interactiveStore';
-  import { modulators, getModulator, setModulator, clearModulator, modulatorSeed, SHAPES, type ModulatorConfig, type ModField } from '../stores/modulatorStore';
+  import { modulators, getModulator, setModulator, clearModulator, modulatorSeedFor, SHAPES, type ModulatorConfig, type ModField } from '../stores/modulatorStore';
   import { flattenSvgPath, encodedToPath, PRESETS } from '../svgFlatten';
   import ColorWheel from './ColorWheel.svelte';
   import { findColorGroups, colorGroupOwned, hexToHueSat, hueSatToHex, type ColorGroup } from '../color';
@@ -393,7 +393,7 @@
         const cfg = nodeMods.get(p.name);
         // Same per-instance seed the preview + device use, so the thumb readout matches.
         if (cfg) liveValues[p.name] = m.ccall('evalModulator', 'number',
-          ['number','number','number','number','number','number'], [cfg.shape, cfg.min, cfg.max, cfg.period, t, modulatorSeed(node.id, p.name)]);
+          ['number','number','number','number','number','number'], [cfg.shape, cfg.min, cfg.max, cfg.period, t, modulatorSeedFor(node.id, p.name, cfg)]);
       }
       liveValues = liveValues; // reactivity
     }
