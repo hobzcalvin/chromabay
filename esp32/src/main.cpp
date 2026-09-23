@@ -2146,7 +2146,14 @@ void processReceivedLayout() {
             Serial.println("[Layout] Failed to open layout file for writing");
         }
     }
-    if (committed) configMgr.loadStripLayouts(); // apply live across all strips
+    if (committed) {
+        configMgr.loadStripLayouts(); // apply live across all strips
+        // A layout sets the canvas size (its W×H replaces the strip's own dimensions), so the
+        // render buffers must be re-sized to match — otherwise the next frame renders W×H
+        // pixels into buffers sized for the old canvas and runs off the end of the heap block.
+        // Same as processReceivedLedConfig(); both run on the loop task, clear of render().
+        if (patternRenderer) patternRenderer->updateMatrixConfig();
+    }
 
     // LAYOUT_SET is notify-capable: code 0 means the bytes are now on flash and applied, so
     // the app may safely read back immediately. Code 4 is a commit failure.
