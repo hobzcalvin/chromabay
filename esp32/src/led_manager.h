@@ -78,19 +78,24 @@ struct LedStripConfig {
             ry = x;
         }
         
+        // Length of a physical row. Rotating by 90°/270° swaps the axes: rx then runs along
+        // the canvas height and ry along its width, so rows are `height` long, not `width`.
+        // (Using width here mapped a 16x8 panel at 90° onto only 64 of its 128 LEDs.)
+        const uint16_t rowLen = (rot == 1 || rot == 3) ? height : width;
+
         // Apply horizontal flip
         if (getFlipH()) {
-            rx = width - 1 - rx;
+            rx = rowLen - 1 - rx;
         }
         
         // Apply serpentine layout
         uint16_t index;
         if (getSerpentine() && (ry % 2 == 1)) {
             // Odd rows go right-to-left
-            index = ry * width + (width - 1 - rx);
+            index = ry * rowLen + (rowLen - 1 - rx);
         } else {
             // Even rows go left-to-right
-            index = ry * width + rx;
+            index = ry * rowLen + rx;
         }
         
         return index < numLeds ? index : numLeds; // Bounds check
