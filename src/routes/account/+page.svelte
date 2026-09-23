@@ -4,6 +4,7 @@
     signIn, signUp, signOut, sendPasswordReset, updatePassword, resendConfirmation,
     getDisplayName, updateDisplayName, deleteAccount,
   } from '$lib/stores/authStore';
+  import { startOnboarding } from '$lib/stores/onboardingStore';
 
   // Account deletion (App Store 5.1.1(v)). Two-step: a button reveals a confirm, so it can't be
   // triggered by one accidental tap.
@@ -188,6 +189,17 @@
       {#if notice}<p class="notice">{notice}</p>{/if}
     </div>
   {/if}
+
+  <div class="card about">
+    <h2 class="sub">Help &amp; about</h2>
+    <button class="btn" on:click={startOnboarding}>Replay welcome tour</button>
+    <p class="muted fine">
+      ChromaBay is free software under the
+      <a href="https://github.com/hobzcalvin/chromabay/blob/main/LICENSE" target="_blank" rel="noopener">GPL-3.0</a>.
+      Source, issues and contributions:
+      <a href="https://github.com/hobzcalvin/chromabay" target="_blank" rel="noopener">github.com/hobzcalvin/chromabay</a>
+    </p>
+  </div>
 </main>
 
 <style>
@@ -217,4 +229,7 @@
   .btn.danger-btn { background: rgba(239,68,68,0.25); border-color: rgba(239,68,68,0.6); }
   .confirm-q { font-weight: 600; margin: 0 0 0.5rem; }
   .err { color: #fca5a5; }
+  .card.about { margin-top: 1rem; }
+  .fine { font-size: 0.8rem; margin: 0.75rem 0 0; }
+  .fine a { color: #93c5fd; }
 </style>

@@ -12,6 +12,8 @@
   import { initDeepLinks } from '$lib/deepLinks';
   import { prefetchLatestFirmwareSet } from '$lib/ble';
   import PreviewRenderHost from '$lib/components/PreviewRenderHost.svelte';
+  import Onboarding from '$lib/components/Onboarding.svelte';
+  import { maybeStartOnboarding } from '$lib/stores/onboardingStore';
 
   $: connected = $connectedDevices.size;
 
@@ -34,6 +36,7 @@
   onMount(() => {
     loadCurrentPatternIntoFlow();
     initDeepLinks(); // auth emails open the app via universal links (native only)
+    maybeStartOnboarding(); // first visit only: welcome card + optional tour of the tabs
     // Start immediately and independently of the Devices page / BLE connection. This caches
     // signed Wi-Fi + no-Wi-Fi images for every supported chip while internet is available,
     // so opening the app once is sufficient preparation for fully offline OTA later.
@@ -71,7 +74,7 @@
     </div>
     
     <nav class="bottom-nav">
-      <a href="{base}/devices" class:active={$page.url.pathname.startsWith(`${base}/devices`)}>
+      <a data-tour="devices" href="{base}/devices" class:active={$page.url.pathname.startsWith(`${base}/devices`)}>
         <span class="emoji-wrap">
           <span class="emoji">💡</span>
           <span
@@ -83,24 +86,25 @@
         </span>
         <span class="label">Devices</span>
       </a>
-      <a href="{base}/patterns" class:active={$page.url.pathname.startsWith(`${base}/patterns`)}>
+      <a data-tour="patterns" href="{base}/patterns" class:active={$page.url.pathname.startsWith(`${base}/patterns`)}>
         <span class="emoji">🌈</span>
         <span class="label">Patterns</span>
       </a>
-      <a href="{base}/interact" class:active={$page.url.pathname.startsWith(`${base}/interact`)} class:cycle-dim={$cycleEnabled}>
+      <a data-tour="interact" href="{base}/interact" class:active={$page.url.pathname.startsWith(`${base}/interact`)} class:cycle-dim={$cycleEnabled}>
         <span class="emoji">🖐️</span>
         <span class="label">Interact</span>
       </a>
-      <a href="{base}/editor" class:active={$page.url.pathname.startsWith(`${base}/editor`)} class:cycle-dim={$cycleEnabled}>
+      <a data-tour="editor" href="{base}/editor" class:active={$page.url.pathname.startsWith(`${base}/editor`)} class:cycle-dim={$cycleEnabled}>
         <span class="emoji">✏️</span>
         <span class="label">Edit</span>
       </a>
-      <a href="{base}/account" class:active={$page.url.pathname.startsWith(`${base}/account`)}>
+      <a data-tour="account" href="{base}/account" class:active={$page.url.pathname.startsWith(`${base}/account`)}>
         <span class="emoji">👤</span>
         <span class="label">Account</span>
       </a>
     </nav>
   </div>
+  <Onboarding />
 </SvelteFlowProvider>
 
 <style>
