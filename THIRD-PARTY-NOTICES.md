@@ -4,8 +4,9 @@ ChromaBay incorporates the open-source components listed below. Each is the prop
 its respective copyright holders and is used under the stated license. This file is provided
 to satisfy the attribution / notice requirements of those licenses.
 
-> ChromaBay's own first-party license has not yet been declared — see the README/`LICENSE`
-> (TODO). This file covers third-party components only.
+> ChromaBay itself is licensed under the GNU General Public License v3.0 or later — see
+> [`LICENSE`](LICENSE). This file covers third-party components only; all of them are
+> GPL-3.0-compatible.
 
 ---
 

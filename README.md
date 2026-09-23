@@ -1,209 +1,152 @@
-# 🔵 ChromaBay
+# ChromaBay
 
-ESP32 Bluetooth Low Energy Monitor built with SvelteKit + Capacitor.
+**Design LED light patterns on your phone or in the browser, and play them on ESP32-powered
+lights over Bluetooth or Wi-Fi.**
 
-## 🚀 Features
+ChromaBay has three parts:
 
-- **Universal BLE Client**: Connect to and interact with ESP32 devices
-- **Cross-Platform**: Web (Chrome/Edge), iOS, and Android support
-- **Real-time Communication**: Read, write, and receive notifications from ESP32
-- **Service Discovery**: Automatically discover all BLE services and characteristics
-- **Modern UI**: Beautiful, responsive interface with real-time status indicators
-- **Live Updates** - Push updates to mobile apps without app store releases
+- **An app** (web, iOS and Android, from one SvelteKit + Capacitor codebase) for building patterns,
+  previewing them live, and driving your devices.
+- **Firmware** for ESP32 LED controllers.
+- **A pattern engine** in C++ that runs in both places. The firmware compiles it natively and
+  the app runs it as WebAssembly, so the preview on your screen matches what the LEDs show.
 
-## 📱 Deployment
-
-The app is deployed to GitHub Pages at: https://hobzcalvin.github.io/chromabay
-
-### Release Process
-
-This project uses **tag-based deployments** for production releases. Deployments are triggered only when you create version tags, not on every push to main.
-
-#### Creating a Release
-
-Use the release script for easy version management:
-
-```bash
-# Patch release (1.0.0 -> 1.0.1)
-./scripts/release.sh patch
-
-# Minor release (1.0.0 -> 1.1.0)
-./scripts/release.sh minor
-
-# Major release (1.0.0 -> 2.0.0)
-./scripts/release.sh major
-
-# Specific version
-./scripts/release.sh v1.2.3
-```
-
-#### Manual Release
-
-If you prefer to create tags manually:
-
-```bash
-# Create and push a version tag
-git tag -a v1.0.0 -m "Release v1.0.0"
-git push origin v1.0.0
-```
-
-#### Manual Deployment
-
-You can also trigger deployments manually from the GitHub Actions tab without creating a tag.
-
-### Build Information
-
-The deployed app displays build information in the footer:
-- **Version**: Git tag or "manual-deploy"
-- **Commit Hash**: Short git commit hash
-- **Build Date**: UTC timestamp when deployed
-- **Commit Message**: Latest commit message
-
-## 🛠️ Development
-
-### Prerequisites
-
-- Node.js 20+
-- npm
-
-### Local Development
-
-```bash
-# Install dependencies
-npm install
-
-# Initialize SvelteKit (required for fresh checkouts)
-npx svelte-kit sync
-
-# Start development server
-npm run dev
-
-# Build for production
-npm run build
-
-# Preview production build
-npm run preview
-```
-
-### Mobile Development
-
-```bash
-# iOS
-npm run build
-npx cap sync ios
-npx cap open ios
-
-# Android
-npm run build
-npx cap sync android
-npx cap open android
-```
-
-**📱 iOS Setup**: See [IOS_SETUP.md](./IOS_SETUP.md) for detailed iOS development guide including corporate security workarounds.
-
-**📋 Full Setup**: See [SETUP.md](./SETUP.md) for complete project setup and deployment instructions.
-
-## 🔌 ESP32 Integration
-
-This app can connect to any ESP32 device running BLE server code. The app will automatically discover and display all available services and characteristics.
-
-### Example ESP32 BLE Server
-
-The app works with standard ESP32 BLE libraries. Here's a minimal example:
-
-```cpp
-#include <BLEDevice.h>
-#include <BLEServer.h>
-#include <BLEUtils.h>
-#include <BLE2902.h>
-
-// Create BLE service and characteristics
-BLEService *pService = pServer->createService("12345678-1234-1234-1234-123456789abc");
-BLECharacteristic *pCharacteristic = pService->createCharacteristic(
-  "87654321-4321-4321-4321-cba987654321",
-  BLECharacteristic::PROPERTY_READ |
-  BLECharacteristic::PROPERTY_WRITE |
-  BLECharacteristic::PROPERTY_NOTIFY
-);
-
-// Start advertising
-pService->start();
-pServer->getAdvertising()->start();
-```
-
-## 📖 Tech Stack
-
-- **Frontend**: SvelteKit, TypeScript, Vite
-- **Mobile**: Capacitor
-- **BLE**: Capacitor Community Bluetooth LE plugin + Web Bluetooth API
-- **Deployment**: GitHub Actions → GitHub Pages
-- **Styling**: Modern CSS with glassmorphism effects
-
-## 🎯 Use Cases
-
-- **IoT Development**: Test and debug ESP32 BLE communication
-- **Sensor Monitoring**: Read real-time data from ESP32 sensors
-- **Device Control**: Send commands to ESP32-controlled devices
-- **Prototyping**: Rapid ESP32 BLE app development and testing
-
-## Live Updates
-
-This app supports live updates for the mobile versions, allowing you to push updates directly to users' devices without going through app store reviews.
-
-### How it works
-
-1. **GitHub Pages Deployment**: The web app is built and deployed to GitHub Pages
-2. **Bundle Creation**: Each deployment creates a ZIP bundle of the web assets
-3. **Version Manifest**: A `version.json` file tracks the latest available version
-4. **Mobile Check**: Mobile apps periodically check for updates from GitHub Pages
-5. **Background Download**: When an update is available, it downloads in the background
-6. **Next Restart**: Updates are applied when the app is restarted
-
-### Technical Details
-
-- Uses [Capawesome Live Updates](https://capawesome.io/plugins/live-update/) plugin
-- Self-hosted on GitHub Pages (no external service required)
-- Updates are downloaded as ZIP bundles
-- Automatic rollback if updates fail
-- Only web layer updates (HTML/CSS/JS) - native changes still require app store
-
-### Update Process
-
-1. Make changes to your app
-2. Push a version tag: `git tag v1.0.1 && git push origin v1.0.1`
-3. GitHub Actions builds and deploys to Pages
-4. Mobile apps automatically detect and download the update
-5. Users get the update on next app restart
-
-### Development
-
-For live update testing:
-
-```bash
-# Create a test bundle
-npm run bundle:create
-
-# Build and create live update
-npm run bundle:live
-```
-
-### Configuration
-
-Live updates are configured in `capacitor.config.ts`:
-
-```typescript
-plugins: {
-  LiveUpdate: {
-    serverDomain: 'https://hobzcalvin.github.io',
-    autoDeleteBundles: true,
-    readyTimeout: 10000,
-    httpTimeout: 60000
-  }
-}
-```
-
-The system checks for updates by fetching `/chromabay/version.json` from GitHub Pages and comparing versions.
+👉 **Try it now at [chromabay.app](https://chromabay.app).** You don't need hardware or an
+account. Browse, preview and edit patterns right away; connect lights when you have them.
 
 ---
 
-Built with ❤️ by ReVolt Labs
+## Features
+
+- **Node-based pattern editor.** Wire generators (plasma, fire, noise, rainbows, text, SVG
+  shapes, raindrops…) into modifiers (blur, mirror, tile, feedback, hue rotate…). About 35
+  operators, each with a live thumbnail.
+- **Interact mode.** Big knobs and colour wheels for whichever parameters a pattern exposes, with
+  optional automation (LFO-style modulation) per control.
+- **Multi-device control.** Every connected device mirrors the pattern you're editing. In
+  **Cycle** mode, devices play through their own on-device libraries in sync on a shared clock,
+  with a crossfade between patterns.
+- **Bluetooth LE and Wi-Fi.** Use the same protocol over either transport. Wi-Fi devices are
+  discovered automatically (Bonjour/mDNS) on iOS.
+- **Arbitrary LED layouts.** Use strips, matrices and multiple outputs. Auto-layout can build a
+  2D map of your LEDs from a camera capture.
+- **Realtime streaming.** Wi-Fi devices can take Art-Net, sACN (E1.31) and DDP from lighting
+  software such as xLights.
+- **Firmware management.** Flash a blank ESP32 from the browser over USB, convert an existing
+  WLED device, or update over the air (OTA images are signed with ECDSA P-256).
+- **Sharing.** Share any pattern as a self-contained link, or publish it to the online gallery.
+  An optional account syncs your library across devices.
+
+## Hardware
+
+| | |
+|---|---|
+| **Controllers** | ESP32, ESP32-S3, ESP32-C3 (4 MB flash or more) |
+| **LED chipsets** | WS2812/WS2813/WS2815/SK6812 (RGB), SK6812/WS2814 (RGBW), WS2811 (400 kHz), TM1814, TM1829, APA102/SK9822 (DotStar) |
+
+Any common ESP32 dev board plus an addressable LED strip works. The simplest way to get started:
+
+1. Open [chromabay.app](https://chromabay.app) in desktop Chrome or Edge and plug the board in
+   over USB.
+2. On the **Devices** tab, go to **Install on a device → Flash a new board over USB**.
+3. Once it reboots, connect over Bluetooth, set your LED count, data pin and chipset under
+   **Show Settings**, and pick a pattern.
+
+Already running [WLED](https://kno.wled.ge/)? Use **Convert a WLED device** instead. No cable
+needed.
+
+> **Browser support:** Bluetooth uses Web Bluetooth, which works in Chrome and Edge on desktop and
+> in Chrome on Android. USB flashing uses Web Serial and needs desktop Chrome or Edge. On iOS,
+> use the native app.
+
+## Repository layout
+
+```
+src/                 SvelteKit app (routes/ = pages, lib/ = transports, stores, components)
+native/              C++ pattern engine and operators (compiled into firmware and to WASM)
+esp32/               PlatformIO firmware project
+static/native/       Prebuilt WASM build of the pattern engine used by the app
+ios/, android/       Capacitor native shells
+supabase/            Database migrations for accounts, library sync and the gallery
+automation/          Scripts for driving the app and devices in tests
+scripts/             Release, signing and asset-generation scripts
+documentation/       Design notes and setup guides
+```
+
+## Development
+
+### App
+
+Requires Node.js 20 or later.
+
+```bash
+npm ci
+npm run dev        # dev server on http://localhost:5173
+npm test           # unit tests (vitest)
+npm run check      # type-check (svelte-check)
+npm run build      # static build into build/
+```
+
+The app runs without any configuration. Cloud features (accounts, library sync, the gallery) are
+switched off unless Supabase is configured; copy `.env.example` to `.env` to set it up. If you
+run a fork publicly, point `VITE_SUPABASE_*` and `VITE_SENTRY_DSN` at your own projects.
+
+### Mobile
+
+```bash
+npm run build && npx cap sync ios && npx cap open ios          # Xcode
+npm run build && npx cap sync android && npx cap open android  # Android Studio
+```
+
+See [`documentation/IOS_SETUP.md`](documentation/IOS_SETUP.md) for signing and device setup.
+
+### Firmware
+
+Requires [PlatformIO](https://platformio.org/).
+
+```bash
+npm run esp32:build                  # build (cd esp32 && pio run)
+npm run esp32:upload                 # flash over USB
+npm run esp32:monitor                # serial monitor
+```
+
+Build targets are defined in [`esp32/platformio.ini`](esp32/platformio.ini): `esp32dev`,
+`esp32-s3` and `esp32-c3`, each with a `-nowifi` variant small enough to update over the air
+on older devices that have smaller app partitions. Official OTA images are signed. If you want
+your own OTA channel, see [`scripts/signing/README.md`](scripts/signing/README.md). Flashing over
+USB never needs a signature.
+
+### Pattern engine (WASM)
+
+Operators live in `native/*Operator.h`. After changing them, rebuild the browser copy with
+[Emscripten](https://emscripten.org/):
+
+```bash
+npm run wasm:compile                 # native/build-wasm.sh → static/native/fastled.{js,wasm}
+```
+
+## Deployment
+
+Pushes to `main` build the app and publish it to GitHub Pages (`chromabay.app`), along with a
+live-update bundle for the mobile apps. Firmware changes under `esp32/` or `native/` trigger a
+separate workflow that builds, signs and publishes firmware for every chip. Both workflows are in
+[`.github/workflows/`](.github/workflows/); the external setup (domain, auth email, deep links)
+is described in [`documentation/SETUP_GUIDE.md`](documentation/SETUP_GUIDE.md).
+
+## Contributing
+
+Issues and pull requests are welcome. Please run `npm test` and `npm run check` before opening
+a PR, and describe how you tested anything that touches hardware (board, chipset, transport).
+
+## License
+
+Copyright © 2025–2026 Grant Patterson.
+
+ChromaBay is free software: you can redistribute it and/or modify it under the terms of the
+[GNU General Public License](LICENSE) as published by the Free Software Foundation, either
+version 3 of the License, or (at your option) any later version. It is distributed WITHOUT ANY
+WARRANTY; see the license for details.
+
+ChromaBay builds on open-source components such as FastLED, NimBLE-Arduino, NeoPixelBus,
+Svelte, Capacitor and the Spleen font. Their licenses and attributions are listed in
+[`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).
