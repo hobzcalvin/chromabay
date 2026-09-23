@@ -1,6 +1,7 @@
 <script lang="ts">
   import { serializeCurrentPattern, nodeTypesStore } from '$lib/flowStore';
   import { 
+    currentPattern,
     currentPatternName,
     saveCurrentPattern,
     saveAsPattern,
@@ -204,6 +205,13 @@
   async function confirmDelete() {
     try {
       await deleteCurrentPattern();
+      // Deleting switches the current pattern, but the canvas still holds the deleted graph;
+      // load the new current one, or the next autosave writes the deleted pattern over it.
+      const next = get(currentPattern);
+      if (next) {
+        const { loadSerializedPattern } = await import('$lib/flowStore');
+        await loadSerializedPattern(next);
+      }
     } catch (error: any) {
       console.error('Failed to delete pattern:', error);
       alert('Failed to delete pattern: ' + (error?.message || 'Unknown error'));
