@@ -1,4 +1,4 @@
-// Online pattern gallery (PATTERN_LIFECYCLE.md). Author-scoped: patterns show as
+// Online pattern gallery (documentation/PATTERN_LIFECYCLE.md). Author-scoped: patterns show as
 // "Name · by author"; publishing upserts by (author, name). Importing copies into your
 // library attributed to the original author — editing it (which rebuilds meta without
 // `author`) makes it yours, so an *unchanged* import stays "by <author>" and isn't a

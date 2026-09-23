@@ -1,6 +1,6 @@
 # Pattern Lifecycle / Library Sync — Implementation Plan
 
-> **Superseded (for the model) by [`../PATTERN_LIFECYCLE.md`](../PATTERN_LIFECYCLE.md).**
+> **Superseded (for the model) by [`PATTERN_LIFECYCLE.md`](PATTERN_LIFECYCLE.md).**
 > That doc is the unified plan (identity, ownership, sharing, gallery, cycling). This file
 > remains the reference for the BLE **push/pull transport** used in its Phase 1.
 

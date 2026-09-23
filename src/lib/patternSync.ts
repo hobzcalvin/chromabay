@@ -1,4 +1,4 @@
-// Cloud sync for the pattern library (PATTERN_LIFECYCLE.md). When signed in, the local library
+// Cloud sync for the pattern library (documentation/PATTERN_LIFECYCLE.md). When signed in, the local library
 // syncs to Supabase's private `library_patterns` table and down to the user's other clients —
 // last-writer-wins by `updated_ms`, with tombstones so deletes propagate and don't resurrect.
 // Local-first: with no account (or no Supabase), this is inert and the app is unchanged.

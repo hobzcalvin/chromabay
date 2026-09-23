@@ -1,6 +1,6 @@
 // Auth state backed by Supabase. Optional + local-first: when Supabase isn't configured,
 // `isConfigured` is false and the app works exactly as before. Logging in is what unlocks the
-// gallery + the synced owner-key keyring (see PATTERN_LIFECYCLE.md); it is never required.
+// gallery + the synced owner-key keyring (see documentation/PATTERN_LIFECYCLE.md); it is never required.
 import { writable, get } from 'svelte/store';
 import { browser } from '$app/environment';
 import { base } from '$app/paths';
@@ -10,7 +10,7 @@ import type { User } from '@supabase/supabase-js';
 // Where the confirmation link should land. Must be allowlisted in Supabase
 // (Auth → URL Configuration → Redirect URLs). Uses the current web origin so it works
 // on both the deployed site and localhost; native (Capacitor) confirmation needs a
-// universal link — see SETUP_GUIDE.md.
+// universal link — see documentation/SETUP_GUIDE.md.
 function redirectTo(): string | undefined {
   if (!browser) return undefined;
   const origin = window.location.origin;

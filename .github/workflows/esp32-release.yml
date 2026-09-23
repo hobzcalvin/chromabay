@@ -353,11 +353,11 @@ jobs:
 
     - name: Convert private key to raw format for PSA
       run: |
-        python3 convert_key_to_raw.py esp32-signing-private.pem private_key.raw
+        python3 scripts/signing/convert_key_to_raw.py esp32-signing-private.pem private_key.raw
 
     - name: Build PSA signing tool
       run: |
-        gcc -Wall -std=c99 psa_sign_firmware.c -lmbedcrypto -o psa_sign_firmware
+        gcc -Wall -std=c99 scripts/signing/psa_sign_firmware.c -lmbedcrypto -o psa_sign_firmware
         chmod +x psa_sign_firmware
 
     - name: Build merged factory images and sign (all chips)
