@@ -1384,6 +1384,15 @@ export async function sendSinglePatternToDevice(deviceId: string, pattern: any):
 async function sendPatternChunked(deviceId: string, msgpackData: Uint8Array): Promise<void> {
   const total = msgpackData.byteLength;
   if (total === 0) return;
+  // The firmware drops a pattern whose totalLen is over 16 KiB without replying (and the u16
+  // length/offset fields can't describe more than 64 KiB). Fail here instead, so the pattern
+  // isn't reported as synced when the device never got it.
+  if (total > 16384) {
+    throw new Error(
+      `Pattern is ${total.toLocaleString()} bytes, but devices accept at most 16,384. ` +
+      `Remove some nodes or shorten long text/SVG parameters.`,
+    );
+  }
   const HEADER = 4;
   const MAX_PAYLOAD = getTransport(deviceId).maxWriteLen - HEADER;
   await serializeDeviceBulk(deviceId, async () => {
