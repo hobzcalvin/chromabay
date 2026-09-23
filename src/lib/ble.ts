@@ -31,28 +31,21 @@ const bleConnections = new Map<string, any>();
 // deliberately does NOT go through here.)
 let bleOpChain: Promise<unknown> = Promise.resolve();
 const BLE_OP_TIMEOUT_MS = 15000;
-// True while a queued op is executing. The chain runs exactly one at a time, so this is an
-// accurate "am I already inside the queue?" — see the re-entrancy note below.
-let inBleOp = false;
 function bleSerial<T>(op: () => Promise<T>): Promise<T> {
-  // Re-entrant calls run inline instead of queueing behind themselves. A high-level operation
-  // that takes this lock and then calls a primitive (which takes it again) would otherwise
-  // deadlock: the inner op waits for a chain the outer op is still holding, until the timeout
-  // below fires and reports it as "BLE op timed out". That is not hypothetical — it is what
-  // getLedConfiguration did the moment its hand-rolled read was replaced by the shared one.
-  if (inBleOp) return op();
+  // Only the transport primitives below (read/write/connect) take this lock, and none of them
+  // calls another, so nothing re-enters it. (An earlier "already inside the queue?" flag was
+  // global, not per call chain: any op that arrived while another was in flight — a second
+  // device's sync, the timestamp timer — saw it set and ran concurrently, defeating the queue.)
+  //
   // Wrap with a timeout so a single hung BLE op (e.g. a peripheral that vanished
   // mid-operation) can't wedge the whole queue and silently block every later op.
-  const guarded = () => {
-    inBleOp = true;
-    const done = () => { inBleOp = false; };
-    return Promise.race<T>([
+  const guarded = () =>
+    Promise.race<T>([
       op(),
       new Promise<T>((_, reject) =>
         setTimeout(() => reject(new Error('BLE op timed out')), BLE_OP_TIMEOUT_MS)
       )
-    ]).then((v) => { done(); return v; }, (e) => { done(); throw e; });
-  };
+    ]);
   const run = bleOpChain.then(guarded, guarded); // run after the previous op regardless of its outcome
   bleOpChain = run.then(() => {}, () => {}); // never let one failure break the chain
   return run;
