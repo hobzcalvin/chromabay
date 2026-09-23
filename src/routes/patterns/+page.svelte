@@ -13,16 +13,12 @@
   import { cycleEnabled, cycleSeconds, cycleCrossfadeSeconds, applyCycle, exitCycle } from '$lib/stores/cycleStore';
   import { browseGallery, importGalleryPattern, publishPattern, type GalleryPattern } from '$lib/gallery';
   import { get } from 'svelte/store';
+  // Auto-subscriptions ($store) are released when the page unmounts; the manual
+  // .subscribe() calls these replace added two more live subscribers on every visit.
   let patternsList: SerializedPattern[] = [];
   let currentName = '';
-  
-  // Subscribe to patterns and current pattern name
-  patterns.subscribe(pats => {
-    patternsList = pats;
-  });
-  currentPatternName.subscribe(name => {
-    currentName = name;
-  });
+  $: patternsList = $patterns;
+  $: currentName = $currentPatternName;
 
   // --- Pattern cycling: ONE control for all connected devices. Each device steps
   // through its OWN stored library off its synced clock, so devices with the same
