@@ -255,8 +255,38 @@ export function serializePattern(
   currentNodeParameters: Map<string, Map<string, any>>, // Actual parameters from the Svelte store
   patternName?: string
 ): SerializedPattern {
-  // Step 1: Sort nodes topologically to determine execution order
-  const { orderedNodes: orderedNodesFullGraph } = topologicalSort(allNodes, allEdges);
+  // Step 1: Sort nodes topologically to determine execution order.
+  //
+  // Data edges alone aren't enough, because nodes share lanes: a modifier writes its result
+  // back into its source's lane. So add ordering-only edges (never serialized):
+  //  - write-after-read: when W overwrites its source S's lane in place, every OTHER reader
+  //    of S must run before W, or it reads W's output instead of S's.
+  const laneOf = new Map(allNodes.map(n => [n.id, getNodeLaneBuffer(n)] as const));
+  const warEdges: Edge[] = [];
+  for (const w of allEdges) {
+    if (laneOf.get(w.target) !== laneOf.get(w.source)) continue;
+    for (const r of allEdges) {
+      if (r.source === w.source && r.target !== w.target) {
+        warEdges.push({ id: `war_${r.target}_${w.target}`, source: r.target, target: w.target } as Edge);
+      }
+    }
+  }
+  //  - last writer: the device displays whatever is LAST written to the output lane, so the
+  //    node feeding Output must be the final writer of its lane: schedule every other
+  //    same-lane writer that isn't downstream of it first. (These can't form a cycle.)
+  const outNode = allNodes.find(n => n.data.type === 'output');
+  const outSrc = outNode ? allEdges.find(e => e.target === outNode.id)?.source : undefined;
+  if (outSrc) {
+    const down = new Set<string>([outSrc]);
+    for (let grew = true; grew;) { grew = false; for (const e of allEdges) if (down.has(e.source) && !down.has(e.target)) { down.add(e.target); grew = true; } }
+    for (const n of allNodes) {
+      if (!down.has(n.id) && n.data.type !== 'output' && laneOf.get(n.id) === laneOf.get(outSrc)) {
+        warEdges.push({ id: `last_${n.id}_${outSrc}`, source: n.id, target: outSrc } as Edge);
+      }
+    }
+  }
+  const orderEdges = [...allEdges, ...warEdges];
+  const { orderedNodes: orderedNodesFullGraph } = topologicalSort(allNodes, orderEdges);
 
   /**
    * Helper – does this node write back to one of the buffers it reads?
@@ -324,14 +354,14 @@ export function serializePattern(
   const levelMap = new Map<string, number>();        // nodeId -> level
   const indegTmp = new Map<string, number>();
   allNodes.forEach(n => indegTmp.set(n.id, 0));
-  allEdges.forEach(e => indegTmp.set(e.target, (indegTmp.get(e.target) ?? 0) + 1));
+  orderEdges.forEach(e => indegTmp.set(e.target, (indegTmp.get(e.target) ?? 0) + 1));
 
   const q: string[] = [];
   indegTmp.forEach((v, id) => { if (v === 0) { q.push(id); levelMap.set(id, 0);} });
   while (q.length) {
     const id = q.shift()!;
     const lvl = levelMap.get(id)!;
-    allEdges
+    orderEdges
       .filter(e => e.source === id)
       .forEach(e => {
         const next = e.target;
