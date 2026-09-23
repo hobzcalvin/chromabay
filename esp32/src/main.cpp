@@ -3517,18 +3517,19 @@ void loop() {
     processButtonPinUpdate();
     processCommConfig();
 
-    // WiFi/TCP transport: accept + read + dispatch framed messages (no-op in BLE mode).
-#if CHROMABAY_WIFI
     // Take the render buffers back once an update is no longer in flight. Done here rather
     // than on each abort path because there are many ways for an update to end and only one
     // of them is tidy; a single condition cannot be forgotten by a future one. (The success
-    // path never reaches this — it reboots.)
+    // path never reaches this — it reboots.) Outside the Wi-Fi guard: a Bluetooth update
+    // releases the buffers too, and no-Wi-Fi builds must get them back just the same.
     if (!ota_in_progress && !ota_finalizing && patternRenderer && !patternRenderer->buffersReady()) {
         patternRenderer->reacquireBuffers();
         Serial.printf("OTA over: render buffers reacquired (%s)\n",
                       patternRenderer->buffersReady() ? "ok" : "FAILED — dark until reboot");
     }
 
+    // WiFi/TCP transport: accept + read + dispatch framed messages (no-op in BLE mode).
+#if CHROMABAY_WIFI
     if (gWifiMode) { WifiLink::tick(); RtStream::tick(); }
 #endif
 
