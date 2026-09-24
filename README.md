@@ -77,7 +77,7 @@ documentation/       Design notes and setup guides
 
 ### App
 
-Requires Node.js 20 or later.
+Requires Node.js 22 or later.
 
 ```bash
 npm ci
