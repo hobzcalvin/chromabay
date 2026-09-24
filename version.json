@@ -1,7 +1,7 @@
 {
-  "version": "1.1.339",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.339.zip",
-  "buildDate": "2026-09-24T16:14:40Z",
-  "commitHash": "ff9f3a61f3053f84da832d4bbe6ee3d2e812a2cb",
-  "commitMessage": "Make the welcome tour visit each tab and try it, with knobs to try"
+  "version": "1.1.340",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.340.zip",
+  "buildDate": "2026-09-24T16:54:28Z",
+  "commitHash": "22378cbc0e3b67a6a73905e6dbb26db52538c5d9",
+  "commitMessage": "Push a selected pattern to devices once, not twice"
 }
