@@ -1,7 +1,7 @@
 {
-  "version": "1.1.337",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.337.zip",
-  "buildDate": "2026-09-19T16:06:33Z",
-  "commitHash": "55e72515f535ab536ba3f94887dfff4156b02448",
-  "commitMessage": "Re-pack the second graph's lanes instead of counting its columns"
+  "version": "1.1.338",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.338.zip",
+  "buildDate": "2026-09-24T08:10:35Z",
+  "commitHash": "ed0e5324cca287858f4a7ce6a50f8aeed546779d",
+  "commitMessage": "README: the app needs Node 22, as CI uses"
 }
