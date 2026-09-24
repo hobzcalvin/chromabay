@@ -1521,6 +1521,10 @@ export interface LedStripConfig {
   gamma?: number; // per-strip gamma correction (1.0 = none; ~2.5 default)
   whitePoint?: string; // per-strip white-balance hex '#rrggbb' (the color shown for "white"; '#ffffff' = neutral)
   dither?: boolean; // per-strip temporal-dithering opt-in (auto-activates only if fast enough); default true
+  // RGBW auto-white mode and white-die colour (0xRRGGBB). No UI edits them yet; they are
+  // carried from the device's report back into every save so a save doesn't reset them.
+  autoWhite?: number;
+  whiteLedColor?: number;
 }
 
 export interface LedConfiguration {
@@ -1658,7 +1662,10 @@ export async function getLedConfiguration(deviceId: string): Promise<LedConfigur
           // White point packed as 0xRRGGBB; default 0xFFFFFF (neutral) if absent.
           whitePoint: '#' + ((strip.wp ?? 0xffffff) & 0xffffff).toString(16).padStart(6, '0'),
           // Temporal dithering opt-in; default on if absent.
-          dither: strip.de ?? true
+          dither: strip.de ?? true,
+          // Absent from older firmware; then left out of the save too (firmware keeps its default).
+          ...(typeof strip.aw === 'number' ? { autoWhite: strip.aw } : {}),
+          ...(typeof strip.wc === 'number' ? { whiteLedColor: strip.wc } : {}),
         };
       })
     };
@@ -1677,6 +1684,17 @@ export async function getLedConfiguration(deviceId: string): Promise<LedConfigur
 // The firmware expects integers for num/w/h; coerce defensively so a stray null can't
 // serialize to nil and break the decode.
 export function encodeLedConfig(config: LedConfiguration): Uint8Array {
+  // A blank pin box binds to null, which encodes as nil; the firmware rejects the whole config
+  // over it without replying, so the save would look successful and change nothing. Refuse it
+  // here with a message the user can act on. (GPIO numbers run to 48 on the ESP32-S3.)
+  const validPin = (p: unknown) => typeof p === 'number' && Number.isInteger(p) && p >= 0 && p <= 48;
+  config.strips.forEach((strip, i) => {
+    const which = config.strips.length > 1 ? `Strip ${i + 1}: ` : '';
+    if (!validPin(strip.pin)) throw new Error(`${which}enter a data pin (a GPIO number from 0 to 48).`);
+    if (isFourWireChipset(strip.chipset) && !validPin(strip.clockPin)) {
+      throw new Error(`${which}enter a clock pin (a GPIO number from 0 to 48).`);
+    }
+  });
   const esp32Config = {
     gb: config.globalBrightness,
     strips: config.strips.map(strip => ({
@@ -1691,7 +1709,9 @@ export function encodeLedConfig(config: LedConfiguration): Uint8Array {
       ort: strip.orientation,
       gm: Math.round((strip.gamma ?? 1.0) * 100),
       wp: strip.whitePoint ? (parseInt(strip.whitePoint.slice(1), 16) & 0xffffff) : 0xffffff,
-      de: strip.dither ?? true
+      de: strip.dither ?? true,
+      ...(strip.autoWhite !== undefined ? { aw: strip.autoWhite } : {}),
+      ...(strip.whiteLedColor !== undefined ? { wc: strip.whiteLedColor } : {}),
     }))
   };
   return msgpackEncode(esp32Config) as Uint8Array;

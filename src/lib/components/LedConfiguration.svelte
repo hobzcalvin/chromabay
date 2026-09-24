@@ -208,12 +208,12 @@
                 </label>
                 <label>
                   {isFourWireChipset(strip.chipset) ? 'Data Pin:' : 'Pin:'}
-                  <input id={buildId('pin', index)} name="pin" type="number" min="0" max="39" bind:value={strip.pin} />
+                  <input id={buildId('pin', index)} name="pin" type="number" min="0" max="48" bind:value={strip.pin} />
                 </label>
                 {#if isFourWireChipset(strip.chipset)}
                   <label>
                     Clock Pin:
-                    <input id={buildId('clockpin', index)} name="clockpin" type="number" min="0" max="39" bind:value={strip.clockPin} />
+                    <input id={buildId('clockpin', index)} name="clockpin" type="number" min="0" max="48" bind:value={strip.clockPin} />
                   </label>
                 {/if}
               </div>
