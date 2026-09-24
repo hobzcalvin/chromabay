@@ -1,7 +1,7 @@
 {
-  "version": "1.1.338",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.338.zip",
-  "buildDate": "2026-09-24T08:10:35Z",
-  "commitHash": "ed0e5324cca287858f4a7ce6a50f8aeed546779d",
-  "commitMessage": "README: the app needs Node 22, as CI uses"
+  "version": "1.1.339",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.339.zip",
+  "buildDate": "2026-09-24T16:14:40Z",
+  "commitHash": "ff9f3a61f3053f84da832d4bbe6ee3d2e812a2cb",
+  "commitMessage": "Make the welcome tour visit each tab and try it, with knobs to try"
 }
