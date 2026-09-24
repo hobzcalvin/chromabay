@@ -997,7 +997,7 @@
     <p class="company">by ReVolt Labs</p>
   </header>
 
-  <section class="controls">
+  <section class="controls" data-tour-target="connect">
     <div class="control-buttons">
       {#if !bleEnabled && bleSupported}
         <button class="btn primary" onclick={handleEnableBle}>

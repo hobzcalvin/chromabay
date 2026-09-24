@@ -152,7 +152,7 @@
     </div>
   {:else}
     <p class="muted">Optional — everything works without an account. Signing in syncs your patterns and devices across your phone and the web, and unlocks the gallery.</p>
-    <div class="card">
+    <div class="card" data-tour-target="signin">
       {#if mode !== 'reset'}
         <div class="tabs">
           <button class:sel={mode === 'in'} on:click={() => setMode('in')}>Sign in</button>

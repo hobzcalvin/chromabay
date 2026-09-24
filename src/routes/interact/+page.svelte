@@ -385,6 +385,7 @@ import { get } from 'svelte/store';
     {#each dynamicKnobs.slice(0, 6) as knob, i (knob.nodeId + '-' + knob.paramName + '-' + knob.kind + '-' + (knob.modField ?? ''))}
       <div
         class="knob-container"
+        data-tour-target="knob"
         style="left: {knobPositions[i]?.[0] ?? 50}%; top: {knobPositions[i]?.[1] ?? 50}%;"
       >
         {#if knob.kind === 'color'}

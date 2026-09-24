@@ -92,14 +92,36 @@ function getSecondsSinceApril19() {
   return Math.floor((now.getTime() - april19.getTime()) / 1000);
 }
 
+// A new library's first pattern: a plasma with its speed, scale and hue already exposed as
+// knobs, so the Interact page has something to turn from the start (a bare rainbow left it
+// empty) and the welcome tour has something to demonstrate on every tab.
+function starterNodes(): SerializedPattern['nodes'] {
+  return [{ t: 'plasma', o: 1, x: { speed: 0, scale: 1, hue_shift: 2 } }];
+}
+
 // Create default pattern
 function createDefaultPattern(): SerializedPattern {
   const seconds = getSecondsSinceApril19();
   const name = `My First Pattern ${seconds}`;
   return {
-    nodes: [{ t: "rainbow", o: 1 }],
+    nodes: starterNodes(),
     meta: { output: 1, name, id: newId(), updatedAt: nowMs() }
   };
+}
+
+export const TOUR_DEMO_NAME = 'Tour Demo';
+
+/** The starter pattern under a fixed name, added to the library if it isn't there yet. The
+ *  tour switches to it when the current pattern has no knobs to try on the Interact page. */
+export async function ensureTourDemoPattern(): Promise<SerializedPattern> {
+  const existing = get(patterns).find((p) => p.meta?.name === TOUR_DEMO_NAME);
+  if (existing) return existing;
+  const demo: SerializedPattern = {
+    nodes: starterNodes(),
+    meta: { output: 1, name: TOUR_DEMO_NAME, id: newId(), updatedAt: nowMs() },
+  };
+  await savePattern(demo);
+  return demo;
 }
 
 // Create new pattern with rainbow node (same as default)

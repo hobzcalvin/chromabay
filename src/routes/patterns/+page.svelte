@@ -423,7 +423,7 @@
     {#if patternsList.length === 0}
       <p class="section-empty">No patterns yet — create one below, or import from your devices or online.</p>
     {/if}
-    <div class="patterns-grid" class:dimmed={$cycleEnabled}>
+    <div class="patterns-grid" class:dimmed={$cycleEnabled} data-tour-target="pattern-list">
       {#each patternsList as pattern (pattern.meta?.id ?? pattern.meta?.name)}
         {@const patternName = pattern.meta?.name || 'Unnamed'}
         {@const isCurrentPattern = patternName === currentName}
@@ -572,7 +572,7 @@
 
   <!-- Online: top gallery patterns you don't already have. -->
   {#if onlineNew.length > 0}
-    <section class="pattern-section">
+    <section class="pattern-section" data-tour-target="gallery">
       <h2 class="section-title">Online</h2>
       {#each onlineNew as g (g.id)}
         <div class="simple-row">

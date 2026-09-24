@@ -261,6 +261,7 @@
     <div class="add-node-dropdown" bind:this={addNodeDropdownRef}>
       <button
         class="add-node-button"
+        data-tour-target="add-node"
         onclick={() => showAddNodeDropdown = !showAddNodeDropdown}
         aria-expanded={showAddNodeDropdown}
       >
