@@ -44,6 +44,7 @@
   }
 
   function setupCanvas() {
+    if (!canvasElement) return;
     if (fullscreen) {
       canvasElement.width = window.innerWidth;
       canvasElement.height = window.innerHeight;
@@ -128,4 +129,4 @@
     touch-action: none;
     border-radius: 0;
   }
-</style> 
+</style>   
