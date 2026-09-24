@@ -1292,12 +1292,15 @@ function syncPatternIfChanged() {
 export function forceSyncCurrentPattern(): void {
   try {
     if (getConnectedDeviceCount() > 0) {
-      // Skip if sync is already in progress
+      // A sync is in flight: queue a re-check instead of dropping this one. It compares
+      // against what that sync sent, so a request for the same pattern costs nothing and
+      // a different one (rapid pattern taps) still lands. Dropping it here was why callers
+      // added their own second sync after loadSerializedPattern, doubling every switch.
       if (syncInProgress) {
-        console.log('Force sync skipped - sync already in progress');
+        pendingSync = true;
         return;
       }
-      
+
       // Update the hash to current pattern so future changes are detected properly
       const currentPattern = serializeCurrentPattern();
       lastPatternHash = JSON.stringify(currentPattern);

@@ -129,16 +129,9 @@
       const emptyPattern = createEmptyPattern(newName.trim());
       await saveAsPattern(emptyPattern, newName.trim());
       
-      // Load the empty pattern into the editor
+      // Load the empty pattern into the editor (which also pushes it to connected devices)
       const { loadSerializedPattern } = await import('$lib/flowStore');
       await loadSerializedPattern(emptyPattern);
-      
-      // Sync to devices
-      try {
-        await syncPatternToAllDevices();
-      } catch (syncError) {
-        console.error('Failed to sync pattern to devices:', syncError);
-      }
       
       showNewDialog = false;
       newName = '';

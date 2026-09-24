@@ -229,12 +229,7 @@
     await exitCycle();
     await switchToPattern(patternName);
     const { loadSerializedPattern } = await import('$lib/flowStore');
-    await loadSerializedPattern(pattern);
-    try {
-      await syncPatternToAllDevices();
-    } catch (error) {
-      console.error('Failed to sync pattern to devices:', error);
-    }
+    await loadSerializedPattern(pattern); // pushes it to connected devices
   }
 
   async function handlePatternItemClick(pattern: SerializedPattern, event: Event) {
