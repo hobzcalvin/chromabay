@@ -210,6 +210,69 @@ function topologicalSort(nodes: Node[], edges: Edge[]): SortResult {
 }
 
 /**
+ * Find an execution order in which every node reads the value it is wired to.
+ *
+ * The device runs nodes in serialized order over three shared lane buffers, and the
+ * deserializer rebuilds each input from the nearest preceding writer of its lane, so an order
+ * is only right if no node overwrites a lane while the value in it still has a reader waiting
+ * (and nothing overwrites the Output's lane after the node feeding it). The ordering heuristics
+ * in serializePattern get most graphs right but can't express "X before W, or after all of W's
+ * readers", so search for an order directly. `preferred` breaks ties: when it is already safe,
+ * it comes back unchanged. Returns null if no safe order exists (e.g. a blend whose two inputs
+ * would both have to occupy one lane at once) or the search runs out of budget.
+ */
+function scheduleLaneSafe(preferred: Node[], allEdges: Edge[], outSrc: string | undefined): Node[] | null {
+  const nodes = preferred.filter(n => n.data.type !== 'output');
+  const ids = new Set(nodes.map(n => n.id));
+  const edges = allEdges.filter(e => ids.has(e.source) && ids.has(e.target));
+  const lane = new Map(nodes.map(n => [n.id, getNodeLaneBuffer(n)] as const));
+  const inputs = new Map(nodes.map(n => [n.id, edges.filter(e => e.target === n.id).map(e => e.source)] as const));
+  // Readers still to run for each value; the node feeding Output is read at the end of the frame.
+  const baseReaders = new Map(nodes.map(n => [n.id, edges.filter(e => e.source === n.id).length + (n.id === outSrc ? 1 : 0)] as const));
+
+  let budget = 20000;
+  const order: Node[] = [];
+  const done = new Set<string>();
+  const readersLeft = new Map(baseReaders);
+  const holder: (string | null)[] = [null, null, null];
+
+  // What's left to do depends only on which nodes have run and what each lane holds, so a
+  // state that failed once fails again however it was reached.
+  const index = new Map(nodes.map((n, i) => [n.id, i] as const));
+  const doneBits = nodes.map(() => '0');
+  const failed = new Set<string>();
+
+  const dfs = (): boolean => {
+    if (order.length === nodes.length) return true;
+    if (--budget < 0) return false;
+    const key = doneBits.join('') + '|' + holder.join(',');
+    if (failed.has(key)) return false;
+    for (const n of nodes) {
+      if (done.has(n.id)) continue;
+      const ins = inputs.get(n.id)!;
+      // Every input must be computed and still sitting in its lane.
+      if (!ins.every(s => done.has(s) && holder[lane.get(s)!] === s)) continue;
+      // Writing our lane must not destroy a value someone else still needs.
+      const l = lane.get(n.id)!;
+      const h = holder[l];
+      if (h !== null && readersLeft.get(h)! - ins.filter(s => s === h).length > 0) continue;
+      // Apply
+      for (const s of ins) readersLeft.set(s, readersLeft.get(s)! - 1);
+      holder[l] = n.id; done.add(n.id); order.push(n); doneBits[index.get(n.id)!] = '1';
+      if (dfs()) return true;
+      // Undo
+      order.pop(); done.delete(n.id); holder[l] = h; doneBits[index.get(n.id)!] = '0';
+      for (const s of ins) readersLeft.set(s, readersLeft.get(s)! + 1);
+      if (budget < 0) return false;
+    }
+    failed.add(key);
+    return false;
+  };
+  // Candidates are tried in `preferred` order, so a safe `preferred` is returned as is.
+  return dfs() ? order : null;
+}
+
+/**
  * Infer which node's output drives the final display — replacing the old explicit Output node.
  * The "final product" is a TERMINAL: a node whose output nothing else consumes (the bottom of a
  * lane). A real pattern blends its lanes down to one terminal; while you're wiring there may be
@@ -421,6 +484,30 @@ export function serializePattern(
     positions.forEach((pos, i) => { conflictSafeOrder[pos] = orderedGroup[i]; });
   });
   
+  // Finally: the heuristics above can still leave a lane overwritten while its value has a
+  // reader waiting. Use the nearest order to theirs that has no such hazard, when one exists.
+  // Some graphs have no fully safe order: e.g. a dead-end modifier in the Output's lane that
+  // must overwrite it, or a blend whose two inputs would share a lane at once. Then keep the
+  // chain that reaches Output (so the device shows the right thing) and as many other
+  // connections as still fit; whatever doesn't fit is what a save/load would rewire.
+  let executionOrder = scheduleLaneSafe(conflictSafeOrder, allEdges, outSrc);
+  if (!executionOrder && outSrc) {
+    const up = new Set<string>([outSrc]);
+    for (let grew = true; grew;) { grew = false; for (const e of allEdges) if (up.has(e.target) && !up.has(e.source)) { up.add(e.source); grew = true; } }
+    const kept = allEdges.filter(e => up.has(e.target));
+    executionOrder = scheduleLaneSafe(conflictSafeOrder, kept, outSrc);
+    if (executionOrder) {
+      for (const e of allEdges) {
+        if (kept.includes(e)) continue;
+        const order = scheduleLaneSafe(conflictSafeOrder, [...kept, e], outSrc);
+        if (order) { kept.push(e); executionOrder = order; }
+      }
+    }
+  }
+  // No order even keeps the Output chain: at least keep the other connections.
+  executionOrder ??= scheduleLaneSafe(conflictSafeOrder, allEdges, undefined);
+  executionOrder ??= conflictSafeOrder;
+
   // Step 2: Find the explicit Output node and determine the final output buffer.
   // -1 is a sentinel meaning "nothing is wired to the output" — the device (and preview) then
   // show black instead of whatever sits in a lane buffer. All nodes are still serialized; this
@@ -439,7 +526,7 @@ export function serializePattern(
   
   // Step 3: Filter out output node for serialization (every other node is kept, even
   // if it isn't wired to the output — disconnected nodes must survive a reload).
-  const nodesToSerialize = conflictSafeOrder.filter(node => node.data.type !== 'output');
+  const nodesToSerialize = executionOrder.filter(node => node.data.type !== 'output');
   
   // Get interactive parameters once before serialization
   const currentInteractiveParams = get(interactiveParameters);

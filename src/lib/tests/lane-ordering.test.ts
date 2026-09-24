@@ -47,3 +47,47 @@ test('the node feeding Output is the last writer of its lane', () => {
   expect(sig.some((s) => s.startsWith('invert-') && s.endsWith('->output'))).toBe(true);
   expect(sig.some((s) => s.startsWith('mirror-') && s.endsWith('->output'))).toBe(false);
 });
+
+// What the device shows: run the serialized nodes in order over the three lane buffers.
+function displayed(nodes: any[], edges: any[]): string {
+  for (const [i, e] of edges.entries()) expect(isValidConnectionWithBuffers(e, nodes, edges.slice(0, i))).toBe(true);
+  const p = serializePattern(nodes, edges, new Map(), 't');
+  const buf = ['', '', ''];
+  for (const n of p.nodes) {
+    const a = n.i === undefined ? '' : buf[n.i], b = n.i2 === undefined ? '' : buf[n.i2];
+    buf[n.o] = n.t === 'blend' ? `blend(${a},${b})` : a ? `${n.t}(${a})` : n.t;
+  }
+  return buf[p.meta.output];
+}
+
+test('an unrelated generator in the Output lane runs before the node feeding Output', () => {
+  // The level-based reader-first pass used to move gradient B ahead of fire F, across the
+  // ordering edge that says F must run first, so the device showed fire.
+  const nodes = [
+    N('M', 'blur', LANES.RIGHT, 0), N('A', 'gradient', LANES.RIGHT, 100),
+    N('B', 'gradient', LANES.CENTER, 200), N('F', 'fire', LANES.CENTER, 300),
+    N('O', 'output', LANES.RIGHT, 400),
+  ];
+  expect(displayed(nodes, [E('A', 'M'), E('B', 'O')])).toBe('gradient');
+});
+
+test('a second reader of a value runs before an in-place writer, even across lanes', () => {
+  // rainbow R feeds invert X (other lane) and mirror Y (in place, displayed); plasma P shares R's lane.
+  const nodes = [
+    N('R', 'rainbow', LANES.CENTER, 0), N('P', 'plasma', LANES.CENTER, 100),
+    N('Y', 'mirror', LANES.CENTER, 200), N('X', 'invert', LANES.RIGHT, 200),
+    N('O', 'output', LANES.CENTER, 300),
+  ];
+  expect(displayed(nodes, [E('R', 'X'), E('Y', 'O'), E('R', 'Y')])).toBe('mirror(rainbow)');
+});
+
+test('when no order can honour every connection, the displayed chain wins', () => {
+  // blend Z overwrites rainbow's lane in place, so mirror M must read rainbow first; M then
+  // writes the lane invert V is waiting in. Something has to give: not the display.
+  const nodes = [
+    N('V', 'invert', LANES.RIGHT, 0), N('M', 'mirror', LANES.RIGHT, 100),
+    N('Z', 'blend', LANES.LEFT, 200), N('R', 'rainbow', LANES.LEFT, 0),
+    N('O', 'output', LANES.RIGHT, 300),
+  ];
+  expect(displayed(nodes, [E('M', 'O'), E('V', 'Z', 'input-2'), E('R', 'Z', 'input-1'), E('R', 'M')])).toBe('mirror(rainbow)');
+});
