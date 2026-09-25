@@ -231,21 +231,27 @@ static String pendingDeviceName;
 static volatile bool buttonPinPending = false;
 static volatile int pendingButtonPin = -1;
 
-// Pattern Storage
-static uint8_t* patternBuffer = nullptr;
-static size_t patternBufferSize = 0;
-static bool newPatternAvailable = false;
-// Guards the pattern buffer hand-off between the BLE host task (onWrite) and the
-// Arduino loop task (processReceivedPattern). Without it, a rapid follow-up write
-// (e.g. dragging a slider) frees patternBuffer while loadPatternFromMessagePack is
-// mid-parse on the loop task -> use-after-free -> garbage frame (rainbow artifacts).
+// Pattern Storage — every fully-reassembled pattern push, oldest first, on its way from the
+// BLE host task (onWrite) to the Arduino loop task (processReceivedPattern). A queue, not one
+// slot: a library push (the app's "sync") must each reach flash, and "sync all" sends many
+// back to back, where a single slot would keep only the newest. Live pushes are coalesced on
+// the loop side instead, so a slider drag still only shows the latest.
+struct PendingPattern { uint8_t* buf; size_t size; };
+static const size_t PATTERN_QUEUE_MAX = 16;
+static PendingPattern patternQueue[PATTERN_QUEUE_MAX];
+static size_t patternQueueHead = 0;  // oldest entry
+static size_t patternQueueCount = 0;
+// Guards the queue hand-off between the BLE host task and the loop task. Without it, a
+// rapid follow-up write (e.g. dragging a slider) could free a buffer while
+// loadPatternFromMessagePack is mid-parse on the loop task -> use-after-free -> garbage
+// frame (rainbow artifacts). Only pointers move under it — no allocation or free.
 static portMUX_TYPE patternMux = portMUX_INITIALIZER_UNLOCKED;
 
 // Pattern-sync reassembly. A pattern can exceed one BLE write (a CoreBluetooth value
 // caps at 512B — e.g. an SVG-fill pattern with a detailed path), so the app sends it in
 // chunks framed [u16 totalLen LE][u16 offset LE][payload], same scheme as LAYOUT_SET.
 // These are touched only by the BLE host task (onWrite), so no lock is needed here;
-// the completed buffer is handed to the loop task via patternBuffer under patternMux.
+// the completed buffer is handed to the loop task via patternQueue under patternMux.
 static uint8_t* patternRxBuf = nullptr;
 static size_t patternRxSize = 0;
 static size_t patternRxAccum = 0;
@@ -260,9 +266,10 @@ static String patternSaveName;   // pattern name captured at receive, used to ke
 static bool patternSaveDirty = false;
 static uint32_t patternSaveChangedAtMs = 0;
 static const uint32_t PATTERN_SAVE_DEBOUNCE_MS = 2000;
-// true  = "add to library" (a deliberate sync — becomes a cycle member);
-// false = "current only" (a Live push — persisted as the boot pattern but NOT cycled).
-// The app sends a top-level `lib` bool in the pattern; absent (old app) defaults to library.
+// false = "current only" (a Live push — persisted as the boot pattern but NOT cycled);
+// true  = shown AND added to the library — only a push from an app too old to send the
+// top-level `lib` bool. An explicit lib=true (a sync) never gets here: it is stored without
+// being shown (see storeLibraryPush).
 static bool patternSaveIsLib = true;
 
 // Live global brightness: the app sends a single byte on each slider tick. We stage
@@ -750,19 +757,21 @@ static void blankAllStrips() {
 }
 
 // Hand a fully-reassembled pattern msgpack buffer to the render loop. Takes ownership of
-// `full` (frees it or the buffer it replaces). Safe to call from either task — the swap is
-// under patternMux.
+// `full`. Safe to call from either task — the queue is under patternMux.
 void stageCompletePattern(uint8_t* full, size_t fullLen) {
     if (!full) return;
     noteActivity();
-    uint8_t* old = nullptr;
+    uint8_t* dropped = nullptr;
     portENTER_CRITICAL(&patternMux);
-    old = patternBuffer;
-    patternBuffer = full;
-    patternBufferSize = fullLen;
-    newPatternAvailable = true;
+    if (patternQueueCount == PATTERN_QUEUE_MAX) { // the loop hasn't kept up: drop the oldest
+        dropped = patternQueue[patternQueueHead].buf;
+        patternQueueHead = (patternQueueHead + 1) % PATTERN_QUEUE_MAX;
+        patternQueueCount--;
+    }
+    patternQueue[(patternQueueHead + patternQueueCount) % PATTERN_QUEUE_MAX] = { full, fullLen };
+    patternQueueCount++;
     portEXIT_CRITICAL(&patternMux);
-    if (old != nullptr) free(old);
+    if (dropped != nullptr) { Serial.println("Pattern queue full — dropped the oldest push"); free(dropped); }
 }
 
 // Stage raw LED-config msgpack for processReceivedLedConfig() to apply on the loop task.
@@ -1908,26 +1917,70 @@ void updateCycle() {
     }
 }
 
+// Read meta.name from a pattern msgpack — the key a library push is stored under. Empty if
+// the buffer doesn't parse or has no string name.
+static String readPatternName(const uint8_t* buf, size_t size) {
+    mpack_tree_t tree;
+    mpack_tree_init_data(&tree, (const char*)buf, size);
+    mpack_tree_parse(&tree);
+    std::string name;
+    mpack_node_t root = mpack_tree_root(&tree);
+    if (mpack_tree_error(&tree) == mpack_ok && mpack_node_map_contains_cstr(root, "meta")) {
+        mpack_node_t meta = mpack_node_map_cstr(root, "meta");
+        if (mpack_node_map_contains_cstr(meta, "name")) {
+            mpack_node_t n = mpack_node_map_cstr(meta, "name");
+            if (mpack_node_type(n) == mpack_type_str) name.assign(mpack_node_str(n), mpack_node_strlen(n));
+        }
+    }
+    if (mpack_tree_error(&tree) != mpack_ok) name.clear();
+    mpack_tree_destroy(&tree);
+    return String(name.c_str());
+}
+
+// A library push (explicit lib=true — the app's "sync"): store it by name for cycling and do
+// NOT show it. The renderer, the remembered current pattern and the power-on pattern are all
+// left alone, so whatever is playing keeps playing. Written straight away, not debounced like
+// a live push: a "sync all" sends many in a row, and every one has to land.
+static void storeLibraryPush(const uint8_t* buf, size_t size) {
+    String name = readPatternName(buf, size);
+    if (name.length() == 0) { Serial.println("Library push: no pattern name — not stored"); return; }
+    size_t before = libOrder.size();
+    if (libUpsert(name, buf, size) && libOrder.size() != before && cyclingActive && cycleIntervalMs > 0) {
+        // A new member shifts which index the synced clock points at, and updateCycle would
+        // switch patterns right now. Hold the current one until the next boundary.
+        lastCycleIndex = (int)((getSynchronizedTime() / cycleIntervalMs) % (unsigned long)libOrder.size());
+    }
+}
+
 // Function to process received pattern data
 void processReceivedPattern() {
-    if (patternRenderer == nullptr) return;
-
-    // Take exclusive ownership of the pending buffer under the lock, so a concurrent
-    // BLE write (rapid slider drags) can't free it while we parse below.
+    // Drain the queue. Library pushes are each stored (never shown); of the live pushes only
+    // the newest is applied, since it supersedes the rest. Each entry is taken under the lock,
+    // so it's ours alone — onWrite only ever adds newer buffers.
     uint8_t* buf = nullptr;
     size_t size = 0;
-    portENTER_CRITICAL(&patternMux);
-    if (newPatternAvailable && patternBuffer != nullptr) {
-        buf = patternBuffer;
-        size = patternBufferSize;
-        patternBuffer = nullptr;
-        patternBufferSize = 0;
-        newPatternAvailable = false;
+    for (;;) {
+        PendingPattern p = { nullptr, 0 };
+        portENTER_CRITICAL(&patternMux);
+        if (patternQueueCount > 0) {
+            p = patternQueue[patternQueueHead];
+            patternQueueHead = (patternQueueHead + 1) % PATTERN_QUEUE_MAX;
+            patternQueueCount--;
+        }
+        portEXIT_CRITICAL(&patternMux);
+        if (p.buf == nullptr) break;
+        if (readPatternLibFlag(p.buf, p.size, false)) {
+            storeLibraryPush(p.buf, p.size);
+            free(p.buf);
+            continue;
+        }
+        if (buf) free(buf);
+        buf = p.buf;
+        size = p.size;
     }
-    portEXIT_CRITICAL(&patternMux);
     if (buf == nullptr) return;
+    if (patternRenderer == nullptr) { free(buf); return; }
 
-    // We own `buf` now — onWrite will only ever touch a newer buffer, never this one.
     // "Here's your pattern now": show it immediately and stage an upsert-BY-NAME into
     // the library (debounced so a slider drag doesn't hammer flash). Cycling is left
     // untouched — it's just an auto-advance, independent of the stored set; this manual
@@ -1965,8 +2018,9 @@ void processPatternFlashSave() {
             // Always persist the last-shown pattern as the boot/current pattern (survives
             // power-off), whether or not it's cycled.
             saveBootCurrent(patternSaveBuf, patternSaveSize);
-            // Only a deliberate "sync" (lib=true) adds it to the cycled library. A Live push
-            // (lib=false) stays current-only, so trying a pattern never pollutes the cycle.
+            // A Live push (lib=false) stays current-only, so trying a pattern never pollutes
+            // the cycle. (Only an old app's flagless push joins the library here; a sync with
+            // lib=true was already stored, unshown, by storeLibraryPush.)
             if (patternSaveIsLib && patternSaveName.length() > 0) {
                 if (libUpsert(patternSaveName, patternSaveBuf, patternSaveSize)) {
                     libSaveCurrentName(patternSaveName);

@@ -1367,7 +1367,8 @@ export async function setCycleOnDevice(
  */
 export async function sendSinglePatternToDevice(deviceId: string, pattern: any): Promise<void> {
   // Strip app/cloud-sync metadata (id/updatedAt/deleted) — the device wire is name+output only.
-  // lib:true → this is a deliberate "sync": the device adds it to its cycled library.
+  // lib:true → this is a deliberate "sync": the device adds it to its cycled library without
+  // showing it (what's playing stays playing).
   const clean = { ...pattern, meta: { name: pattern?.meta?.name, output: pattern?.meta?.output ?? 1 }, lib: true };
   const msgpackData = msgpackEncode(clean) as Uint8Array;
   await sendPatternChunked(deviceId, msgpackData);

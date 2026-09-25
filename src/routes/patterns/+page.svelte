@@ -5,7 +5,7 @@
   import { patterns, loadPatterns, switchToPattern, currentPatternName, createEmptyPattern, saveAsPattern, patternNameExists, importLibraryPattern, forkToLibrary } from '$lib/stores/patternsStore';
   import PatternPreview from '$lib/components/PatternPreview.svelte';
   import type { SerializedPattern } from '$lib/patternSerializer';
-  import { syncPatternToAllDevices, deletePatternOnAllDevices, sendSinglePatternToDevice, deletePatternOnDevice, clearDeviceLibrary } from '$lib/ble';
+  import { deletePatternOnAllDevices, sendSinglePatternToDevice, deletePatternOnDevice, clearDeviceLibrary } from '$lib/ble';
   import { deviceLibraries, refreshDeviceLibraries, syncedCountFor, markSyncedLocally, markUnsyncedLocallyOn, clearDeviceLibraryLocally } from '$lib/stores/deviceLibraryStore';
   import { currentPattern } from '$lib/stores/patternsStore';
   import { connectedDevices, getConnectedDevicesList } from '$lib/stores/deviceStore';
@@ -40,7 +40,7 @@
   // legacy/`$:` mode); reassigning the object triggers reactivity.
   let syncing: Record<string, boolean> = {};
 
-  // Push a pattern into every connected device's library (and show it there). This is the
+  // Store a pattern in every connected device's library for cycling — it isn't shown. This is the
   // "N synced" action. Pushes to all devices in PARALLEL and updates the count OPTIMISTICALLY
   // (for devices that succeeded) instead of re-dumping every device's whole library, which is
   // what made this slow/unresponsive.
@@ -74,9 +74,6 @@
           } catch (e) { console.error('Sync-all failed for', device.deviceId, pattern.meta?.name, e); }
         }
       }
-      // Each push is shown by the device as it lands, so it'd otherwise end on the LAST pattern
-      // synced. Re-assert the app's current pattern so the device ends where the user expects.
-      try { await syncPatternToAllDevices(); } catch (e) { console.error('Re-assert current after sync-all failed:', e); }
     } finally { syncingAll = false; }
   }
 
