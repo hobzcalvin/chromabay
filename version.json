@@ -1,7 +1,7 @@
 {
-  "version": "1.1.340",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.340.zip",
-  "buildDate": "2026-09-24T16:54:28Z",
-  "commitHash": "22378cbc0e3b67a6a73905e6dbb26db52538c5d9",
-  "commitMessage": "Push a selected pattern to devices once, not twice"
+  "version": "1.1.341",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.341.zip",
+  "buildDate": "2026-09-25T22:15:38Z",
+  "commitHash": "d6aa3f9e7363261a3d2fade85dc154a0f7f25542",
+  "commitMessage": "Syncing a pattern stores it on the device without playing it"
 }
