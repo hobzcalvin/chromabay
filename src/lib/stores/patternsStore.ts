@@ -92,11 +92,17 @@ function getSecondsSinceApril19() {
   return Math.floor((now.getTime() - april19.getTime()) / 1000);
 }
 
-// A new library's first pattern: a plasma with its speed, scale and hue already exposed as
-// knobs, so the Interact page has something to turn from the start (a bare rainbow left it
-// empty) and the welcome tour has something to demonstrate on every tab.
+// A new library's first pattern: a rainbow (left lane) with sparse white static (right lane)
+// added over it by a Blend, shown from the left lane. Rainbow speed and angle, static fill and
+// the blend mode are exposed as knobs, so the Interact page has something to turn from the
+// start and the welcome tour has something to demonstrate on every tab.
+const STARTER_OUTPUT = 0;
 function starterNodes(): SerializedPattern['nodes'] {
-  return [{ t: 'plasma', o: 1, x: { speed: 0, scale: 1, hue_shift: 2 } }];
+  return [
+    { t: 'rainbow', o: 0, x: { speed: 0, angle: 1 } },
+    { t: 'static', o: 2, p: { speed: 43.2, fill: 0.06 }, x: { fill: 0 } },
+    { t: 'blend', i: 0, i2: 2, o: STARTER_OUTPUT, p: { blend_mode: 1 /* Add */ }, x: { blend_mode: 0 } },
+  ];
 }
 
 // Create default pattern
@@ -105,7 +111,7 @@ function createDefaultPattern(): SerializedPattern {
   const name = `My First Pattern ${seconds}`;
   return {
     nodes: starterNodes(),
-    meta: { output: 1, name, id: newId(), updatedAt: nowMs() }
+    meta: { output: STARTER_OUTPUT, name, id: newId(), updatedAt: nowMs() }
   };
 }
 
@@ -118,7 +124,7 @@ export async function ensureTourDemoPattern(): Promise<SerializedPattern> {
   if (existing) return existing;
   const demo: SerializedPattern = {
     nodes: starterNodes(),
-    meta: { output: 1, name: TOUR_DEMO_NAME, id: newId(), updatedAt: nowMs() },
+    meta: { output: STARTER_OUTPUT, name: TOUR_DEMO_NAME, id: newId(), updatedAt: nowMs() },
   };
   await savePattern(demo);
   return demo;
