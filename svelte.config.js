@@ -24,6 +24,12 @@ const config = {
 			// Served from the chromabay.app apex root (custom domain) — no base path anywhere.
 			// (Was '/chromabay' for the old github.io/<repo> project-pages URL before the domain.)
 			base: ''
+		},
+		// Poll for new deployments every 60 s.  When a new build lands, SvelteKit detects the
+		// changed /_app/version.json and reloads before the user navigates to a stale route,
+		// preventing "Failed to fetch dynamically imported module" errors from stale chunks.
+		version: {
+			pollInterval: 60_000
 		}
 	}
 };
