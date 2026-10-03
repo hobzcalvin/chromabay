@@ -4,6 +4,7 @@
 // rebuild-required add if we ever want it.
 import * as Sentry from '@sentry/sveltekit';
 import { handleErrorWithSentry } from '@sentry/sveltekit';
+import type { HandleClientError } from '@sveltejs/kit';
 import { dev } from '$app/environment';
 import { Capacitor } from '@capacitor/core';
 
@@ -54,4 +55,21 @@ Sentry.init({
   ],
 });
 
-export const handleError = handleErrorWithSentry();
+const _sentryHandleError = handleErrorWithSentry();
+
+// Wrap the Sentry handler so we can react to stale-chunk errors that occur when
+// a new deployment replaces content-hashed JS files while a user has the old
+// version loaded.  We report to Sentry first (keeping full observability), then
+// reload the page so the browser fetches the new chunks instead of showing a
+// blank / broken state.
+export const handleError: HandleClientError = async (input) => {
+  await _sentryHandleError(input as any);
+
+  const { error } = input;
+  if (
+    error instanceof TypeError &&
+    error.message.includes('Failed to fetch dynamically imported module')
+  ) {
+    window.location.reload();
+  }
+};
