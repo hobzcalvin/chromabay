@@ -12,7 +12,8 @@ ChromaBay has three parts:
   the app runs it as WebAssembly, so the preview on your screen matches what the LEDs show.
 
 👉 **Try it now at [chromabay.app](https://chromabay.app).** You don't need hardware or an
-account. Browse, preview and edit patterns right away; connect lights when you have them.
+account. Browse, preview and edit patterns right away; connect lights when you have them. On
+iPhone or iPad, get it from the [App Store](https://apps.apple.com/us/app/chromabay/id6781765952).
 
 ---
 
@@ -58,7 +59,7 @@ needed.
 > **Browser support:** Bluetooth uses Web Bluetooth, which works in Chrome and Edge on desktop and
 > in Chrome on Android. There's no native Android app; Chrome on Android runs the full web app,
 > Bluetooth included. USB flashing uses Web Serial and needs desktop Chrome or Edge. On iOS, use
-> the native app.
+> the [native app](https://apps.apple.com/us/app/chromabay/id6781765952).
 
 ## Repository layout
 

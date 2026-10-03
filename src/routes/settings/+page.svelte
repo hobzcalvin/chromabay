@@ -5,6 +5,10 @@
     getDisplayName, updateDisplayName, deleteAccount,
   } from '$lib/stores/authStore';
   import { startOnboarding } from '$lib/stores/onboardingStore';
+  import { Capacitor } from '@capacitor/core';
+
+  // Inside the iOS app, a link to its own App Store page is pointless.
+  const showAppStore = !Capacitor.isNativePlatform();
 
   // Account deletion (App Store 5.1.1(v)). Two-step: a button reveals a confirm, so it can't be
   // triggered by one accidental tap.
@@ -194,7 +198,13 @@
 
   <h2 class="section">Help</h2>
   <div class="card">
-    <button class="btn" on:click={startOnboarding}>Replay welcome tour</button>
+    <div class="btn-row">
+      <button class="btn" on:click={startOnboarding}>Replay welcome tour</button>
+      <a class="btn" href="https://github.com/hobzcalvin/chromabay" target="_blank" rel="noopener">Source on GitHub</a>
+      {#if showAppStore}
+        <a class="btn" href="https://apps.apple.com/us/app/chromabay/id6781765952" target="_blank" rel="noopener">Get the iOS app</a>
+      {/if}
+    </div>
     <p class="muted fine">
       ChromaBay is free software under the
       <a href="https://github.com/hobzcalvin/chromabay/blob/main/LICENSE" target="_blank" rel="noopener">GPL-3.0</a>.
@@ -242,6 +252,8 @@
   .btn.danger-btn { background: rgba(239,68,68,0.25); border-color: rgba(239,68,68,0.6); }
   .confirm-q { font-weight: 600; margin: 0 0 0.5rem; }
   .err { color: #fca5a5; }
+  .btn-row { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  a.btn { text-decoration: none; font-size: 0.85rem; }
   .section { margin: 1.75rem 0 0.75rem; font-size: 1.25rem; }
   .card.video { padding: 0; overflow: hidden; }
   .video iframe { display: block; width: 100%; aspect-ratio: 16 / 9; border: 0; }
