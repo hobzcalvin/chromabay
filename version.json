@@ -1,7 +1,7 @@
 {
-  "version": "1.1.344",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.344.zip",
-  "buildDate": "2026-10-03T03:13:52Z",
-  "commitHash": "6dee7d05780ab8d2358211dbe52f85517f155a2b",
-  "commitMessage": "Remove the Sentry hackweek pitch doc"
+  "version": "1.1.345",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.345.zip",
+  "buildDate": "2026-10-03T03:19:19Z",
+  "commitHash": "f60900f13ce35559d17b69732e20fdcafbee4ff6",
+  "commitMessage": "Turn the Account tab into Settings, with Account, Help and Gallery sections"
 }
