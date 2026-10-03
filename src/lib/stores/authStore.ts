@@ -10,7 +10,8 @@ import type { User } from '@supabase/supabase-js';
 // Where the confirmation link should land. Must be allowlisted in Supabase
 // (Auth → URL Configuration → Redirect URLs). Uses the current web origin so it works
 // on both the deployed site and localhost; native (Capacitor) confirmation needs a
-// universal link — see documentation/SETUP_GUIDE.md.
+// universal link — see documentation/SETUP_GUIDE.md. /account forwards to /settings; it stays
+// the target because it's the URL allowlisted in Supabase.
 function redirectTo(): string | undefined {
   if (!browser) return undefined;
   const origin = window.location.origin;
@@ -85,7 +86,7 @@ export async function deleteAccount(): Promise<{ ok: boolean; error?: string }> 
   return { ok: true };
 }
 
-/** Email a password-reset link (lands back on /account in recovery mode). */
+/** Email a password-reset link (lands back on /account → /settings in recovery mode). */
 export async function sendPasswordReset(email: string): Promise<void> {
   if (!supabase) throw new Error('Cloud sync is not configured');
   const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: redirectTo() });

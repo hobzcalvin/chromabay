@@ -117,10 +117,10 @@
       },
     },
     {
-      target: 'account',
-      route: '/account',
+      target: 'settings',
+      route: '/settings',
       title: 'Sync (optional)',
-      body: () => 'Sign in to sync your library between phone and web and to publish to the gallery. Everything else works without an account. You can replay this tour from here.',
+      body: () => 'Sign in to sync your library between phone and web and to publish to the gallery. Everything else works without an account. You can replay this tour from Help, further down this page.',
       task: {
         target: () => q('[data-tour-target="signin"]'),
         text: () => 'Enter an email and password to sign in or create an account. It’s optional, so skip it if you like.',

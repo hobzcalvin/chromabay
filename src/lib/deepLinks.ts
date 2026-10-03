@@ -6,11 +6,11 @@
 // Capacitor fires `appUrlOpen`. We keep the user inside the app: rather than let the webview
 // load the remote https URL (which would swap the local bundle for the deployed site), we map
 // the incoming path to the matching in-app route and navigate the client router there. So a
-// link to /patterns opens the Patterns page, /account opens the account page, etc.
+// link to /patterns opens the Patterns page, /settings opens Settings, etc.
 //
 // Auth emails are the one case that needs extra work: the webview's window.location is
 // capacitor://localhost, so Supabase can't auto-detect the session from the link — we parse
-// the tokens off the URL ourselves and establish the session before routing to /account.
+// the tokens off the URL ourselves and establish the session before routing to /settings.
 import { Capacitor } from '@capacitor/core';
 import { goto } from '$app/navigation';
 import { base } from '$app/paths';
@@ -62,8 +62,8 @@ export async function handleDeepLink(rawUrl: string): Promise<boolean> {
     } catch (e) {
       console.error('deepLinks: failed to establish session from link', e);
     }
-    // Land on /account and drop the token-bearing hash from the visible URL.
-    try { await goto(`${base}/account`, { replaceState: true }); } catch { /* router not ready */ }
+    // Land on /settings (Account is its first section) and drop the token-bearing hash from the visible URL.
+    try { await goto(`${base}/settings`, { replaceState: true }); } catch { /* router not ready */ }
     return true;
   }
 

@@ -98,9 +98,9 @@
         <span class="emoji">✏️</span>
         <span class="label">Edit</span>
       </a>
-      <a data-tour="account" href="{base}/account" class:active={$page.url.pathname.startsWith(`${base}/account`)}>
-        <span class="emoji">👤</span>
-        <span class="label">Account</span>
+      <a data-tour="settings" href="{base}/settings" class:active={$page.url.pathname.startsWith(`${base}/settings`)}>
+        <span class="emoji">⚙️</span>
+        <span class="label">Settings</span>
       </a>
     </nav>
   </div>
