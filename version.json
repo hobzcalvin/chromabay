@@ -1,7 +1,7 @@
 {
-  "version": "1.1.345",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.345.zip",
-  "buildDate": "2026-10-03T03:19:19Z",
-  "commitHash": "f60900f13ce35559d17b69732e20fdcafbee4ff6",
-  "commitMessage": "Turn the Account tab into Settings, with Account, Help and Gallery sections"
+  "version": "1.1.346",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.346.zip",
+  "buildDate": "2026-10-03T03:21:08Z",
+  "commitHash": "f8e589989cfba277168f686ad0ecf3d88c14c2f3",
+  "commitMessage": "Link GitHub and the App Store from Settings → Help and the README"
 }
