@@ -5,8 +5,8 @@ lights over Bluetooth or Wi-Fi.**
 
 ChromaBay has three parts:
 
-- **An app** (web, iOS and Android, from one SvelteKit + Capacitor codebase) for building patterns,
-  previewing them live, and driving your devices.
+- **An app** (web and iOS, from one SvelteKit + Capacitor codebase) for building patterns,
+  previewing them live, and driving your devices. On Android, use the web app in Chrome.
 - **Firmware** for ESP32 LED controllers.
 - **A pattern engine** in C++ that runs in both places. The firmware compiles it natively and
   the app runs it as WebAssembly, so the preview on your screen matches what the LEDs show.
@@ -56,8 +56,9 @@ Already running [WLED](https://kno.wled.ge/)? Use **Convert a WLED device** inst
 needed.
 
 > **Browser support:** Bluetooth uses Web Bluetooth, which works in Chrome and Edge on desktop and
-> in Chrome on Android. USB flashing uses Web Serial and needs desktop Chrome or Edge. On iOS,
-> use the native app.
+> in Chrome on Android. There's no native Android app; Chrome on Android runs the full web app,
+> Bluetooth included. USB flashing uses Web Serial and needs desktop Chrome or Edge. On iOS, use
+> the native app.
 
 ## Repository layout
 
@@ -66,7 +67,7 @@ src/                 SvelteKit app (routes/ = pages, lib/ = transports, stores, 
 native/              C++ pattern engine and operators (compiled into firmware and to WASM)
 esp32/               PlatformIO firmware project
 static/native/       Prebuilt WASM build of the pattern engine used by the app
-ios/, android/       Capacitor native shells
+ios/                 Capacitor native shell (android/ is an unsupported leftover)
 supabase/            Database migrations for accounts, library sync and the gallery
 automation/          Scripts for driving the app and devices in tests
 scripts/             Release, signing and asset-generation scripts
@@ -94,8 +95,7 @@ run a fork publicly, point `VITE_SUPABASE_*` and `VITE_SENTRY_DSN` at your own p
 ### Mobile
 
 ```bash
-npm run build && npx cap sync ios && npx cap open ios          # Xcode
-npm run build && npx cap sync android && npx cap open android  # Android Studio
+npm run build && npx cap sync ios && npx cap open ios   # Xcode
 ```
 
 See [`documentation/IOS_SETUP.md`](documentation/IOS_SETUP.md) for signing and device setup.
