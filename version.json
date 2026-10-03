@@ -1,7 +1,7 @@
 {
-  "version": "1.1.346",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.346.zip",
-  "buildDate": "2026-10-03T03:21:08Z",
-  "commitHash": "f8e589989cfba277168f686ad0ecf3d88c14c2f3",
-  "commitMessage": "Link GitHub and the App Store from Settings → Help and the README"
+  "version": "1.1.347",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.347.zip",
+  "buildDate": "2026-10-03T18:53:30Z",
+  "commitHash": "2d8810714a7f7abf490dfe618fd1ad974f007be5",
+  "commitMessage": "Fix stale chunk loading errors with reload and version polling (#33)"
 }
