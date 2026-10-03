@@ -1,7 +1,7 @@
 {
-  "version": "1.1.343",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.343.zip",
-  "buildDate": "2026-10-03T03:12:32Z",
-  "commitHash": "788f1e5af7c582b08c7180884fa2f8bce29c2ebd",
-  "commitMessage": "README: no native Android app; use Chrome on Android"
+  "version": "1.1.344",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.344.zip",
+  "buildDate": "2026-10-03T03:13:52Z",
+  "commitHash": "6dee7d05780ab8d2358211dbe52f85517f155a2b",
+  "commitMessage": "Remove the Sentry hackweek pitch doc"
 }
