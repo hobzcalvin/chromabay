@@ -200,9 +200,8 @@ static uint32_t calibStartMs = 0;
 static const uint32_t CALIB_FRAME_MS = 220;
 
 // Blink Pins: a wiring aid. For BLINK_DURATION_MS every strip's data pin (and clock pin, on
-// 4-wire chipsets) is released from its LED driver and driven as a plain GPIO, high for half
-// a second and low for half a second, so a meter, scope or bare LED can find which wire is
-// which. The callback only stages the request; the loop task owns the pins (processBlink).
+// 4-wire chipsets) is released from its LED driver and driven as a plain GPIO, high for one
+// second and low for one second, so a meter, scope or bare LED can find which wire is which. The callback only stages the request; the loop task owns the pins (processBlink).
 // Another BLINK_PINS write restarts the 10 s run. Any OTHER command ends it early and puts the
 // LED drivers back (see onEndpointWrite), as does a button press, a realtime packet, an OTA,
 // or the calibration flash.
@@ -216,7 +215,7 @@ static uint32_t blinkRtMark = 0;            // gRealtimeUntilMs at start; a chan
 static LedConfig::FullLedConfiguration blinkSaved; // the strips to rebuild afterwards
 static std::vector<uint8_t> blinkPins;
 static const uint32_t BLINK_DURATION_MS = 10000;
-static const uint32_t BLINK_HALF_PERIOD_MS = 500;
+static const uint32_t BLINK_HALF_PERIOD_MS = 1000; // 1 s on, 1 s off
 // Ends a run and rebuilds the strips; a no-op when not blinking. Also called first by loop-task
 // work that reads or rebuilds the strips (a new LED config, a layout), so that work never runs
 // against the torn-down state — its command can land after this pass's processBlink().

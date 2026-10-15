@@ -1854,7 +1854,7 @@ export async function stopCalibration(deviceId: string): Promise<void> {
 export const BLINK_PINS_FEAT = 5;
 
 /**
- * Blink every strip data/clock pin (high ½ s, low ½ s) for 10 s — a wiring aid. Calling it
+ * Blink every strip data/clock pin (high 1 s, low 1 s) for 10 s — a wiring aid. Calling it
  * again restarts the 10 s; any other command to the device ends it and restores the LEDs.
  */
 export async function blinkPins(deviceId: string): Promise<void> {
