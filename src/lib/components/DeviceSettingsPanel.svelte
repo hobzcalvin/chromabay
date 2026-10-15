@@ -5,7 +5,7 @@
   // Bluetooth/Wi-Fi radio) and saving reboots the device into it, so the link drops — we show
   // clear feedback for that.
   import {
-    RT_PROTO, RT_CAPS_LEGACY, readDeviceSettings, writeDeviceSettings,
+    RT_PROTO, RT_CAPS_LEGACY, readDeviceSettings, writeDeviceSettings, blinkPins, BLINK_PINS_FEAT,
     type DeviceSettings, type DeviceSettingsPatch, type DeviceInfo,
   } from '$lib/ble';
   import { rememberWifiDevice } from '$lib/stores/wifiDeviceStore';
@@ -61,6 +61,27 @@
   const toggleProto = (bit: number) => { rtProto ^= bit; };
   // The universe field is DMX-only; DDP addresses pixels by byte offset.
   const usesUniverse = $derived((rtProto & (RT_PROTO.ARTNET | RT_PROTO.SACN)) !== 0);
+
+  // Blink Pins is a one-shot command, not a setting, so it goes out immediately rather than
+  // waiting for Save. Firmware that predates it has no such endpoint; a Wi-Fi device may not
+  // have reported its level, in which case we just try.
+  const canBlink = $derived(deviceInfo?.feat == null || deviceInfo.feat >= BLINK_PINS_FEAT);
+  let blinkMsg = $state('');
+  let blinkErr = $state(false);
+  let blinkTimer: ReturnType<typeof setTimeout> | undefined;
+  async function doBlink() {
+    clearTimeout(blinkTimer);
+    blinkErr = false;
+    blinkMsg = 'Blinking…';
+    try {
+      await blinkPins(deviceId);
+      blinkTimer = setTimeout(() => (blinkMsg = ''), 10000); // a repeat click restarts the device's 10 s too
+    } catch (e: any) {
+      blinkErr = true;
+      blinkMsg = 'Couldn’t start: ' + (e?.message ?? e);
+    }
+  }
+  $effect(() => () => clearTimeout(blinkTimer));
 
   const activeMode = $derived(settings?.mode_active ?? deviceInfo?.mode ?? (isWifiId(deviceId) ? 'wifi' : 'ble'));
 
@@ -268,6 +289,15 @@
           </label>
           <p class="hint">Stream to this device's IP{settings?.ip ? ` (${settings.ip})` : ''}{usesUniverse ? '' : ' on UDP 4048'}. Takes over live and returns to the pattern {rtTimeout}s after the stream stops. Wi-Fi only.</p>
         {/if}
+
+        <div class="field check">
+          <button type="button" class="btn" disabled={!canBlink} onclick={doBlink}>Blink Pins</button>
+          {#if blinkMsg}<span class="msg {blinkErr ? 'err' : 'info'}">{blinkMsg}</span>{/if}
+        </div>
+        <p class="hint">
+          {#if canBlink}Each data/clock pin on the device will toggle on and off once a second for 10 seconds.
+          {:else}Update this device's firmware to use Blink Pins.{/if}
+        </p>
       {/if}
     </div>
 

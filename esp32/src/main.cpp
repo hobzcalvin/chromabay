@@ -199,6 +199,29 @@ static uint32_t calibStartMs = 0;
 // is handled by registration in the decoder, not by blinking faster.
 static const uint32_t CALIB_FRAME_MS = 220;
 
+// Blink Pins: a wiring aid. For BLINK_DURATION_MS every strip's data pin (and clock pin, on
+// 4-wire chipsets) is released from its LED driver and driven as a plain GPIO, high for half
+// a second and low for half a second, so a meter, scope or bare LED can find which wire is
+// which. The callback only stages the request; the loop task owns the pins (processBlink).
+// Another BLINK_PINS write restarts the 10 s run. Any OTHER command ends it early and puts the
+// LED drivers back (see onEndpointWrite), as does a button press, a realtime packet, an OTA,
+// or the calibration flash.
+#define CHARACTERISTIC_UUID_BLINK_PINS "a0be83fe-8dc9-47f0-ab40-b19721d20ed1"
+static volatile bool blinkRequest = false;  // BLINK_PINS write: start, or restart, a run
+static volatile bool blinkCancel = false;   // any other command: end the run, restore output
+static bool gBlinking = false;              // loop-task only: pins are ours, strips torn down
+static bool blinkLevel = false;
+static uint32_t blinkStartMs = 0;
+static uint32_t blinkRtMark = 0;            // gRealtimeUntilMs at start; a change = a stream arrived
+static LedConfig::FullLedConfiguration blinkSaved; // the strips to rebuild afterwards
+static std::vector<uint8_t> blinkPins;
+static const uint32_t BLINK_DURATION_MS = 10000;
+static const uint32_t BLINK_HALF_PERIOD_MS = 500;
+// Ends a run and rebuilds the strips; a no-op when not blinking. Also called first by loop-task
+// work that reads or rebuilds the strips (a new LED config, a layout), so that work never runs
+// against the torn-down state — its command can land after this pass's processBlink().
+static void endBlink();
+
 // Timestamp Sync Characteristic
 
 // Playlist Sync Characteristic (pattern cycling)
@@ -1304,6 +1327,30 @@ static void onCalibrationWrite(const uint8_t* data, size_t len, Endpoints::Link&
         }
     }
 
+// Blink Pins - any write (payload ignored) starts, or restarts, the 10 s pin blink.
+static void onBlinkPinsWrite(const uint8_t* data, size_t len, Endpoints::Link& link) {
+    (void)data; (void)len; (void)link;
+    noteActivity();
+    blinkCancel = false;
+    blinkRequest = true;
+}
+
+// Runs before every endpoint write, on either link. Anything except another Blink Pins click
+// cancels a blink run in progress — except the traffic the app sends on its own, which says
+// nothing about what the user wants on the pins: the 10 s clock heartbeat, the crash relay,
+// and the read-back requests (layout, library) that are writes only because BLE has no
+// "read with an argument".
+static void onEndpointWrite(const char* uuid) {
+    static const char* const PASSIVE[] = {
+        CHARACTERISTIC_UUID_BLINK_PINS, CHARACTERISTIC_UUID_TIMESTAMP_SYNC,
+        CHARACTERISTIC_UUID_SENTRY_RX, CHARACTERISTIC_UUID_SENTRY_CONFIG,
+        CHARACTERISTIC_UUID_LAYOUT_GET, CHARACTERISTIC_UUID_LIBRARY_DUMP, CHARACTERISTIC_UUID_RX,
+    };
+    for (const char* p : PASSIVE) if (strcasecmp(uuid, p) == 0) return;
+    blinkRequest = false;
+    blinkCancel = true;
+}
+
 // Pattern Sync Callbacks - for receiving messagepack-encoded patterns
 static void onPatternSyncWrite(const uint8_t* data, size_t len, Endpoints::Link& link) {
     (void)data; (void)len; (void)link;
@@ -1570,6 +1617,7 @@ static void processButton() {
     if ((now - buttonDebounceAtMs) > BUTTON_DEBOUNCE_MS && reading != buttonStableState) {
         buttonStableState = reading;
         if (buttonStableState == LOW) { // a debounced press
+            blinkCancel = true; // a press means the user wants the lights back
             buttonClickCount++;
             buttonLastPressMs = now;
             if (buttonClickCount >= 2) {
@@ -2053,6 +2101,7 @@ void processReceivedLedConfig() {
     if (!newLedConfigAvailable || ledConfigBuffer == nullptr) {
         return;
     }
+    endBlink();
 
     // Rare, user-initiated, and it rebuilds every strip and every render buffer — exactly
     // the shape Operation is for. Closes (and sends) when this function returns.
@@ -2196,6 +2245,7 @@ void processReceivedLayout() {
     if (!newLayoutAvailable) return;
     newLayoutAvailable = false;
     if (layoutBuffer == nullptr || layoutBufferSize < 1) { layoutAccumLen = 0; return; }
+    endBlink();
     uint8_t stripIndex = layoutBuffer[0];
     char path[24];
     snprintf(path, sizeof(path), "/layout_%u.bin", (unsigned)stripIndex);
@@ -2381,6 +2431,71 @@ void renderCalibrationFrame() {
         }
     }
     ledMgr.show();
+}
+
+// Take the strip pins off their LED drivers and start toggling them (loop task only).
+static void startBlink() {
+    calibrating = false; // the flash needs the strips this is about to tear down
+    blinkSaved = configMgr.getCurrentConfigurationFromManager();
+    blinkPins.clear();
+    auto addPin = [](uint8_t p) {
+        if ((int)p == buttonPin || !GPIO_IS_VALID_OUTPUT_GPIO(p)) return;
+        if (std::find(blinkPins.begin(), blinkPins.end(), p) == blinkPins.end()) blinkPins.push_back(p);
+    };
+    for (const auto& s : blinkSaved.strips) {
+        addPin(s.pin);
+        if (LedConfig::isFourWire(s.chipset)) addPin(s.clockPin);
+    }
+    // Destroying the buses releases their RMT channels / SPI pins; gpio_reset_pin then routes
+    // each pin back to plain GPIO so digitalWrite reaches the wire.
+    ledMgr.clearStrips();
+    for (uint8_t p : blinkPins) {
+        gpio_reset_pin((gpio_num_t)p);
+        pinMode(p, OUTPUT);
+        digitalWrite(p, HIGH);
+    }
+    blinkLevel = true;
+    blinkRtMark = gRealtimeUntilMs;
+    gBlinking = true;
+    Serial.printf("[Blink] START %u pin(s)\n", (unsigned)blinkPins.size());
+}
+
+// Stop toggling and hand the pins back: rebuild the strips exactly as they were (layouts
+// reload from flash; brightness is whatever it is now, in case it changed meanwhile).
+static void endBlink() {
+    if (!gBlinking) return;
+    gBlinking = false;
+    for (uint8_t p : blinkPins) digitalWrite(p, LOW);
+    blinkSaved.globalBrightness = ledMgr.getGlobalBrightness();
+    configMgr.applyConfiguration(blinkSaved);
+    blinkSaved.strips.clear();
+    blinkPins.clear();
+    Serial.println("[Blink] END, LED output restored");
+}
+
+static void processBlink() {
+    if (blinkRequest) {
+        blinkRequest = false;
+        if (ota_in_progress || ota_finalizing) {
+            Serial.println("[Blink] ignored: update in progress");
+        } else {
+            if (!gBlinking) startBlink();
+            blinkStartMs = millis(); // a repeat click restarts the 10 s
+        }
+    }
+    if (!gBlinking) { blinkCancel = false; return; }
+    uint32_t elapsed = millis() - blinkStartMs;
+    if (blinkCancel || calibrating || ota_in_progress || ota_finalizing
+        || gRealtimeUntilMs != blinkRtMark || elapsed >= BLINK_DURATION_MS) {
+        blinkCancel = false;
+        endBlink();
+        return;
+    }
+    bool level = ((elapsed / BLINK_HALF_PERIOD_MS) & 1u) == 0;
+    if (level != blinkLevel) {
+        blinkLevel = level;
+        for (uint8_t p : blinkPins) digitalWrite(p, level ? HIGH : LOW);
+    }
 }
 
 // Finalize a pending OTA update from the loop task once the signature
@@ -3125,6 +3240,7 @@ static const Endpoints::Endpoint ENDPOINTS[] = {
     { CHARACTERISTIC_UUID_LAYOUT_SET,     NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY,              onLayoutSetWrite,      nullptr },
     { CHARACTERISTIC_UUID_LAYOUT_GET,     NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY,                onLayoutGetWrite,      nullptr },
     { CHARACTERISTIC_UUID_CALIBRATION,    NIMBLE_PROPERTY::WRITE,                                         onCalibrationWrite,    nullptr },
+    { CHARACTERISTIC_UUID_BLINK_PINS,     NIMBLE_PROPERTY::WRITE,                                         onBlinkPinsWrite,      nullptr },
     { CHARACTERISTIC_UUID_LIBRARY_CMD,    NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR,              onLibraryCmdWrite,     nullptr },
     { CHARACTERISTIC_UUID_LIBRARY_DUMP,   NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY,                onLibraryDumpWrite,    nullptr },
     { CHARACTERISTIC_UUID_COMM_CONFIG,    NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE,                  onCommConfigWrite,     onCommConfigRead },
@@ -3321,6 +3437,7 @@ void setup() {
     // The endpoint table is the protocol, so it is installed before either transport starts —
     // not inside the BLE branch, which on a Wi-Fi boot would leave the dispatcher empty.
     Endpoints::install(ENDPOINTS, sizeof(ENDPOINTS) / sizeof(ENDPOINTS[0]));
+    Endpoints::setWriteHook(onEndpointWrite);
 #if CHROMABAY_WIFI
     Endpoints::setWifiSender(&WifiLink::sendEndpointFrame);
 #endif
@@ -3547,7 +3664,7 @@ void loop() {
             } else {
                 renderCalibrationFrame(); // structured-light flash for camera auto-layout
             }
-        } else if (patternRenderer != nullptr && !ota_in_progress && !gAsleep && !gBriDark
+        } else if (patternRenderer != nullptr && !ota_in_progress && !gAsleep && !gBriDark && !gBlinking
                    && (uint32_t)(currentTime) >= gRealtimeUntilMs) {
             // Not streaming (or the stream lapsed) → run the pattern/cycle. While realtime
             // packets are arriving (gRealtimeUntilMs in the future) we hold the streamed
@@ -3571,6 +3688,7 @@ void loop() {
 
     // Process received patterns and LED configuration changes on the loop task,
     // so they never race with update()/render() above.
+    processBlink();   // first: a cancelling command restores the strips before the rest run
     processReceivedPattern();
     processPatternFlashSave();
     processReceivedCycleControl();
@@ -3638,7 +3756,7 @@ void loop() {
     // sleep = gAsleep): otherwise the dither loop keeps re-emitting the LAST target and the
     // LEDs stay lit/frozen on top of the blank (render is skipped, so the target never updates
     // to black). Gate it on the same "output on" condition as rendering.
-    if (!ota_in_progress && !SINGLE_CORE && !gBriDark && !gAsleep) {
+    if (!ota_in_progress && !SINGLE_CORE && !gBriDark && !gAsleep && !gBlinking) {
         ledMgr.ditherTick();
     }
 

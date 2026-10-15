@@ -59,6 +59,9 @@ struct Link {
 
 // Handlers. onWrite gets the payload; onRead is asked to produce the value.
 using WriteFn = void (*)(const uint8_t *data, size_t len, Link &link);
+// Called with the endpoint's UUID before ANY write handler runs, on either link — for state
+// that every command should affect (a blink-pins run ends when anything else arrives).
+using WriteHookFn = void (*)(const char *uuid);
 using ReadFn  = void (*)(Link &link);
 
 struct Endpoint {
@@ -78,6 +81,7 @@ namespace detail {
 inline const Endpoint *gTable = nullptr;
 inline size_t gCount = 0;
 inline WifiSendFn gWifiSend = nullptr;
+inline WriteHookFn gWriteHook = nullptr;
 // UUID → characteristic, for notify(). Small and fixed; a linear scan is cheaper than a map.
 inline NimBLECharacteristic *gChars[40] = {nullptr};
 
@@ -103,6 +107,7 @@ inline void install(const Endpoint *table, size_t count) {
     detail::gCount = count;
 }
 inline void setWifiSender(WifiSendFn fn) { detail::gWifiSend = fn; }
+inline void setWriteHook(WriteHookFn fn) { detail::gWriteHook = fn; }
 
 // Answers over BLE. During a read the value must simply be set (NimBLE returns it); at any
 // other time the same "here is the value" means a notification.
@@ -180,6 +185,7 @@ class TableCallbacks : public NimBLECharacteristicCallbacks {
         const Endpoint *e = detail::find(c->getUUID().toString().c_str());
         if (!e || !e->onWrite) return;
         std::string v = c->getValue();
+        if (detail::gWriteHook) detail::gWriteHook(e->uuid);
         BleLink link(c, /*inRead=*/false);
         e->onWrite((const uint8_t *)v.data(), v.length(), link);
     }
@@ -219,7 +225,10 @@ inline void dispatchWifi(uint8_t channel, uint8_t op, const uint8_t *data, uint3
         if (e->onRead) e->onRead(link);
         else Serial.printf("[Endpoints] channel %u is not readable\n", channel);
     } else if (op == OP_WRITE) {
-        if (e->onWrite) e->onWrite(data, len, link);
+        if (e->onWrite) {
+            if (detail::gWriteHook) detail::gWriteHook(e->uuid);
+            e->onWrite(data, len, link);
+        }
         else Serial.printf("[Endpoints] channel %u is not writable\n", channel);
     }
 }

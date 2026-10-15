@@ -28,7 +28,8 @@
 //   2  WiFi/TCP transport + comm-mode switching, sleep timer, RGB-test toggle, time node
 //   3  DDP realtime streaming (rtProto is a bitmask; settings report rtcaps)
 //   4  cycle crossfade (cycle-control payload carries a trailing [u32 crossfadeMs])
-#define FIRMWARE_FEATURES 4
+//   5  BLINK_PINS endpoint (toggle every strip data/clock pin for 10 s, a wiring aid)
+#define FIRMWARE_FEATURES 5
 
 // --- Firmware Signature Verification ---
 // ECDSA P-256 Public Key (Raw 64-byte format: 32-byte X + 32-byte Y coordinates)

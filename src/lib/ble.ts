@@ -92,6 +92,7 @@ const CHARACTERISTIC_UUID_LAYOUT_SET = "a0be83f5-8dc9-47f0-ab40-b19721d20ed1"; /
 const CHARACTERISTIC_UUID_LAYOUT_GET = "a0be83f6-8dc9-47f0-ab40-b19721d20ed1"; // read back a strip's layout (notify-chunked)
 const CHARACTERISTIC_UUID_LIBRARY_DUMP = "a0be83f9-8dc9-47f0-ab40-b19721d20ed1"; // read the device's stored library (notify-chunked)
 const CHARACTERISTIC_UUID_CALIBRATION = "a0be83f7-8dc9-47f0-ab40-b19721d20ed1"; // auto-layout structured-light flash control
+const CHARACTERISTIC_UUID_BLINK_PINS = "a0be83fe-8dc9-47f0-ab40-b19721d20ed1"; // toggle every strip data/clock pin for 10 s (feat>=5)
 const CHARACTERISTIC_UUID_LIBRARY_CMD = "a0be83f8-8dc9-47f0-ab40-b19721d20ed1"; // on-device pattern library ops (clear / delete-by-name)
 
 // Timestamp Sync Characteristic - for synchronizing time across devices
@@ -1847,6 +1848,18 @@ export async function startCalibration(deviceId: string, stripIndex = 0xff, brig
 export async function stopCalibration(deviceId: string): Promise<void> {
   await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_CALIBRATION,
     new DataView(new Uint8Array([0]).buffer));
+}
+
+/** Firmware level that has the BLINK_PINS endpoint. */
+export const BLINK_PINS_FEAT = 5;
+
+/**
+ * Blink every strip data/clock pin (high ½ s, low ½ s) for 10 s — a wiring aid. Calling it
+ * again restarts the 10 s; any other command to the device ends it and restores the LEDs.
+ */
+export async function blinkPins(deviceId: string): Promise<void> {
+  await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_BLINK_PINS,
+    new DataView(new Uint8Array([1]).buffer));
 }
 
 /**
