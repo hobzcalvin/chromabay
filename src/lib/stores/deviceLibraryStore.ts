@@ -16,6 +16,9 @@ export const deviceLibraries = writable<Record<string, SerializedPattern[]>>({})
 export const deviceLibrariesLoading = writable(false);
 
 let inFlight = false;
+// Devices whose last pull completed and was genuinely empty. Without this an empty library
+// looked like "never pulled", so every Patterns-page visit dumped that device again.
+const pulledEmpty = new Set<string>();
 
 // A brief reconnect blip can't have changed a device's library, but a LONGER absence might
 // (someone re-synced it, it was cleared, etc.). Track when each device dropped so refresh
@@ -33,16 +36,19 @@ connectedDevices.subscribe((map) => {
 async function pullWithRetry(deviceId: string, fallback: SerializedPattern[]): Promise<SerializedPattern[]> {
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const pulled = await pullDeviceLibrary(deviceId);
-      if (pulled.length > 0) return pulled; // got real data
-      // Empty: usually a not-ready-yet race just after (re)connect. Wait and retry.
+      const { patterns, complete } = await pullDeviceLibrary(deviceId);
+      if (patterns.length > 0) return patterns; // got real data
+      // The device finished its listing and it was empty: that IS the answer. Retrying it
+      // only asked again — three dumps and ~3 s of waiting on every Patterns-page visit.
+      if (complete) { pulledEmpty.add(deviceId); return []; }
+      // Heard nothing (link not ready just after a (re)connect, or a dropped sentinel).
     } catch (e) {
       console.warn('[deviceLibrary] pull attempt failed for', deviceId, e);
     }
     if (attempt < 2) await new Promise((r) => setTimeout(r, 1500));
   }
-  // Still empty after retries → keep the last-known snapshot rather than wiping good counts
-  // on a transient failure. (A genuinely-empty device just has no fallback, so shows empty.)
+  // Still nothing after retries → keep the last-known snapshot rather than wiping good counts
+  // on a transient failure.
   return fallback.length ? fallback : [];
 }
 
@@ -68,7 +74,9 @@ export async function refreshDeviceLibraries(opts: { force?: boolean } = {}): Pr
       delete disconnectedAt[d.deviceId]; // consume — it's connected now
       // Keep the cache for a device we already know, UNLESS forced or it was gone long enough
       // that its library might have changed.
-      if (!opts.force && have && have.length > 0 && !staleReconnect) continue;
+      const known = (have && have.length > 0) || pulledEmpty.has(d.deviceId);
+      if (!opts.force && known && !staleReconnect) continue;
+      pulledEmpty.delete(d.deviceId);
       next[d.deviceId] = await pullWithRetry(d.deviceId, have ?? []);
     }
     deviceLibraries.set(next);

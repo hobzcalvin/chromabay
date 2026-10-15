@@ -2348,43 +2348,87 @@ static void onLibraryDumpWrite(const uint8_t* data, size_t len, Endpoints::Link&
 // framed [u8 idx][u16 totalLen LE][u16 offset LE][bytes], then a done sentinel idx=0xFF. Runs
 // from loop() (file IO off the BLE task). The msgpack already carries meta.name, so the file's
 // name header is skipped.
-void processLibraryDumpRequest() {
-    if (!libraryDumpRequest) return;
-    libraryDumpRequest = false;
-    const size_t CH = 180;
+//
+// Sent ONE chunk per loop pass, paced by the clock, never by delay(). This used to be a single
+// loop that slept 8 ms per 180-byte chunk until the whole library was out: a few dozen patterns
+// held the loop for seconds, and everything the loop does — rendering, and applying the
+// brightness / pattern writes that had arrived meanwhile — waited behind it. The app asks for a
+// dump as soon as the Patterns page sees a newly connected device, so "connect, pick a pattern,
+// go back and move the brightness slider" landed squarely inside one.
+static const size_t LIB_DUMP_CHUNK = 180;
+static const uint32_t LIB_DUMP_GAP_MS = 8; // between notifications, so the BLE stack keeps up
+static struct {
+    bool active = false;
+    size_t idx = 0;           // library index being sent
+    uint8_t* data = nullptr;  // its msgpack, loaded when we reach it
+    size_t len = 0, off = 0;
     size_t sent = 0;
-    for (size_t i = 0; i < libNames.size() && i < 255; i++) {
-        File f = LittleFS.open(libPath((int)i), FILE_READ);
-        if (!f) continue;
-        if (f.available() < 2) { f.close(); continue; }
-        uint8_t lo = (uint8_t)f.read(), hi = (uint8_t)f.read();
-        uint16_t nameLen = (uint16_t)lo | ((uint16_t)hi << 8);
-        size_t total = f.size();
-        if (total <= (size_t)(2 + nameLen)) { f.close(); continue; }
-        size_t mpLen = total - (2 + nameLen);
-        if (mpLen > 16384) { f.close(); continue; }
-        f.seek(2 + nameLen);
-        uint8_t* data = (uint8_t*)malloc(mpLen);
-        if (!data) { f.close(); continue; }
-        bool ok = (f.readBytes((char*)data, mpLen) == mpLen);
-        f.close();
-        if (!ok) { free(data); continue; }
-        for (size_t off = 0; off < mpLen; off += CH) {
-            size_t n = (mpLen - off < CH) ? (mpLen - off) : CH;
-            uint8_t frame[5 + 180];
-            frame[0] = (uint8_t)i;
-            frame[1] = mpLen & 0xFF; frame[2] = (mpLen >> 8) & 0xFF;
-            frame[3] = off & 0xFF;   frame[4] = (off >> 8) & 0xFF;
-            memcpy(frame + 5, data + off, n);
-            Endpoints::notify(CHARACTERISTIC_UUID_LIBRARY_DUMP, frame, 5 + n);
-            delay(8);
-        }
-        free(data);
-        sent++;
+    uint32_t nextAtMs = 0;
+} libDump;
+
+// Read pattern i's msgpack (minus the name header). nullptr if absent/unreadable/oversized.
+static uint8_t* libDumpLoad(size_t i, size_t* outLen) {
+    File f = LittleFS.open(libPath((int)i), FILE_READ);
+    if (!f) return nullptr;
+    if (f.available() < 2) { f.close(); return nullptr; }
+    uint8_t lo = (uint8_t)f.read(), hi = (uint8_t)f.read();
+    uint16_t nameLen = (uint16_t)lo | ((uint16_t)hi << 8);
+    size_t total = f.size();
+    if (total <= (size_t)(2 + nameLen)) { f.close(); return nullptr; }
+    size_t mpLen = total - (2 + nameLen);
+    if (mpLen > 16384) { f.close(); return nullptr; }
+    f.seek(2 + nameLen);
+    uint8_t* data = (uint8_t*)malloc(mpLen);
+    if (!data) { f.close(); return nullptr; }
+    bool ok = (f.readBytes((char*)data, mpLen) == mpLen);
+    f.close();
+    if (!ok) { free(data); return nullptr; }
+    *outLen = mpLen;
+    return data;
+}
+
+void processLibraryDumpRequest() {
+    if (libraryDumpRequest) {
+        // A new request (re)starts from the top; the app reassembles by index + offset.
+        libraryDumpRequest = false;
+        if (libDump.data) free(libDump.data);
+        libDump = {};
+        libDump.active = true;
     }
-    uint8_t done[5] = {0xFF, 0, 0, 0, 0};
-    Endpoints::notify(CHARACTERISTIC_UUID_LIBRARY_DUMP, done, 5);
-    Serial.printf("[LibDump] sent %u/%u patterns\n", (unsigned)sent, (unsigned)libNames.size());
+    if (!libDump.active) return;
+    uint32_t now = millis();
+    if ((int32_t)(now - libDump.nextAtMs) < 0) return;
+
+    // Find the next readable pattern. Bounds are re-checked every pass: the library can change
+    // between chunks (a sync or delete), and the worst that does is a short or mixed listing.
+    while (!libDump.data) {
+        if (libDump.idx >= libNames.size() || libDump.idx >= 255) {
+            uint8_t done[5] = {0xFF, 0, 0, 0, 0};
+            Endpoints::notify(CHARACTERISTIC_UUID_LIBRARY_DUMP, done, 5);
+            Serial.printf("[LibDump] sent %u/%u patterns\n", (unsigned)libDump.sent, (unsigned)libNames.size());
+            libDump.active = false;
+            return;
+        }
+        libDump.data = libDumpLoad(libDump.idx, &libDump.len);
+        libDump.off = 0;
+        if (!libDump.data) libDump.idx++;
+    }
+
+    size_t n = libDump.len - libDump.off < LIB_DUMP_CHUNK ? libDump.len - libDump.off : LIB_DUMP_CHUNK;
+    uint8_t frame[5 + LIB_DUMP_CHUNK];
+    frame[0] = (uint8_t)libDump.idx;
+    frame[1] = libDump.len & 0xFF;      frame[2] = (libDump.len >> 8) & 0xFF;
+    frame[3] = libDump.off & 0xFF;      frame[4] = (libDump.off >> 8) & 0xFF;
+    memcpy(frame + 5, libDump.data + libDump.off, n);
+    Endpoints::notify(CHARACTERISTIC_UUID_LIBRARY_DUMP, frame, 5 + n);
+    libDump.nextAtMs = now + LIB_DUMP_GAP_MS;
+    libDump.off += n;
+    if (libDump.off >= libDump.len) {
+        free(libDump.data);
+        libDump.data = nullptr;
+        libDump.idx++;
+        libDump.sent++;
+    }
 }
 
 // Apply a staged library command (clear / delete-by-name) on the loop task.

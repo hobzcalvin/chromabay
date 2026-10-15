@@ -1931,8 +1931,14 @@ export async function getStripLayout(
  * Writes to LIBRARY_DUMP; the device NOTIFYs each pattern's MessagePack framed
  * [u8 idx][u16 totalLen LE][u16 offset LE][bytes], then a done sentinel idx=0xFF. Returns the
  * decoded patterns. Mirrors getStripLayout's reassembly.
+ *
+ * `complete` is true only when the device's done sentinel arrived. That is the difference
+ * between "this device holds no patterns" and "we heard nothing" (timeout / failed write),
+ * which an empty array alone cannot tell apart.
  */
-export async function pullDeviceLibrary(deviceId: string): Promise<import('./patternSerializer').SerializedPattern[]> {
+export async function pullDeviceLibrary(
+  deviceId: string,
+): Promise<{ patterns: import('./patternSerializer').SerializedPattern[]; complete: boolean }> {
   // Track TRUE coverage per pattern (a set of chunk offsets + bytes actually filled), not just
   // a max-offset watermark: a dropped middle chunk would otherwise let `received` reach `total`
   // over a hole, and we'd decode a zero-filled buffer into a garbage pattern (renders wrong /
@@ -1941,6 +1947,7 @@ export async function pullDeviceLibrary(deviceId: string): Promise<import('./pat
   const results: any[] = [];
   let settle: ((v: any) => void) | null = null;
   let cleanedUp = false;
+  let complete = false;
 
   const cleanup = async () => {
     if (cleanedUp) return; cleanedUp = true;
@@ -1952,7 +1959,7 @@ export async function pullDeviceLibrary(deviceId: string): Promise<import('./pat
   const onFrame = (dv: DataView) => {
     if (!settle || dv.byteLength < 5) return;
     const idx = dv.getUint8(0);
-    if (idx === 0xFF) { const s = settle; settle = null; s(results); return; } // done sentinel
+    if (idx === 0xFF) { complete = true; const s = settle; settle = null; s(results); return; } // done sentinel
     const totalLen = dv.getUint16(1, true);
     const offset = dv.getUint16(3, true);
     let e = bufs.get(idx);
@@ -1982,7 +1989,7 @@ export async function pullDeviceLibrary(deviceId: string): Promise<import('./pat
     }
   });
   await cleanup();
-  return result;
+  return { patterns: result, complete };
 }
 
 // Timestamp Sync Functions
