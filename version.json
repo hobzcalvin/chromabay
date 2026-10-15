@@ -1,7 +1,7 @@
 {
-  "version": "1.1.348",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.348.zip",
-  "buildDate": "2026-10-15T03:50:32Z",
-  "commitHash": "6cb3d731f214506f14930db82a1399a3ba37748b",
-  "commitMessage": "Add Blink Pins: toggle every strip data/clock pin for 10 s"
+  "version": "1.1.349",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.349.zip",
+  "buildDate": "2026-10-15T03:52:31Z",
+  "commitHash": "719a3f98e6b1591a95a242547bce9eeabcc9058d",
+  "commitMessage": "Blink Pins: 1 s on, 1 s off"
 }
