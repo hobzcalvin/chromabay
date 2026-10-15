@@ -1,7 +1,7 @@
 {
-  "version": "1.1.349",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.349.zip",
-  "buildDate": "2026-10-15T03:52:31Z",
-  "commitHash": "719a3f98e6b1591a95a242547bce9eeabcc9058d",
-  "commitMessage": "Blink Pins: 1 s on, 1 s off"
+  "version": "1.1.350",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.350.zip",
+  "buildDate": "2026-10-15T05:04:29Z",
+  "commitHash": "50109b4f8f0f6ec299b75a89aabc1cb239de28dd",
+  "commitMessage": "Stop the library dump from stalling the device; don't re-dump empty libraries"
 }
