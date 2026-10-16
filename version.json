@@ -1,7 +1,7 @@
 {
-  "version": "1.1.350",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.350.zip",
-  "buildDate": "2026-10-15T05:04:29Z",
-  "commitHash": "50109b4f8f0f6ec299b75a89aabc1cb239de28dd",
-  "commitMessage": "Stop the library dump from stalling the device; don't re-dump empty libraries"
+  "version": "1.1.351",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.351.zip",
+  "buildDate": "2026-10-16T05:29:53Z",
+  "commitHash": "f8e16394801a9ba7c6aa50d6892534d672c1fcee",
+  "commitMessage": "Keep brightness live during a library sync; make sync flow-controlled"
 }
