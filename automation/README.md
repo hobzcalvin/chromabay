@@ -96,3 +96,29 @@ node automation/wifi-ota.mjs 192.168.x.x esp32/.pio/build/esp32-s3/firmware.bin 
 Neither script discovers or picks a network device. The host must come from the USB target's
 serial banner; `wifi-ota.mjs` additionally refuses to write unless `DEVICE_INFO.name` is the
 exact expected name.
+
+## Driving the app over Web Bluetooth (Chrome for Testing) — the reliable way
+
+`drive.mjs` launches Chrome through Playwright, which often finds no Bluetooth devices (it
+inherits the terminal's missing macOS Bluetooth permission) and can't coexist with your own
+Chrome. These `cft-*` tools are the method that works (verified 2026-10-15, ESP32-S3):
+
+```bash
+python3 automation/serial_banner.py /dev/cu.usbmodemXXXX     # read "Device name: X" — the target
+~/.platformio/penv/bin/python automation/serial_log_ts.py /dev/cu.usbmodemXXXX serial.log &
+npx playwright install chromium                               # once
+automation/cft-launch.sh https://chromabay.app/devices        # or http://localhost:<port>/devices
+# first time only: click Allow on macOS "would like to use Bluetooth" (browser is frozen until then)
+DEVICE_NAME=ChromaBay_X node automation/cft-connect.mjs       # exact name; others are logged + ignored
+node automation/cft-page-log.mjs page.log &                   # app console with host timestamps
+node automation/cft-eval.mjs "await page.getByText('Patterns',{exact:true}).last().click()"
+node automation/cft-bri-drag.mjs 30 200 page.log              # simulated slider drag
+python3 automation/latency_report.py . <since-unix-time>      # drag -> device apply latency
+```
+
+Gotchas: `DeviceAccess` is a page-level CDP domain (a browser-level session says it doesn't
+exist); the chooser event fires repeatedly as the scan fills in (the first is often empty);
+never `browser.close()` — the BLE link lives in the page, so every step is a fresh
+`connectOverCDP` and the connection survives between scripts. For firmware latency, build with
+`PLATFORMIO_BUILD_FLAGS=-DCB_TIMING_TRACE` to get `[T] bri rx/apply`, `[T] pattern rx` and
+`[T] slow <step> Nms` lines.

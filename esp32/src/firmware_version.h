@@ -29,7 +29,8 @@
 //   3  DDP realtime streaming (rtProto is a bitmask; settings report rtcaps)
 //   4  cycle crossfade (cycle-control payload carries a trailing [u32 crossfadeMs])
 //   5  BLINK_PINS endpoint (toggle every strip data/clock pin for 10 s, a wiring aid)
-#define FIRMWARE_FEATURES 5
+//   6  PATTERN_SYNC notifies [u8 status][name] after each library push is stored (sync flow control)
+#define FIRMWARE_FEATURES 6
 
 // --- Firmware Signature Verification ---
 // ECDSA P-256 Public Key (Raw 64-byte format: 32-byte X + 32-byte Y coordinates)

@@ -39,6 +39,17 @@
 #include "sentry_reporting.h" // Crash/reset-reason reporting (no-op unless a DSN is baked in)
 #include "pattern_renderer_base.h" // Include pattern renderer
 
+// Latency tracing for bench debugging, off unless built with -DCB_TIMING_TRACE: when a write
+// arrives vs when the loop applies it, and any loop step slow enough to delay that.
+#ifdef CB_TIMING_TRACE
+#define TTRACE(...) Serial.printf(__VA_ARGS__)
+#define TIMED(name, call) do { uint32_t _t0 = millis(); call; uint32_t _dt = millis() - _t0; \
+    if (_dt > 25) Serial.printf("[T] slow %s %lums @%lu\n", name, (unsigned long)_dt, (unsigned long)millis()); } while (0)
+#else
+#define TTRACE(...) do {} while (0)
+#define TIMED(name, call) do { call; } while (0)
+#endif
+
 // LED Configuration (some of these are now defaults for LedManager config)
 // Default LED data pin. Overridable per chip from platformio.ini (each board's onboard
 // LED sits on a different GPIO — e.g. 13 on classic ESP32, 35 on AtomS3, 2 on XIAO C3).
@@ -782,6 +793,7 @@ static void blankAllStrips() {
 // `full`. Safe to call from either task — the queue is under patternMux.
 void stageCompletePattern(uint8_t* full, size_t fullLen) {
     if (!full) return;
+    TTRACE("[T] pattern rx %u bytes @%lu\n", (unsigned)fullLen, (unsigned long)millis());
     noteActivity();
     uint8_t* dropped = nullptr;
     portENTER_CRITICAL(&patternMux);
@@ -1453,6 +1465,7 @@ static void onBrightnessWrite(const uint8_t* data, size_t len, Endpoints::Link& 
         if (value.length() >= 1) {
             pendingBrightness = (uint8_t)value[0];
             newBrightnessAvailable = true;
+            TTRACE("[T] bri rx %u @%lu\n", (unsigned)pendingBrightness, (unsigned long)millis());
             noteActivity();
         }
     }
@@ -1988,15 +2001,30 @@ static String readPatternName(const uint8_t* buf, size_t size) {
 // NOT show it. The renderer, the remembered current pattern and the power-on pattern are all
 // left alone, so whatever is playing keeps playing. Written straight away, not debounced like
 // a live push: a "sync all" sends many in a row, and every one has to land.
+// Store a library push, then tell the app how it went: a PATTERN_SYNC notify of
+// [u8 status (0 = stored, 1 = not stored)][name UTF-8]. The app waits for this before sending
+// the next pattern of a sync, so a 25-pattern sync can no longer outrun the flash writes,
+// overflow the queue and silently lose the oldest pushes — and a pattern the device could
+// not keep (full, no name) is no longer counted as synced.
 static void storeLibraryPush(const uint8_t* buf, size_t size) {
     String name = readPatternName(buf, size);
-    if (name.length() == 0) { Serial.println("Library push: no pattern name — not stored"); return; }
-    size_t before = libOrder.size();
-    if (libUpsert(name, buf, size) && libOrder.size() != before && cyclingActive && cycleIntervalMs > 0) {
-        // A new member shifts which index the synced clock points at, and updateCycle would
-        // switch patterns right now. Hold the current one until the next boundary.
-        lastCycleIndex = (int)((getSynchronizedTime() / cycleIntervalMs) % (unsigned long)libOrder.size());
+    bool stored = false;
+    if (name.length() == 0) {
+        Serial.println("Library push: no pattern name — not stored");
+    } else {
+        size_t before = libOrder.size();
+        stored = libUpsert(name, buf, size);
+        if (stored && libOrder.size() != before && cyclingActive && cycleIntervalMs > 0) {
+            // A new member shifts which index the synced clock points at, and updateCycle would
+            // switch patterns right now. Hold the current one until the next boundary.
+            lastCycleIndex = (int)((getSynchronizedTime() / cycleIntervalMs) % (unsigned long)libOrder.size());
+        }
     }
+    size_t n = name.length() > 180 ? 180 : name.length();
+    uint8_t ack[1 + 180];
+    ack[0] = stored ? 0 : 1;
+    memcpy(ack + 1, name.c_str(), n);
+    Endpoints::notify(CHARACTERISTIC_UUID_PATTERN_SYNC, ack, 1 + n);
 }
 
 // Function to process received pattern data
@@ -2004,6 +2032,10 @@ void processReceivedPattern() {
     // Drain the queue. Library pushes are each stored (never shown); of the live pushes only
     // the newest is applied, since it supersedes the rest. Each entry is taken under the lock,
     // so it's ours alone — onWrite only ever adds newer buffers.
+    //
+    // At most ONE library push per call: each is a flash write (100-600 ms), and storing a
+    // whole sync's worth in one pass held the loop for seconds — brightness writes sat
+    // unapplied and nothing rendered until the last pattern was on flash.
     uint8_t* buf = nullptr;
     size_t size = 0;
     for (;;) {
@@ -2019,7 +2051,7 @@ void processReceivedPattern() {
         if (readPatternLibFlag(p.buf, p.size, false)) {
             storeLibraryPush(p.buf, p.size);
             free(p.buf);
-            continue;
+            break; // the rest wait for the next loop pass
         }
         if (buf) free(buf);
         buf = p.buf;
@@ -2083,6 +2115,7 @@ void processReceivedBrightness() {
     if (newBrightnessAvailable) {
         uint8_t b = pendingBrightness;
         newBrightnessAvailable = false;
+        TTRACE("[T] bri apply %u @%lu\n", (unsigned)b, (unsigned long)millis());
         ledMgr.setGlobalBrightness(b);
         brightnessDirty = true;
         brightnessChangedAtMs = millis();
@@ -3713,8 +3746,8 @@ void loop() {
             // packets are arriving (gRealtimeUntilMs in the future) we hold the streamed
             // frame and skip this, reverting automatically once packets stop.
             updateCycle();   // pick the synced playlist pattern before rendering
-            patternRenderer->update();
-            patternRenderer->render();
+            TIMED("update", patternRenderer->update());
+            TIMED("render", patternRenderer->render());
             fpsFrames++;
         }
     }
@@ -3732,19 +3765,19 @@ void loop() {
     // Process received patterns and LED configuration changes on the loop task,
     // so they never race with update()/render() above.
     processBlink();   // first: a cancelling command restores the strips before the rest run
-    processReceivedPattern();
-    processPatternFlashSave();
-    processReceivedCycleControl();
-    processReceivedLedConfig();
-    processReceivedLayout();
-    processLayoutGetRequest();
-    processLibraryDumpRequest();
-    processLibraryCommand();
+    TIMED("pattern", processReceivedPattern());
+    TIMED("flashsave", processPatternFlashSave());
+    TIMED("cycle", processReceivedCycleControl());
+    TIMED("ledconfig", processReceivedLedConfig());
+    TIMED("layout", processReceivedLayout());
+    TIMED("layoutget", processLayoutGetRequest());
+    TIMED("libdump", processLibraryDumpRequest());
+    TIMED("libcmd", processLibraryCommand());
     processReceivedBrightness();
     processButton();
     processDeviceName();
     processButtonPinUpdate();
-    processCommConfig();
+    TIMED("commcfg", processCommConfig());
 
     // Take the render buffers back once an update is no longer in flight. Done here rather
     // than on each abort path because there are many ways for an update to end and only one

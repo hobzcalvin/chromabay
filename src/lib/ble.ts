@@ -1370,9 +1370,48 @@ export async function sendSinglePatternToDevice(deviceId: string, pattern: any):
   // Strip app/cloud-sync metadata (id/updatedAt/deleted) — the device wire is name+output only.
   // lib:true → this is a deliberate "sync": the device adds it to its cycled library without
   // showing it (what's playing stays playing).
-  const clean = { ...pattern, meta: { name: pattern?.meta?.name, output: pattern?.meta?.output ?? 1 }, lib: true };
+  const name: string = pattern?.meta?.name ?? '';
+  const clean = { ...pattern, meta: { name, output: pattern?.meta?.output ?? 1 }, lib: true };
   const msgpackData = msgpackEncode(clean) as Uint8Array;
+
+  // Wait for the device to say it stored the pattern before returning, so a caller pushing a
+  // whole library goes at the device's pace. Without this, Sync-all fired 25 patterns back to
+  // back; the device writes each to flash (100-600 ms) and keeps only 16 waiting, dropping the
+  // oldest — so a sync could silently lose patterns yet still count them as synced.
+  // Subscribing on every push is cheap and survives reconnects without bookkeeping.
+  const ackMode = libAckMode.get(deviceId) ?? 'unknown';
+  let ack: Promise<boolean> | null = null;
+  if (ackMode !== 'none') {
+    ack = new Promise<boolean>((resolve) => { libAckWaiters.set(deviceId, { name, resolve }); });
+    await startBinaryNotifications(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_PATTERN_SYNC, (dv) => onLibAck(deviceId, dv))
+      .catch(() => {});
+  }
   await sendPatternChunked(deviceId, msgpackData);
+  if (!ack) return;
+
+  // Firmware before feat 6 never answers; learn that from the first push and stop waiting.
+  const timeoutMs = ackMode === 'acks' ? LIB_ACK_TIMEOUT_MS : LIB_ACK_PROBE_MS;
+  const result = await Promise.race([ack, new Promise<null>((r) => setTimeout(() => r(null), timeoutMs))]);
+  libAckWaiters.delete(deviceId);
+  if (result === null) {
+    if (ackMode === 'unknown') { libAckMode.set(deviceId, 'none'); return; }
+    throw new Error(`${name}: the device did not confirm it was stored`);
+  }
+  libAckMode.set(deviceId, 'acks');
+  if (!result) throw new Error(`${name}: the device could not store it (library full?)`);
+}
+
+// Library-push acknowledgements (firmware feat >= 6): PATTERN_SYNC notifies
+// [u8 status (0 = stored)][name] once a pushed pattern is on flash.
+const LIB_ACK_PROBE_MS = 3000;   // first push to a device: long enough for a slow flash write
+const LIB_ACK_TIMEOUT_MS = 10000;
+const libAckMode = new Map<string, 'unknown' | 'acks' | 'none'>();
+const libAckWaiters = new Map<string, { name: string; resolve: (stored: boolean) => void }>();
+function onLibAck(deviceId: string, dv: DataView) {
+  if (dv.byteLength < 1) return;
+  const name = new TextDecoder().decode(new Uint8Array(dv.buffer, dv.byteOffset + 1, dv.byteLength - 1));
+  const w = libAckWaiters.get(deviceId);
+  if (w && w.name.slice(0, 180) === name) { libAckWaiters.delete(deviceId); w.resolve(dv.getUint8(0) === 0); }
 }
 
 /**
