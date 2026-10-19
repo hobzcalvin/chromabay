@@ -40,6 +40,7 @@ on:
       - main
     paths:
       - 'esp32/**'
+      - '!esp32/test/**' # emulator/host tests only: nothing in the image changes, so no release
       - 'native/**'   # shared C++ operators are compiled into the firmware
       - '.github/workflows/esp32-release.yml'
     tags:
