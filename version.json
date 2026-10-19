@@ -1,7 +1,7 @@
 {
-  "version": "1.1.357",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.357.zip",
-  "buildDate": "2026-10-19T21:02:44Z",
-  "commitHash": "f74235bb6a81c2a007ca123ea4c894572b493626",
-  "commitMessage": "Report a problem: Sentry feedback with device diagnostics attached, and a triage dossier"
+  "version": "1.1.358",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.358.zip",
+  "buildDate": "2026-10-19T21:08:03Z",
+  "commitHash": "e747083851a85606dead9800bef902584d62e9cf",
+  "commitMessage": "Emulator tests: read [ble]/[leds] lines that land mid-way through a console line"
 }
