@@ -158,7 +158,13 @@ export class Run {
     this.boots = [[]];  // console lines, one array per boot
     this.report = {};   // from the exit report
     this.stopped = false;
-    for (const line of this.lines) this.#parse(line);
+    // The guest's console and the emulator's own lines share one file descriptor, and the guest
+    // may be mid-line when the emulator prints: "Butt[ble] t=3.2s notification ...on pin". Split
+    // such lines at the emulator's markers so no [ble]/[leds] event is lost.
+    for (const raw of this.lines) {
+      const parts = raw.split(/(?=\[(?:ble|leds)\] t=)/);
+      for (const line of parts) this.#parse(line);
+    }
   }
 
   #parse(line) {
