@@ -146,7 +146,7 @@ export const scenarios = [
 
   {
     name: 'fresh-flash',
-    what: 'blank flash: LittleFS formats and a default config is written; after a reboot the same flash mounts without reformatting, and a stored pattern is still there',
+    what: 'blank flash: LittleFS formats and a default config is written; after a reboot, and again in a new emulator process from the dumped flash, it mounts without reformatting and the stored pattern still plays',
     async run() {
       const h = await handles(S3);
       const ps = need(h, 'PATTERN_SYNC');
@@ -154,7 +154,8 @@ export const scenarios = [
       const sc = new Script().connect(CONNECT).subscribe(CONNECT + 0.05, ps.ccc).write(CONNECT + 0.1, need(h, 'BRIGHTNESS').handle, [255]);
       pushPattern(sc, CONNECT + 0.2, h, keep, true);
       sc.reboot(6.0);
-      const run = await runEmu({ name: this.name, images: build(S3), ble: true, board: 'atech14', script: sc, seconds: 10 });
+      const dump = path.join(OUT_DIR, `${this.name}.flash.bin`);
+      const run = await runEmu({ name: this.name, images: build(S3), ble: true, board: 'atech14', script: sc, seconds: 10, flashOut: dump });
       checkHealthy(run, { expectedResets: 1 });
       check(run.resets[0].cause === 'RTC_SW_SYS_RESET', `unexpected reset cause ${run.resets[0].cause}`, run);
 
@@ -178,6 +179,16 @@ export const scenarios = [
       const want = await expectedRing(keep, 255);
       const t = run.resets[0].t + 3.0;
       checkRing(run, ringMean(run, t, t + 0.6, 'after reboot'), want, 1.5, 'after the reboot the stored pattern should be playing', t, t + 0.6);
+
+      // A cold start of the same flash in a NEW emulator process, from the image the first run
+      // left behind (--flash-out): what a power cycle, or a USB flash of the same firmware, sees.
+      const s3 = build(S3);
+      const cold = await runEmu({ name: `${this.name}-cold`, images: { flashImage: dump, app: s3.app, elf: s3.elf }, ble: true, board: 'atech14', seconds: 4 });
+      checkHealthy(cold);
+      check(cold.has('LittleFS mounted', 0) && !cold.has('formatting', 0) && !cold.has('No config file found', 0),
+        () => `cold boot of the dumped flash reformatted or lost the config:\n${cold.console(0).filter((l) => /LittleFS|ConfigManager/.test(l)).join('\n')}`, cold);
+      check(cold.has(/\[PatternState @ boot\] libraryPatterns=1 /, 0), 'cold boot of the dumped flash: the stored pattern is gone', cold);
+      checkRing(cold, ringMean(cold, 3.0, 3.6, 'cold boot'), want, 1.5, 'cold boot of the dumped flash plays the stored pattern', 3.0, 3.6);
     },
   },
 

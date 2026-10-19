@@ -30,7 +30,7 @@ what happened, including the ring's colours over time for LED checks.
 | Scenario | Guards |
 |---|---|
 | `boot-smoke` | S3 reaches `Setup complete` with no panic, Guru Meditation, abort, assert, watchdog or unexpected reset; advertises service `a0be83e4-…` and the name `ChromaBay_XXXX`; accepts a connection |
-| `fresh-flash` | Blank flash: LittleFS formats and a default config is created. A library pattern is stored, then a software reset reboots on the same flash: it mounts without reformatting, loads the config and still has the pattern, which plays. This is the "core bump silently loses patterns" risk in `platformio.ini` |
+| `fresh-flash` | Blank flash: LittleFS formats and a default config is created. A library pattern is stored, then a software reset reboots on the same flash, and the dumped flash is cold-booted again in a new emulator process: each time it mounts without reformatting, loads the config and still plays the pattern. This is the "core bump silently loses patterns" risk in `platformio.ini` |
 | `gatt` | Every row of `ENDPOINTS` in `main.cpp` is served with the table's properties, every notifying one has a CCC, and nothing else is in the service. The expectations are parsed from the source, so the test fails when the table and the GATT server drift apart |
 | `roundtrip` | Brightness write/read (default 20); device info JSON (`fw_ver`, `chip`, `name`, `feat`, via Read Blob); comm config JSON; button pin write/read; device name write/read, renaming long→short→long→short, with each new advert carrying exactly one name (**bug 2 regression**). Then a reboot: name, brightness and button pin persist and the boot advert uses the new name |
 | `selftest` | The power-on R, G, B frames reach a dithered 64-LED strip in order, ~0.5 s each at the default brightness, then black (**bug 1 regression**). The expected wire colours encode the current colour order (see finding 3) |
@@ -101,6 +101,8 @@ published or uploaded to Sentry.
   connection event once the guest clock is known. Without the pacing, eight 500-byte writes
   (24 ACL packets) landed before NimBLE's host task ran, exhausted its ACL buffers and reset the
   host (`rc=12`) on the ninth chunk; real links spread a burst over connection events.
+- `--flash-out FILE`: the flash as the guest left it, written at exit, for a later
+  `--flash-image` boot.
 - `udp PORT HEX`, a script command that sends a datagram from the virtual AP's gateway to the
   station, at an exact emulated time. That is how `stream` sends Art-Net and DDP.
 
@@ -113,8 +115,10 @@ other scenarios use that map.
 
 A reboot is the script line `poke 60008000 80000000`, which sets `RTC_CNTL_OPTIONS0.SW_SYS_RST`
 as `esp_restart()` would. esp32sim reboots through the ROM with flash intact, and the virtual
-BLE controller comes back. esp32sim has no option to dump flash at exit, so a second boot of
-the same flash happens inside one run rather than via `--flash-image` from a dump.
+BLE controller comes back. For a cold start, `--flash-out` (from the patch) dumps the flash at
+the end of a run and a new run boots it with `--flash-image`, optionally with new firmware
+written into app0: `fresh-flash` does both, and the colour-order migration test uses the second
+to put new firmware on an old device's flash.
 
 ### Console checks
 

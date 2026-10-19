@@ -1,8 +1,25 @@
 diff --git a/cli/src/lib.rs b/cli/src/lib.rs
-index d04e1dc1..ee3ea1b2 100644
+index d04e1dc1..4c660fe6 100644
 --- a/cli/src/lib.rs
 +++ b/cli/src/lib.rs
-@@ -183,7 +183,7 @@ pub fn parse(args: &[String], default_chip: &str) -> Opts {
+@@ -68,7 +68,7 @@ pub struct Opts {
+     pub approximate_cache: bool,
+     pub chip: String,
+     pub rom: Option<PathBuf>, pub bootloader: Option<String>, pub ptable: Option<String>, pub app: Option<String>, pub elfs: Vec<String>,
+-    pub flash_image: Option<String>, pub flash_at: Vec<String>, pub boot: Option<String>, pub flash_mb: Option<usize>, pub psram_mb: Option<usize>,
++    pub flash_image: Option<String>, pub flash_out: Option<String>, pub flash_at: Vec<String>, pub boot: Option<String>, pub flash_mb: Option<usize>, pub psram_mb: Option<usize>,
+     pub mac: Option<[u8; 6]>, pub strap: Option<u32>, pub reset_cause: Option<u32>, pub efuse_regs: Option<String>, pub regs_init: Option<String>,
+     pub board: String, pub wifi: Option<String>, pub ble: bool, pub ble_full: bool, pub ble_observe: bool, pub ble_scan: bool, pub net: String, pub cam_image: Option<String>, pub cam_stream: Option<String>, pub cam_size: Option<String>, pub cam_fps: f64,
+     pub spi2_timing: bool, pub measured_te: bool,
+@@ -103,6 +103,7 @@ pub fn parse(args: &[String], default_chip: &str) -> Opts {
+             "--elf" => o.elfs.push(next()),
+             "--flash-image" => o.flash_image = Some(next()),
+             "--flash-at" => o.flash_at.push(next()),
++            "--flash-out" => o.flash_out = Some(next()),
+             "--boot" => o.boot = Some(next()),
+             "--flash-mb" => o.flash_mb = Some(next().parse().expect("mb")),
+             "--psram-mb" => o.psram_mb = Some(next().parse().expect("mb")),
+@@ -183,7 +184,7 @@ pub fn parse(args: &[String], default_chip: &str) -> Opts {
              if words.next().is_none_or(|s| s.starts_with('#')) || words.next() != Some("ble") { continue }
              let command = words.collect::<Vec<_>>().join(" ").parse::<esp_soc::ble::peer::Command>()
                  .unwrap_or_else(|e| usage_error(&format!("script: line {}: {e}", ln + 1)));
@@ -11,11 +28,54 @@ index d04e1dc1..ee3ea1b2 100644
              if !o.ble && !o.ble_full { usage_error(&format!("script: line {}: BLE requires --ble and the application ELF", ln + 1)); }
          }
      }
+@@ -390,6 +391,12 @@ fn run<S: Soc>(mut m: Machine<S>, o: &Opts) {
+     let stop = run_with_reboots(&mut m, o.max_insns, !o.no_reboot && boot == "rom", boot == "app");
+     let dt = t0.elapsed().as_secs_f64();
+     report(&mut m, o, stop, dt);
++    if let Some(p) = &o.flash_out {
++        match std::fs::write(p, m.bus.flash_contents()) {
++            Ok(()) => eprintln!("[emu] flash written to {} ({} bytes)", p, m.bus.flash_contents().len()),
++            Err(e) => { eprintln!("[emu] --flash-out {}: {}", p, e); std::process::exit(1); }
++        }
++    }
+     let pending = m.bus.ble_pending_commands();
+     if pending != 0 { eprintln!("[ble] {pending} command(s) still pending at end of run"); }
+     if let Some(model) = approximate { eprintln!("[emu] approximate timing totals: {:?}", model.stats()); }
+diff --git a/cli/src/tests.rs b/cli/src/tests.rs
+index 92af6a51..b75fbc77 100644
+--- a/cli/src/tests.rs
++++ b/cli/src/tests.rs
+@@ -179,3 +179,17 @@ fn analog_scripts_reach_classic_adc_and_touch_registers() {
+         assert_eq!(m.bus.read32(0x3ff4_8870).unwrap() >> 16, touch);
+     }
+ }
++
++#[test]
++fn flash_out_returns_what_the_guest_left_in_flash() {
++    let o = parse(&["esp32sim".into(), "--flash-out".into(), "/tmp/f.bin".into()], "s3");
++    assert_eq!(o.flash_out.as_deref(), Some("/tmp/f.bin"));
++    for mut m in [esp32s3::machine([0; 6])] {
++        m.write_flash(0x9000, &[1, 2, 3]).unwrap();
++        assert_eq!(&m.bus.flash_contents()[0x9000..0x9003], &[1, 2, 3]);
++    }
++    let mut c3 = esp32c3::machine([0; 6], 4 << 20);
++    c3.write_flash(0x1000, &[9]).unwrap();
++    assert_eq!(c3.bus.flash_contents().len(), 4 << 20);
++    assert_eq!(c3.bus.flash_contents()[0x1000], 9);
++}
 diff --git a/docs/cli.md b/docs/cli.md
-index 0ab75efb..46cb836b 100644
+index 0ab75efb..25526fa1 100644
 --- a/docs/cli.md
 +++ b/docs/cli.md
-@@ -67,6 +67,7 @@ separately lists the actual instruction count for each core.
+@@ -17,6 +17,7 @@ PSRAM and register presets.
+ | `--boot rom\|app` | `rom`: start at the mask ROM reset vector (real boot chain). `app`: load the app image segments and jump to its entry |
+ | `--bootloader F`, `--ptable F`, `--app F` | written to flash at 0x0 / 0x8000 / 0x10000 |
+ | `--flash-image F` | whole flash dump written at 0 |
++| `--flash-out F` | write the whole flash to F when the run ends, as the guest left it (NVS, filesystems, OTA data); a later run boots it with `--flash-image F`, optionally with `--flash-at` replacing an app slot |
+ | `--chip s3\|c3\|c6` | which chip (default s3) |
+ | `--rom F` | mask ROM ELF (default: the chip's in `ESP32SIM_ROM_DIR`, then `~/.espressif/tools/esp-rom-elfs/*/`) |
+ | `--mac xx:xx:xx:xx:xx:xx` | the station MAC the efuses report |
+@@ -67,6 +68,7 @@ separately lists the actual instruction count for each core.
  | `--wav F` | audio captured from I2S (whichever controller played) |
  | `--tft-png F`, `--gram-png F` | display frame (visible, scaled) / raw GRAM |
  | `--no-dump` | skip the register dump at exit |
@@ -23,7 +83,7 @@ index 0ab75efb..46cb836b 100644
  
  ### PWM observation
  
-@@ -136,6 +137,11 @@ select ADC1 and GPIO5 selects ADC2; C6 GPIO0–6 select ADC1.
+@@ -136,6 +138,11 @@ select ADC1 and GPIO5 selects ADC2; C6 GPIO0–6 select ADC1.
  2 adcwave 1 /tmp/adc-volts.txt 1000
  ```
  
@@ -35,7 +95,7 @@ index 0ab75efb..46cb836b 100644
  `waituart0 <timeout_s> <text>` holds later actions until UART0 prints the text or
  the timeout expires. Raw counts and completed-conversion observations are exposed
  through the [host ADC API](peripherals.md#host-adc-inputs), with no CLI equivalent.
-@@ -167,14 +173,25 @@ use seconds like the other script actions. For example:
+@@ -167,14 +174,25 @@ use seconds like the other script actions. For example:
  ```
  
  Use handles reported by discovery. `ble subscribe CCC_HANDLE` writes notification
@@ -735,7 +795,7 @@ index f4567c61..b5e67063 100644
 +    }
  }
 diff --git a/esp-soc/src/soc.rs b/esp-soc/src/soc.rs
-index 85020312..e3b01fad 100644
+index 85020312..89a6fd72 100644
 --- a/esp-soc/src/soc.rs
 +++ b/esp-soc/src/soc.rs
 @@ -108,6 +108,9 @@ pub trait SocBus: Bus {
@@ -748,6 +808,15 @@ index 85020312..e3b01fad 100644
      /// Drain complete Ethernet frames without FCS, in transmit order. Empty outside relay mode.
      fn take_ethernet_frames(&mut self) -> Vec<Vec<u8>> { Vec::new() }
      /// Queue a 14..=1518-byte Ethernet frame without FCS. Requires relay mode and an AP.
+@@ -138,6 +141,8 @@ pub trait SocBus: Bus {
+     fn misc(&mut self) -> &mut Misc;
+     fn load_bytes(&mut self, addr: u32, data: &[u8]) -> Result<(), String>;
+     fn write_flash(&mut self, offset: usize, data: &[u8]) -> Result<(), String>;
++    /// The whole flash as the guest left it (`--flash-out`): NVS, filesystems, OTA slots.
++    fn flash_contents(&self) -> &[u8];
+     /// Map and copy the app image at flash `app_off` as the bootloader would; returns the entry point.
+     fn boot_app(&mut self, app_off: usize) -> Result<u32, String>;
+     /// Chip reset: re-create the digital peripherals, keep what survives on silicon. Returns the cause.
 diff --git a/esp-soc/src/wifi.rs b/esp-soc/src/wifi.rs
 index 4064004f..eaa385ac 100644
 --- a/esp-soc/src/wifi.rs
@@ -777,7 +846,7 @@ index 4064004f..eaa385ac 100644
          lines.join("\n")
      }
 diff --git a/esp32/src/soc.rs b/esp32/src/soc.rs
-index a8565ee8..8f7802f8 100644
+index a8565ee8..ffe5aa1a 100644
 --- a/esp32/src/soc.rs
 +++ b/esp32/src/soc.rs
 @@ -66,6 +66,9 @@ impl esp_soc::SocBus for SocBus {
@@ -790,8 +859,16 @@ index a8565ee8..8f7802f8 100644
      fn attach_wifi(&mut self, cfg: esp_soc::wifi::ApConfig, nat: Option<esp_soc::nat::Nat>) -> Result<(), String> {
          self.periph.wifi.link.attach_new(cfg, nat, &self.debug);
          Ok(())
+@@ -104,6 +107,7 @@ impl esp_soc::SocBus for SocBus {
+     fn load_bytes(&mut self, addr: u32, data: &[u8]) -> Result<(), String> {
+         SocBus::load_bytes(self, addr, data)
+     }
++    fn flash_contents(&self) -> &[u8] { &self.flash }
+     fn write_flash(&mut self, offset: usize, data: &[u8]) -> Result<(), String> {
+         SocBus::write_flash(self, offset, data)
+     }
 diff --git a/esp32c3/src/soc.rs b/esp32c3/src/soc.rs
-index f565d526..9d0a8ee0 100644
+index f565d526..a5343953 100644
 --- a/esp32c3/src/soc.rs
 +++ b/esp32c3/src/soc.rs
 @@ -46,6 +46,9 @@ impl esp_soc::SocBus for SocBus {
@@ -804,8 +881,16 @@ index f565d526..9d0a8ee0 100644
      fn attach_wifi(&mut self, cfg: esp_soc::wifi::ApConfig, nat: Option<esp_soc::nat::Nat>) -> Result<(), String> {
          self.periph.wifi.link.attach_new(cfg, nat, &self.debug);
          self.periph.refresh_work();
+@@ -76,6 +79,7 @@ impl esp_soc::SocBus for SocBus {
+     fn refresh_irq(&mut self) -> bool { self.periph.refresh_lines(); true }
+     fn misc(&mut self) -> &mut Misc { &mut self.periph.misc }
+     fn load_bytes(&mut self, addr: u32, data: &[u8]) -> Result<(), String> { SocBus::load_bytes(self, addr, data) }
++    fn flash_contents(&self) -> &[u8] { &self.flash }
+     fn write_flash(&mut self, offset: usize, data: &[u8]) -> Result<(), String> { SocBus::write_flash(self, offset, data) }
+     /// Copy the RAM segments, map the flash-resident ones through the MMU, as the 2nd-stage bootloader would.
+     fn boot_app(&mut self, app_off: usize) -> Result<u32, String> {
 diff --git a/esp32c6/src/soc.rs b/esp32c6/src/soc.rs
-index ed5d7226..ed8586d8 100644
+index ed5d7226..dd7446d3 100644
 --- a/esp32c6/src/soc.rs
 +++ b/esp32c6/src/soc.rs
 @@ -39,6 +39,9 @@ impl esp_soc::SocBus for SocBus {
@@ -818,8 +903,16 @@ index ed5d7226..ed8586d8 100644
      fn attach_wifi(&mut self, cfg: esp_soc::wifi::ApConfig, nat: Option<esp_soc::nat::Nat>) -> Result<(), String> {
          self.periph.wifi_mac.link.attach_new(cfg, nat, &self.debug);
          Ok(())
+@@ -66,6 +69,7 @@ impl esp_soc::SocBus for SocBus {
+     fn take_host_event(&mut self) -> bool { self.periph.radio.take_tx_started() }
+     fn misc(&mut self) -> &mut Misc { &mut self.periph.misc }
+     fn load_bytes(&mut self, addr: u32, data: &[u8]) -> Result<(), String> { SocBus::load_bytes(self, addr, data) }
++    fn flash_contents(&self) -> &[u8] { &self.flash }
+     fn write_flash(&mut self, offset: usize, data: &[u8]) -> Result<(), String> { SocBus::write_flash(self, offset, data) }
+     /// Copy the RAM segments and map the flash-resident ones through the MMU, as the 2nd-stage
+     /// bootloader would. One flat window for code and data makes this straightforward here;
 diff --git a/esp32s3/src/soc.rs b/esp32s3/src/soc.rs
-index eb25f7bb..e444915f 100644
+index eb25f7bb..cc13483a 100644
 --- a/esp32s3/src/soc.rs
 +++ b/esp32s3/src/soc.rs
 @@ -62,6 +62,9 @@ impl esp_soc::SocBus for SocBus {
@@ -832,3 +925,11 @@ index eb25f7bb..e444915f 100644
      fn attach_wifi(&mut self, cfg: esp_soc::wifi::ApConfig, nat: Option<esp_soc::nat::Nat>) -> Result<(), String> {
          self.flush_ticks();
          self.periph.wifi.link.attach_new(cfg, nat, &self.debug);
+@@ -103,6 +106,7 @@ impl esp_soc::SocBus for SocBus {
+     }
+     fn misc(&mut self) -> &mut Misc { &mut self.periph.misc }
+     fn load_bytes(&mut self, addr: u32, data: &[u8]) -> Result<(), String> { SocBus::load_bytes(self, addr, data) }
++    fn flash_contents(&self) -> &[u8] { &self.flash }
+     fn write_flash(&mut self, offset: usize, data: &[u8]) -> Result<(), String> {
+         let target = self.flash.get_mut(offset..).and_then(|tail| tail.get_mut(..data.len()))
+             .ok_or("flash image too large")?;

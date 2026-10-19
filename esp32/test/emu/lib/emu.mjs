@@ -93,14 +93,17 @@ export function toBytes(v) {
  * Run the emulator to completion.
  *   name        scenario name: the log lands in OUT_DIR/<name>.log
  *   chip        's3' | 'c3' | 'esp32'
- *   images      build(env) result, or { flashImage } for a whole-flash dump (no ELF)
+ *   images      build(env) result; or { flashImage } for a whole-flash dump (no ELF, so no BLE);
+ *               or { flashImage, app, elf }: the dump with `app` written into app0 (0x10000),
+ *               i.e. new firmware on an existing device's flash
+ *   flashOut    write the flash to this file when the run ends
  *   ble         virtual BLE controller (needs the ELF)
  *   board       esp32sim board model ('atech14' for the S3 LED ring)
  *   script      a Script
  *   seconds     emulated seconds to run
  *   extra       more CLI args
  */
-export async function runEmu({ name, chip = 's3', images, ble = false, board, script, seconds, extra = [] }) {
+export async function runEmu({ name, chip = 's3', images, ble = false, board, script, seconds, extra = [], flashOut }) {
   const c = CHIPS[chip];
   const exe = path.join(SIM_DIR, 'target/release', c.bin);
   const rom = path.join(SIM_DIR, 'web/wasm/fw', c.rom);
@@ -109,8 +112,12 @@ export async function runEmu({ name, chip = 's3', images, ble = false, board, sc
   }
   fs.mkdirSync(OUT_DIR, { recursive: true });
   const args = [...c.args, '--boot', 'rom', '--rom', rom, '--flash-mb', String(c.flashMb)];
-  if (images.flashImage) args.push('--flash-image', images.flashImage);
-  else args.push('--bootloader', images.bootloader, '--ptable', images.ptable, '--app', images.app, '--elf', images.elf);
+  if (images.flashImage) {
+    args.push('--flash-image', images.flashImage);
+    if (images.app) args.push('--flash-at', `0x10000=${images.app}`);
+    if (images.elf) args.push('--elf', images.elf);
+  } else args.push('--bootloader', images.bootloader, '--ptable', images.ptable, '--app', images.app, '--elf', images.elf);
+  if (flashOut) args.push('--flash-out', flashOut);
   if (ble) args.push('--ble');
   if (board) args.push('--board', board);
   if (script && script.lines.length) {
