@@ -42,10 +42,10 @@ index d04e1dc1..4c660fe6 100644
      if pending != 0 { eprintln!("[ble] {pending} command(s) still pending at end of run"); }
      if let Some(model) = approximate { eprintln!("[emu] approximate timing totals: {:?}", model.stats()); }
 diff --git a/cli/src/tests.rs b/cli/src/tests.rs
-index 92af6a51..b75fbc77 100644
+index 92af6a51..115b9ba5 100644
 --- a/cli/src/tests.rs
 +++ b/cli/src/tests.rs
-@@ -179,3 +179,17 @@ fn analog_scripts_reach_classic_adc_and_touch_registers() {
+@@ -179,3 +179,16 @@ fn analog_scripts_reach_classic_adc_and_touch_registers() {
          assert_eq!(m.bus.read32(0x3ff4_8870).unwrap() >> 16, touch);
      }
  }
@@ -54,10 +54,9 @@ index 92af6a51..b75fbc77 100644
 +fn flash_out_returns_what_the_guest_left_in_flash() {
 +    let o = parse(&["esp32sim".into(), "--flash-out".into(), "/tmp/f.bin".into()], "s3");
 +    assert_eq!(o.flash_out.as_deref(), Some("/tmp/f.bin"));
-+    for mut m in [esp32s3::machine([0; 6])] {
-+        m.write_flash(0x9000, &[1, 2, 3]).unwrap();
-+        assert_eq!(&m.bus.flash_contents()[0x9000..0x9003], &[1, 2, 3]);
-+    }
++    let mut s3 = esp32s3::machine([0; 6]);
++    s3.write_flash(0x9000, &[1, 2, 3]).unwrap();
++    assert_eq!(&s3.bus.flash_contents()[0x9000..0x9003], &[1, 2, 3]);
 +    let mut c3 = esp32c3::machine([0; 6], 4 << 20);
 +    c3.write_flash(0x1000, &[9]).unwrap();
 +    assert_eq!(c3.bus.flash_contents().len(), 4 << 20);
@@ -795,7 +794,7 @@ index f4567c61..b5e67063 100644
 +    }
  }
 diff --git a/esp-soc/src/soc.rs b/esp-soc/src/soc.rs
-index 85020312..89a6fd72 100644
+index 85020312..2d0caf96 100644
 --- a/esp-soc/src/soc.rs
 +++ b/esp-soc/src/soc.rs
 @@ -108,6 +108,9 @@ pub trait SocBus: Bus {
@@ -813,12 +812,12 @@ index 85020312..89a6fd72 100644
      fn load_bytes(&mut self, addr: u32, data: &[u8]) -> Result<(), String>;
      fn write_flash(&mut self, offset: usize, data: &[u8]) -> Result<(), String>;
 +    /// The whole flash as the guest left it (`--flash-out`): NVS, filesystems, OTA slots.
-+    fn flash_contents(&self) -> &[u8];
++    fn flash_contents(&self) -> &[u8] { &[] }
      /// Map and copy the app image at flash `app_off` as the bootloader would; returns the entry point.
      fn boot_app(&mut self, app_off: usize) -> Result<u32, String>;
      /// Chip reset: re-create the digital peripherals, keep what survives on silicon. Returns the cause.
 diff --git a/esp-soc/src/wifi.rs b/esp-soc/src/wifi.rs
-index 4064004f..eaa385ac 100644
+index 4064004f..703757f3 100644
 --- a/esp-soc/src/wifi.rs
 +++ b/esp-soc/src/wifi.rs
 @@ -434,6 +434,14 @@ impl StationLink {
@@ -836,12 +835,13 @@ index 4064004f..eaa385ac 100644
      pub fn relay(&self) -> bool { self.relay }
      /// The descriptor the last received frame went into, 0 before the first one.
      pub fn last_rx_desc(&self) -> u32 { self.last_rx_desc }
-@@ -536,7 +544,7 @@ impl StationLink {
+@@ -536,7 +544,8 @@ impl StationLink {
      pub fn report(&self) -> String {
          let mut lines = Vec::new();
          if self.tx_frames + self.rx_frames > 0 { lines.push(format!("[emu] wifi: {} frames sent by the station, {} received ({} dropped: no descriptor){}", self.tx_frames, self.rx_frames, self.rx_dropped, self.ap.as_ref().map_or(String::new(), |ap| format!("; AP: {} beacons, {} probe responses, {} data frames from the station, state {:?}", ap.stats.0, ap.stats.1, ap.stats.2, ap.state)))); }
 -        if let Some(n) = &self.net { lines.push(format!("[emu] net: {} DHCP leases, {} ARP replies, {} DNS answers, {} NTP answers, {} TCP refused, {} pings, {} frames ignored", n.dhcp_acks, n.arp_replies, n.dns_answers, n.ntp_answers, n.tcp_rejects, n.pings, n.unhandled));
-+        if let Some(n) = &self.net { lines.push(format!("[emu] net: {} DHCP leases, {} ARP replies, {} DNS answers, {} NTP answers, {} TCP refused, {} pings, {} frames ignored, {} UDP injected", n.dhcp_acks, n.arp_replies, n.dns_answers, n.ntp_answers, n.tcp_rejects, n.pings, n.unhandled, n.injected_udp));
++        if let Some(n) = &self.net { lines.push(format!("[emu] net: {} DHCP leases, {} ARP replies, {} DNS answers, {} NTP answers, {} TCP refused, {} pings, {} frames ignored{}", n.dhcp_acks, n.arp_replies, n.dns_answers, n.ntp_answers, n.tcp_rejects, n.pings, n.unhandled,
++                if n.injected_udp > 0 { format!(", {} UDP injected", n.injected_udp) } else { String::new() }));
              if let Some(t) = &n.nat { lines.push(format!("[emu] nat: {} TCP connections ({} failed), {} UDP flows ({} evicted, {} send errors), {} bytes out, {} bytes in", t.tcp_opened, t.tcp_refused, t.udp_flows, t.udp_evicted, t.udp_send_errors, t.bytes_to_host, t.bytes_to_guest)); } }
          lines.join("\n")
      }
