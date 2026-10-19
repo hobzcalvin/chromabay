@@ -6,6 +6,7 @@ import { get } from 'svelte/store';
 const msgpackEncode = msgpack.encode;
 const msgpackDecode = msgpack.decode;
 import { serializeCurrentPattern } from './flowStore';
+import { bleEvent, noteBrightnessWrite, noteBrightnessFromDevice } from './telemetry';
 import { getFirmware, putFirmware } from './firmwareCache';
 import {
   getTransport, setBleTransportFactory, unregisterTransport, isWifiId, hostFromWifiId,
@@ -75,6 +76,7 @@ const CHARACTERISTIC_UUID_TX = 'a0be83e6-8dc9-47f0-ab40-b19721d20ed1';
 
 // New OTA Characteristics (within the same LED_SERVICE_UUID)
 const CHARACTERISTIC_UUID_DEVICE_INFO = "a0be83e7-8dc9-47f0-ab40-b19721d20ed1";
+const CHARACTERISTIC_UUID_DIAGNOSTICS = "a0be83ff-8dc9-47f0-ab40-b19721d20ed1"; // state + recent device events (feat>=7)
 const CHARACTERISTIC_UUID_COMM_CONFIG = "a0be83fa-8dc9-47f0-ab40-b19721d20ed1"; // device settings (feat>=2)
 const CHARACTERISTIC_UUID_OTA_CONTROL = "a0be83e8-8dc9-47f0-ab40-b19721d20ed1";
 const CHARACTERISTIC_UUID_OTA_DATA    = "a0be83e9-8dc9-47f0-ab40-b19721d20ed1";
@@ -126,6 +128,7 @@ export interface DeviceInfo {
   sleep?: number;           // sleep-timer minutes (0 = off)
   rgbtest?: number;         // 1 = boot RGB test on
   heap?: number;
+  id?: string;              // factory eFuse MAC, 12 hex: the device_id its own Sentry events carry (feat>=7)
 }
 
 // Realtime pixel-streaming protocols. A bitmask, so a device can listen for several at once:
@@ -408,6 +411,7 @@ function scheduleReconnect(deviceId: string, attempt: number): void {
       console.log(`[reconnect] ${deviceId} reconnected`);
     } catch (err) {
       console.warn(`[reconnect] ${deviceId} attempt ${attempt + 1} failed:`, err);
+      bleEvent('reconnect failed', { ble_id: deviceId, attempt: attempt + 1, error: String(err) }, { level: 'warning', log: false });
       scheduleReconnect(deviceId, attempt + 1);
     }
   }, delay);
@@ -427,6 +431,7 @@ function cancelReconnect(deviceId: string): void {
 // disconnect / unload) suppresses auto-reconnect; any other drop schedules one.
 export function handleDeviceDisconnected(deviceId: string, intentional = false): void {
   console.log(`Device ${deviceId} disconnected — cleaning up${intentional ? ' (intentional)' : ''}`);
+  bleEvent('disconnect', { ble_id: deviceId, intentional }, { level: intentional ? 'info' : 'warning' });
   const info = bleConnections.get(deviceId);
   // Remove the web disconnect listener so it doesn't accumulate across reconnects
   // (the underlying BluetoothDevice object persists).
@@ -750,7 +755,7 @@ export async function startBinaryNotifications(deviceId: string, serviceUuid: st
 // firmware never notifies, so this is simply inert there.
 export async function startBrightnessNotifications(deviceId: string, callback: (brightness: number) => void): Promise<void> {
   await startBinaryNotifications(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_BRIGHTNESS, (dv) => {
-    if (dv.byteLength >= 1) callback(dv.getUint8(0));
+    if (dv.byteLength >= 1) { noteBrightnessFromDevice(deviceId, dv.getUint8(0)); callback(dv.getUint8(0)); }
   });
 }
 
@@ -782,6 +787,21 @@ export async function initializeConnectedDevice(deviceId: string): Promise<void>
   } catch (error) {
     console.error('Failed to sync initial pattern to device:', error);
     // The link is still valid; a later edit/tap retries the live sync.
+  }
+}
+
+/**
+ * The device's own account of what it just did (firmware feat >= 7): state plus a ring of its
+ * last ~40 events with millis() timestamps (diag_log.h). Read for a problem report; null if the
+ * firmware is older or the read fails.
+ */
+export async function readDeviceDiagnostics(deviceId: string): Promise<Record<string, unknown> | null> {
+  try {
+    const text = await readCharacteristic(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_DIAGNOSTICS);
+    return JSON.parse(text);
+  } catch (e) {
+    console.warn(`[diag] no diagnostics from ${deviceId}:`, e);
+    return null;
   }
 }
 
@@ -1310,6 +1330,7 @@ export async function syncPatternToAllDevices(): Promise<void> {
 
     // Encode as MessagePack
     const msgpackData = msgpackEncode({ ...serializedPattern, lib: false }) as Uint8Array;
+    bleEvent('pattern push (live)', { name: serializedPattern?.meta?.name ?? '', bytes: msgpackData.byteLength, nodes: serializedPattern?.nodes?.length ?? 0, devices: deviceIds.length });
 
     console.log(`Pattern serialized: ${msgpackData.byteLength} bytes`);
 
@@ -1373,6 +1394,7 @@ export async function sendSinglePatternToDevice(deviceId: string, pattern: any):
   const name: string = pattern?.meta?.name ?? '';
   const clean = { ...pattern, meta: { name, output: pattern?.meta?.output ?? 1 }, lib: true };
   const msgpackData = msgpackEncode(clean) as Uint8Array;
+  bleEvent('pattern push (library)', { ble_id: deviceId, name, bytes: msgpackData.byteLength }, { log: false });
 
   // Wait for the device to say it stored the pattern before returning, so a caller pushing a
   // whole library goes at the device's pace. Without this, Sync-all fired 25 patterns back to
@@ -1492,7 +1514,9 @@ export async function sendBrightnessToDevice(deviceId: string, brightness: numbe
   const dataView = new DataView(new Uint8Array([clamped]).buffer);
   try {
     await writeCharacteristicWithoutResponse(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_BRIGHTNESS, dataView);
+    noteBrightnessWrite(deviceId, clamped, true);
   } catch (error) {
+    noteBrightnessWrite(deviceId, clamped, false);
     console.error(`Error sending brightness to ${deviceId}:`, error);
     throw error;
   }

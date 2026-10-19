@@ -7,6 +7,7 @@ import { handleErrorWithSentry } from '@sentry/sveltekit';
 import type { HandleClientError } from '@sveltejs/kit';
 import { dev } from '$app/environment';
 import { Capacitor } from '@capacitor/core';
+import { startDeviceTelemetry } from '$lib/telemetry';
 
 // Client DSN — write-only ingest key, safe to ship in a client bundle (it's public by nature).
 const DSN = (import.meta as any).env?.VITE_SENTRY_DSN
@@ -35,9 +36,13 @@ Sentry.init({
   // will not stay up) left no trace in Sentry at all.
   //
   // warn and error only, deliberately. `log` would forward the FPS counter and every pattern
-  // sync, which is a lot of quota to spend on proving the device is fine. The device cannot
-  // do any of this — sentry-micro has no logging API — so this is the only side that can.
+  // sync, which is a lot of quota to spend on proving the device is fine. The BLE events that
+  // matter (connects, drops, pattern pushes, brightness gestures) are logged explicitly by
+  // telemetry.ts instead. The device sends its own logs through sentry-micro.
   enableLogs: true,
+
+  // Room for a few minutes of BLE breadcrumbs on a problem report (default 100).
+  maxBreadcrumbs: 200,
 
   // A disconnected device is a fact of life on BLE, not a defect, and the app narrates it
   // from a dozen call sites. Dropping it here keeps Logs about things that are worth
@@ -52,8 +57,14 @@ Sentry.init({
     Sentry.replayIntegration({ maskAllText: false, blockAllMedia: false }),
     // Record the <canvas> previews too (the whole point of a visual LED tool).
     Sentry.replayCanvasIntegration(),
+    // "Report a problem" (feedback.ts). No floating button: the form is opened from Settings
+    // and by the keyboard shortcut in +layout.svelte, with device diagnostics attached.
+    Sentry.feedbackIntegration({ autoInject: false, showBranding: false, colorScheme: 'system' }),
   ],
 });
+
+// Tag every event with the connected devices' device_id (telemetry.ts).
+startDeviceTelemetry();
 
 const _sentryHandleError = handleErrorWithSentry();
 

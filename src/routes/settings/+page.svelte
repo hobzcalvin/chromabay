@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { openProblemReport } from '$lib/feedback';
   import {
     authUser, authReady, isConfigured, recoveryMode,
     signIn, signUp, signOut, sendPasswordReset, updatePassword, resendConfirmation,
@@ -200,6 +201,7 @@
   <div class="card">
     <div class="btn-row">
       <button class="btn" on:click={startOnboarding}>Replay welcome tour</button>
+      <button class="btn" on:click={openProblemReport}>Report a problem</button>
       <a class="btn" href="https://github.com/hobzcalvin/chromabay" target="_blank" rel="noopener">Source on GitHub</a>
       {#if showAppStore}
         <a class="btn" href="https://apps.apple.com/us/app/chromabay/id6781765952" target="_blank" rel="noopener">Get the iOS app</a>

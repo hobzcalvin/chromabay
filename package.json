@@ -34,6 +34,7 @@
 		"drive": "node automation/drive.mjs",
 		"verify:wasm": "node automation/verify-wasm.mjs",
 		"verify:render": "node automation/verify-render.mjs",
+		"triage": "node scripts/sentry-triage.mjs",
 		"wasm:compile": "bash native/build-wasm.sh"
 	},
 	"devDependencies": {

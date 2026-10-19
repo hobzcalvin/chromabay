@@ -48,3 +48,6 @@ ios/.asc.env
 *.p8
 
 scratchpad
+
+# Problem-report dossiers (scripts/sentry-triage.mjs): people's reports, never committed
+/triage

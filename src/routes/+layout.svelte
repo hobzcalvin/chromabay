@@ -42,6 +42,16 @@
     // so opening the app once is sufficient preparation for fully offline OTA later.
     prefetchLatestFirmwareSet().catch((e) => console.warn('[OTA] startup prefetch failed:', e));
 
+    // Cmd/Ctrl+Shift+B anywhere: "something weird just happened" (feedback.ts attaches the
+    // device diagnostics and the session replay).
+    function onReportKey(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        import('$lib/feedback').then((m) => m.openProblemReport());
+      }
+    }
+    window.addEventListener('keydown', onReportKey);
+
     // iOS Safari viewport height fix
     function setVHProperty() {
       let vh = window.innerHeight * 0.01;
@@ -59,6 +69,7 @@
     });
     
     return () => {
+      window.removeEventListener('keydown', onReportKey);
       window.removeEventListener('resize', setVHProperty);
       window.removeEventListener('orientationchange', setVHProperty);
     };

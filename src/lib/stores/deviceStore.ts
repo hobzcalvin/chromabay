@@ -5,10 +5,16 @@ export interface ConnectedDevice {
   name: string;
   webDevice?: any; // For web bluetooth
   services: any[];
+  // What the device reported (see DeviceInfo in ble.ts; the full JSON is stored).
   deviceInfo?: {
     fw_ver: string;
     hw_ver: string;
     heap?: number;
+    id?: string;
+    name?: string;
+    chip?: string;
+    feat?: number;
+    mode?: string;
   };
   lastConnected: number;
 }
