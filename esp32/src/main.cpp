@@ -3254,7 +3254,10 @@ namespace RtStream {
         if (!started) begin();
         bool got = false;
         int n;
-        while ((n = artnet.parsePacket()) > 0) {
+        // Only poll the sockets begin() opened: parsePacket() on one that was never begun fails
+        // with EBADF and logs "could not receive data: 9" on every loop pass (seen in esp32sim
+        // with Art-Net + DDP on and sACN off).
+        while ((startedProto & DeviceSettings::RT_ARTNET) && (n = artnet.parsePacket()) > 0) {
             int r = artnet.read(buf, sizeof(buf));
             if (r >= 18 && memcmp(buf, "Art-Net", 7) == 0) {
                 uint16_t op = (uint16_t)buf[8] | ((uint16_t)buf[9] << 8);
@@ -3267,7 +3270,7 @@ namespace RtStream {
                 }
             }
         }
-        while ((n = sacn.parsePacket()) > 0) {
+        while ((startedProto & DeviceSettings::RT_SACN) && (n = sacn.parsePacket()) > 0) {
             int r = sacn.read(buf, sizeof(buf));
             // E1.31: ACN PID at offset 4; universe at 113-114; DMP property count at 123-124
             // (includes the 1-byte DMX start code at 125); channel data at 126. Only start code
@@ -3281,7 +3284,7 @@ namespace RtStream {
                 got = true;
             }
         }
-        while ((n = ddp.parsePacket()) > 0) {
+        while ((startedProto & DeviceSettings::RT_DDP) && (n = ddp.parsePacket()) > 0) {
             int r = ddp.read(buf, sizeof(buf));
             if (r > 0 && applyDdp(buf, r)) got = true;
         }
@@ -3347,6 +3350,17 @@ static const Endpoints::Endpoint ENDPOINTS[] = {
 };
 
 
+// Leave a new OTA image PENDING_VERIFY until setup() has checked it, rather than letting the
+// Arduino core mark it valid first. arduino-esp32 2.x's initArduino() calls
+// esp_ota_mark_app_valid_cancel_rollback() before setup() unless the sketch overrides this weak
+// hook, which made the health check and rollback below dead code: a release that failed (or
+// crashed) during setup was already "valid" and the bootloader never rolled it back. Found in
+// esp32sim. Now the image stays pending until "All systems OK", and a first boot that never gets
+// there (crash, hang + reboot, or a critical failure) goes back to the previous firmware.
+// extern "C": the weak default is C (esp32-hal-misc.c) and no header declares it, so a plain C++
+// definition gets a mangled name and silently overrides nothing.
+extern "C" bool verifyRollbackLater() { return true; }
+
 void setup() {
     Serial.begin(115200);
     delay(1000);
@@ -3363,6 +3377,9 @@ void setup() {
     Serial.printf("Firmware version: %s (feat %d)\n", FIRMWARE_VERSION, FIRMWARE_FEATURES);
 
     const esp_partition_t *running_partition = esp_ota_get_running_partition();
+    if (running_partition) {
+        Serial.printf("Boot: running %s at 0x%x\n", running_partition->label, (unsigned)running_partition->address);
+    }
     esp_ota_img_states_t ota_state;
     if (esp_ota_get_state_partition(running_partition, &ota_state) == ESP_OK) {
         if (ota_state == ESP_OTA_IMG_PENDING_VERIFY) {
