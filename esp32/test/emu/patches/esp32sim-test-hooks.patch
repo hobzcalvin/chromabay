@@ -1,5 +1,5 @@
 diff --git a/cli/src/lib.rs b/cli/src/lib.rs
-index d04e1dc1..c65ba8ac 100644
+index d04e1dc1..ee3ea1b2 100644
 --- a/cli/src/lib.rs
 +++ b/cli/src/lib.rs
 @@ -183,7 +183,7 @@ pub fn parse(args: &[String], default_chip: &str) -> Opts {
@@ -7,12 +7,12 @@ index d04e1dc1..c65ba8ac 100644
              let command = words.collect::<Vec<_>>().join(" ").parse::<esp_soc::ble::peer::Command>()
                  .unwrap_or_else(|e| usage_error(&format!("script: line {}: {e}", ln + 1)));
 -            if o.ble_full && matches!(command, esp_soc::ble::peer::Command::Discover | esp_soc::ble::peer::Command::Read(_) | esp_soc::ble::peer::Command::Write(..)) { usage_error(&format!("script: line {}: command requires HCI --ble", ln + 1)); }
-+            if o.ble_full && matches!(command, esp_soc::ble::peer::Command::Discover | esp_soc::ble::peer::Command::Read(_) | esp_soc::ble::peer::Command::ReadLong(_) | esp_soc::ble::peer::Command::Write(..)) { usage_error(&format!("script: line {}: command requires HCI --ble", ln + 1)); }
++            if o.ble_full && matches!(command, esp_soc::ble::peer::Command::Discover | esp_soc::ble::peer::Command::Read(_) | esp_soc::ble::peer::Command::ReadLong(_) | esp_soc::ble::peer::Command::Write(..) | esp_soc::ble::peer::Command::WriteCmd(..) | esp_soc::ble::peer::Command::Mtu(_) | esp_soc::ble::peer::Command::AwaitNotify(..)) { usage_error(&format!("script: line {}: command requires HCI --ble", ln + 1)); }
              if !o.ble && !o.ble_full { usage_error(&format!("script: line {}: BLE requires --ble and the application ELF", ln + 1)); }
          }
      }
 diff --git a/docs/cli.md b/docs/cli.md
-index 0ab75efb..5f6c1041 100644
+index 0ab75efb..46cb836b 100644
 --- a/docs/cli.md
 +++ b/docs/cli.md
 @@ -67,6 +67,7 @@ separately lists the actual instruction count for each core.
@@ -23,84 +23,354 @@ index 0ab75efb..5f6c1041 100644
  
  ### PWM observation
  
-@@ -167,7 +168,9 @@ use seconds like the other script actions. For example:
+@@ -136,6 +137,11 @@ select ADC1 and GPIO5 selects ADC2; C6 GPIO0–6 select ADC1.
+ 2 adcwave 1 /tmp/adc-volts.txt 1000
+ ```
+ 
++`udp <port> <hex>` sends a UDP datagram from the gateway (10.0.2.2, source port = `port`) to the
++station's `port`, as a sender on the access point's network would: Art-Net, DDP or any other
++inbound protocol, at an exact emulated time. It needs `--wifi` and a station that has joined;
++before that the line is reported and dropped.
++
+ `waituart0 <timeout_s> <text>` holds later actions until UART0 prints the text or
+ the timeout expires. Raw counts and completed-conversion observations are exposed
+ through the [host ADC API](peripherals.md#host-adc-inputs), with no CLI equivalent.
+@@ -167,14 +173,25 @@ use seconds like the other script actions. For example:
  ```
  
  Use handles reported by discovery. `ble subscribe CCC_HANDLE` writes notification
 -enable to a discovered client configuration descriptor. Commands are validated when
 +enable to a discovered client configuration descriptor. `ble read-long HANDLE` reads a value longer than
 +one ATT payload: a Read, then Read Blob requests until a reply is shorter than MTU - 1; it logs
-+one `read` line with the whole value. Commands are validated when
++one `read` line with the whole value. `ble mtu N` (23..517) exchanges MTU as the client and logs
++`mtu M`, the smaller of the two offers; writes may then carry up to M - 3 bytes. `ble write-cmd
++HANDLE HEX` sends a Write Command (write without response), which does not hold the queue.
++`ble await-notify HANDLE COUNT` holds later BLE commands until COUNT notifications in all have
++arrived on HANDLE in this connection: flow control against a peripheral that acks by notifying,
++such as a sliding-window firmware upload. A queue left waiting is reported as pending at exit. Commands are validated when
  CLI arguments are parsed, before loading the ROM, and require `--ble`. `connect` waits for guest advertising;
  ATT commands wait for the connection and run in order, with one request outstanding.
  At exit, the CLI reports the number of queued or in-flight commands still pending.
+-Writes are limited to 20 bytes. A scanning guest sees a virtual
++Writes are limited to ATT_MTU - 3 bytes, 20 until `ble mtu` raises it. A scanning guest sees a virtual
+ peripheral named `esp32sim` advertising the Battery Service.
+ 
+-This models one unencrypted LE link, legacy advertisements and ATT MTU 23.
++This models one unencrypted LE link, legacy advertisements and ATT MTU 23 unless `ble mtu`
++exchanges a larger one. Data to the host is split into 251-byte ACL packets, and with the guest
++clock known (S3/C3) at most four of them reach the host per 30 ms connection event, the interval
++the controller reports: a burst is spread over events as on a real link, instead of arriving at
++once and exhausting the host's ACL buffers.
+ It does not model RF, pairing, physical connection timing or the controller's
+ registers. Unsupported HCI commands return Unknown Command. The callback task
+ and its storage stay allocated until reboot. C6 initializes the guest NPL support
+diff --git a/esp-soc/src/ble.rs b/esp-soc/src/ble.rs
+index a50266ba..06441a71 100644
+--- a/esp-soc/src/ble.rs
++++ b/esp-soc/src/ble.rs
+@@ -18,6 +18,8 @@ pub trait HciController {
+     fn reset(&mut self);
+     fn advance_to(&mut self, cycles: u64);
+     fn next_deadline(&self) -> Option<u64>;
++    /// The guest CPU clock, for controllers that model air time. Default: none modeled.
++    fn set_clock(&mut self, _hz: u64) {}
+ }
+ 
+ /// Put back the flash bytes a controller adapter patched (VHCI on classic/S3/C3, NimBLE on C6).
+@@ -58,6 +60,14 @@ pub enum LinkAction {
+ }
+ 
+ const HANDLE: u16 = 1;
++/// ACL data packet length the controller reports (0xfb) and fragments to.
++const ACL_DATA_LEN: usize = 251;
++/// Air pacing, once the CPU clock is known: the connection interval the controller reports in
++/// LE Connection Complete (24 x 1.25 ms) and how many ACL packets reach the host per event. A
++/// real link spreads a burst over connection events and the host task drains its buffers in
++/// between; delivered all at once, a few kilobytes exhaust the NimBLE host's ACL mbufs.
++const CONN_EVENT_MS: u64 = 30;
++const PACKETS_PER_EVENT: usize = 4;
+ const ADDRESS: [u8; 6] = [1, 0, 0, 0x49, 0x53, 2];
+ const PEER: [u8; 6] = [2, 0, 0, 0x49, 0x53, 2];
+ 
+@@ -77,6 +87,11 @@ pub struct Controller {
+     random: u64,
+     local_name: [u8; 248],
+     default_link_policy: u16,
++    /// ACL packets for the host waiting for a connection event, and the pacing state.
++    air: VecDeque<Vec<u8>>,
++    event_cycles: u64,
++    event_index: u64,
++    event_sent: usize,
+ }
+ 
+ impl Default for Controller { fn default() -> Self { Self::new(Link::default()) } }
+@@ -95,9 +110,27 @@ impl Controller {
+             random: 0x3253_5045_424c_4531,
+             local_name: [0; 248],
+             default_link_policy: 0,
++            air: VecDeque::new(),
++            event_cycles: 0,
++            event_index: 0,
++            event_sent: 0,
++        }
++    }
++    pub fn pop_packet(&mut self) -> Option<Vec<u8>> {
++        self.release_air();
++        self.packets.pop_front()
++    }
++    /// Move this connection event's share of waiting ACL packets to the host.
++    fn release_air(&mut self) {
++        if self.event_cycles == 0 { return; }
++        let index = self.cycles / self.event_cycles;
++        if index != self.event_index { self.event_index = index; self.event_sent = 0; }
++        while self.event_sent < PACKETS_PER_EVENT {
++            let Some(p) = self.air.pop_front() else { break };
++            self.packets.push_back(p);
++            self.event_sent += 1;
+         }
+     }
+-    pub fn pop_packet(&mut self) -> Option<Vec<u8>> { self.packets.pop_front() }
+     fn emit(&mut self, event: LinkEvent) { self.link.borrow_mut().to_peer.push_back(event); }
+     fn event(&mut self, event: u8, data: &[u8]) {
+         let mut p = vec![4, event, data.len() as u8];
+@@ -110,14 +143,20 @@ impl Controller {
+         self.event(0x0e, &p);
+     }
+     fn status(&mut self, op: u16, status: u8) { self.event(0x0f, &[status, 1, op as u8, (op >> 8) as u8]); }
++    /// One L2CAP PDU to the host, split into ACL fragments of at most ACL_DATA_LEN bytes (the
++    /// LE buffer size READ/LE_READ_BUFFER_SIZE report): start, then continuations.
+     fn l2cap(&mut self, cid: u16, pdu: &[u8]) {
+         let len = pdu.len() as u16;
+-        let mut p = vec![2, HANDLE as u8, 0x20];
+-        p.extend_from_slice(&(len + 4).to_le_bytes());
+-        p.extend_from_slice(&len.to_le_bytes());
+-        p.extend_from_slice(&cid.to_le_bytes());
+-        p.extend_from_slice(pdu);
+-        self.packets.push_back(p);
++        let mut frame = Vec::with_capacity(pdu.len() + 4);
++        frame.extend_from_slice(&len.to_le_bytes());
++        frame.extend_from_slice(&cid.to_le_bytes());
++        frame.extend_from_slice(pdu);
++        for (i, chunk) in frame.chunks(ACL_DATA_LEN).enumerate() {
++            let mut p = vec![2, HANDLE as u8, if i == 0 { 0x20 } else { 0x10 }];
++            p.extend_from_slice(&(chunk.len() as u16).to_le_bytes());
++            p.extend_from_slice(chunk);
++            if self.event_cycles == 0 { self.packets.push_back(p); } else { self.air.push_back(p); }
++        }
+     }
+     fn connect(&mut self, guest_central: bool) {
+         self.connected = true;
+@@ -206,6 +245,7 @@ impl Controller {
+                 self.connected = false;
+                 self.emit(LinkEvent::Reset);
+                 self.fragments.clear();
++                self.air.clear();
+                 self.adv.clear();
+                 self.scan_response.clear();
+                 self.active_scan = false;
+@@ -327,6 +367,7 @@ impl Controller {
+                 self.event(5, &[0, HANDLE as u8, 0, p[2]]);
+                 self.connected = false;
+                 self.fragments.clear();
++                self.air.clear();
+                 self.emit(LinkEvent::Disconnected);
+             }
+             LE_READ_CHANNEL_MAP => self.complete(op, &[0, p[0], p[1], 0xff, 0xff, 0xff, 0xff, 0x1f]),
+@@ -434,7 +475,9 @@ impl HciController for Controller {
+     fn poll_h4(&mut self) -> Option<Vec<u8>> { self.pop_packet() }
+     fn reset(&mut self) {
+         *self.link.borrow_mut() = LinkQueues::default();
++        let event_cycles = self.event_cycles;
+         *self = Self::new(self.link.clone());
++        self.event_cycles = event_cycles;
+     }
+     fn advance_to(&mut self, cycles: u64) {
+         self.cycles = cycles;
+@@ -459,6 +502,57 @@ impl HciController for Controller {
+                 _ => {}
+             }
+         }
++        self.release_air();
++    }
++    fn next_deadline(&self) -> Option<u64> {
++        if !self.link.borrow().to_controller.is_empty() { return Some(self.cycles); }
++        (!self.air.is_empty()).then(|| (self.event_index + 1) * self.event_cycles)
++    }
++    fn set_clock(&mut self, hz: u64) { self.event_cycles = hz * CONN_EVENT_MS / 1000; }
++}
++
++#[cfg(test)]
++mod air_tests {
++    use super::*;
++
++    fn connected() -> Controller {
++        let mut c = Controller::new(Link::default());
++        c.connected = true;
++        c
++    }
++
++    #[test]
++    fn l2cap_to_the_host_is_fragmented_at_the_acl_length() {
++        let mut c = connected();
++        c.l2cap(4, &[0x1b; 600]);
++        let p: Vec<_> = std::iter::from_fn(|| c.pop_packet()).collect();
++        assert_eq!(p.len(), 3);
++        assert_eq!((p[0][2], word(&p[0][3..])), (0x20, 251), "start fragment");
++        assert_eq!((p[1][2], word(&p[1][3..])), (0x10, 251), "continuation");
++        assert_eq!((p[2][2], word(&p[2][3..])), (0x10, 604 - 502), "last continuation");
++        assert_eq!(word(&p[0][5..]), 600, "L2CAP length in the first fragment");
++    }
++
++    #[test]
++    fn with_a_clock_a_burst_is_spread_over_connection_events() {
++        let mut c = connected();
++        c.set_clock(1000);                       // 30 cycles per 30 ms event
++        for _ in 0..10 { c.l2cap(4, &[0x1b, 3, 0]); }
++        c.advance_to(0);
++        let first: Vec<_> = std::iter::from_fn(|| c.pop_packet()).collect();
++        assert_eq!(first.len(), PACKETS_PER_EVENT);
++        assert_eq!(c.next_deadline(), Some(30));
++        c.advance_to(30);
++        assert_eq!(std::iter::from_fn(|| c.pop_packet()).count(), PACKETS_PER_EVENT);
++        c.advance_to(60);
++        assert_eq!(std::iter::from_fn(|| c.pop_packet()).count(), 2);
++        assert_eq!(c.next_deadline(), None);
++    }
++
++    #[test]
++    fn without_a_clock_nothing_is_held_back() {
++        let mut c = connected();
++        for _ in 0..10 { c.l2cap(4, &[0x1b, 3, 0]); }
++        assert_eq!(std::iter::from_fn(|| c.pop_packet()).count(), 10);
+     }
+-    fn next_deadline(&self) -> Option<u64> { (!self.link.borrow().to_controller.is_empty()).then_some(self.cycles) }
+ }
 diff --git a/esp-soc/src/ble/peer.rs b/esp-soc/src/ble/peer.rs
-index af4b709e..7bc3c43d 100644
+index af4b709e..591cea42 100644
 --- a/esp-soc/src/ble/peer.rs
 +++ b/esp-soc/src/ble/peer.rs
-@@ -41,6 +41,8 @@ enum Request {
+@@ -41,7 +41,10 @@ enum Request {
      Characteristics,
      Descriptors,
      Read(u16),
 +    /// `read-long`: Read, then Read Blob from each offset while a reply fills the MTU.
 +    ReadLong(u16),
      Write(u16),
++    Mtu(u16),
  }
  
-@@ -51,6 +53,7 @@ pub enum Command {
+ #[derive(Debug, PartialEq)]
+@@ -51,7 +54,15 @@ pub enum Command {
      Disconnect,
      Discover,
      Read(u16),
 +    ReadLong(u16),
      Write(u16, Vec<u8>),
++    /// Write Command (0x52): no response, so it does not hold the queue.
++    WriteCmd(u16, Vec<u8>),
++    /// Exchange MTU as the client, offering this receive MTU.
++    Mtu(u16),
++    /// Hold later commands until this many notifications have arrived on the handle, counted
++    /// from the start of the connection: flow control against a peripheral that acks by notifying.
++    AwaitNotify(u16, u64),
      ReadUuid([u8; 16], [u8; 16]),
  }
-@@ -64,8 +67,8 @@ impl std::str::FromStr for Command {
+ impl std::str::FromStr for Command {
+@@ -64,8 +75,12 @@ impl std::str::FromStr for Command {
              ["disconnect"] => return Ok(Self::Disconnect),
              ["discover"] => return Ok(Self::Discover),
              ["read-uuid", service, characteristic] => return Ok(Self::ReadUuid(parse_uuid(service)?, parse_uuid(characteristic)?)),
 -            ["read" | "subscribe", _] | ["write", _, _] => {}
 -            _ => return Err("expected connect, central-stop, disconnect, discover, read HANDLE, read-uuid SERVICE CHARACTERISTIC, write HANDLE HEX, subscribe CCC_HANDLE".into()),
-+            ["read" | "read-long" | "subscribe", _] | ["write", _, _] => {}
-+            _ => return Err("expected connect, central-stop, disconnect, discover, read HANDLE, read-long HANDLE, read-uuid SERVICE CHARACTERISTIC, write HANDLE HEX, subscribe CCC_HANDLE".into()),
++            ["mtu", n] => {
++                return n.parse().ok().filter(|n| (23..=517).contains(n)).map(Self::Mtu)
++                    .ok_or_else(|| "BLE mtu requires a value from 23 to 517".into());
++            }
++            ["read" | "read-long" | "subscribe", _] | ["write" | "write-cmd", _, _] | ["await-notify", _, _] => {}
++            _ => return Err("expected connect, central-stop, disconnect, discover, mtu N, read HANDLE, read-long HANDLE, read-uuid SERVICE CHARACTERISTIC, write HANDLE HEX, write-cmd HANDLE HEX, await-notify HANDLE COUNT, subscribe CCC_HANDLE".into()),
          }
          let handle =
              if let Some(h) = parts[1].strip_prefix("0x") { u16::from_str_radix(h, 16) } else { parts[1].parse() }
-@@ -74,6 +77,7 @@ impl std::str::FromStr for Command {
+@@ -74,12 +89,15 @@ impl std::str::FromStr for Command {
                  .ok_or("invalid BLE attribute handle")?;
          Ok(match parts[0] {
              "read" => Self::Read(handle),
 +            "read-long" => Self::ReadLong(handle),
              "subscribe" => Self::Write(handle, vec![1, 0]),
++            "await-notify" => Self::AwaitNotify(handle, parts[2].parse().map_err(|_| "BLE await-notify requires a notification count")?),
              _ => {
                  let value = parts[2];
-@@ -95,6 +99,8 @@ fn parse_uuid(text: &str) -> Result<[u8; 16], String> {
+-                let bytes = hex_bytes(value).filter(|b| b.len() <= 20)
+-                    .ok_or("BLE write requires at most 20 bytes of hexadecimal data")?;
+-                Self::Write(handle, bytes)
++                // ATT_MTU - 3 is checked when the write runs, against the MTU then in force.
++                let bytes = hex_bytes(value).filter(|b| b.len() <= MAX_MTU as usize - 3)
++                    .ok_or("BLE write requires at most 514 bytes of hexadecimal data")?;
++                if parts[0] == "write-cmd" { Self::WriteCmd(handle, bytes) } else { Self::Write(handle, bytes) }
+             }
+         })
+     }
+@@ -95,6 +113,9 @@ fn parse_uuid(text: &str) -> Result<[u8; 16], String> {
      bytes.reverse();
      Ok(bytes)
  }
-+/// The ATT MTU of the link: the default, never negotiated.
-+const MTU: usize = 23;
++/// The default ATT MTU, in force until an exchange raises it; and the most this central offers.
++const MTU: u16 = 23;
++const MAX_MTU: u16 = 517;
  fn read_by_type(start: u16, end: u16) -> Vec<u8> {
      vec![8, start as u8, (start >> 8) as u8, end as u8, (end >> 8) as u8, 3, 0x28]
  }
-@@ -162,6 +168,8 @@ pub struct Peer {
+@@ -162,6 +183,13 @@ pub struct Peer {
      pending: Option<Request>,
      discovery_start: u16,
      value: Vec<u8>,
 +    /// The value a `read-long` has assembled so far.
 +    long_value: Vec<u8>,
++    /// The ATT MTU in force, and the receive MTU this central offers in an exchange.
++    mtu: u16,
++    offer_mtu: u16,
++    /// Notifications received per handle on this connection, for `await-notify`.
++    notified: std::collections::BTreeMap<u16, u64>,
  }
  impl Peer {
      fn new(link: Link) -> Self {
-@@ -176,6 +184,7 @@ impl Peer {
+@@ -176,6 +204,10 @@ impl Peer {
              pending: None,
              discovery_start: 1,
              value: vec![100],
 +            long_value: Vec::new(),
++            mtu: MTU,
++            offer_mtu: MTU,
++            notified: Default::default(),
          }
      }
      fn advertisement(&mut self, adv: Vec<u8>, scan_response: Vec<u8>) {
-@@ -208,6 +217,11 @@ impl Peer {
+@@ -201,14 +233,37 @@ impl Peer {
+                 break;
+             }
+             if !self.connected || self.guest_central { break; }
++            if let Command::AwaitNotify(handle, count) = *command {
++                if self.notified.get(&handle).copied().unwrap_or(0) < count { break; }
++                self.commands.pop_front();
++                continue;
++            }
+             match self.commands.pop_front().unwrap() {
+-                Command::Connect | Command::CentralStop | Command::Disconnect | Command::ReadUuid(..) => unreachable!(),
++                Command::Connect | Command::CentralStop | Command::Disconnect | Command::ReadUuid(..) | Command::AwaitNotify(..) => unreachable!(),
++                Command::Mtu(offer) => {
++                    self.offer_mtu = offer;
++                    self.pending = Some(Request::Mtu(offer));
++                    self.att(&[2, offer as u8, (offer >> 8) as u8]);
++                }
++                Command::WriteCmd(handle, value) => {
++                    if self.fits(handle, &value) {
++                        let mut p = vec![0x52, handle as u8, (handle >> 8) as u8];
++                        p.extend(value);
++                        self.att(&p);
++                    }
++                }
+                 Command::Discover => self.discover(Request::Services, 1),
+                 Command::Read(handle) => {
                      self.pending = Some(Request::Read(handle));
                      self.att(&att_read(handle));
                  }
@@ -110,9 +380,51 @@ index af4b709e..7bc3c43d 100644
 +                    self.att(&att_read(handle));
 +                }
                  Command::Write(handle, value) => {
++                    if !self.fits(handle, &value) { continue; }
                      self.pending = Some(Request::Write(handle));
                      let mut p = vec![0x12, handle as u8, (handle >> 8) as u8];
-@@ -322,6 +336,26 @@ impl Peer {
+                     p.extend(value);
+@@ -218,6 +273,14 @@ impl Peer {
+         }
+     }
+     fn att(&mut self, pdu: &[u8]) { self.l2cap(4, pdu); }
++    /// A write value must fit one ATT PDU at the MTU in force: ATT_MTU - 3 bytes.
++    fn fits(&mut self, handle: u16, value: &[u8]) -> bool {
++        let max = self.mtu as usize - 3;
++        if value.len() > max {
++            self.log.push(format!("write of {} bytes to handle=0x{handle:04x} exceeds ATT_MTU - 3 = {max}; not sent", value.len()));
++        }
++        value.len() <= max
++    }
+     fn l2cap(&mut self, cid: u16, pdu: &[u8]) { self.link.borrow_mut().to_controller.push_back(LinkAction::Data(cid, pdu.to_vec())); }
+     fn poll(&mut self) {
+         loop {
+@@ -236,6 +299,8 @@ impl Peer {
+                 LinkEvent::Connected(central) => {
+                     self.connecting = false;
+                     self.connected = true;
++                    self.mtu = MTU;
++                    self.notified.clear();
+                     self.advertising = false;
+                     self.guest_central = central;
+                     self.log.push(format!(
+@@ -299,11 +364,14 @@ impl Peer {
+             return;
+         }
+         if p[0] == 2 && p.len() == 3 {
+-            self.att(&[3, 23, 0]);
++            // The guest asked: answer with what this central offers, and both use the smaller.
++            self.mtu = word(&p[1..]).clamp(MTU, self.offer_mtu);
++            self.att(&[3, self.offer_mtu as u8, (self.offer_mtu >> 8) as u8]);
+             return;
+         }
+         if p[0] == 0x1b || p[0] == 0x1d {
+             if p.len() >= 3 {
++                *self.notified.entry(word(&p[1..])).or_default() += 1;
+                 self.log.push(format!(
+                     "notification handle=0x{:04x} value={} text={:?}",
+                     word(&p[1..]),
+@@ -322,6 +390,26 @@ impl Peer {
              self.log.push(format!("unsolicited ATT {}", hex(p)));
              return;
          };
@@ -121,7 +433,7 @@ index af4b709e..7bc3c43d 100644
 +            let done = if p[0] == 1 && p.len() == 5 && !self.long_value.is_empty() && matches!(p[4], 0x07 | 0x0b) { true }
 +            else if p[0] == 0x0b || p[0] == 0x0d {
 +                self.long_value.extend_from_slice(&p[1..]);
-+                p.len() - 1 < MTU - 1
++                p.len() - 1 < self.mtu as usize - 1
 +            } else {
 +                self.log.push(format!("ATT error request=0x{:02x} handle=0x{handle:04x} error=0x{:02x}", p.get(1).copied().unwrap_or(0), p.get(4).copied().unwrap_or(0)));
 +                return;
@@ -139,11 +451,142 @@ index af4b709e..7bc3c43d 100644
          if p[0] == 1 && p.len() == 5 {
              if p[4] == 0x0a && matches!(kind, Request::Services | Request::Characteristics | Request::Descriptors) {
                  self.discovery_next(kind);
+@@ -336,6 +424,10 @@ impl Peer {
+             return;
+         }
+         match kind {
++            Request::Mtu(offer) if p[0] == 3 && p.len() == 3 => {
++                self.mtu = word(&p[1..]).clamp(MTU, offer);
++                self.log.push(format!("mtu {}", self.mtu));
++            }
+             Request::Read(handle) if p[0] == 0x0b => self.log.push(format!(
+                 "read handle=0x{handle:04x} value={} text={:?}",
+                 hex(&p[1..]),
+@@ -523,7 +615,10 @@ mod tests {
+         assert_eq!(hex_bytes("00aAFF"), Some(vec![0,170,255]));
+         for bad in ["0", "0g", "é0"] { assert_eq!(hex_bytes(bad), None); }
+         assert_eq!("write 1 00aAFF".parse::<Command>().unwrap(), Command::Write(1, vec![0,170,255]));
+-        for bad in ["write 1 0", "write 1 zz", "write 1 é0", "write 1 000000000000000000000000000000000000000000"] { assert!(bad.parse::<Command>().is_err()); }
++        for bad in ["write 1 0", "write 1 zz", "write 1 é0"] { assert!(bad.parse::<Command>().is_err()); }
++        // 21 bytes parses (the MTU in force decides when it runs); more than MAX_MTU - 3 never fits.
++        assert!(format!("write 1 {}", "00".repeat(21)).parse::<Command>().is_ok());
++        assert!(format!("write 1 {}", "00".repeat(515)).parse::<Command>().is_err());
+         assert_eq!(read_by_type(0x1234, 0x5678), [8,0x34,0x12,0x78,0x56,3,0x28]);
+     }
+ 
+@@ -781,4 +876,86 @@ mod tests {
+         assert!(!c.peer.connected);
+         assert!(c.peer.commands.is_empty());
+     }
++
++    /// A controller that keeps what the peer sends, so a test can read it.
++    struct Capture;
++    impl HciController for Capture {
++        fn send_h4(&mut self, _: &[u8]) {}
++        fn poll_h4(&mut self) -> Option<Vec<u8>> { None }
++        fn reset(&mut self) {}
++        fn advance_to(&mut self, _: u64) {}
++        fn next_deadline(&self) -> Option<u64> { None }
++    }
++    fn connected() -> (Session, Link) {
++        let link = Link::default();
++        let mut s = Session::new(Box::new(Capture), link.clone());
++        link.borrow_mut().to_peer.push_back(LinkEvent::Connected(false));
++        s.advance_to(0);
++        (s, link)
++    }
++    fn sent_att(link: &Link) -> Vec<Vec<u8>> {
++        link.borrow_mut().to_controller.drain(..).filter_map(|a| match a { LinkAction::Data(4, p) => Some(p), _ => None }).collect()
++    }
++
++    #[test]
++    fn mtu_exchange_raises_the_write_limit() {
++        assert_eq!("mtu 247".parse::<Command>().unwrap(), Command::Mtu(247));
++        for bad in ["mtu 22", "mtu 518", "mtu x"] { assert!(bad.parse::<Command>().is_err()); }
++        let (mut s, link) = connected();
++        let big = format!("write 3 {}", "ab".repeat(21));
++        s.command(&big).unwrap();
++        assert!(sent_att(&link).is_empty(), "21 bytes do not fit MTU 23");
++        assert!(s.drain_log().iter().any(|l| l.contains("exceeds ATT_MTU - 3 = 20")));
++        s.command("mtu 247").unwrap();
++        assert_eq!(sent_att(&link), vec![vec![2, 247, 0]]);
++        link.borrow_mut().to_peer.push_back(LinkEvent::Data(4, vec![3, 0x05, 0x02])); // server offers 517
++        s.advance_to(1);
++        assert!(s.drain_log().iter().any(|l| l == "mtu 247"), "the smaller of the two MTUs");
++        s.command(&big).unwrap();
++        let att = sent_att(&link);
++        assert_eq!(att.len(), 1);
++        assert_eq!(&att[0][..3], &[0x12, 3, 0]);
++        assert_eq!(att[0].len(), 3 + 21);
++    }
++
++    #[test]
++    fn write_command_needs_no_response_and_await_notify_holds_the_queue() {
++        assert_eq!("write-cmd 3 01".parse::<Command>().unwrap(), Command::WriteCmd(3, vec![1]));
++        assert_eq!("await-notify 3 2".parse::<Command>().unwrap(), Command::AwaitNotify(3, 2));
++        let (mut s, link) = connected();
++        s.command("write-cmd 3 01").unwrap();
++        s.command("write-cmd 3 02").unwrap();
++        assert_eq!(sent_att(&link), vec![vec![0x52, 3, 0, 1], vec![0x52, 3, 0, 2]], "both go without waiting");
++        s.command("await-notify 3 2").unwrap();
++        s.command("write-cmd 3 03").unwrap();
++        assert!(sent_att(&link).is_empty());
++        let notify = |n: u8| LinkEvent::Data(4, vec![0x1b, 3, 0, n]);
++        link.borrow_mut().to_peer.push_back(notify(1));
++        s.advance_to(1);
++        assert!(sent_att(&link).is_empty(), "one of two notifications");
++        link.borrow_mut().to_peer.push_back(notify(2));
++        s.advance_to(2);
++        assert_eq!(sent_att(&link), vec![vec![0x52, 3, 0, 3]]);
++        assert_eq!(s.pending_commands(), 0);
++    }
++
++    #[test]
++    fn read_long_follows_the_negotiated_mtu() {
++        let (mut s, link) = connected();
++        s.command("mtu 100").unwrap();
++        sent_att(&link);
++        link.borrow_mut().to_peer.push_back(LinkEvent::Data(4, vec![3, 100, 0]));
++        s.advance_to(1);
++        s.command("read-long 5").unwrap();
++        assert_eq!(sent_att(&link), vec![vec![0x0a, 5, 0]]);
++        let mut first = vec![0x0b]; first.extend([7u8; 99]);           // fills MTU - 1: more follows
++        link.borrow_mut().to_peer.push_back(LinkEvent::Data(4, first));
++        s.advance_to(2);
++        assert_eq!(sent_att(&link), vec![vec![0x0c, 5, 0, 99, 0]], "Read Blob from offset 99");
++        link.borrow_mut().to_peer.push_back(LinkEvent::Data(4, vec![0x0d, 8, 9]));
++        s.advance_to(3);
++        let log = s.drain_log();
++        let line = log.iter().find(|l| l.starts_with("read handle=0x0005")).expect("one read line");
++        assert!(line.contains(&format!("value={}0809", "07".repeat(99))));
++    }
+ }
+diff --git a/esp-soc/src/ble/vhci.rs b/esp-soc/src/ble/vhci.rs
+index a36586ae..1903f6a2 100644
+--- a/esp-soc/src/ble/vhci.rs
++++ b/esp-soc/src/ble/vhci.rs
+@@ -154,6 +154,7 @@ impl Ble {
+ 
+ pub fn install<B: VhciBus>(bus: &mut B) -> Result<(), String> {
+     let abi = B::abi();
++    bus.ble().session.controller.set_clock(abi.hz);
+     let b = bus.ble();
+     let (entry, init, buffer) = (b.entry, b.init, b.buffer);
+     let literals = [b.create, init + TASK, buffer + 4, b.delay, init + POLL, init + CREATED, buffer, 4096];
 diff --git a/esp-soc/src/machine.rs b/esp-soc/src/machine.rs
-index 1efbbaf8..c9246289 100644
+index 1efbbaf8..38cb6f48 100644
 --- a/esp-soc/src/machine.rs
 +++ b/esp-soc/src/machine.rs
-@@ -97,6 +97,10 @@ pub struct Machine<S: Soc> {
+@@ -15,6 +15,8 @@ mod web;
+ 
+ #[derive(Clone, Debug)]
+ pub enum ScriptAction { Gpio(u8, bool), Serial(String), Uart(usize, String), Stop, Touch(u16, u16, bool), Poke(u32, u32), TouchPad(u8, bool), Ble(String), Analog(u8, esp_periph::AnalogSource),
++    /// `udp <port> <hex>`: a datagram from the gateway to the station's port.
++    Udp(u16, Vec<u8>),
+     /// `waituart0 <timeout_s> <text>`: hold the rest of the script until UART0 prints `text` (or the
+     /// timeout passes), then shift every later action by the time actually waited. Fields: text,
+     /// timeout in cycles, the cycle the script placed it at.
+@@ -97,6 +99,10 @@ pub struct Machine<S: Soc> {
      /// that stops at a chip reset is not ended from the page.
      pub web_restart: bool,
      button_reset: bool,
@@ -154,7 +597,7 @@ index 1efbbaf8..c9246289 100644
      ws: WebState,
      pub rt: Realtime,
      debug_rom: bool,
-@@ -146,7 +150,7 @@ const BB_DEFAULT: u64 = match option_env!("ESP32SIM_BB_BUILD") {
+@@ -146,7 +152,7 @@ const BB_DEFAULT: u64 = match option_env!("ESP32SIM_BB_BUILD") {
  impl<S: Soc> Machine<S> {
      pub fn new(mac: [u8; 6], bus: S::Bus) -> Self {
          Machine {
@@ -163,7 +606,15 @@ index 1efbbaf8..c9246289 100644
              cores: (0..S::CORES).map(|i| S::new_core_with_bus(i, &bus)).collect(), core_held: (0..S::CORES).map(|i| i > 0).collect(), quantum: QUANTUM, run_steps: 0, vq_stats: [0; 4], vq_skip: 0, vq_penalty: 0, vq_max: std::env::var("ESP32SIM_VQ").ok().and_then(|v| v.parse().ok()).unwrap_or(VQ_DEFAULT),
              bb_max: std::env::var("ESP32SIM_BB").ok().and_then(|v| v.parse().ok()).unwrap_or(BB_DEFAULT).min(4096), bb_stats: [0; 8],
              bus, symbols: BTreeMap::new(),
-@@ -1066,9 +1070,21 @@ impl<S: Soc> Machine<S> {
+@@ -1052,6 +1058,7 @@ impl<S: Soc> Machine<S> {
+                 }
+                 ScriptAction::WaitUart0(..) => {}
+                 ScriptAction::Ble(command) => { if let Err(error) = self.bus.ble_command(&command) { eprintln!("[ble] {error}"); } }
++                ScriptAction::Udp(port, payload) => { if let Err(error) = self.bus.net_inject_udp(port, port, &payload) { eprintln!("[net] {error}"); } }
+             }
+         }
+         stopped
+@@ -1066,9 +1073,21 @@ impl<S: Soc> Machine<S> {
          // pacing clock live out of line.
          if self.web.is_some() && self.bus.cycles().wrapping_sub(self.ws.last_push_cycles) >= self.ws.push_interval { self.web_push_due(); }
          if self.rt.enabled && self.bus.cycles().wrapping_sub(self.rt.last_check) >= 1 << 16 { self.rt_pace(); }
@@ -185,3 +636,199 @@ index 1efbbaf8..c9246289 100644
      /// EX168 s4: the due branch of the display push, out of line (EX170 semantics: re-derive the
      /// interval from the board, then decide).
      #[cold]
+@@ -1172,6 +1191,14 @@ impl<S: Soc> Machine<S> {
+                     if !self.bus.ble_enabled() { return Err(format!("line {}: BLE requires --ble with the application ELF, or C3 --ble full", ln + 1)); }
+                     ev.push((c, ScriptAction::Ble(rest.to_string())));
+                 },
++                "udp" => {
++                    let mut p = rest.split_whitespace();
++                    let port: u16 = p.next().and_then(|x| x.parse().ok()).ok_or_else(|| format!("line {}: udp <port> <hex>", ln + 1))?;
++                    let hex = p.next().unwrap_or("");
++                    if hex.is_empty() || hex.len() % 2 != 0 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) { return Err(format!("line {}: udp payload must be hex bytes", ln + 1)); }
++                    let payload = (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap()).collect();
++                    ev.push((c, ScriptAction::Udp(port, payload)));
++                }
+                 "stop" => ev.push((c, ScriptAction::Stop)),
+                 "waituart0" => { let mut p = rest.splitn(2, char::is_whitespace); let to: f64 = p.next().and_then(|x| x.parse().ok()).ok_or_else(|| format!("line {}: waituart0 <timeout_s> <text>", ln + 1))?;
+                                  let text = p.next().unwrap_or("").trim().to_string(); if text.is_empty() { return Err(format!("line {}: waituart0 needs text", ln + 1)); }
+diff --git a/esp-soc/src/net.rs b/esp-soc/src/net.rs
+index f4567c61..b5e67063 100644
+--- a/esp-soc/src/net.rs
++++ b/esp-soc/src/net.rs
+@@ -27,6 +27,11 @@ pub struct VirtualNet {
+     pub arp_replies: u64,
+     pub pings: u64,
+     pub unhandled: u64,
++    /// UDP datagrams injected from the host side (script `udp`), and the station's MAC to send
++    /// them to, learnt from the first frame it sends.
++    pub injected_udp: u64,
++    station_mac: Option<[u8; 6]>,
++    inbound: Vec<Vec<u8>>,
+     now_us: u64,
+ }
+ 
+@@ -39,7 +44,7 @@ impl VirtualNet {
+     pub fn new(log: bool) -> Self {
+         VirtualNet { gw_mac: GATEWAY_MAC, gw_ip: [10, 0, 2, 2], dns_ip: [10, 0, 2, 3],
+                      sta_ip: [10, 0, 2, 15], mask: [255, 255, 255, 0],
+-                     log, nat: None, dhcp_acks: 0, dns_answers: 0, ntp_answers: 0, tcp_rejects: 0, arp_replies: 0, pings: 0, unhandled: 0, now_us: 0 }
++                     log, nat: None, dhcp_acks: 0, dns_answers: 0, ntp_answers: 0, tcp_rejects: 0, arp_replies: 0, pings: 0, unhandled: 0, injected_udp: 0, station_mac: None, inbound: Vec::new(), now_us: 0 }
+     }
+ 
+     /// Handle one Ethernet frame from the station; returns frames to send back to it.
+@@ -47,6 +52,7 @@ impl VirtualNet {
+         if eth.len() < 14 { return Vec::new(); }
+         self.now_us = now_us;
+         let mut src = [0u8; 6]; src.copy_from_slice(&eth[6..12]);
++        if src[0] & 1 == 0 { self.station_mac = Some(src); }
+         match be16(&eth[12..14]) {
+             0x0806 => self.arp(&eth[14..], &src),
+             0x0800 => self.ipv4(&eth[14..], &src),
+@@ -178,7 +184,21 @@ impl VirtualNet {
+     /// Pump the NAT's host sockets; returns frames for the guest.
+     pub fn poll(&mut self, now_us: u64) -> Vec<Vec<u8>> {
+         self.now_us = now_us;
+-        match &mut self.nat { Some(n) => n.poll(now_us), None => Vec::new() }
++        let mut out = std::mem::take(&mut self.inbound);
++        if let Some(n) = &mut self.nat { out.extend(n.poll(now_us)); }
++        out
++    }
++
++    /// Queue a UDP datagram from the gateway to the station; it goes out with the next poll.
++    pub fn inject_udp(&mut self, sport: u16, dport: u16, payload: &[u8]) -> Result<(), String> {
++        let Some(mac) = self.station_mac else { return Err("udp: the station has not joined the network yet".into()) };
++        if payload.len() > 1472 { return Err("udp: payload over 1472 bytes does not fit one frame".into()); }
++        let udp = udp_packet(&self.gw_ip, &self.sta_ip, sport, dport, payload);
++        let frame = self.frame(&mac, 0x0800, &ip_packet(17, &self.gw_ip, &self.sta_ip, &udp));
++        self.inbound.push(frame);
++        self.injected_udp += 1;
++        if self.log { eprintln!("[net] UDP {} bytes injected -> port {}", payload.len(), dport); }
++        Ok(())
+     }
+ 
+     /// Answer A queries with the local resolver address, so name lookups resolve to something that
+@@ -332,4 +352,26 @@ mod tests {
+         assert_eq!(checksum(&reply[0][14..34], 0), 0);
+         assert_eq!(checksum(&reply[0][34..], 0), 0);
+     }
++
++    #[test]
++    fn injected_udp_reaches_the_station_once_it_is_known() {
++        let mut net = VirtualNet::new(false);
++        assert!(net.inject_udp(1000, 6454, b"Art-Net").unwrap_err().contains("not joined"));
++        let station = [0x02, 0x11, 0x22, 0x33, 0x44, 0x55];
++        let mut arp = vec![0xff; 6]; arp.extend(station); arp.extend([0x08, 0x06]); arp.extend([0u8; 28]);
++        net.handle(&arp, 0);
++        net.inject_udp(1000, 6454, b"Art-Net\0").unwrap();
++        let out = net.poll(1);
++        assert_eq!(out.len(), 1);
++        let f = &out[0];
++        assert_eq!(&f[..6], &station, "to the station's MAC");
++        assert_eq!(be16(&f[12..14]), 0x0800);
++        let ip = &f[14..];
++        assert_eq!((ip[9], &ip[12..16], &ip[16..20]), (17, &net.gw_ip[..], &net.sta_ip[..]), "UDP from the gateway to the station");
++        let udp = &ip[20..];
++        assert_eq!((be16(udp), be16(&udp[2..])), (1000, 6454));
++        assert_eq!(&udp[8..], b"Art-Net\0");
++        assert!(net.poll(2).is_empty(), "sent once");
++        assert_eq!(net.injected_udp, 1);
++    }
+ }
+diff --git a/esp-soc/src/soc.rs b/esp-soc/src/soc.rs
+index 85020312..e3b01fad 100644
+--- a/esp-soc/src/soc.rs
++++ b/esp-soc/src/soc.rs
+@@ -108,6 +108,9 @@ pub trait SocBus: Bus {
+     /// Select host Ethernet transport instead of the built-in virtual network. Off by default.
+     /// Changing modes clears queued Ethernet frames; the selection survives chip reset.
+     fn set_ethernet_relay(&mut self, _enabled: bool) -> Result<(), String> { Err("this chip has no Ethernet transport".into()) }
++    /// A UDP datagram from the gateway (10.0.2.2:`sport`) to the station's `dport`, as a sender on
++    /// the access point's network would send it (script `udp`). Needs `--wifi` and an associated station.
++    fn net_inject_udp(&mut self, _sport: u16, _dport: u16, _payload: &[u8]) -> Result<(), String> { Err("this chip has no WiFi".into()) }
+     /// Drain complete Ethernet frames without FCS, in transmit order. Empty outside relay mode.
+     fn take_ethernet_frames(&mut self) -> Vec<Vec<u8>> { Vec::new() }
+     /// Queue a 14..=1518-byte Ethernet frame without FCS. Requires relay mode and an AP.
+diff --git a/esp-soc/src/wifi.rs b/esp-soc/src/wifi.rs
+index 4064004f..eaa385ac 100644
+--- a/esp-soc/src/wifi.rs
++++ b/esp-soc/src/wifi.rs
+@@ -434,6 +434,14 @@ impl StationLink {
+     pub fn ap_mut(&mut self) -> Option<&mut VirtualAp> { self.ap.as_mut() }
+     pub fn net(&self) -> Option<&crate::net::VirtualNet> { self.net.as_ref() }
+     pub fn net_mut(&mut self) -> Option<&mut crate::net::VirtualNet> { self.net.as_mut() }
++    /// `VirtualNet::inject_udp`, for the bus's `net_inject_udp`. The poll that sends it is forced due.
++    pub fn inject_udp(&mut self, sport: u16, dport: u16, payload: &[u8]) -> Result<(), String> {
++        if self.relay { return Err("udp: not available in Ethernet relay mode".into()); }
++        let net = self.net.as_mut().ok_or("udp: no WiFi network (use --wifi)")?;
++        net.inject_udp(sport, dport, payload)?;
++        self.net_polled_us = self.net_polled_us.wrapping_sub(NET_POLL_US);
++        Ok(())
++    }
+     pub fn relay(&self) -> bool { self.relay }
+     /// The descriptor the last received frame went into, 0 before the first one.
+     pub fn last_rx_desc(&self) -> u32 { self.last_rx_desc }
+@@ -536,7 +544,7 @@ impl StationLink {
+     pub fn report(&self) -> String {
+         let mut lines = Vec::new();
+         if self.tx_frames + self.rx_frames > 0 { lines.push(format!("[emu] wifi: {} frames sent by the station, {} received ({} dropped: no descriptor){}", self.tx_frames, self.rx_frames, self.rx_dropped, self.ap.as_ref().map_or(String::new(), |ap| format!("; AP: {} beacons, {} probe responses, {} data frames from the station, state {:?}", ap.stats.0, ap.stats.1, ap.stats.2, ap.state)))); }
+-        if let Some(n) = &self.net { lines.push(format!("[emu] net: {} DHCP leases, {} ARP replies, {} DNS answers, {} NTP answers, {} TCP refused, {} pings, {} frames ignored", n.dhcp_acks, n.arp_replies, n.dns_answers, n.ntp_answers, n.tcp_rejects, n.pings, n.unhandled));
++        if let Some(n) = &self.net { lines.push(format!("[emu] net: {} DHCP leases, {} ARP replies, {} DNS answers, {} NTP answers, {} TCP refused, {} pings, {} frames ignored, {} UDP injected", n.dhcp_acks, n.arp_replies, n.dns_answers, n.ntp_answers, n.tcp_rejects, n.pings, n.unhandled, n.injected_udp));
+             if let Some(t) = &n.nat { lines.push(format!("[emu] nat: {} TCP connections ({} failed), {} UDP flows ({} evicted, {} send errors), {} bytes out, {} bytes in", t.tcp_opened, t.tcp_refused, t.udp_flows, t.udp_evicted, t.udp_send_errors, t.bytes_to_host, t.bytes_to_guest)); } }
+         lines.join("\n")
+     }
+diff --git a/esp32/src/soc.rs b/esp32/src/soc.rs
+index a8565ee8..8f7802f8 100644
+--- a/esp32/src/soc.rs
++++ b/esp32/src/soc.rs
+@@ -66,6 +66,9 @@ impl esp_soc::SocBus for SocBus {
+     fn ble_enabled(&self) -> bool { !self.ble.hooks.is_empty() }
+     fn ble_pending_commands(&self) -> usize { self.ble.session.pending_commands() }
+     fn ble_command(&mut self, command: &str) -> Result<(), String> { self.ble.command(command, self.cycles, periph::CPU_HZ) }
++    fn net_inject_udp(&mut self, sport: u16, dport: u16, payload: &[u8]) -> Result<(), String> {
++        self.periph.wifi.link.inject_udp(sport, dport, payload)
++    }
+     fn attach_wifi(&mut self, cfg: esp_soc::wifi::ApConfig, nat: Option<esp_soc::nat::Nat>) -> Result<(), String> {
+         self.periph.wifi.link.attach_new(cfg, nat, &self.debug);
+         Ok(())
+diff --git a/esp32c3/src/soc.rs b/esp32c3/src/soc.rs
+index f565d526..9d0a8ee0 100644
+--- a/esp32c3/src/soc.rs
++++ b/esp32c3/src/soc.rs
+@@ -46,6 +46,9 @@ impl esp_soc::SocBus for SocBus {
+         if self.periph.ble_lc.enabled() { self.periph.ble_lc.command(command) }
+         else { self.ble.command(command, self.cycles, periph::CPU_HZ) }
+     }
++    fn net_inject_udp(&mut self, sport: u16, dport: u16, payload: &[u8]) -> Result<(), String> {
++        self.periph.wifi.link.inject_udp(sport, dport, payload)
++    }
+     fn attach_wifi(&mut self, cfg: esp_soc::wifi::ApConfig, nat: Option<esp_soc::nat::Nat>) -> Result<(), String> {
+         self.periph.wifi.link.attach_new(cfg, nat, &self.debug);
+         self.periph.refresh_work();
+diff --git a/esp32c6/src/soc.rs b/esp32c6/src/soc.rs
+index ed5d7226..ed8586d8 100644
+--- a/esp32c6/src/soc.rs
++++ b/esp32c6/src/soc.rs
+@@ -39,6 +39,9 @@ impl esp_soc::SocBus for SocBus {
+     fn ble_enabled(&self) -> bool { !self.ble.hooks.is_empty() }
+     fn ble_pending_commands(&self) -> usize { self.ble.session.pending_commands() }
+     fn ble_command(&mut self, command: &str) -> Result<(), String> { self.ble.command(command, self.cycles) }
++    fn net_inject_udp(&mut self, sport: u16, dport: u16, payload: &[u8]) -> Result<(), String> {
++        self.periph.wifi_mac.link.inject_udp(sport, dport, payload)
++    }
+     fn attach_wifi(&mut self, cfg: esp_soc::wifi::ApConfig, nat: Option<esp_soc::nat::Nat>) -> Result<(), String> {
+         self.periph.wifi_mac.link.attach_new(cfg, nat, &self.debug);
+         Ok(())
+diff --git a/esp32s3/src/soc.rs b/esp32s3/src/soc.rs
+index eb25f7bb..e444915f 100644
+--- a/esp32s3/src/soc.rs
++++ b/esp32s3/src/soc.rs
+@@ -62,6 +62,9 @@ impl esp_soc::SocBus for SocBus {
+     fn ble_enabled(&self) -> bool { !self.ble.hooks.is_empty() }
+     fn ble_pending_commands(&self) -> usize { self.ble.session.pending_commands() }
+     fn ble_command(&mut self, command: &str) -> Result<(), String> { self.ble.command(command, self.cycles, periph::CPU_HZ) }
++    fn net_inject_udp(&mut self, sport: u16, dport: u16, payload: &[u8]) -> Result<(), String> {
++        self.periph.wifi.link.inject_udp(sport, dport, payload)
++    }
+     fn attach_wifi(&mut self, cfg: esp_soc::wifi::ApConfig, nat: Option<esp_soc::nat::Nat>) -> Result<(), String> {
+         self.flush_ticks();
+         self.periph.wifi.link.attach_new(cfg, nat, &self.debug);

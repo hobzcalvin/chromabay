@@ -7,7 +7,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { ROOT, OUT_DIR, SERVICE_UUID, Script, build, check, checkHealthy, runEmu, TestFailure } from './lib/emu.mjs';
-import { endpointTable, discovered, handlesByName, propsText, patternChunks, timestampSync, playlistSync, onePattern } from './lib/protocol.mjs';
+import { decode as msgpackDecode, encode as msgpackEncode } from '@msgpack/msgpack';
+import { endpointTable, discovered, handlesByName, propsText, patternChunks, patternBytes, timestampSync, playlistSync, onePattern } from './lib/protocol.mjs';
 import { onWire, scaledRgb, fmt, framesIn, mean, uniform, close, timeline, describeTimeline, wasmRender, RING_LEDS } from './lib/leds.mjs';
 
 const S3 = 'esp32-s3-emu';
@@ -95,6 +96,25 @@ const solid = (name, hue, sat = 255) =>
   onePattern(name, 'gradient', { start_hue: hue, end_hue: hue, start_sat: sat, end_sat: sat, start_val: 255, end_val: 255 });
 const ramp = (name) =>
   onePattern(name, 'gradient', { angle: 0, start_hue: 0, end_hue: 255, start_sat: 255, end_sat: 160, start_val: 255, end_val: 40 });
+const WIFI_SSID = 'chromabay-ci', WIFI_PASS = 'emulated-ap';
+
+/** Art-Net OpDmx (Art-Net 4): "Art-Net\0", opcode 0x5000 LE, protocol 14, seq, physical, universe LE, length BE. */
+function artnetDmx(universe, data) {
+  const b = Buffer.alloc(18 + data.length);
+  b.write('Art-Net\0', 0, 'latin1');
+  b.writeUInt16LE(0x5000, 8); b.writeUInt16BE(14, 10);
+  b.writeUInt16LE(universe, 14); b.writeUInt16BE(data.length, 16);
+  Buffer.from(data).copy(b, 18);
+  return b.toString('hex');
+}
+/** DDP push: flags V1|PUSH, type RGB 8-bit, id 1 (default output), byte offset and length BE. */
+function ddpPush(byteOffset, data) {
+  const b = Buffer.alloc(10 + data.length);
+  b[0] = 0x41; b[2] = 0x0b; b[3] = 1;
+  b.writeUInt32BE(byteOffset, 4); b.writeUInt16BE(data.length, 8);
+  Buffer.from(data).copy(b, 10);
+  return b.toString('hex');
+}
 const STRIP = 64; // the default config's strip: 64 LEDs on the emu LED pin, rendered as 64x1
 
 /** What the ring should show for a one-node pattern at brightness `bri`, per the WASM engine. */
@@ -278,6 +298,54 @@ export const scenarios = [
   },
 
   {
+    name: 'pattern-sync',
+    what: 'an animated pattern (start hue swept by a sawtooth automation) after a TIMESTAMP_SYNC: every frame the device shows is the WASM preview\'s frame at the synced clock, within one steady offset',
+    async run() {
+      const h = await handles(S3);
+      const MOD = { s: 2, lo: 0, hi: 255, pr: 4, sd: 7 }; // SAWTOOTH 0..255 every 4 s
+      const p = onePattern('EmuSweep', 'gradient', { start_hue: 0, end_hue: 160, start_sat: 255, end_sat: 255, start_val: 255, end_val: 255 });
+      p.nodes[0].m = { start_hue: MOD };
+      const TS = 4.0, FRAME_MS = 1000;   // synced clock = 1000 ms at the sync: hue 64 → 255 over the next 3 s
+      const sc = new Script().connect(CONNECT).write(3.1, need(h, 'BRIGHTNESS').handle, [255]);
+      pushPattern(sc, 3.2, h, p, false);
+      sc.write(TS, need(h, 'TIMESTAMP_SYNC').handle, timestampSync(FRAME_MS));
+      const run = await runEmu({ name: this.name, images: build(S3), ble: true, board: 'atech14', script: sc, seconds: 7.0 });
+      checkHealthy(run);
+      const tSync = run.bleOf('written').find((w) => w.handle === need(h, 'TIMESTAMP_SYNC').handle)?.t;
+      check(tSync, 'timestamp write never completed', run);
+
+      // One device frame = one run of dither sub-frames; its mean is what the renderer produced.
+      const runs = [];
+      for (const f of framesIn(run, tSync + 0.3, tSync + 2.8)) {
+        const last = runs.at(-1);
+        if (last && last.frames.at(-1).leds.every((c, i) => close(c, f.leds[i], 1))) last.frames.push(f);
+        else runs.push({ t: f.t, frames: [f] });
+      }
+      check(runs.length >= 30, `only ${runs.length} distinct frames in 2.5 s of an animated pattern`, run);
+      const cache = new Map();
+      const render = async (ms) => {
+        if (!cache.has(ms)) cache.set(ms, (await wasmRender('gradient', p.nodes[0].p, { width: STRIP, timestampMs: ms, mods: p.nodes[0].m })).slice(0, RING_LEDS).map(onWire));
+        return cache.get(ms);
+      };
+      const offsets = [];
+      for (const r of runs.slice(1, -1)) {          // first and last may be cut by the window
+        const got = mean(r.frames);
+        const clock = Math.round(FRAME_MS + (r.t - tSync) * 1000); // the synced clock when it went out
+        let best = { err: Infinity, dt: 0 };
+        for (let dt = -150; dt <= 20; dt++) {      // rendered a little before it is shown
+          const want = await render(clock + dt);
+          const err = Math.max(...got.flatMap((c, i) => c.map((v, k) => Math.abs(v - want[i][k]))));
+          if (err < best.err) best = { err, dt };
+        }
+        check(best.err <= 2, () => `device frame at t=${r.t.toFixed(3)} (synced ${clock} ms) matches no WASM frame within 150 ms (best error ${best.err.toFixed(1)} at ${best.dt} ms):\n  got ${got.map(fmt).join(' ')}`, run);
+        offsets.push(best.dt);
+      }
+      const spread = Math.max(...offsets) - Math.min(...offsets);
+      check(spread <= 60, `frame-to-clock offset wanders by ${spread} ms (${Math.min(...offsets)}..${Math.max(...offsets)}); the device is not following the synced clock`, run);
+    },
+  },
+
+  {
     name: 'brightness',
     what: 'changing brightness while a pattern plays scales the ring output (255 → 64 → 8 → 0)',
     async run() {
@@ -345,6 +413,77 @@ export const scenarios = [
   },
 
   {
+    name: 'library-dump',
+    what: 'patterns stored over PATTERN_SYNC come back byte for byte from LIBRARY_DUMP (MTU 517, the app\'s [idx][total][offset] reassembly, done sentinel)',
+    async run() {
+      const h = await handles(S3);
+      const ps = need(h, 'PATTERN_SYNC'), D = need(h, 'LIBRARY_DUMP');
+      const pats = [solid('Dump_A', 10), ramp('Dump_B'), solid('Dump_C', 200, 90)];
+      const sc = new Script().connect(CONNECT).mtu(3.05, 517).subscribe(3.1, ps.ccc).subscribe(3.1, D.ccc);
+      for (const p of pats) pushPattern(sc, 3.2, h, p, true);
+      sc.awaitNotify(3.2, ps.handle, pats.length).write(3.2, D.handle, [0]);
+      const run = await runEmu({ name: this.name, images: build(S3), ble: true, board: 'atech14', script: sc, seconds: 8 });
+      checkHealthy(run);
+      const frames = run.bleOf('notify').filter((n) => n.handle === D.handle).map((n) => n.value);
+      check(frames.length && frames.at(-1)[0] === 0xff, () => `no done sentinel from LIBRARY_DUMP (${frames.length} frames)`, run);
+      const bufs = new Map();
+      for (const f of frames.slice(0, -1)) {
+        const idx = f[0], total = f.readUInt16LE(1), off = f.readUInt16LE(3);
+        if (!bufs.has(idx)) bufs.set(idx, { buf: Buffer.alloc(total), got: 0 });
+        const e = bufs.get(idx);
+        f.copy(e.buf, off, 5);
+        e.got += f.length - 5;
+      }
+      check(bufs.size === pats.length, `dump returned ${bufs.size} patterns, ${pats.length} were stored`, run);
+      const want = new Map(pats.map((p) => [p.meta.name, Buffer.from(patternBytes(p, true))]));
+      for (const [idx, e] of bufs) {
+        check(e.got === e.buf.length, `pattern ${idx}: ${e.got} of ${e.buf.length} bytes arrived`, run);
+        const got = msgpackDecode(e.buf);
+        const w = want.get(got?.meta?.name);
+        check(w, `dump returned an unknown pattern ${JSON.stringify(got?.meta)}`, run);
+        check(w.equals(e.buf), () => `pattern ${got.meta.name} differs from what was pushed:\n  sent ${w.toString('hex')}\n  got  ${e.buf.toString('hex')}`, run);
+      }
+      check(run.has(`[LibDump] sent ${pats.length}/${pats.length} patterns`), 'the device did not report the whole dump sent', run);
+    },
+  },
+
+  {
+    name: 'stream',
+    what: 'over Wi-Fi (esp32sim\'s virtual AP), Art-Net and DDP frames reach a dithered strip as raw values scaled by global brightness, then the pattern resumes after the stream timeout (bug 1, streaming half)',
+    async run() {
+      const h = await handles(S3);
+      const BRI = 128;
+      const shown = solid('EmuStreamBase', 96);
+      const sc = new Script().connect(CONNECT).mtu(3.05, 517).write(3.1, need(h, 'BRIGHTNESS').handle, [BRI]);
+      pushPattern(sc, 3.2, h, shown, false); // becomes the boot pattern once saved, so it plays on the Wi-Fi boot
+      // After the brightness (1.5 s settle) and the pattern (2 s debounce) are saved, switch transport: the device reboots
+      // into Wi-Fi mode and joins the virtual AP given by --wifi below.
+      sc.write(6.0, need(h, 'COMM_CONFIG').handle, msgpackEncode({ mode: 'wifi', ssid: WIFI_SSID, pass: WIFI_PASS, rtproto: 5, rtto: 2 }));
+      const art = Array.from({ length: RING_LEDS }, (_, i) => [20 * i + 10, 250 - 20 * i, (37 * i) & 0xff]);
+      const ddp = Array.from({ length: 6 }, (_, i) => [200, 30 * i, 255 - 40 * i]);
+      const T_ART = 11.0, T_DDP = 12.0, DDP_AT = 4;
+      sc.at(T_ART, `udp 6454 ${artnetDmx(0, art.flat())}`);
+      sc.at(T_DDP, `udp 4048 ${ddpPush(DDP_AT * 3, ddp.flat())}`);
+      const run = await runEmu({ name: this.name, images: build(S3), ble: true, board: 'atech14', script: sc, seconds: 15.5,
+                                 extra: ['--wifi', `ssid=${WIFI_SSID},psk=${WIFI_PASS}`] });
+      checkHealthy(run, { expectedResets: 1 });
+      for (const l of ['[WiFi] connected: 10.0.2.15', 'Transport: WiFi/TCP', '[RtStream] started proto=5']) {
+        check(run.has(l, 1), () => `Wi-Fi boot: missing "${l}"\n${run.console(1).slice(-25).join('\n')}`, run);
+      }
+      check(!run.has('could not receive data'), 'the stream loop polled a UDP socket it never opened (EBADF on every pass)', run);
+      check(consoleBrightness(run, 1) === BRI, `Wi-Fi boot brightness ${consoleBrightness(run, 1)}, expected ${BRI}`, run);
+      const wire = (c) => onWire(scaledRgb(c, BRI));
+      checkRing(run, ringMean(run, T_ART + 0.2, T_ART + 0.8, 'Art-Net'), art.map(wire), 1, 'Art-Net frame (raw x brightness, no gamma)', T_ART + 0.2, T_ART + 0.8);
+      const afterDdp = art.map((c, i) => (i >= DDP_AT && i < DDP_AT + ddp.length ? ddp[i - DDP_AT] : c));
+      checkRing(run, ringMean(run, T_DDP + 0.2, T_DDP + 0.8, 'DDP'), afterDdp.map(wire), 1, `DDP frame at pixel ${DDP_AT}`, T_DDP + 0.2, T_DDP + 0.8);
+      // Before the stream, and rtto = 2 s after its last packet, the boot pattern plays.
+      const pattern = await expectedRing(shown, BRI);
+      checkRing(run, ringMean(run, T_ART - 1.0, T_ART - 0.2, 'before the stream'), pattern, 1.5, 'the boot pattern before streaming', T_ART - 1.0, T_ART - 0.2);
+      checkRing(run, ringMean(run, T_DDP + 2.6, T_DDP + 3.2, 'after the stream timeout'), pattern, 1.5, 'the pattern is back 2 s after the stream stops', T_DDP + 2.6, T_DDP + 3.2);
+    },
+  },
+
+  {
     name: 'blink-calibration',
     what: 'Blink Pins toggles the LED data pin for 10 s and restores the strip; calibration flashes steady and structured-light frames and stops',
     async run() {
@@ -386,6 +525,75 @@ export const scenarios = [
       check(run.has('[Calib] STOP'), 'calibration did not stop', run);
       checkRing(run, ringMean(run, 17.8, 18.3, 'after calibration'), want, 1.5, 'after calibration stops the pattern is back', 17.8, 18.3);
       check((run.report.rmtTx ?? 0) > 100, `RMT transmitted only ${run.report.rmtTx} frames`, run);
+    },
+  },
+
+  {
+    name: 'ota-unsigned',
+    what: 'a full BLE OTA the way the app streams it (MTU 517, 500-byte write-without-response chunks, 8 in flight, paced by the device\'s acks), END_OTA_UNSIGNED: the device reboots into the new slot and marks it valid',
+    async run() {
+      const h = await handles(S3);
+      const image = fs.readFileSync(build(S3).app);
+      const sc = otaScript(h, image);
+      const end = sc.lastT;
+      sc.write(end, need(h, 'OTA_CONTROL').handle, 'END_OTA_UNSIGNED');
+      const run = await runEmu({ name: this.name, images: build(S3), ble: true, board: 'atech14', script: sc, seconds: OTA_SECONDS + 8 });
+      checkHealthy(run, { expectedResets: 1 });
+      otaReboot.set(S3, run.resets[0].t);
+      checkOtaTransfer(run, h, image);
+      const status = otaStatus(run, h);
+      check(status.includes('OTA_UNSIGNED_ACCEPTED') && status.includes('OTA_SUCCESS_REBOOTING'),
+        () => `OTA status notifications: ${status.join(', ') || 'none'} (want OTA_UNSIGNED_ACCEPTED, OTA_SUCCESS_REBOOTING)`, run);
+      // The new slot boots, checks itself and cancels the rollback.
+      check(run.has('Boot: running app0 at 0x10000', 0), 'the first boot was not from app0', run);
+      check(run.has('Boot: running app1 at 0x290000', 1), () => `after the OTA the device did not boot the new slot (app1):\n${run.find(/Boot: running.*/, 1)?.[0]}`, run);
+      for (const l of ['Boot: Firmware PENDING VERIFICATION', 'All systems OK - marking firmware as valid', 'Setup complete']) {
+        check(run.has(l, 1), () => `after the OTA reboot: missing "${l}"\n${run.console(1).slice(-30).join('\n')}`, run);
+      }
+      check(!run.has('Boot: Firmware PENDING VERIFICATION', 0), 'the first boot was already pending verification', run);
+    },
+  },
+
+  {
+    name: 'ota-rollback',
+    what: 'an OTA whose new image never finishes its first boot (reset 1.5 s in, before "All systems OK") is rolled back by the bootloader to the previous slot',
+    async run() {
+      const h = await handles(S3);
+      const image = fs.readFileSync(build(S3).app);
+      // esp32sim is deterministic, so the reboot comes at the same emulated time as in a plain
+      // unsigned OTA of this build: measure it (or reuse ota-unsigned's), then cut the next boot short.
+      const tReboot = await otaRebootTime(h, image);
+      const sc = otaScript(h, image);
+      sc.write(sc.lastT, need(h, 'OTA_CONTROL').handle, 'END_OTA_UNSIGNED');
+      sc.reboot(tReboot + 1.5);
+      const run = await runEmu({ name: this.name, images: build(S3), ble: true, board: 'atech14', script: sc, seconds: tReboot + 6 });
+      checkHealthy(run, { expectedResets: 2 });
+      check(Math.abs(run.resets[0].t - tReboot) < 0.001, `the OTA reboot moved (t=${run.resets[0].t}, measured ${tReboot}): is the emulator still deterministic?`, run);
+      check(run.has('Boot: running app1 at 0x290000', 1) && run.has('Boot: Firmware PENDING VERIFICATION', 1),
+        'the interrupted boot was not the new, pending image', run);
+      check(!run.has('marking firmware as valid', 1), 'the new image was marked valid before the interruption — reset earlier', run);
+      check(run.has('Boot: running app0 at 0x10000', 2), () => `after the interrupted first boot the bootloader did not roll back to app0:\n${run.find(/Boot: running.*/, 2)?.[0]}`, run);
+      check(!run.has('PENDING VERIFICATION', 2) && run.has('Setup complete', 2), 'the rolled-back image did not boot normally', run);
+    },
+  },
+
+  {
+    name: 'ota-bad-signature',
+    what: 'the same transfer finalized with END_OTA and a wrong signature is refused (OTA_ERR_SIG_INVALID) and the device keeps running the old image',
+    async run() {
+      const h = await handles(S3);
+      const image = fs.readFileSync(build(S3).app);
+      const sc = otaScript(h, image);
+      const end = sc.lastT;
+      sc.write(end, need(h, 'OTA_SIGNATURE').handle, new Uint8Array(64).fill(0x5a));
+      sc.write(end, need(h, 'OTA_CONTROL').handle, 'END_OTA');
+      const run = await runEmu({ name: this.name, images: build(S3), ble: true, board: 'atech14', script: sc, seconds: OTA_SECONDS + 6 });
+      checkHealthy(run);
+      checkOtaTransfer(run, h, image);
+      const status = otaStatus(run, h);
+      check(status.includes('OTA_SIG_RECEIVED') && status.includes('OTA_ERR_SIG_INVALID') && !status.includes('OTA_SUCCESS_REBOOTING'),
+        () => `OTA status notifications: ${status.join(', ') || 'none'} (want OTA_SIG_RECEIVED then OTA_ERR_SIG_INVALID, and no reboot)`, run);
+      check(run.resets.length === 0, 'the device rebooted after a refused update', run);
     },
   },
 
@@ -464,6 +672,54 @@ export const scenarios = [
     },
   },
 ];
+
+// ---- OTA ------------------------------------------------------------------------------------
+
+// What the app does (streamFirmwareOverBle in src/lib/ble.ts): 500-byte chunks written without
+// response, at most OTA_WINDOW = 8 unacknowledged, each acked by a notify on OTA_DATA.
+const OTA_CHUNK = 500, OTA_WINDOW = 8;
+const OTA_SECONDS = 70; // emulated time for the transfer (~60 s for 1.3 MB at the paced link rate)
+
+function otaScript(h, image) {
+  const data = need(h, 'OTA_DATA'), st = need(h, 'OTA_STATUS');
+  const sc = new Script().connect(CONNECT).mtu(CONNECT + 0.05, 517)
+    .subscribe(CONNECT + 0.1, data.ccc).subscribe(CONNECT + 0.1, st.ccc);
+  const t = CONNECT + 0.2;
+  const chunks = Math.ceil(image.length / OTA_CHUNK);
+  for (let k = 0; k < chunks; k++) {
+    if (k >= OTA_WINDOW) sc.awaitNotify(t, data.handle, k - OTA_WINDOW + 1); // room in the window
+    sc.writeCmd(t, data.handle, image.subarray(k * OTA_CHUNK, (k + 1) * OTA_CHUNK));
+  }
+  sc.awaitNotify(t, data.handle, chunks); // every chunk acked
+  sc.lastT = t;                           // BLE commands queue, so the finalize goes at the same time
+  return sc;
+}
+
+const otaReboot = new Map();
+async function otaRebootTime(h, image) {
+  if (!otaReboot.has(S3)) {
+    const sc = otaScript(h, image);
+    sc.write(sc.lastT, need(h, 'OTA_CONTROL').handle, 'END_OTA_UNSIGNED');
+    const run = await runEmu({ name: 'ota-reboot-timing', images: build(S3), ble: true, board: 'atech14', script: sc, seconds: OTA_SECONDS + 4 });
+    check(run.resets.length === 1, 'measuring the OTA reboot: the device did not reboot', run);
+    otaReboot.set(S3, run.resets[0].t);
+  }
+  return otaReboot.get(S3);
+}
+
+function otaStatus(run, h) {
+  const st = need(h, 'OTA_STATUS').handle;
+  return run.bleOf('notify').filter((n) => n.handle === st).map((n) => n.value.toString());
+}
+
+function checkOtaTransfer(run, h, image) {
+  const acks = run.bleOf('notify').filter((n) => n.handle === need(h, 'OTA_DATA').handle).length;
+  const chunks = Math.ceil(image.length / OTA_CHUNK);
+  check(run.bleOf('other').every((e) => !/exceeds ATT_MTU/.test(e.text)), 'a chunk did not fit the negotiated MTU', run);
+  check(run.ble.some((e) => e.kind === 'other' && e.text === 'mtu 517'), 'the MTU exchange did not reach 517', run);
+  check(acks === chunks, () => `the device acked ${acks} of ${chunks} chunks (${image.length} bytes)\n${run.tail(15)}`, run);
+  check(run.has('First OTA data packet received. Starting OTA process...'), 'the OTA never started', run);
+}
 
 // ---- Boot-to-NimBLE checks (no BLE controller) ---------------------------------------------
 

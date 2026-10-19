@@ -50,18 +50,27 @@ export function build(env) {
 
 /** An esp32sim --script, in emulated seconds. BLE commands queue and run one at a time. */
 export class Script {
-  constructor(chip = 's3') { this.chip = chip; this.lines = []; }
+  constructor(chip = 's3') { this.chip = chip; this.lines = []; this.attMtu = 23; }
   at(t, cmd) { this.lines.push([t, cmd]); return this; }
   connect(t) { return this.at(t, 'ble connect'); }
   discover(t) { return this.at(t, 'ble discover'); }
   read(t, handle) { return this.at(t, `ble read ${hex16(handle)}`); }
   readLong(t, handle) { return this.at(t, `ble read-long ${hex16(handle)}`); }
   subscribe(t, ccc) { return this.at(t, `ble subscribe ${hex16(ccc)}`); }
-  write(t, handle, bytes) {
+  /** Exchange MTU, offering `mtu`. Later writes may then carry up to MTU - 3 bytes (the
+   *  firmware offers 517, so the result is what we offer). */
+  mtu(t, mtu) { this.attMtu = mtu; return this.at(t, `ble mtu ${mtu}`); }
+  write(t, handle, bytes) { return this.at(t, `ble write ${hex16(handle)} ${this.#payload(bytes)}`); }
+  /** Write Command: no response, like the app's writeWithoutResponse. */
+  writeCmd(t, handle, bytes) { return this.at(t, `ble write-cmd ${hex16(handle)} ${this.#payload(bytes)}`); }
+  /** Hold later BLE commands until `count` notifications in all have arrived on `handle`. */
+  awaitNotify(t, handle, count) { return this.at(t, `ble await-notify ${hex16(handle)} ${count}`); }
+  #payload(bytes) {
     const b = toBytes(bytes);
-    // The virtual link is ATT MTU 23: one write carries at most 20 bytes. Chunk before here.
-    if (b.length === 0 || b.length > 20) throw new Error(`BLE write of ${b.length} bytes: must be 1..20 (MTU 23)`);
-    return this.at(t, `ble write ${hex16(handle)} ${Buffer.from(b).toString('hex')}`);
+    // One ATT write carries at most ATT_MTU - 3 bytes: 20 until an mtu exchange. Chunk before here.
+    const max = this.attMtu - 3;
+    if (b.length === 0 || b.length > max) throw new Error(`BLE write of ${b.length} bytes: must be 1..${max} (MTU ${this.attMtu})`);
+    return Buffer.from(b).toString('hex');
   }
   /** A software system reset, as the firmware's own esp_restart() would cause. Flash survives. */
   reboot(t) { return this.at(t, CHIPS[this.chip].resetPoke); }
@@ -217,7 +226,10 @@ function unRust(s) {
 const FATAL = [
   /Guru Meditation/, /panic'ed/, /abort\(\) was called/, /assert failed:/, /Backtrace:/,
   /Task watchdog got triggered/, /task_wdt:/, /CORRUPT HEAP/, /Stack canary watchpoint/,
-  /stack overflow/i, /Brownout detector/, /rst:0x[0-9a-f]+ \((?:TG0WDT|TG1WDT|RTCWDT|RTC_WDT|INT_WDT|TASK_WDT|SW_CPU|RTC_SW_CPU|SUPER_WDT)/,
+  /stack overflow/i, /Brownout detector/,
+  // Watchdog boot causes. A software CPU reset is also what esp_restart() (an OTA) leaves, so it
+  // is not fatal by itself: a panic says so above, and resets are counted against the expected.
+  /rst:0x[0-9a-f]+ \((?:TG0WDT|TG1WDT|RTCWDT|RTC_WDT|INT_WDT|TASK_WDT|SUPER_WDT)/,
 ];
 
 /**

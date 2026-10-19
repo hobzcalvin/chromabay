@@ -15,7 +15,7 @@ esp32sim pinned at `f535f3b42293a76ab64c231a0425f35857ab6cf1`.
 esp32/test/emu/setup-esp32sim.sh                          # clone + patch + build esp32sim, fetch ROMs
 (cd esp32 && pio run -e esp32-s3-emu -e esp32-c3-emu -e esp32dev)
 npm ci                                                    # the tests use the app's msgpack + WASM
-node esp32/test/emu/run.mjs                               # all scenarios, ~30 s
+node esp32/test/emu/run.mjs                               # all scenarios, ~2 min (the three OTAs are most of it)
 node esp32/test/emu/run.mjs selftest roundtrip            # some; --list names them
 ```
 
@@ -35,18 +35,29 @@ what happened, including the ring's colours over time for LED checks.
 | `roundtrip` | Brightness write/read (default 20); device info JSON (`fw_ver`, `chip`, `name`, `feat`, via Read Blob); comm config JSON; button pin write/read; device name write/read, renaming long→short→long→short, with each new advert carrying exactly one name (**bug 2 regression**). Then a reboot: name, brightness and button pin persist and the boot advert uses the new name |
 | `selftest` | The power-on R, G, B frames reach a dithered 64-LED strip in order, ~0.5 s each at the default brightness, then black (**bug 1 regression**). The expected wire colours encode the current colour order (see finding 3) |
 | `pattern` | Patterns pushed in the app's wire format (`@msgpack/msgpack`, `[u16 total][u16 offset]` chunks of 20 bytes) play, and the ring matches the app's WASM engine (`static/native/`) pixel for pixel: a solid colour and a hue/saturation/value ramp |
+| `pattern-sync` | An animated pattern (a gradient whose start hue a sawtooth automation sweeps) after a TIMESTAMP_SYNC: every frame the device shows matches the WASM preview's frame at the synced clock within 2 levels, with one steady offset (≤ 60 ms spread). Checks shape, automation maths and clock sync together; a clock off by 500 ms fails it |
 | `brightness` | Brightness changes mid-pattern scale the ring: 255 → 64 → 8 → 0 (black, then no more frames) |
 | `playlist` | Two library pushes (both acknowledged on PATTERN_SYNC), a TIMESTAMP_SYNC and a 2 s PLAYLIST_SYNC: the ring goes A, B, A, B with each switch within 150 ms of the synced clock's boundary |
+| `library-dump` | Three patterns stored over PATTERN_SYNC come back byte for byte from LIBRARY_DUMP at MTU 517, reassembled as `pullDeviceLibrary` does, ending with the done sentinel |
+| `stream` | The device switches to Wi-Fi over COMM_CONFIG, reboots and joins esp32sim's virtual AP. An Art-Net frame and then a DDP frame at a pixel offset reach the dithered strip as raw values × global brightness (128), the boot pattern plays before the stream and is back 2 s (`rtto`) after it stops, and no unopened socket is polled. **Bug 1, streaming half** |
 | `blink-calibration` | Blink Pins drives the LED pin by GPIO for 10 s (≥ 9 edges, no RMT frames meanwhile) and restores the pattern. Calibration mode 2 holds every LED at the requested level, mode 1 shows the all-on frame and the bit-plane frames (LED *i* lit iff bit *b* of *i*), and STOP restores the pattern |
+| `ota-unsigned` | A full BLE OTA of the S3 emu image the way the app streams it: MTU 517, 500-byte writes without response, at most 8 unacknowledged, each next one released by the device's ack notification; `END_OTA_UNSIGNED`. The device reports `OTA_UNSIGNED_ACCEPTED`, `OTA_SUCCESS_REBOOTING`, boots app1 (it was on app0), finds it PENDING VERIFICATION and marks it valid |
+| `ota-rollback` | The same update, with the new image's first boot cut short by a reset 1.5 s in, before it marks itself valid: the bootloader rolls back to app0, which boots normally. **Finding 4** |
+| `ota-bad-signature` | The same transfer, a wrong 64-byte signature and `END_OTA`: `OTA_SIG_RECEIVED`, then `OTA_ERR_SIG_INVALID`, and no reboot |
 | `c3-boot` | ESP32-C3 (single core) boots with BLE, advertises, connects and serves device info with `chip: esp32c3` |
 | `esp32-boot` | Classic ESP32 (`esp32dev`, the release env) boots through LittleFS, config, LEDs and the renderer to `NimBLEDevice::init`, cleanly. See the limits below for what happens next |
 | `release-images` | The factory images listed in the published manifest (`https://chromabay.app/firmware/esp32/chromabay-manifest.json`, i.e. gh-pages) boot to the NimBLE init on S3, C3 and ESP32, and report the manifest's version. No ELF, so no BLE |
 | `lane-repack` | `esp32/test/lane_repack_test.cpp`, the host test of the lane re-packer, compiled with the host C++ compiler and run |
 
-Both bug regressions were checked against the unfixed code. With the old `led_manager.h`,
-`selftest` fails with "expected 3 coloured test frames, saw 0" and the ring is black throughout.
-With the old `processDeviceName()`, `roundtrip` fails with
-`advert … carries 2 name(s) "EmuLight", "EmuLight\u0000_1B44"`.
+Every regression was checked against the unfixed code:
+
+- old `led_manager.h`: `selftest` fails ("expected 3 coloured test frames, saw 0", ring black
+  throughout), and `stream` fails with the ring frozen on the pattern instead of the stream;
+- old `processDeviceName()`: `roundtrip` fails (`advert … carries 2 name(s) "EmuLight",
+  "EmuLight\u0000_1B44"`);
+- the sACN socket polled while closed: `stream` fails ("polled a UDP socket it never opened");
+- `verifyRollbackLater()` missing (or, as first written, without `extern "C"`): `ota-unsigned`
+  fails (the new image boots VALID, never PENDING VERIFICATION) and so does `ota-rollback`.
 
 ## How the tests see the device
 
@@ -72,8 +83,8 @@ published or uploaded to Sentry.
 
 ### Patches to esp32sim
 
-`esp32/test/emu/patches/` holds a small patch applied on top of the pin by
-`setup-esp32sim.sh`. Both parts are general and could go upstream:
+`esp32/test/emu/patches/esp32sim-test-hooks.patch` is applied on top of the pin by
+`setup-esp32sim.sh`. Everything in it is general, with unit tests, and is offered upstream:
 
 - `ESP32SIM_LED_LOG=1` prints every decoded ring update as
   `[leds] t=<s> n=<update> [[r,g,b],...]`, at emulated time. `--web` would also stream frames,
@@ -82,6 +93,16 @@ published or uploaded to Sentry.
 - `ble read-long HANDLE` does a Read, then Read Blob requests until a reply is shorter than
   MTU − 1, and logs one `read` line with the whole value. Without it, device info, comm config
   and other JSON values come back truncated at 22 bytes.
+- `ble mtu N` (MTU exchange as the client), `ble write-cmd HANDLE HEX` (Write Command, i.e.
+  write without response) and `ble await-notify HANDLE COUNT` (hold later commands until that
+  many notifications have arrived). Together they express the app's ack-paced OTA window in a
+  fixed script.
+- Controller → host data split into 251-byte ACL packets, and paced to four per 30 ms
+  connection event once the guest clock is known. Without the pacing, eight 500-byte writes
+  (24 ACL packets) landed before NimBLE's host task ran, exhausted its ACL buffers and reset the
+  host (`rc=12`) on the ninth chunk; real links spread a burst over connection events.
+- `udp PORT HEX`, a script command that sends a datagram from the virtual AP's gateway to the
+  station, at an exact emulated time. That is how `stream` sends Art-Net and DDP.
 
 ### Scripts, handles and reboots
 
@@ -141,17 +162,36 @@ These came out of the first session in the emulator. Each was traced to the firm
    `onWire()` / `WIRE_SWAPS_RG` in `esp32/test/emu/lib/leds.mjs`. If the colour order is changed
    on purpose, flip that, and `selftest` and `pattern` check the new order.
 
+4. **Fixed: OTA rollback never happened.** arduino-esp32 2.x's `initArduino()` marks a pending
+   OTA image valid *before* `setup()` runs, unless the sketch overrides the weak
+   `verifyRollbackLater()`. So the firmware's own "PENDING VERIFICATION → check critical systems
+   → roll back" block in `setup()` was dead code: a release that failed or crashed during setup
+   was already valid and the bootloader never went back. `main.cpp` now defines
+   `extern "C" bool verifyRollbackLater() { return true; }` (the `extern "C"` matters: the weak
+   default is C and nothing declares it, so a C++ definition silently overrides nothing). A new
+   image now stays pending until "All systems OK"; a first boot that never gets there is rolled
+   back on the next reset. The one new behaviour: power lost during a new image's first ~3 s
+   also rolls back, to the firmware that was running before, which is harmless. Each boot also
+   logs `Boot: running app0|app1 at 0x…`.
+
+5. **Fixed: closed UDP sockets polled on every loop pass.** With streaming on but not every
+   protocol enabled (say Art-Net + DDP), `RtStream::tick()` still called `parsePacket()` on the
+   sACN socket, which `begin()` never opened: EBADF and a `could not receive data: 9` log line
+   per pass. Each socket is now polled only if its protocol was started.
+
+6. **Open, minor: with an empty library, a stream's last frame stays on after the timeout.**
+   `render()` returns early when there is no pattern, so after `rtto` nothing replaces the
+   streamed frame. With a pattern loaded it comes back as it should (`stream` checks that). Some
+   controllers hold the last frame on purpose; going dark instead would be a one-line blank on
+   the stream-to-pattern transition.
+
 ## Limits and future work
 
-- **Wi-Fi.** esp32sim joins a virtual AP and NATs outbound traffic, but has no inbound port
-  forwarding, so a host process can't reach the device's WebSocket server or send it
-  Art-Net/sACN/DDP. Wi-Fi transport tests and streaming tests (which would cover bug 1's other
-  victim end to end) wait for inbound forwarding or mDNS upstream.
-- **MTU 23.** The virtual link never negotiates the firmware's MTU 517. Writes carry at most
-  20 bytes, so pattern pushes are chunked to 16 payload bytes (they work), and notifications are
-  truncated to 20 bytes, so LIBRARY_DUMP isn't tested. The virtual central only sends Write
-  Requests, and OTA_DATA is write-without-response only, so BLE OTA can't be driven either.
-  Both need MTU exchange and Write Command support upstream.
+- **Wi-Fi.** The device joins esp32sim's virtual AP and receives injected UDP (`stream`), but
+  there is still no inbound TCP, so the WebSocket control transport (and OTA over Wi-Fi) can't
+  be driven, and sACN is untested (it arrives by multicast; the injection is unicast).
+- **MTU.** Tests that don't raise it run at the default 23, like a central that never
+  negotiates; the app's own transfers (`ota-*`, `library-dump`, `stream`) exchange 517.
 - **Classic ESP32 BLE.** esp32sim's virtual controller covers S3, C3 and C6. On the classic chip
   the firmware runs cleanly up to `NimBLEDevice::init` and then faults inside the BT controller's
   ROM init (`btdm_rom_ref_init`, `StoreProhibited`). `esp32-boot` checks that the run gets that

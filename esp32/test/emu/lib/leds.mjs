@@ -98,7 +98,7 @@ export async function wasmEngine() {
  * Render one operator with the WASM engine, as the app's preview does for a one-node pattern:
  * width x height RGB pixels, row-major, at timestampMs.
  */
-export async function wasmRender(type, params, { width, height = 1, timestampMs = 1000 }) {
+export async function wasmRender(type, params, { width, height = 1, timestampMs = 1000, mods = {} }) {
   const m = await wasmEngine();
   const id = m.ccall('createOperatorInstance', 'number', ['string'], [type]);
   if (id < 0) throw new Error(`WASM has no operator "${type}"`);
@@ -109,6 +109,13 @@ export async function wasmRender(type, params, { width, height = 1, timestampMs 
     const i = info.findIndex((p) => p.name === k);
     if (i < 0) throw new Error(`operator "${type}" has no parameter "${k}" (has ${info.map((p) => p.name).join(', ')})`);
     m.ccall('setOperatorFloatParameter', null, ['number', 'number', 'number'], [id, i, v]);
+  }
+  // Automation, as the app wires it: { param: { s: shape, lo, hi, pr: period s, sd: seed } }.
+  for (const [k, mod] of Object.entries(mods)) {
+    const i = info.findIndex((p) => p.name === k);
+    if (i < 0) throw new Error(`operator "${type}" has no parameter "${k}" to modulate`);
+    m.ccall('setOperatorModulator', null, ['number', 'number', 'number', 'number', 'number', 'number', 'number'],
+      [id, i, mod.s, mod.lo, mod.hi, mod.pr, mod.sd ?? 0]);
   }
   const bytes = width * height * 3;
   const out = m._malloc(bytes);

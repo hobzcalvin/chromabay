@@ -78,8 +78,11 @@ export function handlesByName(found) {
  * (+ lib), framed [u16 totalLen LE][u16 offset LE][payload] per write (sendPatternChunked).
  * maxWrite is the link's write size; esp32sim's ATT MTU 23 allows 20.
  */
+/** The MessagePack the app sends for a pattern (before chunking). */
+export function patternBytes(pattern, lib) { return msgpackEncode({ ...pattern, lib }); }
+
 export function patternChunks(pattern, { lib, maxWrite = 20 } = {}) {
-  const data = msgpackEncode({ ...pattern, lib });
+  const data = patternBytes(pattern, lib);
   if (data.byteLength > 16384) throw new Error(`pattern is ${data.byteLength} bytes; the device accepts 16384`);
   const payload = maxWrite - 4;
   const chunks = [];
