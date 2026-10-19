@@ -199,7 +199,7 @@ export const scenarios = [
       const h = await handles(S3);
       const run = h.run;
       const table = endpointTable();
-      check(table.length === 26, `ENDPOINTS has ${table.length} rows; this test (and the notes) expect 26 — update both if that changed on purpose`, run);
+      check(table.length === 27, `ENDPOINTS has ${table.length} rows; this test (and the notes) expect 27 — update both if that changed on purpose`, run);
       const ours = [...h.found.values()].filter((c) => c.service === SERVICE_UUID);
       const problems = [];
       for (const e of table) {
@@ -491,6 +491,37 @@ export const scenarios = [
       const pattern = await expectedRing(shown, BRI);
       checkRing(run, ringMean(run, T_ART - 1.0, T_ART - 0.2, 'before the stream'), pattern, 1.5, 'the boot pattern before streaming', T_ART - 1.0, T_ART - 0.2);
       checkRing(run, ringMean(run, T_DDP + 2.6, T_DDP + 3.2, 'after the stream timeout'), pattern, 1.5, 'the pattern is back 2 s after the stream stops', T_DDP + 2.6, T_DDP + 3.2);
+    },
+  },
+
+  {
+    name: 'diagnostics',
+    what: 'DIAGNOSTICS (for problem reports) returns the device\'s state and a timestamped ring of what it just did: connect, brightness received and applied, pattern received and shown; its id matches device info',
+    async run() {
+      const h = await handles(S3);
+      const D = need(h, 'DIAGNOSTICS').handle, I = need(h, 'DEVICE_INFO').handle, B = need(h, 'BRIGHTNESS').handle;
+      const sc = new Script().connect(CONNECT).mtu(3.05, 517).write(3.1, B, [80]);
+      pushPattern(sc, 3.3, h, solid('EmuDiag', 50), false);
+      sc.readLong(4.0, I).readLong(4.1, D);
+      const run = await runEmu({ name: this.name, images: build(S3), ble: true, board: 'atech14', script: sc, seconds: 4.6 });
+      checkHealthy(run);
+      const info = json(run, oneRead(run, I, 4.0), 'device info');
+      check(/^[0-9a-f]{12}$/.test(info.id ?? '') && info.feat >= 7, () => `device info id/feat: ${JSON.stringify(info)}`, run);
+      const diag = json(run, oneRead(run, D, 4.1), 'diagnostics');
+      check(diag.id === info.id, `diagnostics id ${diag.id} != device info id ${info.id}`, run);
+      check(diag.bri === 80 && diag.bri_pending === 0 && diag.pattern === 'EmuDiag' && diag.mode === 'ble',
+        () => `diagnostics state: ${JSON.stringify({ ...diag, events: undefined })}`, run);
+      const ev = diag.events.map(([, t]) => t);
+      const story = () => `events:\n  ${diag.events.map(([ms, t]) => `${ms} ${t}`).join('\n  ')}`;
+      const order = ['boot ok', 'ble connect', 'bri rx 80', 'bri set 80', 'pat rx', 'pat show EmuDiag'];
+      let at = -1;
+      for (const want of order) {
+        const i = ev.findIndex((t, k) => k > at && t.startsWith(want));
+        check(i > at, () => `diagnostics events lack "${want}" after "${order[order.indexOf(want) - 1] ?? 'start'}"\n${story()}`, run);
+        at = i;
+      }
+      check(diag.events.every(([ms], i) => i === 0 || ms >= diag.events[i - 1][0]), () => `event times go backwards\n${story()}`, run);
+      check(diag.notes >= diag.events.length, 'notes counter below the events returned', run);
     },
   },
 

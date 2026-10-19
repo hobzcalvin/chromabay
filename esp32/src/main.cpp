@@ -26,6 +26,7 @@
 #include "esp_heap_caps.h" // largest contiguous block — the number that decides an OTA
 #include "esp_chip_info.h" // Report which ESP32 variant we're running on (device-info JSON)
 #include "device_settings.h" // NVS-backed comm mode / WiFi creds / sleep timer / rgb-test
+#include "diag_log.h"
 #include "endpoints.h"      // one endpoint table, carried by BLE or Wi-Fi alike
 #include <time.h>           // wall-clock: time()/localtime for the on/off schedule
 #include <sys/time.h>       // settimeofday() — feed the system clock from app sync / NTP
@@ -217,6 +218,9 @@ static const uint32_t CALIB_FRAME_MS = 220;
 // LED drivers back (see onEndpointWrite), as does a button press, a realtime packet, an OTA,
 // or the calibration flash.
 #define CHARACTERISTIC_UUID_BLINK_PINS "a0be83fe-8dc9-47f0-ab40-b19721d20ed1"
+// Diagnostics (read): state + the DiagLog event ring as JSON, for the app's "report a problem"
+// form. See diag_log.h. feat >= 7.
+#define CHARACTERISTIC_UUID_DIAGNOSTICS "a0be83ff-8dc9-47f0-ab40-b19721d20ed1"
 static volatile bool blinkRequest = false;  // BLINK_PINS write: start, or restart, a run
 static volatile bool blinkCancel = false;   // any other command: end the run, restore output
 static bool gBlinking = false;              // loop-task only: pins are ours, strips torn down
@@ -385,6 +389,7 @@ unsigned long lastUpdate = 0;
 const unsigned long updateInterval = SINGLE_CORE ? 30 : 20;
 unsigned long fpsLastReport = 0;          // serial FPS report timer
 uint32_t fpsFrames = 0;                   // rendered frames since last report
+static uint32_t gLastFpsX10 = 0;          // the last report's fps x10, for diagnostics
 
 // OTA State Variables
 esp_ota_handle_t ota_handle = 0;
@@ -696,6 +701,7 @@ static void otaVerifyTaskRelease(bool cancelled) {
 static void abortOtaForLostLink(const char *why) {
     if (!ota_in_progress && signature_task_handle == nullptr && !ota_finalizing) return;
     Serial.printf("%s during OTA. Aborting OTA.\n", why);
+    DiagLog::note("ota abort: %.18s", why);
     SentryReporting::logWarn("OTA abort: %s", why);
     if (ota_handle != 0) esp_ota_abort(ota_handle);
     otaVerifyTaskRelease(true);
@@ -732,6 +738,17 @@ static const char* chipModelName() {
 // Build the device-info JSON. Shared by the BLE characteristic and the WiFi/TCP transport.
 // `feat` lets the app gate features/prompt upgrades; `mode`/`ip` tell it which transport is
 // live and where to reach the device on WiFi.
+// The factory eFuse MAC as 12 lowercase hex digits: the same `device_id` sentry-micro tags the
+// device's own events with, so the app can tag its events to match and a report can be joined
+// across the app and firmware Sentry projects.
+static String deviceIdHex() {
+    uint8_t mac[6] = {0};
+    char id[13] = "";
+    if (esp_efuse_mac_get_default(mac) == ESP_OK)
+        snprintf(id, sizeof(id), "%02x%02x%02x%02x%02x%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    return String(id);
+}
+
 String buildDeviceInfoJson() {
     String j = "{";
     j += "\"fw_ver\":\"" + String(FIRMWARE_VERSION) + "\",";
@@ -746,6 +763,7 @@ String buildDeviceInfoJson() {
     { const esp_partition_t* up = esp_ota_get_next_update_partition(NULL);
       if (up) j += "\"slot\":" + String((uint32_t)up->size) + ","; }
     j += "\"chip\":\"" + String(chipModelName()) + "\",";
+    j += "\"id\":\"" + deviceIdHex() + "\",";
     j += "\"name\":\"" + deviceName + "\",";
     j += "\"mode\":\"" + String(gWifiMode ? "wifi" : "ble") + "\",";
 #if CHROMABAY_WIFI
@@ -762,6 +780,40 @@ static void onDeviceInfoRead(Endpoints::Link& link) {
     link.send(buildDeviceInfoJson());
 }
 
+// What the device is doing and has just done, for a problem report (diag_log.h). Read on demand:
+// built here, not kept up to date.
+static void onDiagnosticsRead(Endpoints::Link& link) {
+    const uint32_t now = millis();
+    uint32_t notes = 0;
+    String ev = DiagLog::json(&notes);
+    String j = "{";
+    j += "\"id\":\"" + deviceIdHex() + "\",";
+    j += "\"fw\":\"" + String(FIRMWARE_VERSION) + "\",";
+    j += "\"up\":" + String(now) + ",";
+    j += "\"heap\":" + String(ESP.getFreeHeap()) + ",";
+    j += "\"minheap\":" + String(ESP.getMinFreeHeap()) + ",";
+    j += "\"maxblock\":" + String((uint32_t)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)) + ",";
+    j += "\"fps10\":" + String(gLastFpsX10) + ",";
+    j += "\"bri\":" + String(ledMgr.getGlobalBrightness()) + ",";
+    j += "\"bri_pending\":" + String(newBrightnessAvailable ? 1 : 0) + ",";
+    j += "\"pattern\":\"" + String(patternRenderer ? patternRenderer->getCurrentPatternName() : "") + "\",";
+    j += "\"lib\":" + String((unsigned)libNames.size()) + ",";
+    j += "\"cycling\":" + String(cyclingActive ? 1 : 0) + ",";
+    j += "\"synced\":" + String(timestampSynced ? 1 : 0) + ",";
+    j += "\"clock\":" + String((unsigned long)getSynchronizedTime()) + ",";
+    j += "\"streaming\":" + String((int32_t)(now - gRealtimeUntilMs) < 0 ? 1 : 0) + ",";
+    j += "\"asleep\":" + String(gAsleep ? 1 : 0) + ",";
+    j += "\"dark\":" + String(gBriDark ? 1 : 0) + ",";
+    j += "\"blinking\":" + String(gBlinking ? 1 : 0) + ",";
+    j += "\"calibrating\":" + String(calibrating ? 1 : 0) + ",";
+    j += "\"ota\":" + String(ota_in_progress ? 1 : 0) + ",";
+    j += "\"mode\":\"" + String(gWifiMode ? "wifi" : "ble") + "\",";
+    j += "\"notes\":" + String(notes) + ",";
+    j += "\"events\":" + ev;
+    j += "}";
+    link.send(j);
+}
+
 void updateDeviceInfoCharacteristic() {
     // Seeds the value a BLE read answers from, and pushes the change to whichever link is
     // attached. (Always an explicit length: NimBLE's setValue(const char*) has proven
@@ -776,7 +828,7 @@ void updateDeviceInfoCharacteristic() {
 // if we were asleep, wake (rendering resumes in loop()).
 static void noteActivity() {
     gLastActivityMs = millis();
-    if (gAsleep) { gAsleep = false; Serial.println("[Sleep] woke on activity"); }
+    if (gAsleep) { gAsleep = false; Serial.println("[Sleep] woke on activity"); DiagLog::note("wake"); }
 }
 
 // Write every LED on every strip black and push it out once. Used when going to sleep or
@@ -793,6 +845,7 @@ static void blankAllStrips() {
 // `full`. Safe to call from either task — the queue is under patternMux.
 void stageCompletePattern(uint8_t* full, size_t fullLen) {
     if (!full) return;
+    DiagLog::note("pat rx %uB", (unsigned)fullLen);
     TTRACE("[T] pattern rx %u bytes @%lu\n", (unsigned)fullLen, (unsigned long)millis());
     noteActivity();
     uint8_t* dropped = nullptr;
@@ -876,6 +929,7 @@ class ServerCallbacks: public NimBLEServerCallbacks {
         noteActivity();
         SentryReporting::setBleConnected(true);  // a route for any buffered crash report
         Serial.println("BLE Client Connected");
+        DiagLog::note("ble connect");
         logPatternState("connect");
         // Update device info characteristic as heap might have changed or client needs fresh info
         updateDeviceInfoCharacteristic();
@@ -893,6 +947,7 @@ class ServerCallbacks: public NimBLEServerCallbacks {
         SentryReporting::logWarn("BLE disconnect after %us up%s", (unsigned)(millis() / 1000),
                                  ota_in_progress ? ", mid-OTA" : "");
         Serial.println("BLE Client Disconnected");
+        DiagLog::note("ble disconnect");
         logPatternState("disconnect");
         // If OTA was in progress and client disconnects, abort it to free resources
         abortOtaForLostLink("BLE client disconnected");
@@ -1081,6 +1136,7 @@ static void onOtaDataWrite(const uint8_t* data, size_t len, Endpoints::Link& lin
 
         if (!ota_in_progress) {
             Serial.println("First OTA data packet received. Starting OTA process...");
+            DiagLog::note("ota start");
             signature_received = false; // Reset signature status for new OTA
             ota_skip_signature = false; // Default to signed; only END_OTA_UNSIGNED opts out
             ota_received_size = 0;      // Reset received size
@@ -1330,11 +1386,13 @@ static void onCalibrationWrite(const uint8_t* data, size_t len, Endpoints::Link&
             }
             uint8_t bits = 1; while ((1u << bits) < maxN) bits++;
             calibBits = bits; calibStrip = strip; calibStartMs = millis(); calibrating = true;
+            DiagLog::note("calib start mode %d", calibMode);
             Serial.printf("[Calib] START strip=%d bits=%d bright=%d mode=%d (cycle=%d frames @ %dms)\n",
                           strip, bits, calibBrightness, calibMode, calibMode == 0 ? 2 : 2 + bits, (int)CALIB_FRAME_MS);
         } else {
             calibrating = false;
             Serial.println("[Calib] STOP");
+            DiagLog::note("calib stop");
         }
     }
 
@@ -1444,6 +1502,7 @@ static void onTimestampSyncWrite(const uint8_t* data, size_t len, Endpoints::Lin
                     settimeofday(&tv, nullptr); // seed the system clock for time()/schedule
                 }
             }
+            DiagLog::note("ts sync %lu", syncedTimestampMs);
             Serial.printf("Timestamp sync: frame=%lu ms, wall-epoch=%s\n", syncedTimestampMs,
                           value.length() >= 16 ? String((uint32_t)(syncedEpochMs / 1000ULL)).c_str() : "(none)");
         } else {
@@ -1465,6 +1524,7 @@ static void onBrightnessWrite(const uint8_t* data, size_t len, Endpoints::Link& 
         if (value.length() >= 1) {
             pendingBrightness = (uint8_t)value[0];
             newBrightnessAvailable = true;
+            DiagLog::note("bri rx %u", (unsigned)pendingBrightness);
             TTRACE("[T] bri rx %u @%lu\n", (unsigned)pendingBrightness, (unsigned long)millis());
             noteActivity();
         }
@@ -1550,6 +1610,7 @@ void processDeviceName() {
         NimBLEDevice::startAdvertising();
     }
     updateDeviceInfoCharacteristic();
+    DiagLog::note("rename %.24s", deviceName.c_str());
     Serial.printf("Device renamed to: %s\n", deviceName.c_str());
 }
 
@@ -1652,6 +1713,7 @@ static void processButton() {
             buttonClickCount++;
             buttonLastPressMs = now;
             if (buttonClickCount >= 2) {
+                DiagLog::note("button double");
                 onButtonDoubleClick();
                 buttonClickCount = 0;
             }
@@ -1660,6 +1722,7 @@ static void processButton() {
     // Resolve a single click once the double-click window has elapsed with no 2nd press.
     if (buttonClickCount == 1 && (now - buttonLastPressMs) > BUTTON_DOUBLE_GAP_MS) {
         buttonClickCount = 0;
+        DiagLog::note("button single");
         onButtonSingleClick();
     }
 }
@@ -1958,6 +2021,7 @@ void processReceivedCycleControl() {
     cyclingActive = pendingCycleEnabled;
     lastCycleIndex = -1; // re-apply on next updateCycle
     saveCycleState();
+    DiagLog::note("cycle %s %lums", cyclingActive ? "on" : "off", (unsigned long)cycleIntervalMs);
     Serial.printf("Cycle control: %s, %lu ms, crossfade %lu ms\n",
                   cyclingActive ? "ON" : "OFF", (unsigned long)cycleIntervalMs,
                   (unsigned long)effectiveCrossfadeMs());
@@ -1986,6 +2050,7 @@ void updateCycle() {
         }
         if (libLoadIndex(fileIdx)) {
             libSaveCurrentName(libNames[fileIdx]);
+            DiagLog::note("cycle -> %.20s", libNames[fileIdx].c_str());
             Serial.printf("Cycle -> '%s' (%d/%u) @ %lu ms%s\n", libNames[fileIdx].c_str(), index,
                           (unsigned)count, t, crossfadeMs ? " (crossfading)" : "");
         } else if (crossfadeMs > 0) {
@@ -2033,6 +2098,7 @@ static void storeLibraryPush(const uint8_t* buf, size_t size) {
     } else {
         size_t before = libOrder.size();
         stored = libUpsert(name, buf, size);
+        DiagLog::note("lib %s %.20s", stored ? "ok" : "FAIL", name.c_str());
         if (stored && libOrder.size() != before && cyclingActive && cycleIntervalMs > 0) {
             // A new member shifts which index the synced clock points at, and updateCycle would
             // switch patterns right now. Hold the current one until the next boundary.
@@ -2086,6 +2152,7 @@ void processReceivedPattern() {
     // Deliberately NOT traced: a slider drag applies several patterns a second, and
     // finishing a transaction sends — which blocks this task. See SentryReporting::Operation.
     bool success = patternRenderer->loadPatternFromMessagePack(buf, size);
+    DiagLog::note(success ? "pat show %.20s" : "pat FAIL %.20s", patternRenderer->getCurrentPatternName());
     if (success) {
         if (cyclingActive && cycleIntervalMs > 0 && !libOrder.empty()) {
             // Don't let the next tick instantly override the manual pick.
@@ -2136,6 +2203,7 @@ void processReceivedBrightness() {
         newBrightnessAvailable = false;
         TTRACE("[T] bri apply %u @%lu\n", (unsigned)b, (unsigned long)millis());
         ledMgr.setGlobalBrightness(b);
+        DiagLog::note("bri set %u", (unsigned)b);
         brightnessDirty = true;
         brightnessChangedAtMs = millis();
     }
@@ -2253,6 +2321,7 @@ void processReceivedLedConfig() {
             // outside update()/render(), so nothing else touches the renderer buffers
             // or LED strips while we reallocate/recreate them.
             configMgr.applyConfiguration(newConfig);
+            DiagLog::note("ledcfg %u strips bri %u", (unsigned)newConfig.strips.size(), (unsigned)newConfig.globalBrightness);
 
             // Update pattern renderer matrix config
             if (patternRenderer) {
@@ -2553,6 +2622,7 @@ static void startBlink() {
     blinkRtMark = gRealtimeUntilMs;
     gBlinking = true;
     Serial.printf("[Blink] START %u pin(s)\n", (unsigned)blinkPins.size());
+    DiagLog::note("blink start");
 }
 
 // Stop toggling and hand the pins back: rebuild the strips exactly as they were (layouts
@@ -2566,6 +2636,7 @@ static void endBlink() {
     blinkSaved.strips.clear();
     blinkPins.clear();
     Serial.println("[Blink] END, LED output restored");
+    DiagLog::note("blink end");
 }
 
 static void processBlink() {
@@ -2662,6 +2733,7 @@ void finalizeOtaIfReady() {
             SentryReporting::logInfo("OTA ok: %u bytes%s, rebooting", (unsigned)ota_received_size,
                                      ota_skip_signature ? " (unsigned)" : "");
             const char* msg = "OTA_SUCCESS_REBOOTING";
+            DiagLog::note("ota ok, rebooting");
             Endpoints::notify(CHARACTERISTIC_UUID_OTA_STATUS, msg);
             delay(100); // Allow BLE notification to send before reboot
             // Before the reboot, not after: a restart is not a flush, and this transaction
@@ -2819,6 +2891,7 @@ void processCommConfig() {
                              (gSettings.wifiSsid != oldSsid || gSettings.wifiPass != oldPass));
 #if CHROMABAY_WIFI
     if (transportChanged) {
+        DiagLog::note("comm -> %s, reboot", gSettings.commMode == DeviceSettings::COMM_WIFI ? "wifi" : "ble");
         Serial.println("[CommConfig] transport change → rebooting in 400ms");
         // Says why the device is about to disappear, which is otherwise indistinguishable
         // from a crash at the far end. Sent before the reboot, not at scope exit: this
@@ -3290,6 +3363,7 @@ namespace RtStream {
         }
         if (got) {
             ledMgr.show();
+            if ((int32_t)(millis() - gRealtimeUntilMs) >= 0) DiagLog::note("stream on");
             gRealtimeUntilMs = millis() + (uint32_t)gSettings.rtTimeoutSec * 1000u;
             noteActivity();
         }
@@ -3339,6 +3413,7 @@ static const Endpoints::Endpoint ENDPOINTS[] = {
     { CHARACTERISTIC_UUID_LAYOUT_GET,     NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY,                onLayoutGetWrite,      nullptr },
     { CHARACTERISTIC_UUID_CALIBRATION,    NIMBLE_PROPERTY::WRITE,                                         onCalibrationWrite,    nullptr },
     { CHARACTERISTIC_UUID_BLINK_PINS,     NIMBLE_PROPERTY::WRITE,                                         onBlinkPinsWrite,      nullptr },
+    { CHARACTERISTIC_UUID_DIAGNOSTICS,    NIMBLE_PROPERTY::READ,                                          nullptr,               onDiagnosticsRead },
     { CHARACTERISTIC_UUID_LIBRARY_CMD,    NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR,              onLibraryCmdWrite,     nullptr },
     { CHARACTERISTIC_UUID_LIBRARY_DUMP,   NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY,                onLibraryDumpWrite,    nullptr },
     { CHARACTERISTIC_UUID_COMM_CONFIG,    NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE,                  onCommConfigWrite,     onCommConfigRead },
@@ -3653,6 +3728,7 @@ void setup() {
                   SINGLE_CORE ? "single — WS2812 flicker mitigations ON: dithering off, slower frame cadence; prefer APA102"
                               : "multi — render on core 1, BLE on core 0");
     Serial.println("Setup complete");
+    DiagLog::note("boot ok %lums", (unsigned long)millis());
     // Recorded, not sent — it rides whenever the app next shows up. Metrics without a clock
     // are held rather than dropped, which is why boot numbers survive a cold start.
     SentryReporting::recordBoot(millis());
@@ -3708,11 +3784,12 @@ void loop() {
         bool off = !inOn;
         if (off != gSchedInOffWindow) {
             gSchedInOffWindow = off;
-            if (off) { ledMgr.setGlobalBrightness(0); Serial.println("[Sched] auto-off (brightness 0)"); }
+            if (off) { ledMgr.setGlobalBrightness(0); Serial.println("[Sched] auto-off (brightness 0)"); DiagLog::note("sched off"); }
             else {
                 if (ledMgr.getGlobalBrightness() == 0)
                     ledMgr.setGlobalBrightness(gSettings.lastNonZeroBright ? gSettings.lastNonZeroBright : BOOT_MIN_BRIGHTNESS);
                 gLastActivityMs = currentTime;
+                DiagLog::note("sched on bri %u", ledMgr.getGlobalBrightness());
                 Serial.printf("[Sched] auto-on (brightness %u)\n", ledMgr.getGlobalBrightness());
             }
         }
@@ -3791,6 +3868,7 @@ void loop() {
         Serial.printf("[FPS] %.1f fps (%lu frames / %.1fs)\n", fpsFrames / secs, (unsigned long)fpsFrames, secs);
         // Safe from here precisely because recording a metric never touches the transport.
         SentryReporting::noteFps((uint32_t)(fpsFrames * 10.0f / secs));
+        gLastFpsX10 = (uint32_t)(fpsFrames * 10.0f / secs);
         fpsFrames = 0;
         fpsLastReport = currentTime;
     }
@@ -3838,6 +3916,7 @@ void loop() {
         uint32_t idleMs = currentTime - gLastActivityMs;
         if (!gAsleep && idleMs >= (uint32_t)gSettings.sleepMinutes * 60000UL) {
             gAsleep = true;
+            DiagLog::note("sleep");
             Serial.printf("[Sleep] idle %us → sleeping (LEDs off)\n", (unsigned)(idleMs / 1000));
             blankAllStrips();
         }
