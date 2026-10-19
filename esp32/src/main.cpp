@@ -1513,6 +1513,26 @@ static void onDeviceNameWrite(const uint8_t* data, size_t len, Endpoints::Link& 
         deviceNamePending = true;
     }
 
+// Build the advertisement from scratch: the service UUID in the advertising packet and the
+// GAP device name wherever NimBLE puts it. Called at boot and again on every rename.
+//
+// From scratch, not by NimBLEAdvertising::setName(). In NimBLE-Arduino 1.4.3 a name that
+// doesn't fit next to the 128-bit service UUID ("ChromaBay_XXXX" doesn't) is moved into the
+// scan response as a pointer and a length, and setName() never clears that. Rename to 10
+// characters or fewer and the new name fits in the advertisement, while the scan response
+// still points at the GAP name buffer with the OLD length, so ChromaBay_1B44 renamed to
+// EmuLight also advertised "EmuLight\0_1B44" (seen in esp32sim; iOS prefers the scan-response
+// name). reset() points the name at the current GAP name and empties the scan
+// response; removeServices() is needed because reset() keeps the UUID list.
+static void configureAdvertising() {
+    NimBLEAdvertising *adv = NimBLEDevice::getAdvertising();
+    adv->reset();
+    adv->removeServices();
+    adv->addServiceUUID(SERVICE_UUID);
+    adv->setScanResponse(true);  // Enable scan response for more space
+    adv->setMinPreferred(0x0);
+}
+
 // Apply a staged rename from the loop task: persist to flash, update the GAP +
 // advertised name, refresh device info.
 void processDeviceName() {
@@ -1523,12 +1543,11 @@ void processDeviceName() {
     if (n.length() == 0 || n.length() > 31) return; // keep within BLE name limits
     deviceName = n;
     saveDeviceName(deviceName);
-    NimBLEDevice::setDeviceName(deviceName.c_str());
-    NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
-    if (adv) {
-        adv->stop();
-        adv->setName(deviceName.c_str());
-        adv->start();
+    if (!gWifiMode) {
+        // GAP name first: configureAdvertising() reads it.
+        NimBLEDevice::setDeviceName(deviceName.c_str());
+        configureAdvertising();
+        NimBLEDevice::startAdvertising();
     }
     updateDeviceInfoCharacteristic();
     Serial.printf("Device renamed to: %s\n", deviceName.c_str());
@@ -3579,10 +3598,7 @@ void setup() {
             pService->start();
             updateDeviceInfoCharacteristic();
             
-            NimBLEAdvertising *pAdvertising = NimBLEDevice::getAdvertising();
-            pAdvertising->addServiceUUID(SERVICE_UUID); 
-            pAdvertising->setScanResponse(true);  // Enable scan response for more space
-            pAdvertising->setMinPreferred(0x0);
+            configureAdvertising();
             NimBLEDevice::startAdvertising();
             
             Serial.println("BLE services started");

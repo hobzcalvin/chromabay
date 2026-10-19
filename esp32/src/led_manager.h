@@ -172,17 +172,34 @@ public:
         return true; // If no bus, it can "show" (do nothing)
     }
 
-    // color is in WRGB format (W in MSB)
+    // color is in WRGB format (W in MSB). Raw: no gamma/white-point LUT, but still scaled by
+    // brightness and put in the strip's colour order.
     void setPixelColor(uint16_t pixelIndex, uint32_t color) {
         if (_busPtr && _internalType != ITYPE_NONE && pixelIndex < _config.numLeds) {
+            if (_ditherOn) {
+                // A dithering strip transmits its dither TARGET on every show(), so a write
+                // straight to NeoPixelBus would be overwritten before it went out. The dither
+                // pipeline carries RGB only (see chooseDitherBits), so W is dropped here exactly
+                // as it is for a render.
+                setDitherTargetRaw(pixelIndex, (uint8_t)(color >> 16), (uint8_t)(color >> 8), (uint8_t)color);
+                return;
+            }
             // Brightness is handled by NeoPixelBus SetLuminance, so pass raw color.
             // Color order is applied by LedWrapper.
             LedWrapper::setPixelColor(_busPtr, _internalType, pixelIndex, color, _config.colorOrder);
         }
     }
 
-    // FastLED CRGB compatible setPixelColor
+    // FastLED CRGB compatible setPixelColor: the render path. Applies the strip's gamma and
+    // white-point LUT (and auto-white on RGBW), then brightness.
     void setPixelColor(uint16_t pixelIndex, const CRGB& color);
+
+    // The colour as given — no gamma or white-point LUT — still scaled by brightness, put in
+    // the strip's colour order and, on RGBW, split into white the way a render is. For output
+    // that is not a rendered pattern: the boot self-test, and realtime streams (Art-Net / sACN /
+    // DDP), whose senders have already done their own colour correction (WLED's default too).
+    // Works on dithering and non-dithering strips alike.
+    void setPixelColorRaw(uint16_t pixelIndex, const CRGB& color);
 
     // 2D Matrix coordinate setPixelColor
     void setPixelColorXY(uint16_t x, uint16_t y, uint32_t color) {
@@ -419,6 +436,14 @@ public:
     // FastLED.h include, since it reads CRGB channels). Called by setPixelColor.
     void setDitherTarget(uint16_t pixelIndex, const CRGB& color);
 
+    // Store an uncorrected pixel as a dither target: the same brightness scaling as a render,
+    // with an identity curve (c * 257 is c at 16 bits) in place of the gamma LUT.
+    void setDitherTargetRaw(uint16_t pixelIndex, uint8_t r, uint8_t g, uint8_t b) {
+        if (pixelIndex >= _config.numLeds) return;
+        const uint16_t lin16[3] = { (uint16_t)(r * 257u), (uint16_t)(g * 257u), (uint16_t)(b * 257u) };
+        storeDitherTarget(pixelIndex, lin16);
+    }
+
 private:
     LedStripConfig _config;
     void* _busPtr;
@@ -435,6 +460,17 @@ private:
     uint8_t _ditherBits = 0;
     std::vector<uint16_t> _ditherTarget; // per channel, fixed-point (ditherBits frac bits)
     std::vector<uint8_t> _ditherResid;   // per channel sigma-delta residual (0..2^bits-1)
+
+    // target_fixed = (c16/65535) * (brightness/255) * 255 * L = c16 * brightness * L / 65535,
+    // for a pixel already in 16-bit output space (corrected or not).
+    void storeDitherTarget(uint16_t pixelIndex, const uint16_t c16[3]) {
+        const uint16_t L = (uint16_t)1 << _ditherBits;
+        size_t base = (size_t)pixelIndex * 3;
+        for (int ch = 0; ch < 3; ch++) {
+            uint32_t t = ((uint32_t)c16[ch] * _brightness * L + 32767) / 65535;
+            _ditherTarget[base + ch] = (uint16_t)t;
+        }
+    }
 
     // Estimate how fast we can re-Show this strip (Hz): data bits / bitrate + reset, then
     // cap by the main-loop sub-frame rate (it drives sub-frames once per ~1ms iteration).
@@ -695,22 +731,32 @@ inline void LedConfig::LedBus::setDitherTarget(uint16_t pixelIndex, const CRGB& 
     // N fractional bits below 8-bit. Dithering then time-averages to that target, so gamma
     // and white point survive at far better than 8-bit before the final quantization.
     const uint16_t lc16[3] = { _lut16[0][color.r], _lut16[1][color.g], _lut16[2][color.b] };
-    const uint16_t L = (uint16_t)1 << _ditherBits;
-    size_t base = (size_t)pixelIndex * 3;
-    for (int ch = 0; ch < 3; ch++) {
-        // target_fixed = (lc16/65535) * (brightness/255) * 255 * L = lc16 * brightness * L / 65535
-        uint32_t t = ((uint32_t)lc16[ch] * _brightness * L + 32767) / 65535;
-        _ditherTarget[base + ch] = (uint16_t)t;
+    storeDitherTarget(pixelIndex, lc16);
+}
+
+inline void LedConfig::LedBus::setPixelColorRaw(uint16_t pixelIndex, const CRGB& color) {
+    if (_busPtr && _internalType != ITYPE_NONE && pixelIndex < _config.numLeds) {
+        if (_ditherOn) {
+            setDitherTargetRaw(pixelIndex, color.r, color.g, color.b);
+            return;
+        }
+        uint8_t r = color.r, g = color.g, b = color.b, w = 0;
+        if (_hasWhite && _config.autoWhiteMode != static_cast<uint8_t>(AutoWhiteMode::Off))
+            computeAutoWhite(color.r, color.g, color.b, r, g, b, w);
+        uint32_t wrgbColor = (static_cast<uint32_t>(w) << 24) | (static_cast<uint32_t>(r) << 16) |
+                             (static_cast<uint32_t>(g) << 8)  | static_cast<uint32_t>(b);
+        // Brightness is NeoPixelBus luminance on a non-dithering strip; colour order is LedWrapper's.
+        LedWrapper::setPixelColor(_busPtr, _internalType, pixelIndex, wrgbColor, _config.colorOrder);
     }
 }
 
+// Uncorrected, like the WRGB overload — see LedBus::setPixelColorRaw. This used to pack the
+// colour into a uint32 and write it to NeoPixelBus directly, which a dithering strip's show()
+// then overwrote from its (never-set) dither target: the boot self-test and every streamed
+// frame went out black on a dithered strip.
 inline void LedConfig::LedManager::setPixelColor(uint8_t stripIndex, uint16_t pixelIndex, const CRGB& color) {
     if (stripIndex < _strips.size() && _strips[stripIndex]) {
-        // Convert CRGB to WRGB (assuming W=0 for CRGB)
-        uint32_t wrgbColor = (static_cast<uint32_t>(color.r) << 16) |
-                             (static_cast<uint32_t>(color.g) << 8)  |
-                             static_cast<uint32_t>(color.b);
-        _strips[stripIndex]->setPixelColor(pixelIndex, wrgbColor); // Use -> operator
+        _strips[stripIndex]->setPixelColorRaw(pixelIndex, color);
     }
 }
 
