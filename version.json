@@ -1,7 +1,7 @@
 {
-  "version": "1.1.355",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.355.zip",
-  "buildDate": "2026-10-19T20:23:48Z",
-  "commitHash": "8e6ce5c5758a06afb957f2ac4194c3f4bf01de20",
-  "commitMessage": "Don't cut a firmware release for test-only changes under esp32/test/"
+  "version": "1.1.356",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.356.zip",
+  "buildDate": "2026-10-19T20:41:35Z",
+  "commitHash": "3ac20c36b61720516b06c06d293013f8e633ced1",
+  "commitMessage": "esp32sim patch: match the upstream PR branches (report line unchanged when unused, trait default, clippy)"
 }
