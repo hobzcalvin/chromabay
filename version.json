@@ -1,7 +1,7 @@
 {
-  "version": "1.1.351",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.351.zip",
-  "buildDate": "2026-10-16T05:29:53Z",
-  "commitHash": "f8e16394801a9ba7c6aa50d6892534d672c1fcee",
-  "commitMessage": "Keep brightness live during a library sync; make sync flow-controlled"
+  "version": "1.1.352",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.352.zip",
+  "buildDate": "2026-10-19T18:13:59Z",
+  "commitHash": "fb261f7696e5fbdace9e4601efb90931a8654534",
+  "commitMessage": "Run the firmware in esp32sim in CI: boot, BLE, LEDs, persistence, release images"
 }
