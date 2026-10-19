@@ -15,3 +15,5 @@ default_partitions.bin
 # OS files
 .DS_Store
 Thumbs.db
+test/emu/.esp32sim/
+test/emu/out/

@@ -86,6 +86,10 @@ jobs:
         uses: getsentry/sentry-micro/.github/actions/list-environments@main
         with:
           project-dir: esp32
+          # Test-only builds for the esp32sim emulator (firmware-emu.yml). They are never
+          # published or run by anyone, so there are no crashes to symbolicate; building
+          # them here would only add release jobs and Sentry uploads for nothing.
+          skip-environments: esp32-s3-emu,esp32-c3-emu
 
       - name: Determine firmware version
         id: version

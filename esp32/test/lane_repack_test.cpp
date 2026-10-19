@@ -2,7 +2,7 @@
 //
 //   g++ -std=c++17 -O1 -Wall esp32/test/lane_repack_test.cpp -o /tmp/lane_repack_test && /tmp/lane_repack_test
 //
-// Not wired into CI — the firmware build has no host-test step to hang it off yet.
+// CI runs it as the lane-repack scenario of esp32/test/emu/run.mjs (firmware-emu.yml).
 //
 // The important property is not "did it find an assignment" but "does the assignment compute
 // the same thing". So the core check is an interpreter: evaluate the graph symbolically with

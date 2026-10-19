@@ -1,0 +1,102 @@
+name: Firmware in emulator
+
+# Boots the real firmware images in esp32sim (https://github.com/mikroverk/esp32sim) and drives
+# them over a virtual BLE link: boot, flash persistence, the GATT table, endpoint round-trips,
+# pattern playback against the app's WASM renderer, playlists, Blink Pins and calibration, on
+# S3, C3 and classic ESP32, plus the published release images. The test logic lives in
+# esp32/test/emu/ and runs the same locally; documentation/ESP32_EMULATOR.md explains it.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'esp32/**'
+      - 'native/**'          # operators compiled into the firmware
+      - 'static/native/**'   # the WASM build the pattern test compares against
+      - '.github/workflows/firmware-emu.yml'
+  pull_request:
+    paths:
+      - 'esp32/**'
+      - 'native/**'
+      - 'static/native/**'
+      - '.github/workflows/firmware-emu.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  emulator:
+    name: esp32sim
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      # ---- The emulator: pinned commit + our patches, built once and cached ----------------
+      # The key hashes the setup script (which holds the pinned commit) and the patches, so
+      # bumping either rebuilds; the cargo registry rides along.
+      - name: Cache esp32sim
+        id: sim-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            esp32/test/emu/.esp32sim
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: esp32sim-${{ runner.os }}-${{ hashFiles('esp32/test/emu/setup-esp32sim.sh', 'esp32/test/emu/patches/**') }}
+
+      - name: Rust toolchain
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+
+      - name: Build esp32sim
+        run: esp32/test/emu/setup-esp32sim.sh
+
+      # ---- Firmware ----------------------------------------------------------------------
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install PlatformIO
+        run: pip install platformio==6.1.19
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            esp32/.pio
+          key: pio-emu-${{ runner.os }}-${{ hashFiles('esp32/platformio.ini') }}
+          restore-keys: |
+            pio-emu-${{ runner.os }}-
+
+      # The emu envs add the esp32sim BLE shim (and, on the S3, the LED pin esp32sim decodes);
+      # esp32dev is the release build, booted as-is on the classic chip. CI=true keeps the
+      # version stamp out, as in the release build.
+      - name: Build firmware
+        working-directory: esp32
+        run: pio run -e esp32-s3-emu -e esp32-c3-emu -e esp32dev
+
+      # ---- Tests -------------------------------------------------------------------------
+      # Node runs the tests: the pattern test encodes with the app's own MessagePack library
+      # and renders with the app's WASM engine.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install Node dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Run emulator tests
+        run: node esp32/test/emu/run.mjs
+
+      - name: Upload logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp32sim-logs
+          path: esp32/test/emu/out/
+          retention-days: 14
+          if-no-files-found: warn

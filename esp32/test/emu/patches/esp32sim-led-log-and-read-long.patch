@@ -1,0 +1,187 @@
+diff --git a/cli/src/lib.rs b/cli/src/lib.rs
+index d04e1dc1..c65ba8ac 100644
+--- a/cli/src/lib.rs
++++ b/cli/src/lib.rs
+@@ -183,7 +183,7 @@ pub fn parse(args: &[String], default_chip: &str) -> Opts {
+             if words.next().is_none_or(|s| s.starts_with('#')) || words.next() != Some("ble") { continue }
+             let command = words.collect::<Vec<_>>().join(" ").parse::<esp_soc::ble::peer::Command>()
+                 .unwrap_or_else(|e| usage_error(&format!("script: line {}: {e}", ln + 1)));
+-            if o.ble_full && matches!(command, esp_soc::ble::peer::Command::Discover | esp_soc::ble::peer::Command::Read(_) | esp_soc::ble::peer::Command::Write(..)) { usage_error(&format!("script: line {}: command requires HCI --ble", ln + 1)); }
++            if o.ble_full && matches!(command, esp_soc::ble::peer::Command::Discover | esp_soc::ble::peer::Command::Read(_) | esp_soc::ble::peer::Command::ReadLong(_) | esp_soc::ble::peer::Command::Write(..)) { usage_error(&format!("script: line {}: command requires HCI --ble", ln + 1)); }
+             if !o.ble && !o.ble_full { usage_error(&format!("script: line {}: BLE requires --ble and the application ELF", ln + 1)); }
+         }
+     }
+diff --git a/docs/cli.md b/docs/cli.md
+index 0ab75efb..5f6c1041 100644
+--- a/docs/cli.md
++++ b/docs/cli.md
+@@ -67,6 +67,7 @@ separately lists the actual instruction count for each core.
+ | `--wav F` | audio captured from I2S (whichever controller played) |
+ | `--tft-png F`, `--gram-png F` | display frame (visible, scaled) / raw GRAM |
+ | `--no-dump` | skip the register dump at exit |
++| `ESP32SIM_LED_LOG=1` (environment) | print every decoded update of the board's LED ring on stderr as `[leds] t=<seconds> n=<update> [[r,g,b],...]`, in physical order and at emulated time; unlike `--web` it needs no real-time pacing and samples nothing |
+ 
+ ### PWM observation
+ 
+@@ -167,7 +168,9 @@ use seconds like the other script actions. For example:
+ ```
+ 
+ Use handles reported by discovery. `ble subscribe CCC_HANDLE` writes notification
+-enable to a discovered client configuration descriptor. Commands are validated when
++enable to a discovered client configuration descriptor. `ble read-long HANDLE` reads a value longer than
++one ATT payload: a Read, then Read Blob requests until a reply is shorter than MTU - 1; it logs
++one `read` line with the whole value. Commands are validated when
+ CLI arguments are parsed, before loading the ROM, and require `--ble`. `connect` waits for guest advertising;
+ ATT commands wait for the connection and run in order, with one request outstanding.
+ At exit, the CLI reports the number of queued or in-flight commands still pending.
+diff --git a/esp-soc/src/ble/peer.rs b/esp-soc/src/ble/peer.rs
+index af4b709e..7bc3c43d 100644
+--- a/esp-soc/src/ble/peer.rs
++++ b/esp-soc/src/ble/peer.rs
+@@ -41,6 +41,8 @@ enum Request {
+     Characteristics,
+     Descriptors,
+     Read(u16),
++    /// `read-long`: Read, then Read Blob from each offset while a reply fills the MTU.
++    ReadLong(u16),
+     Write(u16),
+ }
+ 
+@@ -51,6 +53,7 @@ pub enum Command {
+     Disconnect,
+     Discover,
+     Read(u16),
++    ReadLong(u16),
+     Write(u16, Vec<u8>),
+     ReadUuid([u8; 16], [u8; 16]),
+ }
+@@ -64,8 +67,8 @@ impl std::str::FromStr for Command {
+             ["disconnect"] => return Ok(Self::Disconnect),
+             ["discover"] => return Ok(Self::Discover),
+             ["read-uuid", service, characteristic] => return Ok(Self::ReadUuid(parse_uuid(service)?, parse_uuid(characteristic)?)),
+-            ["read" | "subscribe", _] | ["write", _, _] => {}
+-            _ => return Err("expected connect, central-stop, disconnect, discover, read HANDLE, read-uuid SERVICE CHARACTERISTIC, write HANDLE HEX, subscribe CCC_HANDLE".into()),
++            ["read" | "read-long" | "subscribe", _] | ["write", _, _] => {}
++            _ => return Err("expected connect, central-stop, disconnect, discover, read HANDLE, read-long HANDLE, read-uuid SERVICE CHARACTERISTIC, write HANDLE HEX, subscribe CCC_HANDLE".into()),
+         }
+         let handle =
+             if let Some(h) = parts[1].strip_prefix("0x") { u16::from_str_radix(h, 16) } else { parts[1].parse() }
+@@ -74,6 +77,7 @@ impl std::str::FromStr for Command {
+                 .ok_or("invalid BLE attribute handle")?;
+         Ok(match parts[0] {
+             "read" => Self::Read(handle),
++            "read-long" => Self::ReadLong(handle),
+             "subscribe" => Self::Write(handle, vec![1, 0]),
+             _ => {
+                 let value = parts[2];
+@@ -95,6 +99,8 @@ fn parse_uuid(text: &str) -> Result<[u8; 16], String> {
+     bytes.reverse();
+     Ok(bytes)
+ }
++/// The ATT MTU of the link: the default, never negotiated.
++const MTU: usize = 23;
+ fn read_by_type(start: u16, end: u16) -> Vec<u8> {
+     vec![8, start as u8, (start >> 8) as u8, end as u8, (end >> 8) as u8, 3, 0x28]
+ }
+@@ -162,6 +168,8 @@ pub struct Peer {
+     pending: Option<Request>,
+     discovery_start: u16,
+     value: Vec<u8>,
++    /// The value a `read-long` has assembled so far.
++    long_value: Vec<u8>,
+ }
+ impl Peer {
+     fn new(link: Link) -> Self {
+@@ -176,6 +184,7 @@ impl Peer {
+             pending: None,
+             discovery_start: 1,
+             value: vec![100],
++            long_value: Vec::new(),
+         }
+     }
+     fn advertisement(&mut self, adv: Vec<u8>, scan_response: Vec<u8>) {
+@@ -208,6 +217,11 @@ impl Peer {
+                     self.pending = Some(Request::Read(handle));
+                     self.att(&att_read(handle));
+                 }
++                Command::ReadLong(handle) => {
++                    self.long_value.clear();
++                    self.pending = Some(Request::ReadLong(handle));
++                    self.att(&att_read(handle));
++                }
+                 Command::Write(handle, value) => {
+                     self.pending = Some(Request::Write(handle));
+                     let mut p = vec![0x12, handle as u8, (handle >> 8) as u8];
+@@ -322,6 +336,26 @@ impl Peer {
+             self.log.push(format!("unsolicited ATT {}", hex(p)));
+             return;
+         };
++        if let Request::ReadLong(handle) = kind {
++            // Read Blob past the end: Invalid Offset (0x07) or Attribute Not Long (0x0b) ends it.
++            let done = if p[0] == 1 && p.len() == 5 && !self.long_value.is_empty() && matches!(p[4], 0x07 | 0x0b) { true }
++            else if p[0] == 0x0b || p[0] == 0x0d {
++                self.long_value.extend_from_slice(&p[1..]);
++                p.len() - 1 < MTU - 1
++            } else {
++                self.log.push(format!("ATT error request=0x{:02x} handle=0x{handle:04x} error=0x{:02x}", p.get(1).copied().unwrap_or(0), p.get(4).copied().unwrap_or(0)));
++                return;
++            };
++            if done {
++                let v = std::mem::take(&mut self.long_value);
++                self.log.push(format!("read handle=0x{handle:04x} value={} text={:?}", hex(&v), String::from_utf8_lossy(&v)));
++            } else {
++                let offset = self.long_value.len() as u16;
++                self.pending = Some(Request::ReadLong(handle));
++                self.att(&[0x0c, handle as u8, (handle >> 8) as u8, offset as u8, (offset >> 8) as u8]);
++            }
++            return;
++        }
+         if p[0] == 1 && p.len() == 5 {
+             if p[4] == 0x0a && matches!(kind, Request::Services | Request::Characteristics | Request::Descriptors) {
+                 self.discovery_next(kind);
+diff --git a/esp-soc/src/machine.rs b/esp-soc/src/machine.rs
+index 1efbbaf8..c9246289 100644
+--- a/esp-soc/src/machine.rs
++++ b/esp-soc/src/machine.rs
+@@ -97,6 +97,10 @@ pub struct Machine<S: Soc> {
+     /// that stops at a chip reset is not ended from the page.
+     pub web_restart: bool,
+     button_reset: bool,
++    /// `ESP32SIM_LED_LOG=1`: print every decoded LED-ring update as `[leds] t=<s> n=<updates> [[r,g,b],...]`
++    /// on stderr, at emulated time and without real-time pacing (the web stream samples, this does not).
++    /// Holds the last update count reported.
++    led_log: Option<u64>,
+     ws: WebState,
+     pub rt: Realtime,
+     debug_rom: bool,
+@@ -146,7 +150,7 @@ const BB_DEFAULT: u64 = match option_env!("ESP32SIM_BB_BUILD") {
+ impl<S: Soc> Machine<S> {
+     pub fn new(mac: [u8; 6], bus: S::Bus) -> Self {
+         Machine {
+-            web_restart: false, button_reset: false, mac, reboots: 0, stubs: HashMap::new(), stub_bloom: 0, probe_bloom: 0, stub_hits: 0, fn_probes: HashMap::new(),
++            web_restart: false, button_reset: false, led_log: std::env::var_os("ESP32SIM_LED_LOG").filter(|v| v != "0").map(|_| 0), mac, reboots: 0, stubs: HashMap::new(), stub_bloom: 0, probe_bloom: 0, stub_hits: 0, fn_probes: HashMap::new(),
+             cores: (0..S::CORES).map(|i| S::new_core_with_bus(i, &bus)).collect(), core_held: (0..S::CORES).map(|i| i > 0).collect(), quantum: QUANTUM, run_steps: 0, vq_stats: [0; 4], vq_skip: 0, vq_penalty: 0, vq_max: std::env::var("ESP32SIM_VQ").ok().and_then(|v| v.parse().ok()).unwrap_or(VQ_DEFAULT),
+             bb_max: std::env::var("ESP32SIM_BB").ok().and_then(|v| v.parse().ok()).unwrap_or(BB_DEFAULT).min(4096), bb_stats: [0; 8],
+             bus, symbols: BTreeMap::new(),
+@@ -1066,9 +1070,21 @@ impl<S: Soc> Machine<S> {
+         // pacing clock live out of line.
+         if self.web.is_some() && self.bus.cycles().wrapping_sub(self.ws.last_push_cycles) >= self.ws.push_interval { self.web_push_due(); }
+         if self.rt.enabled && self.bus.cycles().wrapping_sub(self.rt.last_check) >= 1 << 16 { self.rt_pace(); }
++        if self.led_log.is_some() { self.led_log_poll(); }
+         stopped
+     }
+ 
++    #[cold]
++    #[inline(never)]
++    fn led_log_poll(&mut self) {
++        let t = self.seconds();
++        let Some((leds, updates)) = self.bus.board_ref().leds() else { return };
++        if Some(updates) == self.led_log { return; }
++        self.led_log = Some(updates);
++        let body: Vec<String> = leds.iter().map(|c| format!("[{},{},{}]", c[0], c[1], c[2])).collect();
++        eprintln!("[leds] t={:.6} n={} [{}]", t, updates, body.join(","));
++    }
++
+     /// EX168 s4: the due branch of the display push, out of line (EX170 semantics: re-derive the
+     /// interval from the board, then decide).
+     #[cold]
