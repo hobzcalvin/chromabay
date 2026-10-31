@@ -1,7 +1,7 @@
 {
-  "version": "1.1.358",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.358.zip",
-  "buildDate": "2026-10-19T21:08:03Z",
-  "commitHash": "e747083851a85606dead9800bef902584d62e9cf",
-  "commitMessage": "Emulator tests: read [ble]/[leds] lines that land mid-way through a console line"
+  "version": "1.1.359",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.359.zip",
+  "buildDate": "2026-10-31T21:57:02Z",
+  "commitHash": "26de74808613174fe69f8776d7116c4fcb47a89e",
+  "commitMessage": "Fix repeat Report a problem, YouTube error 153 in the app, 5s default crossfade"
 }
