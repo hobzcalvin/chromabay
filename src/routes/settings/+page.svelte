@@ -217,13 +217,23 @@
 
   <h2 class="section">Gallery</h2>
   <div class="card video">
-    <iframe
-      src="https://www.youtube-nocookie.com/embed/mXanKMap3JE"
-      title="ChromaBay video"
-      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-      referrerpolicy="strict-origin-when-cross-origin"
-      allowfullscreen
-    ></iframe>
+    {#if showAppStore}
+      <iframe
+        src="https://www.youtube-nocookie.com/embed/mXanKMap3JE"
+        title="ChromaBay video"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+        referrerpolicy="strict-origin-when-cross-origin"
+        allowfullscreen
+      ></iframe>
+    {:else}
+      <!-- In the native app the page's origin is capacitor://localhost (iOS) or a local http
+           host, so YouTube's embed gets no usable Referer and refuses to play ("Error 153").
+           Show the thumbnail and hand off to YouTube instead. -->
+      <a class="video-link" href="https://www.youtube.com/watch?v=mXanKMap3JE" target="_blank" rel="noopener" aria-label="Watch the ChromaBay video on YouTube">
+        <img src="https://i.ytimg.com/vi/mXanKMap3JE/hqdefault.jpg" alt="ChromaBay video" loading="lazy" />
+        <span class="play" aria-hidden="true">▶</span>
+      </a>
+    {/if}
   </div>
 </main>
 
@@ -259,6 +269,9 @@
   .section { margin: 1.75rem 0 0.75rem; font-size: 1.25rem; }
   .card.video { padding: 0; overflow: hidden; }
   .video iframe { display: block; width: 100%; aspect-ratio: 16 / 9; border: 0; }
+  .video-link { position: relative; display: block; aspect-ratio: 16 / 9; background: #000; }
+  .video-link img { display: block; width: 100%; height: 100%; object-fit: cover; }
+  .video-link .play { position: absolute; inset: 0; margin: auto; width: 68px; height: 48px; border-radius: 12px; background: rgba(255,0,0,0.9); color: #fff; font-size: 1.4rem; display: flex; align-items: center; justify-content: center; }
   .fine { font-size: 0.8rem; margin: 0.75rem 0 0; }
   .fine a { color: #93c5fd; }
 </style>

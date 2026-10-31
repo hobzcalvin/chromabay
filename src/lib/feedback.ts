@@ -42,7 +42,9 @@ export async function openProblemReport(): Promise<void> {
   const devices = deviceSummary();
   const diags = await Promise.all(devices.map(async (d) => ({
     device: d,
-    diagnostics: (d.feat ?? 0) >= 7 ? await withTimeout(readDeviceDiagnostics(d.ble_id), DIAG_TIMEOUT_MS) : null,
+    diagnostics: (d.feat ?? 0) >= 7
+      ? await withTimeout(readDeviceDiagnostics(d.ble_id), DIAG_TIMEOUT_MS).catch(() => null)
+      : null,
   })));
   bleEvent('problem report opened', { devices: devices.length, with_diagnostics: diags.filter((x) => x.diagnostics).length });
 
@@ -58,7 +60,10 @@ export async function openProblemReport(): Promise<void> {
   }
   const ids = devices.map((d) => d.device_id).filter(Boolean) as string[];
 
+  let closed = false;
   const done = () => {
+    if (closed) return;
+    closed = true;
     open = false;
     // Attachments live on the scope; drop them once the report has gone, so they don't ride
     // on unrelated events. Delayed: the form closes as the event is still being assembled.
@@ -77,7 +82,11 @@ export async function openProblemReport(): Promise<void> {
         report_devices: String(devices.length),
         ...(ids.length ? { device_id: ids[0], device_ids: ids.join(',') } : {}),
       },
+      // Cancel/backdrop fires onFormClose; a successful send fires onFormSubmitted instead (once
+      // the success toast is gone), never onFormClose. Both must release the form, or every
+      // later "Report a problem" tap is swallowed by the still-set `open` flag.
       onFormClose: () => { form.removeFromDom(); done(); },
+      onFormSubmitted: () => { form.removeFromDom(); done(); },
       onSubmitSuccess: (_data, eventId) => bleEvent('problem report sent', { event_id: eventId }, { log: false }),
     });
     form.appendToDom();

@@ -75,4 +75,15 @@ describe('problem report', () => {
     formOptions.onFormClose();
     expect(form.removeFromDom).toHaveBeenCalled();
   });
+
+  it('can be opened again after a report is sent', async () => {
+    connectedDevices.set(new Map());
+    form.open.mockClear();
+    await openProblemReport();
+    expect(form.open).toHaveBeenCalledTimes(1);
+    formOptions.onFormSubmitted(); // what Sentry calls after a successful send (not onFormClose)
+    await openProblemReport();
+    expect(form.open).toHaveBeenCalledTimes(2);
+    formOptions.onFormClose();
+  });
 });

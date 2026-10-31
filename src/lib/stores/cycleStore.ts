@@ -11,9 +11,8 @@ import { setCycleOnDevice } from '$lib/ble';
 
 export const cycleEnabled = writable(false);
 export const cycleSeconds = writable(30);
-// Seconds to dissolve one pattern into the next. 0 = cut, which is how cycling behaved
-// before crossfading existed, so it stays the default.
-export const cycleCrossfadeSeconds = writable(0);
+// Seconds to dissolve one pattern into the next. 0 = cut.
+export const cycleCrossfadeSeconds = writable(5);
 
 // The device clamps a crossfade to half the interval (a fade as long as the interval never
 // finishes before the next one starts), so clamp here too and write the clamped value back
