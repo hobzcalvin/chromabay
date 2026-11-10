@@ -1,7 +1,7 @@
 {
-  "version": "1.1.362",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.362.zip",
-  "buildDate": "2026-11-10T06:19:23Z",
-  "commitHash": "5369ca566fc77428e3792a2327404f36777174cd",
-  "commitMessage": "Show LED colours on screen as the LEDs show them (no more muddy yellow)"
+  "version": "1.1.363",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.363.zip",
+  "buildDate": "2026-11-10T06:20:49Z",
+  "commitHash": "3c42fd5c56f9264a75870f03a323509deafe3117",
+  "commitMessage": "Interact: only show knobs for nodes that feed the Output"
 }
