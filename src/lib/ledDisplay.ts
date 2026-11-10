@@ -6,20 +6,25 @@
 // mid-tone far darker than the LEDs do. The worst case is yellow: FastLED's rainbow makes it
 // (171, 170, 0), which a strip shows as a bright yellow and a screen as olive ("muddy").
 //
-// The previews encode the values for the screen first (the sRGB transfer curve, approximated
-// by the 1/2.2 power). This is DISPLAY ONLY: the values operators read and devices are sent are
-// never changed. Strips with their own gamma configured (Show Settings → Color correction)
-// will look a little darker on the LEDs than here, as they should.
+// The previews brighten each pixel for the screen by its BRIGHTEST channel only: that channel
+// is encoded with the sRGB-like 1/2.2 curve and the other two are scaled by the same factor. A
+// pixel's colour (the ratio between its channels) never changes, only how bright it reads.
+// Encoding each channel separately (the first attempt) is closer to the physics on paper but
+// lifts small channels hugely, so rainbow red (215, 0, 40) turned pink and looked washed out.
+// This is DISPLAY ONLY: the values operators read and devices are sent are never changed.
 export const LED_DISPLAY_EXPONENT = 1 / 2.2;
 
-const LUT = new Uint8ClampedArray(256);
-for (let i = 0; i < 256; i++) LUT[i] = Math.round(255 * Math.pow(i / 255, LED_DISPLAY_EXPONENT));
+// GAIN[m] = the factor that takes a brightest channel of m to its encoded value, in 1/256ths.
+const GAIN = new Uint16Array(256);
+for (let m = 1; m < 256; m++) GAIN[m] = Math.round((255 * Math.pow(m / 255, LED_DISPLAY_EXPONENT) / m) * 256);
 
 /** Encode RGBA `src` for the screen into `dst` (same size; may be `src` itself). Alpha kept. */
 export function ledToScreen(src: ImageData, dst: ImageData = src): ImageData {
   const s = src.data, d = dst.data;
   for (let i = 0; i < s.length; i += 4) {
-    d[i] = LUT[s[i]]; d[i + 1] = LUT[s[i + 1]]; d[i + 2] = LUT[s[i + 2]]; d[i + 3] = s[i + 3];
+    const r = s[i], g = s[i + 1], b = s[i + 2];
+    const k = GAIN[r > g ? (r > b ? r : b) : (g > b ? g : b)];
+    d[i] = (r * k) >> 8; d[i + 1] = (g * k) >> 8; d[i + 2] = (b * k) >> 8; d[i + 3] = s[i + 3];
   }
   return dst;
 }
@@ -33,5 +38,8 @@ export function screenScratch(): (src: ImageData) => ImageData {
   };
 }
 
-/** The value a byte shows as on screen (for tests and CSS colour swatches). */
-export const ledByteToScreen = (v: number): number => LUT[Math.max(0, Math.min(255, v | 0))];
+/** How one pixel shows on screen (for tests). */
+export function ledPixelToScreen(r: number, g: number, b: number): [number, number, number] {
+  const k = GAIN[Math.max(r, g, b)];
+  return [(r * k) >> 8, (g * k) >> 8, (b * k) >> 8];
+}

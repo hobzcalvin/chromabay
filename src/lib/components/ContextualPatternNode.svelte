@@ -219,7 +219,6 @@
   }
   
   .pattern-canvas {
-    filter: url(#led-display); /* display-only LED → screen encoding, see ledDisplay.ts */
     position: absolute;
     top: 0;
     left: 0;

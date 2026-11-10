@@ -4,6 +4,8 @@ import { clearNodeInteractiveParameters } from './stores/interactiveStore';
 import { getModulator, modulatorSeedFor } from './stores/modulatorStore';
 import { renderConfig, type RenderConfig } from './renderConfig';
 import { operatorInputCount, isDualInputType } from './operatorArity';
+import { screenScratch } from './ledDisplay';
+const nodeThumbToScreen = screenScratch();
 
 // Global start time for synchronized animations across all nodes
 export const globalStartTime = writable<number>(Date.now());
@@ -1001,6 +1003,9 @@ class CentralizedRenderer {
             outputs.set(node.id, outputData);
             return outputs;
           });
+          // The output has been captured, so the canvas is now only something to look at:
+          // redraw it brightened for the screen (ledDisplay.ts). It's cleared next frame.
+          ctx.putImageData(nodeThumbToScreen(outputData), 0, 0);
         }
       }
     }

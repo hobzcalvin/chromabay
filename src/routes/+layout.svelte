@@ -79,18 +79,6 @@
 <SvelteFlowProvider>
   <!-- Renders each unique pattern preview once; PatternPreview instances blit the frames. -->
   <PreviewRenderHost />
-  <!-- LED values → screen for the editor's node thumbnails (src/lib/ledDisplay.ts). Those
-       canvases are also where node outputs are read back from, so they get a CSS filter (which
-       only changes how they look) rather than having their pixels converted. -->
-  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
-    <filter id="led-display" color-interpolation-filters="sRGB">
-      <feComponentTransfer>
-        <feFuncR type="gamma" amplitude="1" exponent="0.4545" offset="0" />
-        <feFuncG type="gamma" amplitude="1" exponent="0.4545" offset="0" />
-        <feFuncB type="gamma" amplitude="1" exponent="0.4545" offset="0" />
-      </feComponentTransfer>
-    </filter>
-  </svg>
   <div class="app-container">
     <div class="content-area">
       <slot />
