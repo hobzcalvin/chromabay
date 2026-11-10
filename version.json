@@ -1,7 +1,7 @@
 {
-  "version": "1.1.364",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.364.zip",
-  "buildDate": "2026-11-10T06:23:54Z",
-  "commitHash": "fd0d464a3d7051937fdbec795da444b0edd713ec",
-  "commitMessage": "Import LED settings from WLED (cfg.json, or saved during conversion)"
+  "version": "1.1.365",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.365.zip",
+  "buildDate": "2026-11-10T06:26:10Z",
+  "commitHash": "7b3a652fd7e7da1cfbb552d3a19591bb96ef1bfd",
+  "commitMessage": "Save a pending pattern edit when the app is backgrounded or hidden"
 }
