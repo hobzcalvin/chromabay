@@ -259,6 +259,10 @@
         </label>
 
         <div class="field row"><span class="lbl">Realtime streaming</span></div>
+        {#if transport === 'ble'}
+          <p class="hint">Art-Net, sACN and DDP arrive over Wi-Fi, so they do nothing while this device is on Bluetooth. Switch it to Wi-Fi under Connection to set them up. (Settings already chosen are kept.)</p>
+        {/if}
+        <fieldset class="rt" disabled={transport === 'ble'}>
         {#each RT_OPTIONS as opt (opt.bit)}
           {#if rtCaps & opt.bit}
             <label class="field check">
@@ -267,9 +271,9 @@
             </label>
           {/if}
         {/each}
-        {#if rtProto === 0}
+        {#if rtProto === 0 && transport !== 'ble'}
           <p class="hint">Off — the device shows its own patterns. Tick a protocol to let a lighting controller drive the pixels live.</p>
-        {:else}
+        {:else if rtProto !== 0}
           {#if usesUniverse}
             <label class="field row">
               <span>Start universe</span>
@@ -289,6 +293,7 @@
           </label>
           <p class="hint">Stream to this device's IP{settings?.ip ? ` (${settings.ip})` : ''}{usesUniverse ? '' : ' on UDP 4048'}. Takes over live and returns to the pattern {rtTimeout}s after the stream stops. Wi-Fi only.</p>
         {/if}
+        </fieldset>
 
         <div class="field check">
           <button type="button" class="btn" disabled={!canBlink} onclick={doBlink}>Blink Pins</button>
@@ -360,5 +365,7 @@
   .msg.info { opacity: 0.85; }
 
   .hint { font-size: 0.82rem; opacity: 0.7; margin: 0; }
+  fieldset.rt { border: 0; margin: 0; padding: 0; min-width: 0; display: contents; }
+  fieldset.rt:disabled { display: block; opacity: 0.45; }
   .hint.warn { color: #fca5a5; opacity: 0.95; }
 </style>
