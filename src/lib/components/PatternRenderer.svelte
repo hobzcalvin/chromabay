@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { screenScratch } from '$lib/ledDisplay';
   import { onMount, onDestroy } from 'svelte';
   import { flowNodes, flowEdges, nodeOutputs } from '$lib/flowStore';
   import PatternNode from '$lib/PatternNode.svelte';
@@ -18,6 +19,7 @@
   let animationFrame: number | null = null;
 
   // Offscreen canvas for scaling the output
+  const toScreen = screenScratch();
   const offscreen = document.createElement('canvas');
   const offCtx = offscreen.getContext('2d');
 
@@ -31,7 +33,7 @@
 
     offscreen.width = data.width;
     offscreen.height = data.height;
-    offCtx.putImageData(data, 0, 0);
+    offCtx.putImageData(toScreen(data), 0, 0); // LED values → screen (display only)
 
     ctx.imageSmoothingEnabled = false;
     ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);

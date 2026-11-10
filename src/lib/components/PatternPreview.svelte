@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { screenScratch } from '$lib/ledDisplay';
   // Lightweight: does NOT render the pattern itself. It registers interest in the pattern
   // (acquirePreview → a shared PatternRenderSource renders it once, see previewRender.ts) and
   // blits the latest shared frame to its own <canvas>. Many previews of the same pattern thus
@@ -16,6 +17,7 @@
   let key: string | null = null;
   let loadedPattern: SerializedPattern | null = null;
 
+  const toScreen = screenScratch();
   const offscreen = typeof document !== 'undefined' ? document.createElement('canvas') : null;
   const offCtx = offscreen ? offscreen.getContext('2d') : null;
 
@@ -24,7 +26,7 @@
     if (frame && ctx && offCtx && offscreen) {
       offscreen.width = frame.width;
       offscreen.height = frame.height;
-      offCtx.putImageData(frame, 0, 0);
+      offCtx.putImageData(toScreen(frame), 0, 0); // LED values → screen (display only)
       ctx.imageSmoothingEnabled = false;
       ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
       ctx.drawImage(offscreen, 0, 0, canvasElement.width, canvasElement.height);

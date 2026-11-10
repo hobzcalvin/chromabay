@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ledToScreen } from '$lib/ledDisplay';
   // Live WASM render of a single operator at its DEFAULT settings, for the Add-Node modal.
   // Generators render with no input (their canonical look); modifiers are fed the RGB venn
   // as input 1 and a white X as input 2 (single-input ops ignore input 2; Blend uses both).
@@ -81,7 +82,7 @@
           img.data[i + 2] = heap[j + 2];
           img.data[i + 3] = 255;
         }
-        ctx.putImageData(img, 0, 0);
+        ctx.putImageData(ledToScreen(img), 0, 0); // LED values → screen (display only)
       }
       raf = requestAnimationFrame(frame);
     }
