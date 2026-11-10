@@ -1,7 +1,7 @@
 {
-  "version": "1.1.369",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.369.zip",
-  "buildDate": "2026-11-10T06:51:42Z",
-  "commitHash": "c87ad13e20d6e335542095d6afc7cfaf5cd73661",
-  "commitMessage": "New pattern: pre-fill a name, keep the field inside the dialog"
+  "version": "1.1.370",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.370.zip",
+  "buildDate": "2026-11-10T06:55:21Z",
+  "commitHash": "31c560d8a6e837d682b08fed9755d9d8cd36f9fd",
+  "commitMessage": "Spell it color everywhere"
 }
