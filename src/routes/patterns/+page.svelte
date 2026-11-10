@@ -282,10 +282,9 @@
     if (!patternName) return;
     console.log('Setting pattern as current:', patternName);
     // Selecting a single pattern is a Live action → leave Cycle so devices show it (WYSIWYG).
-    await exitCycle();
-    await switchToPattern(patternName);
-    const { loadSerializedPattern } = await import('$lib/flowStore');
-    await loadSerializedPattern(pattern); // pushes it to connected devices
+    // Queued, latest tap wins (see selectPattern in flowStore); loading pushes to devices.
+    const { selectPattern: select } = await import('$lib/flowStore');
+    await select(pattern, exitCycle);
   }
 
   async function handlePatternItemClick(pattern: SerializedPattern, event: Event) {
@@ -316,11 +315,9 @@
     // Set as current pattern and load into editor
     if (pattern.meta?.name) {
       console.log('Setting pattern as current for editing:', pattern.meta?.name);
-      await exitCycle();
-      await switchToPattern(pattern.meta.name);
-      // Load the pattern into the flow editor immediately
-      const { loadSerializedPattern } = await import('$lib/flowStore');
-      await loadSerializedPattern(pattern);
+      // Load the pattern into the flow editor (queued with any other selection in flight)
+      const { selectPattern: select } = await import('$lib/flowStore');
+      await select(pattern, exitCycle);
       goto(`${base}/editor`);
     }
   }

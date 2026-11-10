@@ -4,7 +4,7 @@ import PatternRenderer from '$lib/components/PatternRenderer.svelte';
 import RotaryKnob from '$lib/components/RotaryKnob.svelte';
 import ColorWheel from '$lib/components/ColorWheel.svelte';
 import { loadPatterns, currentPattern, patterns, switchToPattern } from '$lib/stores/patternsStore';
-import { loadSerializedPattern, initializeDefaultPattern, forceSyncCurrentPattern, 
+import { loadSerializedPattern, selectPattern, initializeDefaultPattern, forceSyncCurrentPattern, 
          flowNodes, flowEdges, nodeParameters, getNodeDefinition, setNodeParameter, type Parameter } from '$lib/flowStore';
 import { interactiveParameters } from '$lib/stores/interactiveStore';
 import { findColorGroups, hexToHueSat, hueSatToHex } from '$lib/color';
@@ -338,9 +338,7 @@ import { get } from 'svelte/store';
       if (idx < 0) idx = 0;
       const next = list[(idx + dir + list.length) % list.length];
       if (!next?.meta?.name) return;
-      await switchToPattern(next.meta.name);
-      await loadSerializedPattern(next);
-      forceSyncCurrentPattern();
+      await selectPattern(next); // queued with any other selection; loading pushes to devices
     } catch (e) {
       console.error('Interact: switch pattern failed', e);
     } finally {

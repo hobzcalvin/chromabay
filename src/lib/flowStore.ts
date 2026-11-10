@@ -1336,6 +1336,29 @@ export function forceSyncCurrentPattern(): void {
   }
 }
 
+// Selecting a pattern is several awaits long (leave Cycle over BLE, persist the name, load the
+// graph, push it to devices). Two quick taps used to run two selections interleaved: A's load
+// could finish after B had become "current", leaving the editor and the devices on A while the
+// app called it B, and the next autosave then wrote A's graph under B's name. Selections now run
+// one at a time, and a selection superseded by a newer tap stops at its next step.
+let selectChain: Promise<void> = Promise.resolve();
+let selectSeq = 0;
+export function selectPattern(pattern: SerializedPattern, before?: () => Promise<unknown>): Promise<void> {
+  const mine = ++selectSeq;
+  const name = pattern.meta?.name;
+  const run = async () => {
+    if (mine !== selectSeq || !name) return;
+    if (before) await before();
+    if (mine !== selectSeq) return;
+    const { switchToPattern } = await import('$lib/stores/patternsStore');
+    await switchToPattern(name);
+    if (mine !== selectSeq) return;
+    await loadSerializedPattern(pattern);
+  };
+  selectChain = selectChain.then(run, run).catch((e) => { console.error('Select pattern failed:', e); });
+  return selectChain;
+}
+
 export async function loadSerializedPattern(serializedPattern: SerializedPattern): Promise<void> {
   // Cancel any autosave a prior edit scheduled, so it can't fire mid-load and
   // persist the wrong (about-to-be-replaced) content.
