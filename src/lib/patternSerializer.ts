@@ -319,6 +319,16 @@ export function serializePattern(
   currentNodeParameters: Map<string, Map<string, any>>, // Actual parameters from the Svelte store
   patternName?: string
 ): SerializedPattern {
+  // Ignore edges whose ends aren't in the graph. The node and edge stores are written
+  // separately, so while a pattern loads (or a node is deleted) there's a moment where edges
+  // still name nodes that are gone. Serializing then threw ("reading 'id'" in the ordering
+  // pass), which made the device-sync check skip that change and could fail a save.
+  {
+    const ids = new Set(allNodes.map(n => n.id));
+    if (allEdges.some(e => !ids.has(e.source) || !ids.has(e.target))) {
+      allEdges = allEdges.filter(e => ids.has(e.source) && ids.has(e.target));
+    }
+  }
   // Step 1: Sort nodes topologically to determine execution order.
   //
   // Data edges alone aren't enough, because nodes share lanes: a modifier writes its result

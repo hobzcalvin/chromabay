@@ -108,3 +108,11 @@ test('displace keeps both inputs through a save/load round trip', () => {
   expect(d.i2).toBeDefined();
   expect(d.i).not.toBe(d.i2);
 });
+
+test('serializing ignores an edge whose source node is gone (mid-load state)', () => {
+  const src = { nodes: [{ t: 'plasma', o: 0 }, { t: 'blur', o: 0, i: 0 }], meta: { output: 0 } } as any;
+  const g = deserializePattern(src);
+  const stale = { id: 'stale', source: 'gone', target: g.nodes[1].id, sourceHandle: 'output', targetHandle: 'input' };
+  const out = serializePattern(g.nodes, [...g.edges, stale] as any, g.nodeParameters);
+  expect(out.nodes.map((n: any) => n.t)).toEqual(['plasma', 'blur']);
+});
