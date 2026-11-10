@@ -71,9 +71,6 @@
 #include "RgbSplitOperator.h"
 #include "GradientMapOperator.h"
 #include "DisplaceOperator.h"
-// Demo operator with a deliberate divide-by-zero at speed 0, for showing crash
-// reporting end to end. Remove or gate before shipping firmware to users.
-#include "BuggyRainbowOperator.h"
 
 // Add your new operators here:
 // #include "RainbowOperator.h"
