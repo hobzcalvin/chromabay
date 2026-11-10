@@ -11,7 +11,8 @@
   import { connectedDevices, getConnectedDevicesList } from '$lib/stores/deviceStore';
   import { authUser } from '$lib/stores/authStore';
   import { cycleEnabled, cycleSeconds, cycleCrossfadeSeconds, applyCycle, exitCycle } from '$lib/stores/cycleStore';
-  import { browseGallery, importGalleryPattern, publishPattern, type GalleryPattern } from '$lib/gallery';
+  import { browseGallery, importGalleryPattern, publishPattern, unpublishPattern, type GalleryPattern, type GallerySort } from '$lib/gallery';
+  import { isSupabaseConfigured } from '$lib/supabase';
   import { get } from 'svelte/store';
   // Auto-subscriptions ($store) are released when the page unmounts; the manual
   // .subscribe() calls these replace added two more live subscribers on every visit.
@@ -93,7 +94,7 @@
     publishing = { ...publishing, [name]: true };
     try {
       const res = await publishPattern(pattern);
-      if (res.ok) onlinePatterns = await browseGallery({ limit: 30 }); // refresh so it shows ✅ shared
+      if (res.ok) await loadGallery(); // refresh so it shows ✅ shared
       else alert('Share failed: ' + (res.error ?? 'unknown error'));
     } finally {
       const p = { ...publishing }; delete p[name]; publishing = p;
@@ -150,26 +151,75 @@
     return out;
   })();
 
-  // Online, content-addressed (git/lockfile-style): show a gallery pattern unless it's mine
-  // or I already hold that EXACT version. `meta.sourceHash` is the remote hash pinned when I
-  // checked it out; adopting sets it to the current remote hash. So a brand-new pattern shows
-  // (never adopted), and an author's re-publish shows again (its new content_hash isn't among
-  // my pinned hashes) — but my own param tweaks never do (they don't change sourceHash).
+  // Online gallery. Every published pattern is listed, including your own: hiding your own
+  // entries (as this used to) meant the section was empty for anyone who had published, which
+  // was most of the gallery, so it looked like it never worked. Each row instead says where
+  // you stand with it. Content-addressed (git/lockfile-style): `meta.sourceHash` is the remote
+  // hash pinned when you imported it, so you "have" an entry when you hold that EXACT version;
+  // an author's re-publish has a new content_hash and offers itself again as an update.
   $: myUid = $authUser?.id ?? null;
   $: adoptedHashes = new Set(patternsList.map((p) => p.meta?.sourceHash).filter(Boolean) as string[]);
-  $: onlineNew = onlinePatterns.filter(
-    (g) => g.author !== myUid && !(g.content_hash && adoptedHashes.has(g.content_hash)),
-  );
+  $: adoptedNames = new Set(patternsList.filter((p) => p.meta?.sourceHash).map((p) => `${p.meta?.author ?? ''}\u0000${p.meta?.name}`));
+  type GalleryState = 'mine' | 'have' | 'update' | 'new';
+  function galleryState(g: GalleryPattern): GalleryState {
+    if (myUid && g.author === myUid) return 'mine';
+    if (g.content_hash && adoptedHashes.has(g.content_hash)) return 'have';
+    if (adoptedNames.has(`${g.author ?? ''}\u0000${g.name}`)) return 'update';
+    return 'new';
+  }
   // Names I've published (gallery entries under my uid). Reactive so the button's ✅ state
   // updates as soon as onlinePatterns refreshes after a publish.
   $: publishedNames = new Set(
     myUid ? onlinePatterns.filter((g) => g.author === myUid).map((g) => g.name) : [],
   );
 
+  const galleryEnabled = isSupabaseConfigured();
+  let gallerySort: GallerySort = 'top';
+  let gallerySearch = '';
+  let galleryLoading = false;
+  let galleryError = '';
+  let galleryBusy: Record<string, boolean> = {};
+  let gallerySeq = 0;
+  async function loadGallery() {
+    if (!galleryEnabled) return;
+    const seq = ++gallerySeq; // drop responses that a newer search/sort has superseded
+    galleryLoading = true;
+    galleryError = '';
+    try {
+      const rows = await browseGallery({ limit: 60, sort: gallerySort, search: gallerySearch });
+      if (seq === gallerySeq) onlinePatterns = rows;
+    } catch (e: any) {
+      if (seq === gallerySeq) galleryError = e?.message || 'Could not reach the gallery';
+    } finally {
+      if (seq === gallerySeq) galleryLoading = false;
+    }
+  }
+  let searchTimer: ReturnType<typeof setTimeout> | undefined;
+  function onGallerySearch() {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(loadGallery, 300);
+  }
+  function setGallerySort(s: GallerySort) {
+    if (s === gallerySort) return;
+    gallerySort = s;
+    loadGallery();
+  }
+  async function handleUnpublish(g: GalleryPattern) {
+    if (!confirm(`Remove “${g.name}” from the public gallery? Your local copy stays.`)) return;
+    galleryBusy = { ...galleryBusy, [g.id]: true };
+    try {
+      const res = await unpublishPattern(g.id);
+      if (!res.ok) alert(`Couldn't unpublish: ${res.error}`);
+      await loadGallery();
+    } finally {
+      const b = { ...galleryBusy }; delete b[g.id]; galleryBusy = b;
+    }
+  }
+
   onMount(async () => {
     await loadPatterns();
     refreshDeviceLibraries(); // best-effort, non-blocking
-    try { onlinePatterns = await browseGallery({ limit: 30 }); } catch (e) { console.warn('gallery browse failed', e); }
+    loadGallery();
   });
 
   // Import a pattern (from a device or the gallery) into My Patterns, then select it as
@@ -186,7 +236,16 @@
     }
   }
   const handleImportDevicePattern = (p: SerializedPattern) => importAndSelect(() => importLibraryPattern(p));
-  const handleImportGallery = (g: GalleryPattern) => importAndSelect(() => importGalleryPattern(g));
+  async function handleImportGallery(g: GalleryPattern) {
+    if (galleryBusy[g.id]) return;
+    galleryBusy = { ...galleryBusy, [g.id]: true };
+    try {
+      await importAndSelect(() => importGalleryPattern(g));
+      await loadGallery(); // the import upvoted it: refresh the count
+    } finally {
+      const b = { ...galleryBusy }; delete b[g.id]; galleryBusy = b;
+    }
+  }
 
   // Remove a pattern from ONE device's library (not from My Patterns). Optimistic: the row
   // disappears immediately. We do NOT re-dump on success — the BLE dump is lossy (drops
@@ -562,18 +621,48 @@
     </section>
   {/if}
 
-  <!-- Online: top gallery patterns you don't already have. -->
-  {#if onlineNew.length > 0}
+  <!-- Online gallery: everything published, with where you stand on each entry. -->
+  {#if galleryEnabled}
     <section class="pattern-section" data-tour-target="gallery">
-      <h2 class="section-title">Online</h2>
-      {#each onlineNew as g (g.id)}
-        <div class="simple-row">
+      <div class="gallery-head">
+        <h2 class="section-title">Online Gallery</h2>
+        <div class="gallery-sort" role="group" aria-label="Sort gallery">
+          <button class:active={gallerySort === 'top'} onclick={() => setGallerySort('top')}>Top</button>
+          <button class:active={gallerySort === 'new'} onclick={() => setGallerySort('new')}>New</button>
+        </div>
+      </div>
+      <input
+        class="gallery-search"
+        type="search"
+        placeholder="Search the gallery"
+        bind:value={gallerySearch}
+        oninput={onGallerySearch}
+      />
+      {#if galleryError}
+        <p class="section-empty">Couldn't load the gallery ({galleryError}). <button class="link-btn" onclick={loadGallery}>Retry</button></p>
+      {:else if galleryLoading && onlinePatterns.length === 0}
+        <p class="section-empty">Loading…</p>
+      {:else if onlinePatterns.length === 0}
+        <p class="section-empty">{gallerySearch.trim() ? 'No patterns match that search.' : 'Nothing published yet. Share one of yours with 🔗 above.'}</p>
+      {/if}
+      {#each onlinePatterns as g (g.id)}
+        {@const st = galleryState(g)}
+        <div class="simple-row" class:dim={galleryLoading}>
           <PatternPreview pattern={g.blob} size={44} />
-          <span class="simple-name">{g.name}{g.handle ? ` · by ${g.handle}` : ''}</span>
-          <span class="upvotes">▲ {g.upvote_count}</span>
-          <button class="import-btn" onclick={() => handleImportGallery(g)}>Import</button>
+          <span class="simple-name">{g.name}<span class="by">{st === 'mine' ? ' · yours' : g.handle ? ` · by ${g.handle}` : ''}</span></span>
+          <span class="upvotes" title="Upvotes (importing a pattern upvotes it)">▲ {g.upvote_count}</span>
+          {#if st === 'mine'}
+            <button class="mini-btn" disabled={galleryBusy[g.id]} onclick={() => handleUnpublish(g)} title="Remove from the gallery" aria-label="Unpublish">🗑</button>
+          {:else if st === 'have'}
+            <span class="have-tag" title="This exact version is in My Patterns">✓ Have it</span>
+          {:else}
+            <button class="import-btn" disabled={galleryBusy[g.id]} onclick={() => handleImportGallery(g)}>{galleryBusy[g.id] ? '…' : st === 'update' ? 'Update' : 'Import'}</button>
+          {/if}
         </div>
       {/each}
+      {#if !$authUser}
+        <p class="section-empty small">Sign in under Settings to publish your own patterns.</p>
+      {/if}
     </section>
   {/if}
 </main>
@@ -633,6 +722,25 @@
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .upvotes { color: #cbd5e1; font-size: 0.8rem; white-space: nowrap; }
+  .simple-name .by { color: rgba(255, 255, 255, 0.65); }
+  .simple-row.dim { opacity: 0.6; }
+  .have-tag { color: #bbf7d0; font-size: 0.8rem; font-weight: 600; white-space: nowrap; padding: 0 0.3rem; }
+  .gallery-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+  .gallery-sort { display: flex; gap: 0.25rem; }
+  .gallery-sort button {
+    background: rgba(0, 0, 0, 0.25); color: rgba(255, 255, 255, 0.8); border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 8px; padding: 0.2rem 0.6rem; font-size: 0.8rem; cursor: pointer;
+  }
+  .gallery-sort button.active { background: rgba(255, 255, 255, 0.9); color: #312e81; font-weight: 600; }
+  .gallery-search {
+    width: 100%; box-sizing: border-box; margin: 0.25rem 0 0.75rem; padding: 0.45rem 0.7rem;
+    border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.25); background: rgba(0, 0, 0, 0.25);
+    color: #fff; font-size: 0.9rem;
+  }
+  .gallery-search::placeholder { color: rgba(255, 255, 255, 0.55); }
+  .section-empty.small { font-size: 0.8rem; margin-top: 0.5rem; }
+  .link-btn { background: none; border: none; color: #fff; text-decoration: underline; cursor: pointer; padding: 0; font: inherit; }
+  .import-btn:disabled, .mini-btn:disabled { opacity: 0.5; cursor: default; }
   .import-btn {
     background: linear-gradient(135deg, #3b82f6, #1d4ed8); color: #fff; border: none;
     padding: 0.35rem 0.8rem; border-radius: 8px; font-size: 0.85rem; font-weight: 600; cursor: pointer;

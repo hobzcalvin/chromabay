@@ -533,6 +533,29 @@ export async function importLibraryPattern(incoming: SerializedPattern): Promise
 }
 
 /**
+ * Update an unmodified gallery import to the author's newer published version, in place: same
+ * local id and name, new nodes and pinned `sourceHash`. Matches the copy by author + name among
+ * patterns that still carry a `sourceHash` (an edited copy has dropped it and is yours, so it is
+ * never overwritten). Returns null when there is no such copy, so the caller can import fresh.
+ */
+export async function updateImportedPattern(incoming: SerializedPattern): Promise<{ name: string } | null> {
+  const list = await readStored();
+  const author = incoming.meta?.author;
+  const name = incoming.meta?.name;
+  const i = list.findIndex((p) => p.meta?.sourceHash && p.meta?.author === author && p.meta?.name === name);
+  if (i < 0 || !name) return null;
+  const old = list[i];
+  list[i] = {
+    nodes: incoming.nodes ?? [],
+    meta: { ...old.meta, output: incoming.meta?.output ?? 1, sourceHash: incoming.meta?.sourceHash, updatedAt: nowMs() },
+  };
+  await writeStored(list);
+  patterns.set(list);
+  onLibraryChanged();
+  return { name };
+}
+
+/**
  * Merge remote library rows into the local store: last-writer-wins by `updated_ms`, honoring
  * tombstones (a `deleted` row removes the local copy and records a tombstone so it won't
  * resurrect). Called by the cloud-sync pull. Returns whether anything changed locally.

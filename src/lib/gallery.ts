@@ -6,7 +6,7 @@
 import { get } from 'svelte/store';
 import { supabase } from './supabase';
 import { authUser } from './stores/authStore';
-import { importLibraryPattern } from './stores/patternsStore';
+import { importLibraryPattern, updateImportedPattern } from './stores/patternsStore';
 import type { SerializedPattern } from './patternSerializer';
 
 /** Hash the pattern's *content* (nodes + output), independent of name/id/timestamps. */
@@ -41,22 +41,48 @@ export async function publishPattern(p: SerializedPattern): Promise<{ ok: boolea
   return error ? { ok: false, error: error.message } : { ok: true };
 }
 
-/** Browse public gallery patterns (search by name; newest-highest-voted first). */
-export async function browseGallery(opts: { search?: string; limit?: number } = {}): Promise<GalleryPattern[]> {
+export type GallerySort = 'top' | 'new';
+
+/**
+ * Browse public gallery patterns (search by name). `top` = most upvoted first, `new` = newest
+ * first. Throws on a network/database error so the caller can say so instead of silently
+ * showing nothing (a swallowed error used to look exactly like an empty gallery).
+ */
+export async function browseGallery(
+  opts: { search?: string; limit?: number; sort?: GallerySort } = {},
+): Promise<GalleryPattern[]> {
   if (!supabase) return [];
   let q = supabase
     .from('patterns')
-    .select('id,author,name,blob,content_hash,upvote_count,created_at,profiles(handle,display_name)')
-    .order('upvote_count', { ascending: false })
-    .order('created_at', { ascending: false })
-    .limit(opts.limit ?? 60);
-  if (opts.search?.trim()) q = q.ilike('name', `%${opts.search.trim()}%`);
+    .select('id,author,name,blob,content_hash,upvote_count,created_at,profiles(handle,display_name)');
+  q = opts.sort === 'new'
+    ? q.order('created_at', { ascending: false })
+    : q.order('upvote_count', { ascending: false }).order('created_at', { ascending: false });
+  q = q.limit(opts.limit ?? 60);
+  // PostgREST `ilike` treats % and _ as wildcards; escape them so a search is literal.
+  const term = opts.search?.trim().replace(/[\\%_]/g, (c) => `\\${c}`);
+  if (term) q = q.ilike('name', `%${term}%`);
   const { data, error } = await q;
-  if (error) { console.warn('[gallery] browse failed:', error.message); return []; }
-  return (data || []).map((r: any) => ({
-    ...r,
-    handle: r.profiles?.handle || r.profiles?.display_name || 'anon',
-  }));
+  if (error) {
+    console.warn('[gallery] browse failed:', error.message);
+    throw new Error(error.message);
+  }
+  return (data || [])
+    // A row without a usable blob can't be previewed or imported; skip it rather than crash.
+    .filter((r: any) => r?.blob && Array.isArray(r.blob.nodes))
+    .map((r: any) => ({
+      ...r,
+      handle: r.profiles?.handle || r.profiles?.display_name || 'anon',
+    }));
+}
+
+/** Remove one of YOUR published patterns from the gallery (RLS: author only). */
+export async function unpublishPattern(id: string): Promise<{ ok: boolean; error?: string }> {
+  if (!supabase) return { ok: false, error: 'Cloud not configured' };
+  const uid = get(authUser)?.id;
+  if (!uid) return { ok: false, error: 'Sign in to unpublish' };
+  const { error } = await supabase.from('patterns').delete().eq('id', id).eq('author', uid);
+  return error ? { ok: false, error: error.message } : { ok: true };
 }
 
 /**
@@ -90,7 +116,10 @@ export async function importGalleryPattern(g: GalleryPattern): Promise<{ name: s
       sourceHash: g.content_hash ?? undefined,
     },
   };
-  const res = await importLibraryPattern(incoming);
+  // A newer version of something you imported (and haven't edited) replaces that copy rather
+  // than landing next to it as "Name 2".
+  const updated = await updateImportedPattern(incoming);
+  const res = updated ? { name: updated.name, collided: false } : await importLibraryPattern(incoming);
   // Adopting a pattern is an upvote (idempotent per user).
   const uid = get(authUser)?.id;
   if (supabase && uid) {
