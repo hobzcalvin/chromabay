@@ -59,24 +59,39 @@ export function triggerAutoSave(reason: string): void {
   if (!hasEditablePattern()) return;
 
   clearTimeout(autoSaveTimeout);
-  autoSaveTimeout = setTimeout(async () => {
-    // A load may have started, or the editor emptied, in the 500ms since this
-    // was scheduled — don't persist over the stored pattern.
-    if (patternLoading || !hasEditablePattern()) return;
-    try {
-      const { saveCurrentPattern } = await import('$lib/stores/patternsStore');
-      const { currentPatternName } = await import('$lib/stores/patternsStore');
-      const { get } = await import('svelte/store');
+  pendingAutoSaveReason = reason;
+  autoSaveTimeout = setTimeout(() => { void runAutoSave(); }, 500); // 500ms debounce
+}
 
-      const currentName = get(currentPatternName);
-      const serialized = serializeCurrentPattern(currentName);
-      await saveCurrentPattern(serialized);
+let pendingAutoSaveReason: string | null = null;
+async function runAutoSave(): Promise<void> {
+  autoSaveTimeout = undefined;
+  const reason = pendingAutoSaveReason;
+  pendingAutoSaveReason = null;
+  if (reason === null) return;
+  // A load may have started, or the editor emptied, in the 500ms since this
+  // was scheduled — don't persist over the stored pattern.
+  if (patternLoading || !hasEditablePattern()) return;
+  try {
+    const { saveCurrentPattern, currentPatternName } = await import('$lib/stores/patternsStore');
+    const currentName = get(currentPatternName);
+    const serialized = serializeCurrentPattern(currentName);
+    await saveCurrentPattern(serialized);
+    console.log(`📊 Auto-saved pattern after ${reason}`);
+  } catch (error) {
+    console.error('❌ Failed to auto-save pattern:', error);
+  }
+}
 
-      console.log(`📊 Auto-saved pattern after ${reason}`);
-    } catch (error) {
-      console.error('❌ Failed to auto-save pattern:', error);
-    }
-  }, 500); // 500ms debounce
+/**
+ * Save now if an autosave is waiting out its debounce. Called when the app is backgrounded or
+ * the page is hidden: iOS force-quit (and a live-update reload) always comes after that, and an
+ * edit made in the last half second used to be lost with the pending timer.
+ */
+export function flushAutoSave(): Promise<void> {
+  if (!autoSaveTimeout) return Promise.resolve();
+  clearTimeout(autoSaveTimeout);
+  return runAutoSave();
 }
 
 // Helper function to get parameter value for a node

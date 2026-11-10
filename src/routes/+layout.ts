@@ -233,6 +233,19 @@ if (browser && Capacitor.isNativePlatform() && !dev && !isLocalBuild) {
   console.log('📱 UPDATE: Live updates disabled in development mode');
 }
 
+// Save a pending pattern edit before the app can be killed: backgrounding (native) or hiding
+// the page (web) comes before any force-quit, swipe-away or reload.
+if (browser) {
+  const flush = () => { import('$lib/flowStore').then(({ flushAutoSave }) => flushAutoSave()).catch(() => {}); };
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush(); });
+  window.addEventListener('pagehide', flush);
+  if (Capacitor.isNativePlatform()) {
+    import('@capacitor/app').then(({ App }) => {
+      App.addListener('appStateChange', ({ isActive }) => { if (!isActive) flush(); });
+    }).catch(() => {});
+  }
+}
+
 // Handle app state changes - leave Interact view when foregrounded
 if (browser && Capacitor.isNativePlatform()) {
   import('@capacitor/app').then(({ App }) => {
