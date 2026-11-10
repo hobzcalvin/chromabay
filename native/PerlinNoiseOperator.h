@@ -22,6 +22,10 @@ public:
         float saturation = getFloat(parameters, 4, 255.0f);
         int octaves = getInt(parameters, 5, 1);          // fractal detail (1 = plain Perlin)
         float warp = getFloat(parameters, 6, 0.0f);      // domain warp: organic swirl/flow
+        // What the noise drives. Hue only (the original look) leaves brightness at full, so a low
+        // Saturation or a small Hue Range shows almost nothing; Brightness makes it a grey/one-hue
+        // noise source (useful as a mask or a Displace map); Both does the two at once.
+        int drives = getInt(parameters, 7, 0);
 
         // Integrated time factor (smooth when speed changes; see BaseOperator::advancePhase).
         uint16_t time_factor = (uint16_t)fmodf(advancePhase(deltaTimeMs, speed * 10.0f), 65536.0f);
@@ -56,15 +60,22 @@ public:
                 // Generate noise value (fractal when octaves > 1)
                 uint8_t noise_val = fbm8((uint32_t)noise_x, (uint32_t)noise_y, time_factor, octaves);
 
-                // Map noise to hue
-                float hue = hue_base + ((float)noise_val / 255.0f * hue_range);
+                // Map noise to hue (and/or brightness)
+                float hue = drives == 1 ? hue_base : hue_base + ((float)noise_val / 255.0f * hue_range);
                 while (hue > 255.0f) hue -= 255.0f;
                 while (hue < 0.0f) hue += 255.0f;
 
                 // Full brightness: the noise drives HUE, not value. (A second noise layer
                 // used to dim each pixel to 0.3..1.0, so it never looked fully lit even at
                 // value=255 — that's why this looked dim vs. a plain noise->hue map.)
-                CHSV hsv_color((uint8_t)hue, (uint8_t)saturation, 255);
+                uint8_t val = 255;
+                if (drives != 0) {
+                    // Stretch the noise's typical ~40..215 span to the full range before using it
+                    // as brightness, so the dark parts actually go dark.
+                    int v = ((int)noise_val - 40) * 255 / 175;
+                    val = (uint8_t)(v < 0 ? 0 : (v > 255 ? 255 : v));
+                }
+                CHSV hsv_color((uint8_t)hue, (uint8_t)saturation, val);
                 outputBuffer[index] = hsv_color;
             }
         }
@@ -86,7 +97,8 @@ public:
             ParameterInfo("hue_range", "Hue Range", ParameterInfo::FLOAT, 60.0f, 0.0f, 255.0f),
             ParameterInfo("saturation", "Saturation", ParameterInfo::FLOAT, 255.0f, 0.0f, 255.0f),
             ParameterInfo("octaves", "Octaves", ParameterInfo::INT, 1, 1, 6),
-            ParameterInfo("warp", "Warp", ParameterInfo::FLOAT, 0.0f, 0.0f, 2.0f)
+            ParameterInfo("warp", "Warp", ParameterInfo::FLOAT, 0.0f, 0.0f, 2.0f),
+            ParameterInfo("drives", "Noise drives", ParameterInfo::SELECT, 0, std::vector<std::string>{ "Hue", "Brightness", "Both" })
         };
     }
 };
