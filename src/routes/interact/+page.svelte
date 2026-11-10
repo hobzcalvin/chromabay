@@ -5,7 +5,7 @@ import RotaryKnob from '$lib/components/RotaryKnob.svelte';
 import ColorWheel from '$lib/components/ColorWheel.svelte';
 import { loadPatterns, currentPattern, patterns, switchToPattern } from '$lib/stores/patternsStore';
 import { loadSerializedPattern, initializeDefaultPattern, forceSyncCurrentPattern, 
-         flowNodes, nodeParameters, getNodeDefinition, setNodeParameter, type Parameter } from '$lib/flowStore';
+         flowNodes, flowEdges, nodeParameters, getNodeDefinition, setNodeParameter, type Parameter } from '$lib/flowStore';
 import { interactiveParameters } from '$lib/stores/interactiveStore';
 import { findColorGroups, hexToHueSat, hueSatToHex } from '$lib/color';
 import { modulators, getModulator, setModulator, SHAPES, type ModField } from '$lib/stores/modulatorStore';
@@ -89,7 +89,7 @@ import { get } from 'svelte/store';
   $: {
     // Wait for stores to be properly loaded and watch interactive params AND automations
     // ($modulators referenced so interactive-speed knobs appear/disappear reactively).
-    if ($flowNodes.length > 0 && $interactiveParameters && $modulators) {
+    if ($flowNodes.length > 0 && $flowEdges && $interactiveParameters && $modulators) {
       const newKnobs = generateDynamicKnobs();
       if (newKnobs.length !== dynamicKnobs.length ||
           newKnobs.some((knob, i) =>
@@ -163,6 +163,22 @@ import { get } from 'svelte/store';
     console.log('Current nodes:', currentNodes.length);
     console.log('Interactive parameters:', currentInteractiveParams.size);
     
+    // Only nodes whose output reaches the Output node get knobs: a knob on a disconnected or
+    // dead-end node turns and nothing on the lights changes. Walk upstream from Output.
+    const currentEdges = get(flowEdges);
+    const contributing = new Set<string>();
+    const outputNode = currentNodes.find(n => n.data.type === 'output');
+    if (outputNode) {
+      const stack = [outputNode.id];
+      while (stack.length) {
+        const id = stack.pop()!;
+        if (contributing.has(id)) continue;
+        contributing.add(id);
+        for (const e of currentEdges) if (e.target === id && !contributing.has(e.source)) stack.push(e.source);
+      }
+    }
+    const contributes = (id: string) => !outputNode || contributing.has(id);
+
     // Create an array to store knobs with their order
     const knobsWithOrder: { knob: InteractiveKnob; order: number }[] = [];
     
@@ -174,6 +190,7 @@ import { get } from 'svelte/store';
         console.log(`Node ${nodeId} not found in current nodes`);
         continue;
       }
+      if (!contributes(nodeId)) continue; // not wired to Output: its knobs would do nothing
       
       const nodeDefinition = getNodeDefinition(node.data.type as string);
       if (!nodeDefinition) {
@@ -263,7 +280,7 @@ import { get } from 'svelte/store';
     const currentModulators = get(modulators);
     for (const [nodeId, params] of currentModulators.entries()) {
       const node = currentNodes.find(n => n.id === nodeId);
-      if (!node) continue;
+      if (!node || !contributes(nodeId)) continue;
       const nodeDefinition = getNodeDefinition(node.data.type as string);
       if (!nodeDefinition) continue;
       for (const [paramName, cfg] of params.entries()) {
