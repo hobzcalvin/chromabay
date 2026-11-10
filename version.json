@@ -1,7 +1,7 @@
 {
-  "version": "1.1.365",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.365.zip",
-  "buildDate": "2026-11-10T06:26:10Z",
-  "commitHash": "7b3a652fd7e7da1cfbb552d3a19591bb96ef1bfd",
-  "commitMessage": "Save a pending pattern edit when the app is backgrounded or hidden"
+  "version": "1.1.366",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.366.zip",
+  "buildDate": "2026-11-10T06:30:12Z",
+  "commitHash": "0a8bb87b516b8edcf62d4a2403d78d6c8ad128e1",
+  "commitMessage": "Queue pattern selections so the last tap wins"
 }
