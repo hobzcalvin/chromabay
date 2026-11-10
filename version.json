@@ -1,7 +1,7 @@
 {
-  "version": "1.1.360",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.360.zip",
-  "buildDate": "2026-11-10T06:01:06Z",
-  "commitHash": "6b99b7c69aab410cf53f8de10f330c7e2e712147",
-  "commitMessage": "Online gallery: list every published pattern, with search, sort and states"
+  "version": "1.1.361",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.361.zip",
+  "buildDate": "2026-11-10T06:14:41Z",
+  "commitHash": "bb1f98f6c59164c11131b49e5f9e8b342ec8bb45",
+  "commitMessage": "Perlin Noise: let the noise drive brightness, not only hue"
 }
