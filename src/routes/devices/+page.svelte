@@ -545,6 +545,12 @@
   // Per-device rename + button-pin edit buffers (keyed by deviceId).
   let renameValue: Record<string, string> = $state({});
   let buttonPinValue: Record<string, string> = $state({});
+  // A WLED import (LedConfiguration → Import from WLED) also carries the device's name and
+  // button pin; put them in the form fields so the one Save Configuration writes them too.
+  function applyWledExtras(deviceId: string, r: { name?: string; buttonPin?: number }) {
+    if (r.name) renameValue[deviceId] = r.name.slice(0, 31);
+    if (r.buttonPin !== undefined && r.buttonPin >= 0 && r.buttonPin <= 39) buttonPinValue[deviceId] = String(r.buttonPin);
+  }
 
   // (Pattern advancement on a device's button double-click is handled on the device
   // itself now — it steps through its own stored library. The app no longer pushes a
@@ -1100,6 +1106,7 @@
                   onAddStrip={addLedStrip}
                   onRemoveStrip={removeLedStrip}
                   onSaveConfig={saveConfiguration}
+                  onWledImport={applyWledExtras}
                 />
 
                 {@render firmwareSection(device, settings)}
@@ -1183,6 +1190,7 @@
                   onAddStrip={addLedStrip}
                   onRemoveStrip={removeLedStrip}
                   onSaveConfig={saveConfiguration}
+                  onWledImport={applyWledExtras}
                 />
 
                 {@render firmwareSection(device, settings)}

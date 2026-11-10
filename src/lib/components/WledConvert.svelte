@@ -9,9 +9,10 @@
   // over USB, or via the app's in-app "Install from a file" (unsigned) OTA — text only.
   import { Capacitor } from '@capacitor/core';
   import { listCachedFirmware, getFirmware } from '$lib/firmwareCache';
-  import { flashFirmwareViaWledHttp, WLED_AP_SSID, WLED_AP_PASS } from '$lib/wledOta';
+  import { flashFirmwareViaWledHttp, WLED_AP_HOST, WLED_AP_SSID, WLED_AP_PASS } from '$lib/wledOta';
   import { fetchFirmwareRegistry, resolveFirmware, prefetchFirmware, firmwareCacheKey } from '$lib/ble';
   import FirmwareDownloads from './FirmwareDownloads.svelte';
+  import { wledConfigToChromaBay, describeWledImport, saveWledImport } from '$lib/wledImport';
 
   const isNative = Capacitor.getPlatform() !== 'web';
   const REGISTRY_URL = 'https://chromabay.app/firmware/esp32/esp32_firmware_registry.json';
@@ -65,9 +66,26 @@
     if (!fw) { message = 'Firmware could not be read. Connect to the internet and reopen this section.'; result = 'error'; return; }
 
     busy = true; result = 'idle'; message = '';
+    // Keep WLED's own settings (LED count, pins, chipset, name…) before they're overwritten, so
+    // the device's LED settings can offer them once it runs ChromaBay. Best effort: a failure
+    // here never blocks the conversion (a cfg.json can still be imported by hand later).
+    let keptNote = '';
+    try {
+      const ctl = new AbortController();
+      const t = setTimeout(() => ctl.abort(), 4000);
+      const resp = await fetch(`http://${WLED_AP_HOST}/json/cfg`, { signal: ctl.signal });
+      clearTimeout(t);
+      const cfg = await resp.json();
+      const parsed = wledConfigToChromaBay(cfg);
+      saveWledImport(cfg);
+      keptNote = ` Saved its WLED settings (${describeWledImport(parsed)}): open the device's Show Settings → LED Configuration → Import from WLED to use them.`;
+    } catch (e) {
+      console.warn('[WLED convert] could not read WLED config (continuing):', e);
+    }
     try {
       const r = await flashFirmwareViaWledHttp(fw.bin, undefined, (m) => (message = m));
       result = r.confirmed ? 'confirmed' : 'sent';
+      message += keptNote;
     } catch (e: any) {
       result = 'error';
       message = `Couldn't reach the device. Make sure you're joined to its "${WLED_AP_SSID}" Wi-Fi. (${e?.message ?? e})`;
@@ -121,7 +139,8 @@
         <ol>
           <li>Download the ChromaBay <strong>firmware .bin</strong> for your board's chip (below).</li>
           <li>Open the device's WLED web UI (e.g. <code>http://4.3.2.1</code> on its AP, or its IP on your network).</li>
-          <li>Go to <strong>Config → Security &amp; Updates</strong>, and under <strong>Manual OTA update</strong> choose the file and upload. WLED reboots into ChromaBay.</li>
+          <li>Go to <strong>Config → Security &amp; Updates</strong>. First tap <strong>Backup configuration</strong> to save WLED's <code>cfg.json</code>: once it runs ChromaBay, import that file under the device's <strong>Show Settings → LED Configuration → Import from WLED</strong> to keep its pins, LED count and chipset.</li>
+          <li>Then, under <strong>Manual OTA update</strong>, choose the ChromaBay file and upload. WLED reboots into ChromaBay.</li>
         </ol>
         <FirmwareDownloads kind="app" />
       </div>

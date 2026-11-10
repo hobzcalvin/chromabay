@@ -4,6 +4,41 @@
   import { getRotation, getFlipH, getSerpentine, setRotation, setFlipH, setSerpentine } from '$lib/ble';
   import LayoutPreview from './LayoutPreview.svelte';
   import AutoLayoutModal from './AutoLayoutModal.svelte';
+  import { wledConfigToChromaBay, describeWledImport, loadSavedWledImport, clearSavedWledImport, type WledImport } from '$lib/wledImport';
+
+  // Import LED settings from WLED: a cfg.json file, or the config the converter saved from a
+  // device just before flashing it (Install on a device → Convert a WLED device). Fills this
+  // form; nothing reaches the device until Save Configuration.
+  let wledSaved = $state(loadSavedWledImport());
+  let wledMsg = $state('');
+  let wledWarnings = $state<string[]>([]);
+  function applyWled(r: WledImport, from: string) {
+    if (!settings.ledConfig) return;
+    settings.ledConfig.strips = r.config.strips.map((s) => ({ ...s }));
+    settings.ledConfig.globalBrightness = r.config.globalBrightness;
+    wledWarnings = r.warnings;
+    onWledImport?.(deviceId, r);
+    const extras = [r.name && onWledImport ? `name “${r.name}”` : '', r.buttonPin !== undefined && onWledImport ? `button pin ${r.buttonPin}` : ''].filter(Boolean);
+    wledMsg = `Filled in from ${from}: ${describeWledImport(r)}${extras.length ? `, plus ${extras.join(' and ')}` : ''}. Review, then Save Configuration.`;
+  }
+  async function onWledFile(e: Event) {
+    const input = e.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    try {
+      applyWled(wledConfigToChromaBay(await file.text()), file.name);
+    } catch (err: any) {
+      wledWarnings = [];
+      wledMsg = err?.message ?? String(err);
+    }
+  }
+  function applySavedWled() {
+    if (!wledSaved) return;
+    applyWled(wledSaved.result, 'the WLED device you converted');
+    clearSavedWledImport();
+    wledSaved = null;
+  }
 
   let autoLayoutStrip: number | null = $state(null);
 
@@ -78,7 +113,8 @@
     layoutSupported = true, // custom-layout upload/download needs the BLE layout chars (no Wi-Fi channel yet)
     onAddStrip,
     onRemoveStrip,
-    onSaveConfig
+    onSaveConfig,
+    onWledImport
   }: {
     settings: any;
     deviceId: string;
@@ -87,6 +123,7 @@
     onAddStrip: (deviceId: string) => void;
     onRemoveStrip: (deviceId: string, index: number) => void;
     onSaveConfig: (deviceId: string) => void;
+    onWledImport?: (deviceId: string, r: WledImport) => void;
   } = $props();
 
   // Build ID with prefix
@@ -312,6 +349,22 @@
         {/each}
       </div>
 
+      <details class="sub-section wled-import" open={!!wledSaved}>
+        <summary>Import from WLED</summary>
+        {#if wledSaved}
+          <p class="wled-note">Settings saved from a WLED device before it was converted: {describeWledImport(wledSaved.result)}.</p>
+          <button class="btn primary small" onclick={applySavedWled}>Use these settings</button>
+          <button class="btn secondary small" onclick={() => { clearSavedWledImport(); wledSaved = null; }}>Discard</button>
+        {/if}
+        <p class="wled-note">Or load a WLED <code>cfg.json</code> (in WLED: Config → Security &amp; Updates → Backup configuration). Pins, LED counts, chipset, colour order, matrix size, gamma and brightness carry over.</p>
+        <label class="btn secondary small file-btn">
+          Choose cfg.json…
+          <input type="file" accept=".json,application/json" onchange={onWledFile} hidden />
+        </label>
+        {#if wledMsg}<p class="wled-note msg">{wledMsg}</p>{/if}
+        {#each wledWarnings as w}<p class="wled-note warn">⚠ {w}</p>{/each}
+      </details>
+
       <button class="btn primary" onclick={() => onSaveConfig(deviceId)} disabled={settings.ledConfigLoading}>
         Save Configuration
       </button>
@@ -331,6 +384,11 @@
 {/if}
 
 <style>
+  .wled-import { margin: 0.75rem 0; }
+  .wled-note { font-size: 0.85rem; margin: 0.4rem 0; opacity: 0.9; }
+  .wled-note.msg { font-weight: 600; }
+  .wled-note.warn { color: #fbbf24; }
+  .file-btn { display: inline-block; cursor: pointer; }
   /* Buttons match the devices page. Svelte scopes styles per-file, so this component
      needs its own copy of the .btn rules (the page's don't reach in here). Keep in sync
      with the .btn block in src/routes/devices/+page.svelte. */
