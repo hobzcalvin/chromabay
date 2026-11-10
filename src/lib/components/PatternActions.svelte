@@ -8,6 +8,7 @@
     renameCurrentPattern,
     deleteCurrentPattern,
     patternNameExists,
+    suggestPatternName,
     createEmptyPattern
   } from '$lib/stores/patternsStore';
   import { syncPatternToAllDevices } from '$lib/ble';
@@ -87,9 +88,14 @@
     };
   });
   
+  // Focus a dialog's name field with its text selected, once it's on screen.
+  function focusSelect(el: HTMLInputElement) {
+    requestAnimationFrame(() => { el.focus(); el.select(); });
+  }
+
   // Actions
   function handleNew() {
-    newName = '';
+    newName = suggestPatternName(); // pre-selected: Enter accepts it, typing replaces it
     showNewDialog = true;
     showDropdown = false;
   }
@@ -281,6 +287,7 @@
       <h3>Create New Pattern</h3>
       <input
         type="text"
+        use:focusSelect
         bind:value={newName}
         placeholder="Enter pattern name..."
         onkeydown={(e) => e.key === 'Enter' && confirmNew()}
@@ -300,6 +307,7 @@
       <h3>Duplicate Pattern</h3>
       <input
         type="text"
+        use:focusSelect
         bind:value={duplicateName}
         placeholder="Enter new pattern name..."
         onkeydown={(e) => e.key === 'Enter' && confirmDuplicate()}
@@ -319,6 +327,7 @@
       <h3>Rename Pattern</h3>
       <input
         type="text"
+        use:focusSelect
         bind:value={renameName}
         placeholder="Enter new name..."
         onkeydown={(e) => e.key === 'Enter' && confirmRename()}
@@ -449,6 +458,7 @@
   
   .dialog {
     background: white;
+    color: #111827; /* the app's text is white; without this the title vanished on white */
     padding: 1.5rem;
     border-radius: 0.75rem;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
@@ -464,6 +474,7 @@
   
   .dialog input {
     width: 100%;
+    box-sizing: border-box; /* padding inside the 100%, so it can't run past the dialog */
     padding: 0.75rem;
     border: 1px solid #ddd;
     border-radius: 0.5rem;

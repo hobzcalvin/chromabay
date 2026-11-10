@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { base } from '$app/paths';
-  import { patterns, loadPatterns, switchToPattern, currentPatternName, createEmptyPattern, saveAsPattern, patternNameExists, importLibraryPattern, forkToLibrary } from '$lib/stores/patternsStore';
+  import { patterns, loadPatterns, switchToPattern, currentPatternName, createEmptyPattern, saveAsPattern, patternNameExists, suggestPatternName, importLibraryPattern, forkToLibrary } from '$lib/stores/patternsStore';
   import PatternPreview from '$lib/components/PatternPreview.svelte';
   import type { SerializedPattern } from '$lib/patternSerializer';
   import { deletePatternOnAllDevices, sendSinglePatternToDevice, deletePatternOnDevice, clearDeviceLibrary } from '$lib/ble';
@@ -398,7 +398,7 @@
   }
   
   async function handleNewPattern() {
-    const name = prompt('Enter a name for the new pattern:');
+    const name = prompt('Name the new pattern:', suggestPatternName()); // pre-filled and selected
     if (!name?.trim()) return;
 
     try {

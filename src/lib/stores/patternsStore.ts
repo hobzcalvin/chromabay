@@ -434,6 +434,15 @@ export async function switchToPattern(patternName: string) {
   }
 }
 
+/** A free default name for a new pattern: "Pattern 4821" (random, not already taken). */
+export function suggestPatternName(): string {
+  for (let tries = 0; tries < 50; tries++) {
+    const name = `Pattern ${1000 + Math.floor(Math.random() * 9000)}`;
+    if (!patternNameExists(name)) return name;
+  }
+  return `Pattern ${Date.now() % 100000}`;
+}
+
 // Check if pattern name exists (for Save As validation)
 export function patternNameExists(name: string): boolean {
   try {
