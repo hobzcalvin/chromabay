@@ -1,7 +1,7 @@
 {
-  "version": "1.1.366",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.366.zip",
-  "buildDate": "2026-11-10T06:30:12Z",
-  "commitHash": "0a8bb87b516b8edcf62d4a2403d78d6c8ad128e1",
-  "commitMessage": "Queue pattern selections so the last tap wins"
+  "version": "1.1.367",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.367.zip",
+  "buildDate": "2026-11-10T06:43:13Z",
+  "commitHash": "95454100bbfda586902f86c3a2dd3a8212f75e56",
+  "commitMessage": "Preview colours: brighten by the brightest channel, keep the hue"
 }
