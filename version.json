@@ -1,7 +1,7 @@
 {
-  "version": "1.1.361",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.361.zip",
-  "buildDate": "2026-11-10T06:14:41Z",
-  "commitHash": "bb1f98f6c59164c11131b49e5f9e8b342ec8bb45",
-  "commitMessage": "Perlin Noise: let the noise drive brightness, not only hue"
+  "version": "1.1.362",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.362.zip",
+  "buildDate": "2026-11-10T06:19:23Z",
+  "commitHash": "5369ca566fc77428e3792a2327404f36777174cd",
+  "commitMessage": "Show LED colours on screen as the LEDs show them (no more muddy yellow)"
 }
