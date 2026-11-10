@@ -1,7 +1,7 @@
 {
-  "version": "1.1.368",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.368.zip",
-  "buildDate": "2026-11-10T06:48:45Z",
-  "commitHash": "189b892aeb9d8dcd1f513729c3437a43212915e2",
-  "commitMessage": "Follow daylight saving: send the phone's UTC offset with every time sync"
+  "version": "1.1.369",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.369.zip",
+  "buildDate": "2026-11-10T06:51:42Z",
+  "commitHash": "c87ad13e20d6e335542095d6afc7cfaf5cd73661",
+  "commitMessage": "New pattern: pre-fill a name, keep the field inside the dialog"
 }
