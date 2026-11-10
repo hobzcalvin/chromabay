@@ -1,7 +1,7 @@
 {
-  "version": "1.1.359",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.359.zip",
-  "buildDate": "2026-10-31T21:57:02Z",
-  "commitHash": "26de74808613174fe69f8776d7116c4fcb47a89e",
-  "commitMessage": "Fix repeat Report a problem, YouTube error 153 in the app, 5s default crossfade"
+  "version": "1.1.360",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.360.zip",
+  "buildDate": "2026-11-10T06:01:06Z",
+  "commitHash": "6b99b7c69aab410cf53f8de10f330c7e2e712147",
+  "commitMessage": "Online gallery: list every published pattern, with search, sort and states"
 }
