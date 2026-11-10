@@ -1,7 +1,7 @@
 {
-  "version": "1.1.367",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.367.zip",
-  "buildDate": "2026-11-10T06:43:13Z",
-  "commitHash": "95454100bbfda586902f86c3a2dd3a8212f75e56",
-  "commitMessage": "Preview colours: brighten by the brightest channel, keep the hue"
+  "version": "1.1.368",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.368.zip",
+  "buildDate": "2026-11-10T06:48:45Z",
+  "commitHash": "189b892aeb9d8dcd1f513729c3437a43212915e2",
+  "commitMessage": "Follow daylight saving: send the phone's UTC offset with every time sync"
 }
