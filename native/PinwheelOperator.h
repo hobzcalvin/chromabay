@@ -3,7 +3,7 @@
 #include "OpUtil.h"
 
 // Pinwheel - N arms radiating from a centre, spinning, optionally twisted into a spiral.
-// Arms alternate between colour and black (or sweep the colour wheel), with a soft edge.
+// Arms alternate between color and black (or sweep the color wheel), with a soft edge.
 class PinwheelOperator : public BaseOperator {
 public:
     void render(CRGB* /* in1 */, CRGB* /* in2 */, CRGB* out, uint32_t width, uint32_t height,

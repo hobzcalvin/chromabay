@@ -1,8 +1,8 @@
 #pragma once
 #include "BaseOperator.h"
 
-// Solid Colour - every pixel one colour. The constant you reach for when building effects by
-// hand: the second input of a Blend (tint, multiply down, add a floor), the colour behind a
+// Solid Color - every pixel one color. The constant you reach for when building effects by
+// hand: the second input of a Blend (tint, multiply down, add a floor), the color behind a
 // Shape, or something to automate.
 class SolidOperator : public BaseOperator {
 public:
@@ -16,10 +16,10 @@ public:
         for (uint32_t i = 0; i < n; i++) out[i] = c;
     }
     const char* getName() const override { return "solid"; }
-    const char* getDisplayName() const override { return "Solid Colour"; }
+    const char* getDisplayName() const override { return "Solid Color"; }
     std::vector<ParameterInfo> getParameterInfo() const override {
         return {
-            ParameterInfo("color", "Colour", ParameterInfo::COLOR, CRGB(255, 120, 0)),
+            ParameterInfo("color", "Color", ParameterInfo::COLOR, CRGB(255, 120, 0)),
             ParameterInfo("brightness", "Brightness", ParameterInfo::FLOAT, 1.0f, 0.0f, 1.0f)
         };
     }

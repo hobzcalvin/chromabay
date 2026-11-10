@@ -28,7 +28,7 @@ struct LedStripConfig {
     uint8_t orientation = 0; // Bit 0-1: rotation (0°/90°/180°/270°), Bit 2: flip H, Bit 3: serpentine
     // Per-strip gamma correction applied to each channel on output. 1.0 = none (default).
     float gamma = 1.0f;
-    // Per-strip white-point correction: the colour the strip should render for "white".
+    // Per-strip white-point correction: the color the strip should render for "white".
     // Each channel is scaled by wp/255 on output, so e.g. lowering blue cancels a
     // cold/blue strip. Default 255/255/255 = neutral (no correction).
     uint8_t wpR = 255;
@@ -37,11 +37,11 @@ struct LedStripConfig {
     // --- Auto-white (RGBW strips only) ---------------------------------------------------
     // How to drive the dedicated white LED from the rendered RGB. Ignored on non-RGBW
     // chipsets. Default Accurate: pull the common white component out of RGB and let the
-    // (efficient, single-die) white LED render it, subtracting it from RGB so the colour is
+    // (efficient, single-die) white LED render it, subtracting it from RGB so the color is
     // unchanged. See AutoWhiteMode. The app doesn't set this yet — RGBW just works.
     uint8_t autoWhiteMode = static_cast<uint8_t>(AutoWhiteMode::Accurate);
-    // Colour the white die actually emits at full drive, as an RGB triple (brightest channel
-    // ~255). Lets extraction stay colour-neutral on non-neutral whites. 255/255/255 = neutral
+    // Color the white die actually emits at full drive, as an RGB triple (brightest channel
+    // ~255). Lets extraction stay color-neutral on non-neutral whites. 255/255/255 = neutral
     // (classic W = min(R,G,B)); a natural-white die is ~255/246/224, warm-white ~255/210/168.
     uint8_t wLedR = 255;
     uint8_t wLedG = 255;
@@ -173,7 +173,7 @@ public:
     }
 
     // color is in WRGB format (W in MSB). Raw: no gamma/white-point LUT, but still scaled by
-    // brightness and put in the strip's colour order.
+    // brightness and put in the strip's color order.
     void setPixelColor(uint16_t pixelIndex, uint32_t color) {
         if (_busPtr && _internalType != ITYPE_NONE && pixelIndex < _config.numLeds) {
             if (_ditherOn) {
@@ -194,10 +194,10 @@ public:
     // white-point LUT (and auto-white on RGBW), then brightness.
     void setPixelColor(uint16_t pixelIndex, const CRGB& color);
 
-    // The colour as given — no gamma or white-point LUT — still scaled by brightness, put in
-    // the strip's colour order and, on RGBW, split into white the way a render is. For output
+    // The color as given — no gamma or white-point LUT — still scaled by brightness, put in
+    // the strip's color order and, on RGBW, split into white the way a render is. For output
     // that is not a rendered pattern: the boot self-test, and realtime streams (Art-Net / sACN /
-    // DDP), whose senders have already done their own colour correction (WLED's default too).
+    // DDP), whose senders have already done their own color correction (WLED's default too).
     // Works on dithering and non-dithering strips alike.
     void setPixelColorRaw(uint16_t pixelIndex, const CRGB& color);
 
@@ -293,10 +293,10 @@ public:
     uint8_t lutW(uint8_t c) const { return _lutW[c]; }
 
     // Derive the white channel + (for Accurate mode) the reduced RGB for an RGBW pixel.
-    // Colour-aware: the white die emits (wLedR,wLedG,wLedB) at full, so we pull the largest
+    // Color-aware: the white die emits (wLedR,wLedG,wLedB) at full, so we pull the largest
     // white level whose emission stays under the target on every channel, then subtract that
     // emission. With a neutral die (255,255,255) this is exactly W=min(R,G,B) then R,G,B-=W.
-    // Operates in the pattern's colour space (pre-gamma), matching WLED; gamma is applied to
+    // Operates in the pattern's color space (pre-gamma), matching WLED; gamma is applied to
     // the results by the per-channel LUTs afterwards.
     void computeAutoWhite(uint8_t r, uint8_t g, uint8_t b,
                           uint8_t& oR, uint8_t& oG, uint8_t& oB, uint8_t& oW) const {
@@ -711,7 +711,7 @@ inline void LedConfig::LedBus::setPixelColor(uint16_t pixelIndex, const CRGB& co
             setDitherTarget(pixelIndex, color);
             return;
         }
-        // RGBW: split off the white channel first (in the pattern's colour space), then
+        // RGBW: split off the white channel first (in the pattern's color space), then
         // gamma-correct the reduced RGB + W on output. Non-RGBW strips keep w=0 (no-op).
         uint8_t r = color.r, g = color.g, b = color.b, w = 0;
         if (_hasWhite && _config.autoWhiteMode != static_cast<uint8_t>(AutoWhiteMode::Off))
@@ -745,13 +745,13 @@ inline void LedConfig::LedBus::setPixelColorRaw(uint16_t pixelIndex, const CRGB&
             computeAutoWhite(color.r, color.g, color.b, r, g, b, w);
         uint32_t wrgbColor = (static_cast<uint32_t>(w) << 24) | (static_cast<uint32_t>(r) << 16) |
                              (static_cast<uint32_t>(g) << 8)  | static_cast<uint32_t>(b);
-        // Brightness is NeoPixelBus luminance on a non-dithering strip; colour order is LedWrapper's.
+        // Brightness is NeoPixelBus luminance on a non-dithering strip; color order is LedWrapper's.
         LedWrapper::setPixelColor(_busPtr, _internalType, pixelIndex, wrgbColor, _config.colorOrder);
     }
 }
 
 // Uncorrected, like the WRGB overload — see LedBus::setPixelColorRaw. This used to pack the
-// colour into a uint32 and write it to NeoPixelBus directly, which a dithering strip's show()
+// color into a uint32 and write it to NeoPixelBus directly, which a dithering strip's show()
 // then overwrote from its (never-set) dither target: the boot self-test and every streamed
 // frame went out black on a dithered strip.
 inline void LedConfig::LedManager::setPixelColor(uint8_t stripIndex, uint16_t pixelIndex, const CRGB& color) {

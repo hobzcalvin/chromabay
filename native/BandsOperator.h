@@ -4,10 +4,10 @@
 #include "Modulation.h"   // hash01 — per-band randomness (identical on WASM + firmware)
 #include <cmath>
 
-// Bands - several coloured stripes, each with its own hue, width, direction and speed, sweeping
+// Bands - several colored stripes, each with its own hue, width, direction and speed, sweeping
 // across the display and screen-blending where they cross. Motion is either Scroll (bands pass
 // through and wrap) or Bounce (back and forth, so they linger). Spread controls turn it from
-// parallel marching bars into a criss-cross of colours moving at all different angles. This is
+// parallel marching bars into a criss-cross of colors moving at all different angles. This is
 // the "moving bands" idea — where Interference is a static moiré field, this is overt motion.
 class BandsOperator : public BaseOperator {
     static constexpr float kTwoPi = 6.28318530718f;
@@ -42,7 +42,7 @@ public:
 
         for (int i = 0; i < count; i++) {
             // Per-band motion (speed/width/phase are fixed per band); the wrap count `cycle` drives
-            // the per-pass respawn of colour AND angle.
+            // the per-pass respawn of color AND angle.
             float spd = 1.0f + speedSpread * (Modulation::hash01((uint32_t)(i * 4 + 2), seed) * 2.0f - 1.0f);
             float wid = widthFrac * (1.0f + widthSpread * (Modulation::hash01((uint32_t)(i * 4 + 3), seed) * 2.0f - 1.0f));
             if (wid < 0.01f) wid = 0.01f;
@@ -52,34 +52,34 @@ public:
             float halfW = wid * 0.5f;
             int cycle = (int)floorf(m);
             float center;
-            int colourCycle, angleCycle;
+            int colorCycle, angleCycle;
             if (motion == 1) {
                 // Bounce: stay fully ON-screen and reverse at the edges. The band never leaves, so
-                // there's nothing to "retire" — it keeps a fixed colour and angle.
+                // there's nothing to "retire" — it keeps a fixed color and angle.
                 float tri = 1.0f - fabsf(2.0f * frac - 1.0f);          // 0..1
                 float range = 1.0f - 2.0f * halfW; if (range < 0.0f) range = 0.0f;
                 center = halfW + tri * range;
-                colourCycle = 0; angleCycle = 0;
+                colorCycle = 0; angleCycle = 0;
             } else if (motion == 2) {
                 // Wander: position driven by smooth noise, ranging past both edges — so the band
                 // changes direction mid-display and drifts on/off screen ("dies" and returns). The
-                // hue drifts continuously (below), so a band that wanders back reads as a new colour.
+                // hue drifts continuously (below), so a band that wanders back reads as a new color.
                 float nz = Modulation::valueNoise(m, seed + (uint32_t)(i * 17 + 3));  // 0..1
                 center = -0.3f + nz * 1.6f;                                            // ~[-0.3, 1.3]
-                colourCycle = 0; angleCycle = 0;
+                colorCycle = 0; angleCycle = 0;
             } else {
                 // Scroll: travel fully OFF both edges each pass (no toroidal wrap), so a band is
                 // genuinely off-screen at the cycle boundary — that's when it respawns with a new
-                // colour + angle, so the change is never visible mid-screen.
+                // color + angle, so the change is never visible mid-screen.
                 const float pad = 0.06f;
                 float travel = 1.0f + 2.0f * halfW + 2.0f * pad;
                 center = -(halfW + pad) + frac * travel;
-                colourCycle = cycle; angleCycle = cycle;
+                colorCycle = cycle; angleCycle = cycle;
             }
 
             // Start hues spread round the wheel; scroll advances by a golden-ish step each respawn;
-            // wander drifts the hue continuously so bands keep changing colour without a visible pop.
-            uint8_t hue = (uint8_t)((int)(255.0f * (float)i / (float)count) + colourCycle * 97
+            // wander drifts the hue continuously so bands keep changing color without a visible pop.
+            uint8_t hue = (uint8_t)((int)(255.0f * (float)i / (float)count) + colorCycle * 97
                                     + (motion == 2 ? (int)(t * 45.0f) : 0));
             CRGB col = CHSV(hue, sat, 255);
             float aRnd = Modulation::hash01((uint32_t)(i * 4 + 1 + angleCycle * 101), seed);

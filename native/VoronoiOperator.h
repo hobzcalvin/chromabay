@@ -3,7 +3,7 @@
 #include "OpUtil.h"
 
 // Voronoi - cellular noise: N seed points drift around the display and every pixel belongs to
-// its nearest one. Show the cells as flat colours, as a distance field (bright at each seed),
+// its nearest one. Show the cells as flat colors, as a distance field (bright at each seed),
 // or as glowing borders between neighbours (after hydra's voronoi()). Seeds are a pure
 // function of time, so the preview and every device agree.
 class VoronoiOperator : public BaseOperator {

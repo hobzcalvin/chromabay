@@ -31,7 +31,7 @@ namespace ConfigKeys {
     const char* const WHITE_POINT = "wp"; // per-strip white point packed 0xRRGGBB (u32), optional
     const char* const DITHER = "de"; // per-strip temporal-dither opt-in (bool), optional
     const char* const AUTO_WHITE = "aw"; // RGBW auto-white mode (u8, AutoWhiteMode), optional
-    const char* const W_LED_COLOR = "wc"; // white-die colour packed 0xRRGGBB (u32), optional
+    const char* const W_LED_COLOR = "wc"; // white-die color packed 0xRRGGBB (u32), optional
 } // namespace ConfigKeys
 
 // Structure to hold the complete configuration for serialization/deserialization
@@ -78,7 +78,7 @@ public:
             if (bus) {
                 const LedStripConfig& stripConfig = bus->getConfig();
                 // Each strip is a map (14 key-value pairs incl. clock pin, gamma, white point,
-                // dither, auto-white mode + white-die colour)
+                // dither, auto-white mode + white-die color)
                 mpack_start_map(&writer, 14);
                 mpack_write_cstr(&writer, ConfigKeys::CHIPSET);
                 mpack_write_u8(&writer, static_cast<uint8_t>(stripConfig.chipset));

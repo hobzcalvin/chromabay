@@ -11,7 +11,7 @@
 //    int directly; tolerate a string here too — a numeric index ("2") or a label ("Multiply").
 //  - COLOR: the value is "#rrggbb", the same spelling the operator metadata reports for the
 //    default. Without this it stayed a STRING, getColor() saw the wrong type and handed back
-//    the default, and a colour param picked in the app rendered white on the device forever.
+//    the default, and a color param picked in the app rendered white on the device forever.
 //  - anything else: the raw string.
 static ParameterValue valueForString(const ParameterInfo& info, const char* value) {
     if (info.type == ParameterInfo::COLOR) {
@@ -26,7 +26,7 @@ static ParameterValue valueForString(const ParameterInfo& info, const char* valu
             if (d < 0) break;
             rgb = (rgb << 4) | (uint32_t)d;
         }
-        if (n != 6) return info.defaultValue;  // not a colour we can read — keep the default
+        if (n != 6) return info.defaultValue;  // not a color we can read — keep the default
         return ParameterValue(CRGB((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF));
     }
     if (info.type == ParameterInfo::SELECT) {
@@ -920,7 +920,7 @@ bool PatternRendererBase::loadPatternFromMessagePack(const uint8_t* data, unsign
                                 node.parameters[j] = ParameterValue(value);
                             } else if (paramType == mpack_type_str) {
                                 // A string means what the parameter says it means: a SELECT
-                                // option, a "#rrggbb" colour, or free text.
+                                // option, a "#rrggbb" color, or free text.
                                 std::string vb = mpackFullStr(paramNode);
                                 node.parameters[j] = valueForString(paramInfo[j], vb.c_str());
                             }

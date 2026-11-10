@@ -3,7 +3,7 @@
 //  - getVennInput(): three additive R/G/B circles (the classic blend-mode test image).
 //    Used as the input to ALL single-input modifiers. Drawn PER-PIXEL with HARD edges and
 //    pure 0/255 channels (no antialiasing) — antialiased edges produce muddy in-between
-//    colours that make hue-rotate / brightness->rainbow boundaries look broken.
+//    colors that make hue-rotate / brightness->rainbow boundaries look broken.
 //  - getWhiteXInput(): a white X on black, used as Blend's SECOND input.
 //
 // Returns ImageData at the requested size, cached per (kind,w,h).

@@ -12,13 +12,13 @@ export const RING_LEDS = KNOB_RING_PHYSICAL.length;
 export const chainOrder = (physical) => KNOB_RING_PHYSICAL.map((p) => physical[p]);
 
 /**
- * The colour a WS2812 receives for a pixel the firmware was given as [r, g, b].
+ * The color a WS2812 receives for a pixel the firmware was given as [r, g, b].
  *
- * OPEN QUESTION (documentation/ESP32_EMULATOR.md, "Colour order"): with the default
+ * OPEN QUESTION (documentation/ESP32_EMULATOR.md, "Color order"): with the default
  * colorOrder GRB, LedWrapper swaps R and G, and the NeoGrbFeature bus swaps them again, so the
  * wire carries R and G exchanged. esp32sim decodes the wire as a WS2812 does (G first), so it
  * sees red as green. That is what the firmware does today, and this encodes it rather than
- * hides it; if the colour order is changed deliberately, change this one function.
+ * hides it; if the color order is changed deliberately, change this one function.
  */
 export const WIRE_SWAPS_RG = true;
 export function onWire([r, g, b]) { return WIRE_SWAPS_RG ? [g, r, b] : [r, g, b]; }

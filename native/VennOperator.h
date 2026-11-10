@@ -4,7 +4,7 @@
 #include <cmath>
 
 // Venn - three additive R/G/B circles orbiting the centre, so their overlaps sweep through
-// cyan / magenta / yellow / white (the classic colour-mixing image behind every modifier's
+// cyan / magenta / yellow / white (the classic color-mixing image behind every modifier's
 // preview). It's a GENERATOR whose default actually MOVES — the circles orbit — unlike the
 // static preview. Resolution-independent: sizes are fractions of the short side.
 class VennOperator : public BaseOperator {

@@ -3,8 +3,8 @@
 #include "OpUtil.h"
 
 // Threshold - splits the input by brightness at a level, with an adjustable soft edge (after
-// hydra's thresh() and luma()). "White / black" turns anything into a hard mask; "Keep colour"
-// is a luma key that keeps the bright parts in their own colours and drops the rest.
+// hydra's thresh() and luma()). "White / black" turns anything into a hard mask; "Keep color"
+// is a luma key that keeps the bright parts in their own colors and drops the rest.
 class ThresholdOperator : public BaseOperator {
 public:
     void render(CRGB* in1, CRGB* /* in2 */, CRGB* out, uint32_t width, uint32_t height,
@@ -29,7 +29,7 @@ public:
         return {
             ParameterInfo("level", "Level", ParameterInfo::FLOAT, 0.5f, 0.0f, 1.0f),
             ParameterInfo("softness", "Softness", ParameterInfo::FLOAT, 0.05f, 0.0f, 1.0f),
-            ParameterInfo("mode", "Output", ParameterInfo::SELECT, 0, std::vector<std::string>{ "White / black", "Keep colour" }),
+            ParameterInfo("mode", "Output", ParameterInfo::SELECT, 0, std::vector<std::string>{ "White / black", "Keep color" }),
             ParameterInfo("invert", "Invert", ParameterInfo::BOOL, false)
         };
     }

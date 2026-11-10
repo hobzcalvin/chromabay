@@ -24,7 +24,7 @@ interactive TTY and crashes when launched headlessly.
 Env overrides: `APP_URL` (default `http://localhost:5173/devices`), `ESP32_DIR`
 (default `./esp32`), `PIO` (default `~/.platformio/penv/bin/pio`).
 
-Output is colour-tagged: `[drive]` orchestration, `[esp32]` serial, `[browser]`
+Output is color-tagged: `[drive]` orchestration, `[esp32]` serial, `[browser]`
 page console.
 
 ## Which device it drives (read this before running)

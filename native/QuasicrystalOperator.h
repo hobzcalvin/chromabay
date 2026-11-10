@@ -4,7 +4,7 @@
 
 // Quasicrystal - the sum of N plane waves at evenly spaced angles, each drifting in phase.
 // Five or seven waves give endlessly non-repeating Penrose-like rosettes that slowly turn
-// inside out. Rendered as brightness of one hue, or mapped round the colour wheel.
+// inside out. Rendered as brightness of one hue, or mapped round the color wheel.
 class QuasicrystalOperator : public BaseOperator {
     static const int MAXW = 13;
 public:
@@ -51,7 +51,7 @@ public:
             ParameterInfo("waves", "Symmetry (waves)", ParameterInfo::INT, 7, 1, 13),
             ParameterInfo("scale", "Scale", ParameterInfo::FLOAT, 3.5f, 0.5f, 30.0f),
             ParameterInfo("speed", "Speed", ParameterInfo::FLOAT, 0.3f, -3.0f, 3.0f),
-            ParameterInfo("color", "Colour", ParameterInfo::SELECT, 1, std::vector<std::string>{ "One hue", "Rainbow" }),
+            ParameterInfo("color", "Color", ParameterInfo::SELECT, 1, std::vector<std::string>{ "One hue", "Rainbow" }),
             ParameterInfo("hue", "Hue", ParameterInfo::FLOAT, 160.0f, 0.0f, 255.0f),
             ParameterInfo("saturation", "Saturation", ParameterInfo::FLOAT, 255.0f, 0.0f, 255.0f),
             ParameterInfo("contrast", "Contrast", ParameterInfo::FLOAT, 1.0f, 0.2f, 4.0f)

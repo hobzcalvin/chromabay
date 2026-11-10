@@ -23,7 +23,7 @@ node esp32/test/emu/run.mjs selftest roundtrip            # some; --list names t
 (`ESP32SIM_DIR` points elsewhere). Each emulator run's complete output (console, `[ble]` events,
 `[leds]` frames, exit report) is saved to `esp32/test/emu/out/<scenario>.log`, next to the script
 it ran. CI uploads that directory when a run fails. A failure message says what was expected and
-what happened, including the ring's colours over time for LED checks.
+what happened, including the ring's colors over time for LED checks.
 
 ## What each scenario guards
 
@@ -33,8 +33,8 @@ what happened, including the ring's colours over time for LED checks.
 | `fresh-flash` | Blank flash: LittleFS formats and a default config is created. A library pattern is stored, then a software reset reboots on the same flash, and the dumped flash is cold-booted again in a new emulator process: each time it mounts without reformatting, loads the config and still plays the pattern. This is the "core bump silently loses patterns" risk in `platformio.ini` |
 | `gatt` | Every row of `ENDPOINTS` in `main.cpp` (27) is served with the table's properties, every notifying one has a CCC, and nothing else is in the service. The expectations are parsed from the source, so the test fails when the table and the GATT server drift apart |
 | `roundtrip` | Brightness write/read (default 20); device info JSON (`fw_ver`, `chip`, `name`, `feat`, via Read Blob); comm config JSON; button pin write/read; device name write/read, renaming long→short→long→short, with each new advert carrying exactly one name (**bug 2 regression**). Then a reboot: name, brightness and button pin persist and the boot advert uses the new name |
-| `selftest` | The power-on R, G, B frames reach a dithered 64-LED strip in order, ~0.5 s each at the default brightness, then black (**bug 1 regression**). The expected wire colours encode the current colour order (see finding 3) |
-| `pattern` | Patterns pushed in the app's wire format (`@msgpack/msgpack`, `[u16 total][u16 offset]` chunks of 20 bytes) play, and the ring matches the app's WASM engine (`static/native/`) pixel for pixel: a solid colour and a hue/saturation/value ramp |
+| `selftest` | The power-on R, G, B frames reach a dithered 64-LED strip in order, ~0.5 s each at the default brightness, then black (**bug 1 regression**). The expected wire colors encode the current color order (see finding 3) |
+| `pattern` | Patterns pushed in the app's wire format (`@msgpack/msgpack`, `[u16 total][u16 offset]` chunks of 20 bytes) play, and the ring matches the app's WASM engine (`static/native/`) pixel for pixel: a solid color and a hue/saturation/value ramp |
 | `pattern-sync` | An animated pattern (a gradient whose start hue a sawtooth automation sweeps) after a TIMESTAMP_SYNC: every frame the device shows matches the WASM preview's frame at the synced clock within 2 levels, with one steady offset (≤ 60 ms spread). Checks shape, automation maths and clock sync together; a clock off by 500 ms fails it |
 | `brightness` | Brightness changes mid-pattern scale the ring: 255 → 64 → 8 → 0 (black, then no more frames) |
 | `playlist` | Two library pushes (both acknowledged on PATTERN_SYNC), a TIMESTAMP_SYNC and a 2 s PLAYLIST_SYNC: the ring goes A, B, A, B with each switch within 150 ms of the synced clock's boundary |
@@ -52,7 +52,7 @@ what happened, including the ring's colours over time for LED checks.
 
 Every regression was checked against the unfixed code:
 
-- old `led_manager.h`: `selftest` fails ("expected 3 coloured test frames, saw 0", ring black
+- old `led_manager.h`: `selftest` fails ("expected 3 colored test frames, saw 0", ring black
   throughout), and `stream` fails with the ring frozen on the pattern instead of the stream;
 - old `processDeviceName()`: `roundtrip` fails (`advert … carries 2 name(s) "EmuLight",
   "EmuLight\u0000_1B44"`);
@@ -118,7 +118,7 @@ A reboot is the script line `poke 60008000 80000000`, which sets `RTC_CNTL_OPTIO
 as `esp_restart()` would. esp32sim reboots through the ROM with flash intact, and the virtual
 BLE controller comes back. For a cold start, `--flash-out` (from the patch) dumps the flash at
 the end of a run and a new run boots it with `--flash-image`, optionally with new firmware
-written into app0: `fresh-flash` does both, and the colour-order migration test uses the second
+written into app0: `fresh-flash` does both, and the color-order migration test uses the second
 to put new firmware on an old device's flash.
 
 ### Console checks
@@ -131,8 +131,8 @@ chip reset the scenario didn't cause, an ATT error, or a scripted BLE command th
 
 These came out of the first session in the emulator. Each was traced to the firmware source.
 
-1. **Fixed: on dithered strips, colours written through `LedManager::setPixelColor(strip, i,
-   CRGB)` never reached the LEDs.** That overload packed the colour into a `uint32_t` and called
+1. **Fixed: on dithered strips, colors written through `LedManager::setPixelColor(strip, i,
+   CRGB)` never reached the LEDs.** That overload packed the color into a `uint32_t` and called
    the raw `LedBus::setPixelColor(uint16_t, uint32_t)`, which wrote straight to NeoPixelBus.
    With dithering on (the default whenever the estimated show rate allows it, e.g. 64 WS2812s),
    `LedManager::show()` calls `ditherShow()`, which rewrites every pixel from `_ditherTarget`,
@@ -142,8 +142,8 @@ These came out of the first session in the emulator. Each was traced to the firm
 
    The overload now goes to a new `LedBus::setPixelColorRaw()`, and the `uint32_t` overload is
    dither-aware too. **Raw** means: the strip's gamma and white-point LUT is *not* applied
-   (streaming senders do their own colour correction; this is WLED's default too), while global
-   brightness, colour order and RGBW auto-white still are. On a dithering strip the value
+   (streaming senders do their own color correction; this is WLED's default too), while global
+   brightness, color order and RGBW auto-white still are. On a dithering strip the value
    becomes the dither target through an identity curve, at the same brightness scaling a render
    gets. Rendered patterns are unchanged and still use the LUT.
 
@@ -157,14 +157,14 @@ These came out of the first session in the emulator. Each was traced to the firm
    re-reads the GAP name and empties the scan response) and `removeServices()` (`reset()`
    keeps the UUID list), then adds the service again. NimBLE is not upgraded.
 
-3. **Open: colour order may be applied twice.** With the default `colorOrder` GRB,
+3. **Open: color order may be applied twice.** With the default `colorOrder` GRB,
    `LedWrapper::setPixelColor` swaps R and G, and the bus is `NeoGrbFeature`, which already
    sends G first. On the wire, red goes out as green: esp32sim decodes the stream as a WS2812
    does (G first) and the self-test's red frame arrives as `[0,20,0]`, green (FastLED's
    `0x008000`) as `[10,0,0]`. History before `d2d4e8d` is squashed, so it isn't clear whether
    the app's GRB default compensates for strips that are actually RGB. **Not changed: this
    needs a check on a real WS2812 strip.** The tests encode today's behaviour in one place,
-   `onWire()` / `WIRE_SWAPS_RG` in `esp32/test/emu/lib/leds.mjs`. If the colour order is changed
+   `onWire()` / `WIRE_SWAPS_RG` in `esp32/test/emu/lib/leds.mjs`. If the color order is changed
    on purpose, flip that, and `selftest` and `pattern` check the new order.
 
 4. **Fixed: OTA rollback never happened.** arduino-esp32 2.x's `initArduino()` marks a pending

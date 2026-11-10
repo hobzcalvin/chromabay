@@ -1,11 +1,11 @@
 // Hex ↔ hue/saturation for COLOR parameters.
 //
-// The app has one colour control everywhere: the hue/sat wheel (ColorWheel.svelte), where
+// The app has one color control everywhere: the hue/sat wheel (ColorWheel.svelte), where
 // angle is hue and radius is saturation. Value/brightness deliberately isn't a dimension —
-// that's the device's brightness control — so a colour param lives on the wheel at full
+// that's the device's brightness control — so a color param lives on the wheel at full
 // value: the centre is white, the rim is fully saturated.
 //
-// A colour param's value travels as "#rrggbb" all the way to the operator: it's what the
+// A color param's value travels as "#rrggbb" all the way to the operator: it's what the
 // WASM metadata reports as the default, what the preview binding parses, and what the
 // firmware's pattern parser reads. These two functions are the only places that convert.
 
@@ -43,8 +43,8 @@ export function hueSatToHex(hue: number, sat: number): string {
   return '#' + rgb.map((v) => v.toString(16).padStart(2, '0')).join('');
 }
 
-// ---- Colour parameter grouping ---------------------------------------------------------
-// An operator expresses a colour in one of two ways, and the editor shows the same wheel for
+// ---- Color parameter grouping ---------------------------------------------------------
+// An operator expresses a color in one of two ways, and the editor shows the same wheel for
 // both: a COLOR param carrying "#rrggbb" (Test Rectangle, Time), or a hue+saturation pair of
 // FLOAT params on the 0–255 scale (Rainbow's hue/saturation, Gradient's start_/end_ sets).
 // A matching `*_val` stays a slider of its own — the wheel has no brightness axis.
@@ -61,7 +61,7 @@ export interface ColorGroup {
 }
 
 /**
- * Colour controls an operator's params add up to, in declaration order. Each group's members
+ * Color controls an operator's params add up to, in declaration order. Each group's members
  * are the params the caller should NOT also render as plain sliders (except `val`, which is
  * exactly that).
  */
@@ -80,7 +80,7 @@ export function findColorGroups(params: Parameter[]): ColorGroup[] {
     if (!m) continue;
     const prefix = m[1].toLowerCase();
     const sat = pick(prefix + 'sat', prefix + 'saturation');
-    if (!sat) continue; // a lone hue is a hue slider, not a colour
+    if (!sat) continue; // a lone hue is a hue slider, not a color
     groups.push({
       key: p.name,
       // "Start Hue" → "Start Color", "Hue" → "Color".
@@ -94,7 +94,7 @@ export function findColorGroups(params: Parameter[]): ColorGroup[] {
   return groups;
 }
 
-/** Every param a colour group owns outright — the ones to hide from the plain slider list. */
+/** Every param a color group owns outright — the ones to hide from the plain slider list. */
 export function colorGroupOwned(groups: ColorGroup[]): Set<string> {
   const owned = new Set<string>();
   for (const g of groups) {

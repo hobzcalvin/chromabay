@@ -1,4 +1,4 @@
-// Showing LED colours on a screen.
+// Showing LED colors on a screen.
 //
 // An addressable LED's light output is linear in the value it is sent: 128 is half the light
 // of 255. A screen is not: it treats pixel values as sRGB-encoded, where 128 is only about a
@@ -8,7 +8,7 @@
 //
 // The previews brighten each pixel for the screen by its BRIGHTEST channel only: that channel
 // is encoded with the sRGB-like 1/2.2 curve and the other two are scaled by the same factor. A
-// pixel's colour (the ratio between its channels) never changes, only how bright it reads.
+// pixel's color (the ratio between its channels) never changes, only how bright it reads.
 // Encoding each channel separately (the first attempt) is closer to the physics on paper but
 // lifts small channels hugely, so rainbow red (215, 0, 40) turned pink and looked washed out.
 // This is DISPLAY ONLY: the values operators read and devices are sent are never changed.

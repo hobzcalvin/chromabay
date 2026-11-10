@@ -1,6 +1,6 @@
 // Read a WLED configuration (its cfg.json: "Config → Security & Updates → Backup configuration",
 // or GET http://<device>/json/cfg) and turn it into ChromaBay LED settings, so moving a light
-// from WLED to ChromaBay keeps its LED count, pins, chipset, colour order, matrix size, gamma
+// from WLED to ChromaBay keeps its LED count, pins, chipset, color order, matrix size, gamma
 // and brightness. Pure: no I/O here, the callers fetch or read the file.
 import type { LedConfiguration, LedStripConfig } from './ble';
 import { LedChipsets, ColorOrders } from './ble';
@@ -38,7 +38,7 @@ const WLED_TYPE_NAMES: Record<number, string> = {
   80: 'DDP output', 81: 'E1.31 output', 82: 'Art-Net output',
 };
 
-// WLED colour orders (low nibble of `order`) → ChromaBay's.
+// WLED color orders (low nibble of `order`) → ChromaBay's.
 const WLED_ORDERS: Record<number, number> = {
   0: ColorOrders.GRB, 1: ColorOrders.RGB, 2: ColorOrders.BRG,
   3: ColorOrders.RBG, 4: ColorOrders.BGR, 5: ColorOrders.GBR,
@@ -59,7 +59,7 @@ export function wledConfigToChromaBay(input: unknown): WledImport {
   const warnings: string[] = [];
   const strips: LedStripConfig[] = [];
 
-  // Gamma: WLED corrects colours with gc.col (2.8 by default) when gamma correction is on.
+  // Gamma: WLED corrects colors with gc.col (2.8 by default) when gamma correction is on.
   const gcol = num(cfg?.light?.gc?.col);
   const gamma = gcol && gcol > 1 ? Math.min(3, Math.round(gcol * 10) / 10) : 1.0;
 

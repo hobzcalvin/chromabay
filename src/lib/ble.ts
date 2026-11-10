@@ -1586,7 +1586,7 @@ export interface LedStripConfig {
   gamma?: number; // per-strip gamma correction (1.0 = none; ~2.5 default)
   whitePoint?: string; // per-strip white-balance hex '#rrggbb' (the color shown for "white"; '#ffffff' = neutral)
   dither?: boolean; // per-strip temporal-dithering opt-in (auto-activates only if fast enough); default true
-  // RGBW auto-white mode and white-die colour (0xRRGGBB). No UI edits them yet; they are
+  // RGBW auto-white mode and white-die color (0xRRGGBB). No UI edits them yet; they are
   // carried from the device's report back into every save so a save doesn't reset them.
   autoWhite?: number;
   whiteLedColor?: number;

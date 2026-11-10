@@ -2,7 +2,7 @@
 #include "BaseOperator.h"
 #include "OpUtil.h"
 
-// Shape - one filled regular polygon (or circle) as a colour on black, with a soft edge.
+// Shape - one filled regular polygon (or circle) as a color on black, with a soft edge.
 // The plain mask source the graph was missing: multiply it with anything to cut that pattern
 // to a shape, tile or kaleidoscope it, or displace it (after hydra's shape()).
 class ShapeOperator : public BaseOperator {
@@ -56,7 +56,7 @@ public:
             ParameterInfo("spin", "Spin (deg/sec)", ParameterInfo::FLOAT, 0.0f, -360.0f, 360.0f),
             ParameterInfo("x", "Centre X", ParameterInfo::FLOAT, 0.0f, -1.0f, 1.0f),
             ParameterInfo("y", "Centre Y", ParameterInfo::FLOAT, 0.0f, -1.0f, 1.0f),
-            ParameterInfo("color", "Colour", ParameterInfo::COLOR, CRGB(255, 255, 255)),
+            ParameterInfo("color", "Color", ParameterInfo::COLOR, CRGB(255, 255, 255)),
             ParameterInfo("outline", "Outline only", ParameterInfo::BOOL, false)
         };
     }

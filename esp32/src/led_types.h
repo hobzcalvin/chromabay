@@ -42,12 +42,12 @@ inline bool hasWhiteChannel(LedChipset cs) {
            cs == LedChipset::UCS8904_RGBW;
 }
 
-// How the white channel of an RGBW strip is derived from the rendered RGB colour.
+// How the white channel of an RGBW strip is derived from the rendered RGB color.
 // (Values are firmware-internal; the app doesn't set these yet — RGBW strips just default
-// to Accurate. Room is left to expose mode + white-die colour later.)
+// to Accurate. Room is left to expose mode + white-die color later.)
 enum class AutoWhiteMode : uint8_t {
     Off      = 0, // leave W at 0 (RGB only) — the old behaviour
-    Accurate = 1, // W = common white component; SUBTRACT it from RGB (colour-accurate, cooler)
+    Accurate = 1, // W = common white component; SUBTRACT it from RGB (color-accurate, cooler)
     Brighter = 2, // W = common white component; keep RGB (adds white on top, more output)
     Max      = 3, // W = max(R,G,B), keep RGB (legacy/simple)
 };

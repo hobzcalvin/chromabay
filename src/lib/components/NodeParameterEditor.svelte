@@ -308,12 +308,12 @@
   // options. Automation (an LFO) still only makes sense for a continuous slider.
   const canInteract = (p: Parameter) => isSlider(p) || (p.type as string) === 'select' || p.type === 'color';
 
-  // Every colour an operator exposes gets the same wheel: a "#rrggbb" COLOR param, a hue+sat
+  // Every color an operator exposes gets the same wheel: a "#rrggbb" COLOR param, a hue+sat
   // pair, or a prefixed set like Gradient's start_/end_. A group's *_val keeps its own slider
   // (the wheel has no brightness axis) and the hue param stays automatable underneath.
   $: colorGroups = nodeDefinition ? findColorGroups(nodeDefinition.params) : [];
   $: colorOwned = colorGroupOwned(colorGroups);
-  // Where the wheel sits now, in hue/sat terms, whichever way the operator spells its colour.
+  // Where the wheel sits now, in hue/sat terms, whichever way the operator spells its color.
   function wheelPos(g: ColorGroup): { hue: number; sat: number } {
     if (g.hex) return hexToHueSat(getParameterValue(g.hex));
     return { hue: Number(getParameterValue(g.hue!)), sat: Number(getParameterValue(g.sat!)) };
@@ -331,8 +331,8 @@
   $: convolveCustom = isConvolve && presetParam
     ? String($nodeParameters.get(node.id)?.get('preset') ?? presetParam.default ?? 1) === '0'
     : false;
-  // Plain params first; the colour wheels (each with its own value slider under it) render
-  // after them, because a param declared after a colour would otherwise sit below a tall wheel.
+  // Plain params first; the color wheels (each with its own value slider under it) render
+  // after them, because a param declared after a color would otherwise sit below a tall wheel.
   $: visibleParams = nodeDefinition
     ? nodeDefinition.params.filter((p) => {
         if (colorOwned.has(p.name)) return false;                  // shown in / under a wheel
@@ -481,7 +481,7 @@
       </div>
     {:else if nodeDefinition && nodeDefinition.params.length > 0}
       <!-- One row per parameter. Rendered from the list below, and again for the value slider
-           that belongs under a colour wheel. -->
+           that belongs under a color wheel. -->
       {#snippet paramRow(param: Parameter)}
         {@const inputId = getUniqueInputId(param.name)}
         <div class="parameter-group">
@@ -666,7 +666,7 @@
                   checked={getParameterInteractiveReactive(node.id, anchor.name)}
                   onchange={(e) => handleInteractiveToggle(anchor, e)}
                 />
-                <label for="interactive-{getUniqueInputId(g.key)}" class="hand-emoji" title="Interactive parameter (shows colour wheel on interact page)">🖐️</label>
+                <label for="interactive-{getUniqueInputId(g.key)}" class="hand-emoji" title="Interactive parameter (shows color wheel on interact page)">🖐️</label>
               </div>
             {/if}
             {#if g.hue}
@@ -717,7 +717,7 @@
     z-index: 1001;
     pointer-events: none;
   }
-  /* Each variant is a triangle in the popover's background colour, pointing toward the node, with
+  /* Each variant is a triangle in the popover's background color, pointing toward the node, with
      a drop-shadow on the outward edges to hint the popover's border. */
   .caret-top {    /* popover below node — points up */
     border-left: 8px solid transparent; border-right: 8px solid transparent;

@@ -1,7 +1,7 @@
 import { test, expect } from 'vitest';
 import { ledPixelToScreen } from '../ledDisplay';
 
-test('brightens by the brightest channel without changing the colour', () => {
+test('brightens by the brightest channel without changing the color', () => {
   const [r, g, b] = ledPixelToScreen(171, 170, 0);   // FastLED rainbow yellow: olive raw
   expect(r).toBeGreaterThan(205);
   expect(Math.abs(r - g)).toBeLessThanOrEqual(2);

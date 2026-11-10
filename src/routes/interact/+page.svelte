@@ -29,8 +29,8 @@ import { get } from 'svelte/store';
     kind: 'knob' | 'color' | 'mod' | 'enum';   // color = hue+sat wheel; mod = automation field; enum = a select
     modField?: ModField;              // for kind 'mod': which automation field this knob drives
     labels?: string[];                // for enum knobs (select options, or automation envelope shapes)
-    satParamName?: string;            // colour wheel over a hue+sat pair: the sat param it also drives
-    hexParam?: boolean;               // colour wheel over a single "#rrggbb" COLOR param
+    satParamName?: string;            // color wheel over a hue+sat pair: the sat param it also drives
+    hexParam?: boolean;               // color wheel over a single "#rrggbb" COLOR param
     satValue?: number;
   }
   
@@ -113,7 +113,7 @@ import { get } from 'svelte/store';
   $: {
     for (const knob of dynamicKnobs) {
       const key = `${knob.nodeId}-${knob.paramName}-${knob.kind}-${knob.modField ?? ''}`;
-      // A "#rrggbb" colour param: both wheel axes fold into one string, so compare the string
+      // A "#rrggbb" color param: both wheel axes fold into one string, so compare the string
       // rather than the hue alone — otherwise dragging the saturation never writes anything.
       if (knob.kind === 'color' && knob.hexParam) {
         const hex = hueSatToHex(knob.value, knob.satValue ?? 255);
@@ -141,7 +141,7 @@ import { get } from 'svelte/store';
         }
         previousKnobValues.set(key, knob.value);
       }
-      // Colour wheel also drives the saturation param.
+      // Color wheel also drives the saturation param.
       if (knob.kind === 'color' && knob.satParamName) {
         const sKey = `${knob.nodeId}-${knob.satParamName}`;
         if (previousKnobValues.get(sKey) !== knob.satValue) {
@@ -238,7 +238,7 @@ import { get } from 'svelte/store';
         const selOptions = (paramDef.type as string) === 'select' ? (paramDef.options ?? []) : null;
         if (selOptions) { min = 0; max = Math.max(0, selOptions.length - 1); step = 1; }
 
-        // A colour param gets the editor's wheel, not a rotary knob: either a "#rrggbb" COLOR
+        // A color param gets the editor's wheel, not a rotary knob: either a "#rrggbb" COLOR
         // param or a hue that has a matching saturation (hue/saturation, start_hue/start_sat…).
         const group = findColorGroups(nodeDefinition.params)
           .find((g) => (g.hex ?? g.hue)?.name === paramName) ?? null;
@@ -254,7 +254,7 @@ import { get } from 'svelte/store';
           paramName,
           paramLabel: `${node.data.label || nodeDefinition.name} ${group ? group.label : paramDef.label}`,
           nodeType: node.data.type as string,
-          // A colour wheel's `value` is always the hue, whatever the param's own storage is.
+          // A color wheel's `value` is always the hue, whatever the param's own storage is.
           value: hexColor !== null ? hexToHueSat(hexColor).hue
                : selOptions ? (Number(currentValue) || 0)
                : currentValue,

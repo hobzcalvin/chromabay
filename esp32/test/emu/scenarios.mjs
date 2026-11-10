@@ -76,7 +76,7 @@ function checkAdvertName(run, ads, name, why) {
   }
 }
 
-/** The ring's mean colour per LED over [t0, t1), with enough frames to average dither out. */
+/** The ring's mean color per LED over [t0, t1), with enough frames to average dither out. */
 function ringMean(run, t0, t1, what) {
   const fr = framesIn(run, t0, t1);
   check(fr.length >= 3, () => `${what}: only ${fr.length} LED frame(s) between t=${t0} and t=${t1} — is the strip updating?\n${describeTimeline(timeline(run, t0 - 1, t1 + 1))}`, run);
@@ -279,7 +279,7 @@ export const scenarios = [
       const tl = timeline(run, 0, 3.2);
       const lit = tl.filter((r) => r.uniform && r.uniform.some((v) => v > 0));
       const story = () => `ring during boot:\n${describeTimeline(tl)}`;
-      check(lit.length >= 3, () => `expected 3 coloured test frames, saw ${lit.length} — on a dithered strip they used to be overwritten with black\n${story()}`, run);
+      check(lit.length >= 3, () => `expected 3 colored test frames, saw ${lit.length} — on a dithered strip they used to be overwritten with black\n${story()}`, run);
       want.forEach(([n, c], i) => {
         check(close(lit[i].uniform, c, 1), () => `test frame ${i + 1} should be ${n} = ${fmt(c)} on the wire, got ${fmt(lit[i].uniform)}\n${story()}`, run);
         const next = tl[tl.indexOf(lit[i]) + 1];

@@ -1,8 +1,8 @@
 <script lang="ts">
   // HSV hue/saturation wheel: angle = hue, radius = saturation (centre = white/desaturated,
-  // edge = full saturation). Value/brightness isn't a dimension here — LED colour params are
+  // edge = full saturation). Value/brightness isn't a dimension here — LED color params are
   // hue+sat only. Emits hue & sat on the operator's 0–255 scale. Used both as the editor's
-  // combined colour control and as the Interact-page control for a colour param.
+  // combined color control and as the Interact-page control for a color param.
   import { createEventDispatcher, onMount, onDestroy } from 'svelte';
 
   export let hue = 0;         // 0–255
@@ -58,7 +58,7 @@
   on:pointerup={onUp}
   on:pointercancel={onUp}
   role="slider"
-  aria-label="Colour (hue and saturation)"
+  aria-label="Color (hue and saturation)"
   aria-valuenow={hue}
   aria-valuemin={0}
   aria-valuemax={255}

@@ -203,4 +203,4 @@ A single `memcpy()` from BLE into a `std::vector<uint8_t>` gives you a parse-fri
 
 ---
 
-Happy hacking & colourful LEDs! 🎉
+Happy hacking & colorful LEDs! 🎉

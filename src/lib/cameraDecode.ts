@@ -85,7 +85,7 @@ async function captureBurst(video: HTMLVideoElement, captureMs: number, procWidt
     const grab = () => {
       ctx.drawImage(video, 0, 0, w, h);
       const d = ctx.getImageData(0, 0, w, h).data;
-      // "Brightness" = MAX(R,G,B), not luma — so a coloured LED (e.g. a blue one, which is
+      // "Brightness" = MAX(R,G,B), not luma — so a colored LED (e.g. a blue one, which is
       // ~dark in luma) registers as fully bright. `gray` holds this max-channel value.
       const gray = new Uint8Array(w * h);
       for (let i = 0, j = 0; i < d.length; i += 4, j++) {

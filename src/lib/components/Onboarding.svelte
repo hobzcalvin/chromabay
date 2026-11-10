@@ -76,7 +76,7 @@
       target: 'interact',
       route: '/interact',
       title: 'Play with it live',
-      body: (knobs) => 'Big knobs and colour wheels for the current pattern’s controls, made for tweaking in real time.' +
+      body: (knobs) => 'Big knobs and color wheels for the current pattern’s controls, made for tweaking in real time.' +
         (knobs ? '' : ' This pattern has no knobs yet; Try it switches to a demo pattern that does.'),
       task: {
         prepare: async () => {

@@ -356,7 +356,7 @@
           <button class="btn primary small" onclick={applySavedWled}>Use these settings</button>
           <button class="btn secondary small" onclick={() => { clearSavedWledImport(); wledSaved = null; }}>Discard</button>
         {/if}
-        <p class="wled-note">Or load a WLED <code>cfg.json</code> (in WLED: Config → Security &amp; Updates → Backup configuration). Pins, LED counts, chipset, colour order, matrix size, gamma and brightness carry over.</p>
+        <p class="wled-note">Or load a WLED <code>cfg.json</code> (in WLED: Config → Security &amp; Updates → Backup configuration). Pins, LED counts, chipset, color order, matrix size, gamma and brightness carry over.</p>
         <label class="btn secondary small file-btn">
           Choose cfg.json…
           <input type="file" accept=".json,application/json" onchange={onWledFile} hidden />

@@ -2,9 +2,9 @@
 #include "BaseOperator.h"
 #include "OpUtil.h"
 
-// Colour Adjust - the per-pixel colour controls a grading tool has: brightness, contrast,
+// Color Adjust - the per-pixel color controls a grading tool has: brightness, contrast,
 // saturation, gamma, and red/green/blue gains (after hydra's brightness/contrast/saturate/
-// color). Gamma and the gains also make it a manual colour correction for a strip whose
+// color). Gamma and the gains also make it a manual color correction for a strip whose
 // whites look tinted. A 256-entry table per channel keeps it cheap on the device.
 class ColorAdjustOperator : public BaseOperator {
     uint8_t _lut[3][256];
@@ -45,7 +45,7 @@ public:
         }
     }
     const char* getName() const override { return "coloradjust"; }
-    const char* getDisplayName() const override { return "Colour Adjust"; }
+    const char* getDisplayName() const override { return "Color Adjust"; }
     std::vector<ParameterInfo> getParameterInfo() const override {
         return {
             ParameterInfo("brightness", "Brightness", ParameterInfo::FLOAT, 0.0f, -1.0f, 1.0f),

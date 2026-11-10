@@ -2,10 +2,10 @@
 #include "BaseOperator.h"
 #include "OpUtil.h"
 
-// Oscillator - the most basic periodic source: a sine wave across the display, one per colour
-// channel. With Colour offset 0 it is grey stripes; raising it phase-shifts R, G and B apart
+// Oscillator - the most basic periodic source: a sine wave across the display, one per color
+// channel. With Color offset 0 it is grey stripes; raising it phase-shifts R, G and B apart
 // into rainbow-edged bands (after hydra's osc()). A building block: feed it to Threshold for
-// hard stripes, to Displace as a warp field, or to Gradient Map to colour it.
+// hard stripes, to Displace as a warp field, or to Gradient Map to color it.
 class OscillatorOperator : public BaseOperator {
 public:
     void render(CRGB* /* in1 */, CRGB* /* in2 */, CRGB* out, uint32_t width, uint32_t height,
@@ -44,7 +44,7 @@ public:
         return {
             ParameterInfo("frequency", "Frequency", ParameterInfo::FLOAT, 4.0f, 0.0f, 40.0f),
             ParameterInfo("speed", "Speed (cycles/sec)", ParameterInfo::FLOAT, 0.5f, -5.0f, 5.0f),
-            ParameterInfo("offset", "Colour offset", ParameterInfo::FLOAT, 0.0f, 0.0f, 1.0f),
+            ParameterInfo("offset", "Color offset", ParameterInfo::FLOAT, 0.0f, 0.0f, 1.0f),
             ParameterInfo("angle", "Angle", ParameterInfo::FLOAT, 0.0f, 0.0f, 360.0f),
             ParameterInfo("shape", "Shape", ParameterInfo::SELECT, 0, std::vector<std::string>{ "Sine", "Triangle", "Saw", "Square" })
         };

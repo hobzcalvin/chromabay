@@ -3588,7 +3588,7 @@ void setup() {
     }
     
     // Power-on test: Red, Green, Blue for 0.5s each before the saved pattern
-    // starts (verifies the LEDs work AND that colour order is correct — if these
+    // starts (verifies the LEDs work AND that color order is correct — if these
     // don't show as R/G/B in order, the strip's colorOrder config is wrong).
     // The R/G/B flash is toggleable per device (gSettings.rgbTest) — some installs
     // don't want it — but a total absence of strips is still a fatal error.

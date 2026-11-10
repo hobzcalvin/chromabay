@@ -3,7 +3,7 @@
 #include "BaseOperator.h"
 #include <cmath>
 
-// Wave - traveling bands of a single colour at any angle. Generalizes the old Chase
+// Wave - traveling bands of a single color at any angle. Generalizes the old Chase
 // (hard moving bar) and Comet (bright head with a fading tail): each of the `bands`
 // repeats has a width (`size`, % of its cell) and independent left/right edge fades.
 //   - fadeLeft = fadeRight = 100%  -> a triangle wave (centre bright, fades both sides) [default]

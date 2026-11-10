@@ -146,7 +146,7 @@ class FireOperator : public BaseOperator {
             (uint8_t)(nb < 0 ? 0 : (nb > 255 ? 255 : nb)));
     }
 
-    // Bilinearly sample the heat field down (or up) into the output dimensions, colouring
+    // Bilinearly sample the heat field down (or up) into the output dimensions, coloring
     // each sampled temperature. The sim runs at a fixed detail resolution independent of
     // the strip size, so small/odd displays show a smooth, detailed fire instead of a
     // coarse one simulated at their own low resolution.

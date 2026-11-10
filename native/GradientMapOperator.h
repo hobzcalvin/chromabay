@@ -2,10 +2,10 @@
 #include "BaseOperator.h"
 #include "OpUtil.h"
 
-// Gradient Map - recolours the input by brightness: black maps to the first colour, mid-grey
-// to the middle one, white to the last (a "colorama" with chosen colours). Turns any grey
+// Gradient Map - recolors the input by brightness: black maps to the first color, mid-grey
+// to the middle one, white to the last (a "colorama" with chosen colors). Turns any grey
 // source (Oscillator, Voronoi distance, Threshold, noise) into a palette, or re-themes a
-// coloured pattern. Shift cycles the map so the colours flow through the image.
+// colored pattern. Shift cycles the map so the colors flow through the image.
 class GradientMapOperator : public BaseOperator {
 public:
     void render(CRGB* in1, CRGB* /* in2 */, CRGB* out, uint32_t width, uint32_t height,
@@ -33,9 +33,9 @@ public:
     const char* getDisplayName() const override { return "Gradient Map"; }
     std::vector<ParameterInfo> getParameterInfo() const override {
         return {
-            ParameterInfo("dark", "Dark colour", ParameterInfo::COLOR, CRGB(0, 0, 40)),
-            ParameterInfo("mid", "Mid colour", ParameterInfo::COLOR, CRGB(255, 0, 120)),
-            ParameterInfo("light", "Light colour", ParameterInfo::COLOR, CRGB(255, 220, 80)),
+            ParameterInfo("dark", "Dark color", ParameterInfo::COLOR, CRGB(0, 0, 40)),
+            ParameterInfo("mid", "Mid color", ParameterInfo::COLOR, CRGB(255, 0, 120)),
+            ParameterInfo("light", "Light color", ParameterInfo::COLOR, CRGB(255, 220, 80)),
             ParameterInfo("shift", "Shift (/sec)", ParameterInfo::FLOAT, 0.0f, -2.0f, 2.0f),
             ParameterInfo("mirror", "Mirror ends", ParameterInfo::BOOL, false)
         };
