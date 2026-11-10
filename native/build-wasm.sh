@@ -27,8 +27,13 @@ if [ -z "${FASTLED_SRC:-}" ]; then
   FASTLED_SRC="$FLDIR/src"
 fi
 OUT="$HERE/fastled_js"
-# shellcheck disable=SC1090
-source ~/emsdk/emsdk_env.sh >/dev/null 2>&1
+# Use emsdk when it's installed at ~/emsdk; otherwise any emcc on PATH (e.g. the distro's
+# `apt install emscripten`, which is what the cloud sessions use).
+if [ -f ~/emsdk/emsdk_env.sh ]; then
+  # shellcheck disable=SC1090
+  source ~/emsdk/emsdk_env.sh >/dev/null 2>&1
+fi
+command -v emcc >/dev/null || { echo "emcc not found: install emsdk at ~/emsdk or put emcc on PATH" >&2; exit 1; }
 mkdir -p "$OUT"
 
 DEFINES="-DFASTLED_STUB_IMPL=1 -DFASTLED_FORCE_NAMESPACE=1 -DFASTLED_USE_PROGMEM=0 -DEMSCRIPTEN_HAS_UNBOUND_TYPE_NAMES=0"
