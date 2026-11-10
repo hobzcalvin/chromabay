@@ -55,6 +55,22 @@
 #include "VennOperator.h"
 #include "BandsOperator.h"
 #include "TimeOperator.h"
+// Low-level building blocks (documentation/NODES.md)
+#include "OscillatorOperator.h"
+#include "ShapeOperator.h"
+#include "SolidOperator.h"
+#include "VoronoiOperator.h"
+#include "QuasicrystalOperator.h"
+#include "PinwheelOperator.h"
+#include "ParticlesOperator.h"
+#include "KaleidoscopeOperator.h"
+#include "PixelateOperator.h"
+#include "ThresholdOperator.h"
+#include "ColorAdjustOperator.h"
+#include "PolarOperator.h"
+#include "RgbSplitOperator.h"
+#include "GradientMapOperator.h"
+#include "DisplaceOperator.h"
 // Demo operator with a deliberate divide-by-zero at speed 0, for showing crash
 // reporting end to end. Remove or gate before shipping firmware to users.
 #include "BuggyRainbowOperator.h"

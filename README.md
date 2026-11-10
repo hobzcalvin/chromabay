@@ -20,8 +20,9 @@ iPhone or iPad, get it from the [App Store](https://apps.apple.com/us/app/chroma
 ## Features
 
 - **Node-based pattern editor.** Wire generators (plasma, fire, noise, rainbows, text, SVG
-  shapes, raindrops…) into modifiers (blur, mirror, tile, feedback, hue rotate…). About 35
-  operators, each with a live thumbnail.
+  shapes, raindrops, particles…) into modifiers (blur, mirror, tile, feedback, kaleidoscope,
+  displace…). About 50 operators, each with a live thumbnail, including low-level building
+  blocks for making effects from parts ([documentation/NODES.md](documentation/NODES.md)).
 - **Interact mode.** Big knobs and colour wheels for whichever parameters a pattern exposes, with
   optional automation (LFO-style modulation) per control.
 - **Multi-device control.** Every connected device mirrors the pattern you're editing. In

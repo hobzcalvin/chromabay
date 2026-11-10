@@ -3,7 +3,7 @@ import type { Node, Edge, Connection } from '@xyflow/svelte';
 import { clearNodeInteractiveParameters } from './stores/interactiveStore';
 import { getModulator, modulatorSeedFor } from './stores/modulatorStore';
 import { renderConfig, type RenderConfig } from './renderConfig';
-import { operatorInputCount } from './operatorArity';
+import { operatorInputCount, isDualInputType } from './operatorArity';
 
 // Global start time for synchronized animations across all nodes
 export const globalStartTime = writable<number>(Date.now());
@@ -756,7 +756,7 @@ export function validateBufferConnection(connection: Edge | Connection, nodes: N
   }
   
   // Special rules for blend nodes
-  if (target.data.type === 'blend') {
+  if (isDualInputType(target.data.type as string)) {
     const targetHandleId = connection.targetHandle;
     
     // For blend node's second input (input-2), must be from different buffer
@@ -787,7 +787,7 @@ export function isValidConnectionWithBuffers(connection: Edge | Connection, node
   
   // Check existing connection limits
   const targetHandleId = connection.targetHandle;
-  const isBlendNode = target.data.type === 'blend';
+  const isBlendNode = isDualInputType(target.data.type as string);
   
   if (isBlendNode) {
     // For blend nodes, each handle can only have one connection
@@ -1038,7 +1038,7 @@ class CentralizedRenderer {
     const inputEdges = edges.filter(edge => edge.target === nodeId);
     
     const node = nodes.find(n => n.id === nodeId);
-    if (node?.data.type === 'blend') {
+    if (isDualInputType(node?.data.type as string)) {
       // For blend nodes, get both inputs
       const input1Edge = inputEdges.find(e => e.targetHandle === 'input-1' || e.targetHandle === 'input');
       const input2Edge = inputEdges.find(e => e.targetHandle === 'input-2');
@@ -1140,7 +1140,7 @@ export function deleteNode(nodeId: string): void {
   if (!nodeToDelete) return;
   
   // Check if it's a blend node
-  const isBlendNode = nodeToDelete.data.type === 'blend';
+  const isBlendNode = isDualInputType(nodeToDelete.data.type as string);
   
   // Get edges connected to this node
   const inputEdges = currentEdges.filter(edge => edge.target === nodeId);

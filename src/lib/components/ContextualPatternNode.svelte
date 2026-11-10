@@ -2,7 +2,7 @@
   import { Handle, Position, type NodeProps } from '@xyflow/svelte';
   import { onMount, onDestroy, getContext } from 'svelte';
   import { getNodeDefinition, disableIndividualAnimation, type RenderContext } from '$lib/flowStore';
-  import { operatorInputCount } from '$lib/operatorArity';
+  import { operatorInputCount, isDualInputType } from '$lib/operatorArity';
   import { flowNodes as globalFlowNodes, flowEdges as globalFlowEdges, nodeOutputs as globalNodeOutputs, globalStartTime as globalGlobalStartTime, nodeParameters as globalNodeParameters } from '$lib/flowStore';
   import { renderConfig } from '$lib/renderConfig';
   import type { Writable } from 'svelte/store';
@@ -58,7 +58,7 @@
     const edges = $flowEdges.filter(edge => edge.target === id);
     const nodes = $flowNodes;
     
-    if (nodeType === 'blend') {
+    if (isDualInputType(nodeType)) {
       // For blend nodes, get both inputs
       const input1Edge = edges.find(e => e.targetHandle === 'input-1');
       const input2Edge = edges.find(e => e.targetHandle === 'input-2');
@@ -162,7 +162,7 @@
     }
   });
   
-  const isBlendNode = nodeType === 'blend';
+  const isBlendNode = isDualInputType(nodeType);
   const isOutputNode = nodeType === 'output';
   const inputCount = operatorInputCount(nodeType); // 0 generator, 1 transform/output, 2 blend
 </script>
