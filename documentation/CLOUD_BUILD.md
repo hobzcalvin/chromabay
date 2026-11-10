@@ -25,3 +25,7 @@ emsdk build (`fire`, `movingblob` and `raindrops` differ only in their random se
 Rendering checks that need no browser: `node esp32/test/emu/...` loads the WASM straight into
 Node (see `wasmEngine()` in `esp32/test/emu/lib/leds.mjs`), and so does
 `src/lib/tests/operators.test.ts`.
+
+Stop `npm run dev` before running `build-wasm.sh` by hand: the dev server watches `native/` and
+rebuilds on its own, and two builds at once can leave a `fastled.js` and `fastled.wasm` from
+different runs (the app then fails with `LinkError: ... function import requires a callable`).

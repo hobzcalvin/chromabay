@@ -2069,14 +2069,18 @@ export async function sendTimestampSync(deviceId: string): Promise<void> {
     //  bytes 8-15 = the WALL clock: Unix epoch ms (Date.now). Used for the Clock node + the
     //               on/off schedule. This is a real date — the frame clock is NOT, so they must
     //               travel separately. (Older firmware ignores bytes 8-15 and just frame-syncs.)
+    //  bytes 16-17 = the phone's UTC offset in minutes (int16, local = UTC + this), daylight
+    //               saving included. Sent every sync so a device follows DST changes without
+    //               anyone re-saving its settings. (Firmware before this reads only 16 bytes.)
     const frameMs = Math.floor(performance.now());
     const epochMs = Date.now();
-    const buffer = new ArrayBuffer(16);
+    const buffer = new ArrayBuffer(18);
     const view = new DataView(buffer);
     view.setUint32(0, frameMs >>> 0, true);
     view.setUint32(4, Math.floor(frameMs / 0x100000000), true);
     view.setUint32(8, epochMs >>> 0, true);
     view.setUint32(12, Math.floor(epochMs / 0x100000000), true);
+    view.setInt16(16, -new Date().getTimezoneOffset(), true);
 
     // Send binary data to timestamp sync characteristic
     await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_TIMESTAMP_SYNC, view);

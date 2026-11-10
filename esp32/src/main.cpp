@@ -315,6 +315,9 @@ static bool patternSaveIsLib = true;
 // persisted save is debounced so dragging doesn't thrash flash.
 static volatile bool newBrightnessAvailable = false;
 static volatile uint8_t pendingBrightness = 255;
+// The app's UTC offset (minutes) from the latest TIMESTAMP_SYNC, staged for the loop task,
+// which saves it if it changed (e.g. daylight saving began). INT16_MIN = nothing staged.
+static volatile int16_t pendingTzOffsetMin = INT16_MIN;
 static bool brightnessDirty = false;
 static uint32_t brightnessChangedAtMs = 0;
 
@@ -1501,6 +1504,11 @@ static void onTimestampSyncWrite(const uint8_t* data, size_t len, Endpoints::Lin
                     struct timeval tv = { (time_t)(epochMs / 1000ULL), (suseconds_t)((epochMs % 1000ULL) * 1000ULL) };
                     settimeofday(&tv, nullptr); // seed the system clock for time()/schedule
                 }
+            }
+            if (value.length() >= 18) {
+                int16_t tz = 0;
+                memcpy(&tz, value.data() + 16, 2);
+                if (tz >= -720 && tz <= 840) pendingTzOffsetMin = tz; // UTC-12 .. UTC+14
             }
             DiagLog::note("ts sync %lu", syncedTimestampMs);
             Serial.printf("Timestamp sync: frame=%lu ms, wall-epoch=%s\n", syncedTimestampMs,
@@ -3755,6 +3763,20 @@ void loop() {
     else if (syncedEpochMs > 1704067200000ULL) { nowEpoch = (uint32_t)((syncedEpochMs + (uint64_t)(currentTime - syncedEpochLocalMs)) / 1000ULL); gClockValid = true; }
     else                     { gClockValid = false; }
     if (nowEpoch) WallClock::set(nowEpoch);
+
+    // Follow the phone's time zone (and so daylight saving) for the schedule and Clock node.
+    // Saved only when it actually changes, so the every-10-s sync never writes flash.
+    if (pendingTzOffsetMin != INT16_MIN) {
+        int16_t tz = pendingTzOffsetMin;
+        pendingTzOffsetMin = INT16_MIN;
+        if (tz != gSettings.tzOffsetMin) {
+            Serial.printf("Time zone: UTC%+d min -> UTC%+d min (from the app)\n", gSettings.tzOffsetMin, tz);
+            DiagLog::note("tz %d", (int)tz);
+            gSettings.tzOffsetMin = tz;
+            DeviceSettings::save(gSettings);
+        }
+    }
+    WallClock::setTzOffsetMin(gSettings.tzOffsetMin);
 
     // Daily on/off schedule: blank output outside the on-window. Re-evaluated each loop so a
     // settings change or a clock arriving takes effect immediately. Inert without a valid

@@ -8,7 +8,8 @@
 
 // Clock - renders the current wall-clock time (HH:MM, optionally :SS) using the bitmap font.
 // Time comes from WallClock::get() (Unix seconds), which the host keeps current; a per-node
-// timezone offset (hours, quarter-hour steps allowed) shifts it. Shows "--:--" until synced.
+// time zone is either the local one the app reports (default; follows daylight saving) or a
+// fixed offset in hours (quarter-hour steps allowed). Shows "--:--" until synced.
 // Great for a desk clock, and the source ticks so downstream effects can react each second.
 class TimeOperator : public BaseOperator {
 public:
@@ -23,6 +24,10 @@ public:
         int    is12h     = getInt(parameters, 1, 0);        // SELECT: 0 = 24-hour, 1 = 12-hour
         bool   showSecs  = getBool(parameters, 2, false);
         CRGB   color     = getColor(parameters, 3, CRGB(255, 255, 255));
+        // 0 = the local time zone the app reports (follows daylight saving); 1 = the fixed
+        // offset above. Patterns saved before this existed read as 0, local time: their fixed
+        // offset was usually the owner's own zone, which went stale at the next DST change.
+        int    zone      = getInt(parameters, 4, 0);
 
         for (uint32_t i = 0; i < width * height; i++) outputBuffer[i] = CRGB::Black;
 
@@ -32,7 +37,8 @@ public:
             // Not synced yet — show placeholder so it's obviously "waiting", not broken.
             snprintf(text, sizeof(text), showSecs ? "--:--:--" : "--:--");
         } else {
-            long local = (long)epoch + (long)(tzHours * 3600.0f);
+            long offsetSec = zone == 0 ? (long)WallClock::getTzOffsetMin() * 60 : (long)(tzHours * 3600.0f);
+            long local = (long)epoch + offsetSec;
             local %= 86400; if (local < 0) local += 86400;
             int h = (int)(local / 3600), m = (int)((local % 3600) / 60), s = (int)(local % 60);
             if (is12h) {
@@ -52,10 +58,11 @@ public:
 
     std::vector<ParameterInfo> getParameterInfo() const override {
         return {
-            ParameterInfo("tz", "Timezone (hrs)", ParameterInfo::FLOAT, 0.0f, -12.0f, 14.0f),
+            ParameterInfo("tz", "Fixed offset (hrs from UTC)", ParameterInfo::FLOAT, 0.0f, -12.0f, 14.0f),
             ParameterInfo("format", "Format", ParameterInfo::SELECT, 0, std::vector<std::string>{ "24-hour", "12-hour" }),
             ParameterInfo("seconds", "Show seconds", ParameterInfo::BOOL, ParameterValue(false)),
-            ParameterInfo("color", "Color", ParameterInfo::COLOR, ParameterValue(CRGB(255, 255, 255)))
+            ParameterInfo("color", "Color", ParameterInfo::COLOR, ParameterValue(CRGB(255, 255, 255))),
+            ParameterInfo("zone", "Time zone", ParameterInfo::SELECT, 0, std::vector<std::string>{ "Local (phone, follows DST)", "Fixed offset" })
         };
     }
 

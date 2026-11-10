@@ -45,6 +45,12 @@ extern "C" {
     void setWallClock(unsigned int epochSec) {
         WallClock::set((uint32_t)epochSec);
     }
+
+    // Local UTC offset in minutes (DST included), for the Clock node's "Local time".
+    EMSCRIPTEN_KEEPALIVE
+    void setWallClockTz(int offsetMin) {
+        WallClock::setTzOffsetMin((int16_t)offsetMin);
+    }
     
     EMSCRIPTEN_KEEPALIVE
     const char* getOperatorName(int index) {

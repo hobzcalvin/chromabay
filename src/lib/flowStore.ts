@@ -945,6 +945,7 @@ class CentralizedRenderer {
     try {
       const wm = (globalThis as any).getWasmModule?.();
       wm?.ccall('setWallClock', null, ['number'], [Math.floor(Date.now() / 1000)]);
+      wm?._setWallClockTz?.(-new Date().getTimezoneOffset());
     } catch { /* older wasm */ }
 
     for (const node of executionOrder) {

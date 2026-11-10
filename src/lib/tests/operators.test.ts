@@ -116,3 +116,14 @@ test('serializing ignores an edge whose source node is gone (mid-load state)', (
   const out = serializePattern(g.nodes, [...g.edges, stale] as any, g.nodeParameters);
   expect(out.nodes.map((n: any) => n.t)).toEqual(['plasma', 'blur']);
 });
+
+test('Clock in local mode follows the time zone the app reports (DST changes included)', () => {
+  const frame = (tzMin: number) => {
+    m.ccall('setWallClock', null, ['number'], [1793570400]); // 2026-11-02 00:40 UTC
+    m.ccall('setWallClockTz', null, ['number'], [tzMin]);
+    return render('clock', 32, 8, null, null, [0])[0];
+  };
+  const pdt = frame(-420), pst = frame(-480);
+  expect(same([pdt], [pst])).toBe(false);          // 17:40 vs 16:40
+  expect(same([frame(-420)], [pdt])).toBe(true);
+});
