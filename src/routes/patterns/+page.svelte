@@ -6,7 +6,7 @@
   import PatternPreview from '$lib/components/PatternPreview.svelte';
   import type { SerializedPattern } from '$lib/patternSerializer';
   import { deletePatternOnAllDevices, sendSinglePatternToDevice, deletePatternOnDevice, clearDeviceLibrary } from '$lib/ble';
-  import { deviceLibraries, refreshDeviceLibraries, syncedCountFor, markSyncedLocally, markUnsyncedLocallyOn, clearDeviceLibraryLocally } from '$lib/stores/deviceLibraryStore';
+  import { deviceLibraries, libraryHeldBack, refreshDeviceLibraries, syncedCountFor, markSyncedLocally, markUnsyncedLocallyOn, clearDeviceLibraryLocally } from '$lib/stores/deviceLibraryStore';
   import { currentPattern } from '$lib/stores/patternsStore';
   import { connectedDevices, getConnectedDevicesList } from '$lib/stores/deviceStore';
   import { authUser } from '$lib/stores/authStore';
@@ -599,6 +599,10 @@
                 <button class="del-all-btn" onclick={() => handleClearDevice(device.deviceId, device.name)}>Delete all</button>
               {/if}
             </div>
+            {#if $libraryHeldBack.has(device.deviceId) && !($deviceLibraries[device.deviceId]?.length)}
+              <p class="section-empty">This device's firmware freezes its lights (and ignores brightness) while it lists its patterns, so the list isn't loaded automatically. Update its firmware on the Devices tab, or
+                <button class="link-btn" onclick={() => refreshDeviceLibraries({ force: true, only: [device.deviceId] })}>load the list now</button>.</p>
+            {:else}
             {#each ($deviceLibraries[device.deviceId] ?? []) as p (p.meta?.name)}
               {@const nm = p.meta?.name ?? ''}
               <div class="simple-row">
@@ -612,6 +616,7 @@
             {:else}
               <p class="section-empty">No stored patterns.</p>
             {/each}
+            {/if}
           </div>
         {/each}
       </details>

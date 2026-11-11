@@ -6,7 +6,7 @@
 //    "0 synced / No stored patterns" when a device drops and comes back;
 //  - counts only CONNECTED devices (stale snapshots for disconnected ones are ignored).
 import { writable, get } from 'svelte/store';
-import { pullDeviceLibrary } from '$lib/ble';
+import { pullDeviceLibrary, getDeviceInfo } from '$lib/ble';
 import { connectedDevices, getConnectedDevicesList } from './deviceStore';
 import type { SerializedPattern } from '$lib/patternSerializer';
 
@@ -14,6 +14,21 @@ import type { SerializedPattern } from '$lib/patternSerializer';
 // have since disconnected; consumers scope to the connected set — see syncedCountFor).
 export const deviceLibraries = writable<Record<string, SerializedPattern[]>>({});
 export const deviceLibrariesLoading = writable(false);
+
+// Firmware before feature level 6 sends LIBRARY_DUMP from one blocking loop (level 5 paced it,
+// level 6 also kept brightness applying during a sync). On those devices a dump freezes the
+// lights and leaves brightness writes unapplied for seconds or longer, and the Patterns page
+// used to start one on every visit: "go to Patterns, come back, the brightness slider does
+// nothing". Such devices are only dumped when someone asks (Per Device → Load list).
+export const SAFE_DUMP_FEAT = 6;
+/** Connected devices whose library we didn't pull automatically because of old firmware. */
+export const libraryHeldBack = writable<Set<string>>(new Set());
+
+async function featOf(deviceId: string): Promise<number | undefined> {
+  const known = get(connectedDevices).get(deviceId)?.deviceInfo?.feat;
+  if (typeof known === 'number') return known;
+  try { return (await getDeviceInfo(deviceId)).feat ?? 1; } catch { return undefined; }
+}
 
 let inFlight = false;
 // Devices whose last pull completed and was genuinely empty. Without this an empty library
@@ -59,7 +74,7 @@ async function pullWithRetry(deviceId: string, fallback: SerializedPattern[]): P
  * We only pull devices we've never seen. Pass { force: true } to re-dump everything (after
  * we changed a device's library via sync/remove, or an explicit user refresh).
  */
-export async function refreshDeviceLibraries(opts: { force?: boolean } = {}): Promise<void> {
+export async function refreshDeviceLibraries(opts: { force?: boolean; only?: string[] } = {}): Promise<void> {
   if (inFlight) return;
   inFlight = true;
   deviceLibrariesLoading.set(true);
@@ -67,7 +82,16 @@ export async function refreshDeviceLibraries(opts: { force?: boolean } = {}): Pr
     const list = getConnectedDevicesList(get(connectedDevices));
     const prev = get(deviceLibraries);
     const next: Record<string, SerializedPattern[]> = { ...prev }; // keep snapshots across blips
+    const heldBack = new Set(get(libraryHeldBack));
     for (const d of list) {
+      if (opts.only && !opts.only.includes(d.deviceId)) continue;
+      // Old firmware: dump only when this device was asked for by name (opts.only).
+      const feat = await featOf(d.deviceId);
+      if (!opts.only && feat !== undefined && feat < SAFE_DUMP_FEAT) {
+        heldBack.add(d.deviceId);
+        continue;
+      }
+      heldBack.delete(d.deviceId);
       const have = prev[d.deviceId];
       const away = disconnectedAt[d.deviceId];
       const staleReconnect = away != null && Date.now() - away > STALE_RECONNECT_MS;
@@ -80,6 +104,7 @@ export async function refreshDeviceLibraries(opts: { force?: boolean } = {}): Pr
       next[d.deviceId] = await pullWithRetry(d.deviceId, have ?? []);
     }
     deviceLibraries.set(next);
+    libraryHeldBack.set(heldBack);
   } finally {
     inFlight = false;
     deviceLibrariesLoading.set(false);
