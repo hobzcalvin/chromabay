@@ -1,7 +1,7 @@
 {
-  "version": "1.1.372",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.372.zip",
-  "buildDate": "2026-11-11T18:37:22Z",
-  "commitHash": "93e3e62721de187984b7999278659ac38f198b51",
-  "commitMessage": "Switching from WLED keeps the device's settings, automatically"
+  "version": "1.2.373",
+  "downloadUrl": "https://chromabay.app/live-update-1.2.373.zip",
+  "buildDate": "2026-11-11T21:18:00Z",
+  "commitHash": "b7814092f6c02a9445f3d7f20c13426a117166c7",
+  "commitMessage": "Hot-update line → 1.2.x now that 1.2.0 is live; bake the version into store builds"
 }
