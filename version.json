@@ -1,7 +1,7 @@
 {
-  "version": "1.1.370",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.370.zip",
-  "buildDate": "2026-11-10T06:55:21Z",
-  "commitHash": "31c560d8a6e837d682b08fed9755d9d8cd36f9fd",
-  "commitMessage": "Spell it color everywhere"
+  "version": "1.1.371",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.371.zip",
+  "buildDate": "2026-11-11T06:19:09Z",
+  "commitHash": "9aac50c608dea89d6ddd7f6c04309590adb8b5f9",
+  "commitMessage": "Don't auto-dump device libraries on firmware that freezes while dumping"
 }

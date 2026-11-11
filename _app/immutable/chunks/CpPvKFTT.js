@@ -1,0 +1,6 @@
+
+!function(){try{var e="undefined"!=typeof window?window:"undefined"!=typeof global?global:"undefined"!=typeof globalThis?globalThis:"undefined"!=typeof self?self:{},n=(new e.Error).stack;n&&(e._sentryDebugIds=e._sentryDebugIds||{},e._sentryDebugIds[n]="60121f10-c7f9-5744-80cd-ed87c418da16")}catch(e){}}();
+import{g as s,w as l}from"./Cd1DiQE4.js";import{p as i,q as C}from"./B02LB3Sw.js";import{s as d}from"./DdTqsdBs.js";const o=l(!1),y=l(30),m=l(5);function p(){const e=Math.max(1,Math.floor(s(y)||1)),c=Math.min(Math.max(0,s(m)||0),e/2);return{secs:e,fade:c}}async function v(){const{secs:e,fade:c}=p();y.set(e),m.set(c);const n=s(o);for(const t of C(s(i)))try{await d(t.deviceId,n,e,c)}catch(a){console.error("[cycle] apply failed for",t.deviceId,a)}}async function S(){s(o)&&(o.set(!1),await v())}let f=new Set;i.subscribe(e=>{const c=new Set(e.keys()),n=[...c].filter(t=>!f.has(t));f=c,n.length!==0&&setTimeout(()=>{const t=s(o),{secs:a,fade:h}=p();for(const r of n)s(i).has(r)&&d(r,t,a,h).catch(u=>console.error("[cycle] apply-on-connect failed",r,u))},1500)});export{v as a,m as b,y as c,o as d,S as e};
+//# sourceMappingURL=CpPvKFTT.js.map
+
+//# debugId=60121f10-c7f9-5744-80cd-ed87c418da16
