@@ -31,7 +31,10 @@
 //   5  BLINK_PINS endpoint (toggle every strip data/clock pin for 10 s, a wiring aid)
 //   6  PATTERN_SYNC notifies [u8 status][name] after each library push is stored (sync flow control)
 //   7  DIAGNOSTICS endpoint (state + recent-event ring, for problem reports); device info "id"
-#define FIRMWARE_FEATURES 7
+//   8  WLED migration: device info "wled":1 while WLED's cfg.json is on the filesystem, and
+//      LAYOUT_GET serves WLED's files (0xF0 cfg.json, 0xF1 ledmap.json, 0xF2.. ledmap1..9.json;
+//      0xFF retires them so the import runs once)
+#define FIRMWARE_FEATURES 8
 
 // --- Firmware Signature Verification ---
 // ECDSA P-256 Public Key (Raw 64-byte format: 32-byte X + 32-byte Y coordinates)

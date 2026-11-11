@@ -14,7 +14,7 @@ const { connectedDevices } = await import('../stores/deviceStore');
 const { refreshDeviceLibraries, libraryHeldBack, deviceLibraries } = await import('../stores/deviceLibraryStore');
 
 test('old firmware is not dumped automatically, only on request', async () => {
-  const dev = (id: string, feat: number) => [id, { deviceId: id, name: id, services: [], lastConnected: 0, deviceInfo: { fw_ver: 'x', hw_ver: 'x', feat } }] as const;
+  const dev = (id: string, feat: number) => [id, { deviceId: id, name: id, services: [], lastConnected: 0, deviceInfo: { fw_ver: 'x', hw_ver: 'x', feat } }] as [string, any];
   connectedDevices.set(new Map([dev('old', 4), dev('new', 7)]));
   await refreshDeviceLibraries();
   expect(pulls).toEqual(['new']);

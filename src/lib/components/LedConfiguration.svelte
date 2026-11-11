@@ -4,30 +4,57 @@
   import { getRotation, getFlipH, getSerpentine, setRotation, setFlipH, setSerpentine } from '$lib/ble';
   import LayoutPreview from './LayoutPreview.svelte';
   import AutoLayoutModal from './AutoLayoutModal.svelte';
-  import { wledConfigToChromaBay, describeWledImport, loadSavedWledImport, clearSavedWledImport, type WledImport } from '$lib/wledImport';
+  import { wledConfigToChromaBay, wledLedmapToLayout, describeWledImport, loadSavedWledImport, clearSavedWledImport, type WledImport, type WledLayout } from '$lib/wledImport';
 
-  // Import LED settings from WLED: a cfg.json file, or the config the converter saved from a
-  // device just before flashing it (Install on a device → Convert a WLED device). Fills this
-  // form; nothing reaches the device until Save Configuration.
+  // Import LED settings from WLED: its cfg.json and/or ledmap.json (pick both at once), or the
+  // config the converter saved before flashing. Most conversions don't need this: the app
+  // applies WLED's settings by itself on first connect (wledMigration.ts). Picking files is an
+  // explicit request, so it's written to the device right away, layout included.
   let wledSaved = $state(loadSavedWledImport());
   let wledMsg = $state('');
   let wledWarnings = $state<string[]>([]);
-  function applyWled(r: WledImport, from: string) {
+  async function applyWled(r: WledImport | null, layout: WledLayout | null | undefined, from: string) {
     if (!settings.ledConfig) return;
-    settings.ledConfig.strips = r.config.strips.map((s) => ({ ...s }));
-    settings.ledConfig.globalBrightness = r.config.globalBrightness;
-    wledWarnings = r.warnings;
-    onWledImport?.(deviceId, r);
-    const extras = [r.name && onWledImport ? `name “${r.name}”` : '', r.buttonPin !== undefined && onWledImport ? `button pin ${r.buttonPin}` : ''].filter(Boolean);
-    wledMsg = `Filled in from ${from}: ${describeWledImport(r)}${extras.length ? `, plus ${extras.join(' and ')}` : ''}. Review, then Save Configuration.`;
+    if (r) {
+      settings.ledConfig.strips = r.config.strips.map((s) => ({ ...s }));
+      settings.ledConfig.globalBrightness = r.config.globalBrightness;
+      onWledImport?.(deviceId, r);
+    }
+    wledWarnings = r?.warnings ?? [];
+    const lay = layout ?? r?.layout;
+    try {
+      if (r) await onSaveConfig(deviceId);
+      if (lay) {
+        await uploadStripLayout(deviceId, 0, lay);
+        layoutJson[0] = JSON.stringify(lay);
+        layoutMsg[0] = `Applied ${lay.width}×${lay.height} from WLED`;
+      }
+      const what = [r ? describeWledImport(r) : '', !r && lay ? `layout ${lay.width}×${lay.height} on strip 1` : ''].filter(Boolean).join('');
+      wledMsg = `Imported from ${from} and saved to the device: ${what}.`;
+    } catch (err: any) {
+      wledMsg = `Filled in from ${from}, but saving failed (${err?.message ?? err}). Check the values, then Save Configuration.`;
+    }
   }
   async function onWledFile(e: Event) {
     const input = e.currentTarget as HTMLInputElement;
-    const file = input.files?.[0];
+    const files = [...(input.files ?? [])];
     input.value = '';
-    if (!file) return;
+    if (!files.length) return;
+    let cfgText: string | null = null, ledmapText: string | null = null;
+    for (const f of files) {
+      const t = await f.text();
+      let j: any = null; try { j = JSON.parse(t); } catch { /* reported below */ }
+      if (j?.hw?.led) cfgText = t; else if (Array.isArray(j?.map)) ledmapText = t;
+    }
+    const names = files.map((f) => f.name).join(' + ');
     try {
-      applyWled(wledConfigToChromaBay(await file.text()), file.name);
+      if (cfgText) await applyWled(wledConfigToChromaBay(cfgText, ledmapText ?? undefined), null, names);
+      else if (ledmapText) {
+        const s0 = settings.ledConfig?.strips?.[0];
+        const lay = wledLedmapToLayout(ledmapText, s0?.width && s0?.height ? { width: s0.width, height: s0.height } : undefined);
+        if (!lay) throw new Error("That ledmap.json couldn't be read.");
+        await applyWled(null, lay, names);
+      } else throw new Error("Those files aren't WLED's cfg.json or ledmap.json.");
     } catch (err: any) {
       wledWarnings = [];
       wledMsg = err?.message ?? String(err);
@@ -35,7 +62,7 @@
   }
   function applySavedWled() {
     if (!wledSaved) return;
-    applyWled(wledSaved.result, 'the WLED device you converted');
+    applyWled(wledSaved.result, null, 'the WLED device you converted');
     clearSavedWledImport();
     wledSaved = null;
   }
@@ -122,7 +149,7 @@
     layoutSupported?: boolean;
     onAddStrip: (deviceId: string) => void;
     onRemoveStrip: (deviceId: string, index: number) => void;
-    onSaveConfig: (deviceId: string) => void;
+    onSaveConfig: (deviceId: string) => void | Promise<void>;
     onWledImport?: (deviceId: string, r: WledImport) => void;
   } = $props();
 
@@ -356,10 +383,10 @@
           <button class="btn primary small" onclick={applySavedWled}>Use these settings</button>
           <button class="btn secondary small" onclick={() => { clearSavedWledImport(); wledSaved = null; }}>Discard</button>
         {/if}
-        <p class="wled-note">Or load a WLED <code>cfg.json</code> (in WLED: Config → Security &amp; Updates → Backup configuration). Pins, LED counts, chipset, color order, matrix size, gamma and brightness carry over.</p>
+        <p class="wled-note">A board converted from WLED brings its settings over by itself when you first connect. To import by hand, pick WLED's <code>cfg.json</code> (Config → Security &amp; Updates → Backup configuration) and/or its <code>ledmap.json</code>: outputs, pins, LED counts, chipset, color order, matrix size, gamma, brightness, name, button and layout are saved to the device straight away.</p>
         <label class="btn secondary small file-btn">
-          Choose cfg.json…
-          <input type="file" accept=".json,application/json" onchange={onWledFile} hidden />
+          Choose cfg.json / ledmap.json…
+          <input type="file" accept=".json,application/json" multiple onchange={onWledFile} hidden />
         </label>
         {#if wledMsg}<p class="wled-note msg">{wledMsg}</p>{/if}
         {#each wledWarnings as w}<p class="wled-note warn">⚠ {w}</p>{/each}

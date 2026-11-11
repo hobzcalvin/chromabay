@@ -487,6 +487,14 @@
       return;
     }
 
+    // Fresh from WLED? Bring its settings across before showing the card (wledMigration.ts).
+    const { migrateFromWledIfNeeded } = await import('$lib/wledMigration');
+    const wled = await migrateFromWledIfNeeded(deviceId, settings.deviceInfo);
+    if (wled) {
+      statusMessage = `Kept your WLED settings: ${wled.summary}.${wled.warnings.length ? ' ' + wled.warnings.join(' ') : ''}`;
+      try { await loadLedConfig(deviceId); await loadDeviceInfo(deviceId); } catch (e) { console.error('reload after WLED import failed', e); }
+    }
+
     // Core loaded → reveal the full card. Remaining loads refine it in place (best-effort).
     settings.phase = 'ready';
     try { settings.buttonPin = await getButtonPin(deviceId); } catch (e) { console.error('getButtonPin failed', e); }

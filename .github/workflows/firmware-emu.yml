@@ -78,6 +78,10 @@ jobs:
         working-directory: esp32
         run: pio run -e esp32-s3-emu -e esp32-c3-emu -e esp32dev
 
+      # mklittlefs builds the WLED filesystem image the wled-migration scenario boots on.
+      - name: Install mklittlefs
+        run: pio pkg install -g --tool platformio/tool-mklittlefs
+
       # ---- Tests -------------------------------------------------------------------------
       # Node runs the tests: the pattern test encodes with the app's own MessagePack library
       # and renders with the app's WASM engine.

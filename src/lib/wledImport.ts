@@ -5,14 +5,35 @@
 import type { LedConfiguration, LedStripConfig } from './ble';
 import { LedChipsets, ColorOrders } from './ble';
 
+export interface WledLayout { width: number; height: number; map: number[] }
+
 export interface WledImport {
   /** WLED's device name (id.name), if any — offered as the ChromaBay device name. */
   name?: string;
   config: LedConfiguration;
   /** WLED's first button's GPIO, if it had one configured. */
   buttonPin?: number;
+  /** WLED's ledmap.json as a ChromaBay layout for strip 1, when one came with the config. */
+  layout?: WledLayout;
   /** Things that didn't carry over, in words a person can act on. */
   warnings: string[];
+}
+
+/**
+ * WLED's ledmap.json → a ChromaBay strip layout. Same shape: `map[cell] = LED index` in
+ * row-major order, -1 for an empty cell, with optional width/height (a 1D ledmap has neither;
+ * then the strip's own width/height, or a single row). Returns null for anything else.
+ */
+export function wledLedmapToLayout(input: unknown, fallback?: { width: number; height: number }): WledLayout | null {
+  let j: any = input;
+  if (typeof input === 'string') { try { j = JSON.parse(input); } catch { return null; } }
+  const map: unknown = j?.map;
+  if (!Array.isArray(map) || !map.length || !map.every((v) => typeof v === 'number' && Number.isInteger(v))) return null;
+  let width = num(j?.width), height = num(j?.height);
+  if (!(width && height) && fallback && fallback.width * fallback.height === map.length) ({ width, height } = fallback);
+  if (!(width && height)) { width = map.length; height = 1; }
+  if (width * height !== map.length) return null;
+  return { width, height, map: map as number[] };
 }
 
 // WLED bus types (wled00/const.h) → ChromaBay chipsets.
@@ -46,8 +67,8 @@ const WLED_ORDERS: Record<number, number> = {
 
 const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
 
-/** Parse WLED's cfg.json (as text or an object). Throws if it isn't one. */
-export function wledConfigToChromaBay(input: unknown): WledImport {
+/** Parse WLED's cfg.json (as text or an object), with its ledmap.json if there is one. Throws if it isn't a cfg.json. */
+export function wledConfigToChromaBay(input: unknown, ledmap?: unknown): WledImport {
   let cfg: any = input;
   if (typeof input === 'string') {
     try { cfg = JSON.parse(input); } catch { throw new Error("That file isn't JSON. Use WLED's cfg.json (Config → Security & Updates → Backup configuration)."); }
@@ -117,10 +138,19 @@ export function wledConfigToChromaBay(input: unknown): WledImport {
   const bri = num(cfg?.def?.bri);
   const btn = Array.isArray(cfg?.hw?.btn?.ins) ? cfg.hw.btn.ins.find((x: any) => num(x?.type) && Array.isArray(x?.pin) && x.pin[0] >= 0) : undefined;
   const name = typeof cfg?.id?.name === 'string' && cfg.id.name.trim() ? cfg.id.name.trim() : undefined;
+  let layout: WledLayout | undefined;
+  if (ledmap !== undefined && ledmap !== null) {
+    const s0 = strips[0];
+    const l = wledLedmapToLayout(ledmap, s0.width && s0.height ? { width: s0.width, height: s0.height } : undefined);
+    if (!l) warnings.push("WLED's ledmap.json couldn't be read; strip 1 keeps a plain grid.");
+    else if (strips.length > 1) warnings.push("WLED's ledmap.json spans several outputs; ChromaBay keeps one layout per strip, so set those up under Custom Layout.");
+    else layout = l;
+  }
   return {
     name,
     config: { globalBrightness: bri !== undefined ? Math.max(1, Math.min(255, Math.round(bri))) : 128, strips },
     buttonPin: btn ? btn.pin[0] : undefined,
+    layout,
     warnings,
   };
 }
@@ -131,21 +161,21 @@ export function describeWledImport(w: WledImport): string {
     const shape = s.height && s.height > 1 ? `${s.width}×${s.height}` : `${s.numLeds} LEDs`;
     return `${shape} on GPIO ${s.pin}`;
   });
-  return `${w.name ? `“${w.name}”: ` : ''}${parts.join(', ')}, brightness ${w.config.globalBrightness}`;
+  return `${w.name ? `“${w.name}”: ` : ''}${parts.join(', ')}, brightness ${w.config.globalBrightness}${w.layout ? ', custom layout' : ''}`;
 }
 
 // A WLED config fetched just before converting a device, kept so the settings can be offered
 // once the board is running ChromaBay (the conversion itself wipes WLED's settings).
 const SAVED_KEY = 'chromabay.wledImport';
-export function saveWledImport(cfg: unknown): void {
-  try { localStorage.setItem(SAVED_KEY, JSON.stringify({ cfg, savedAt: Date.now() })); } catch { /* storage unavailable */ }
+export function saveWledImport(cfg: unknown, ledmap?: unknown): void {
+  try { localStorage.setItem(SAVED_KEY, JSON.stringify({ cfg, ledmap, savedAt: Date.now() })); } catch { /* storage unavailable */ }
 }
 export function loadSavedWledImport(): { result: WledImport; savedAt: number } | null {
   try {
     const raw = localStorage.getItem(SAVED_KEY);
     if (!raw) return null;
-    const { cfg, savedAt } = JSON.parse(raw);
-    return { result: wledConfigToChromaBay(cfg), savedAt };
+    const { cfg, ledmap, savedAt } = JSON.parse(raw);
+    return { result: wledConfigToChromaBay(cfg, ledmap), savedAt };
   } catch { return null; }
 }
 export function clearSavedWledImport(): void {

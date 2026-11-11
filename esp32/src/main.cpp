@@ -186,6 +186,17 @@ static uint16_t currentConnHandle = 0xFFFF;
 // Pattern Sync Characteristic
 
 // LED Configuration Characteristics
+// A board converted from WLED over the air keeps WLED's partition table and its LittleFS, so
+// WLED's own /cfg.json and /ledmap*.json are still here on ChromaBay's first boot. The app
+// reads them (LAYOUT_GET 0xF0..0xFA) and applies the settings, then retires them (0xFF).
+// Parsing lives in the app (src/lib/wledImport.ts) to keep JSON out of the firmware.
+static volatile bool gHasWledFiles = false;
+static const uint8_t WLED_FILE_CFG = 0xF0, WLED_FILE_LEDMAP = 0xF1, WLED_FILE_LAST = 0xFA, WLED_RETIRE = 0xFF;
+static void wledFilePath(uint8_t code, char* out, size_t n) {
+    if (code == WLED_FILE_CFG) snprintf(out, n, "/cfg.json");
+    else if (code == WLED_FILE_LEDMAP) snprintf(out, n, "/ledmap.json");
+    else snprintf(out, n, "/ledmap%u.json", (unsigned)(code - WLED_FILE_LEDMAP));
+}
 static volatile int layoutGetRequest = -1;                // strip index requested via LAYOUT_GET write, -1 = none
 static volatile bool libraryDumpRequest = false;           // set by LIBRARY_DUMP write, served from loop()
 
@@ -757,6 +768,7 @@ String buildDeviceInfoJson() {
     j += "\"fw_ver\":\"" + String(FIRMWARE_VERSION) + "\",";
     j += "\"hw_ver\":\"" + String(HARDWARE_VERSION) + "\",";
     j += "\"feat\":" + String(FIRMWARE_FEATURES) + ",";
+    if (gHasWledFiles) j += "\"wled\":1,"; // WLED's settings are still on flash (see gHasWledFiles)
     // Does THIS image support WiFi, and how big is the OTA slot the app can flash into? The
     // app compares `slot` (the size of the partition the NEXT OTA writes to — the inactive
     // app slot, read from the live partition table, so it's correct even on devices we only
@@ -2429,14 +2441,37 @@ void processLayoutGetRequest() {
     layoutGetRequest = -1;
 
     char path[24];
-    snprintf(path, sizeof(path), "/layout_%u.bin", (unsigned)idx);
+    size_t maxLen = 16384;
+    if (idx == WLED_RETIRE) {
+        // Keep WLED's files (renamed) rather than delete them: going back to WLED later can
+        // restore them by hand, and the import isn't offered again.
+        char from[24], to[32];
+        for (uint8_t c = WLED_FILE_CFG; c <= WLED_FILE_LAST; c++) {
+            wledFilePath(c, from, sizeof(from));
+            if (!LittleFS.exists(from)) continue;
+            snprintf(to, sizeof(to), "/wled%s", from + 1); // /cfg.json -> /wledcfg.json
+            LittleFS.remove(to);
+            LittleFS.rename(from, to);
+        }
+        gHasWledFiles = false;
+        DiagLog::note("wled retired");
+        uint8_t hdr[4] = {0, 0, 0, 0};
+        Endpoints::notify(CHARACTERISTIC_UUID_LAYOUT_GET, hdr, 4);
+        Serial.println("[WLED] Imported files retired");
+        return;
+    } else if (idx >= WLED_FILE_CFG && idx <= WLED_FILE_LAST) {
+        wledFilePath((uint8_t)idx, path, sizeof(path));
+        maxLen = 60000; // a large ledmap; totalLen is a u16
+    } else {
+        snprintf(path, sizeof(path), "/layout_%u.bin", (unsigned)idx);
+    }
     uint8_t* data = nullptr;
     size_t len = 0;
     if (LittleFS.exists(path)) {
         File f = LittleFS.open(path, FILE_READ);
         if (f) {
             size_t sz = f.size();
-            if (sz > 0 && sz <= 16384) {
+            if (sz > 0 && sz <= maxLen) {
                 data = (uint8_t*)malloc(sz);
                 if (data && f.readBytes((char*)data, sz) == sz) len = sz;
                 else { if (data) { free(data); data = nullptr; } }
@@ -3484,6 +3519,8 @@ void setup() {
     // platformio.ini, a firmware update keeps the same LittleFS format, so a healthy
     // device mounts cleanly here and its saved pattern survives the update.
     if (LittleFS.begin(false)) {
+        gHasWledFiles = LittleFS.exists("/cfg.json");
+        if (gHasWledFiles) Serial.println("[WLED] Found WLED's cfg.json: settings available to import");
         Serial.println("LittleFS mounted");
     } else {
         Serial.println("WARNING: LittleFS mount failed — formatting (any saved pattern is lost)");

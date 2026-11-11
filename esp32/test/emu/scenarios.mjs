@@ -193,6 +193,78 @@ export const scenarios = [
   },
 
   {
+    name: 'wled-migration',
+    what: 'a board converted from WLED over the air still has WLED\'s LittleFS: ChromaBay mounts it without formatting, reports "wled":1 (feat 8), serves cfg.json and ledmap.json byte for byte over LAYOUT_GET, and retires them on request so a reboot no longer offers them',
+    async run() {
+      // WLED's filesystem as an OTA conversion leaves it: WLED's files, nothing of ChromaBay's.
+      const cfg = JSON.stringify({ rev: [1, 0], id: { name: 'Porch Lights' },
+        hw: { led: { total: 64, ins: [{ start: 0, len: 64, pin: [8], order: 0, type: 22 }], matrix: { panels: [{ w: 8, h: 8, s: true }] } }, btn: { ins: [{ type: 2, pin: [0] }] } },
+        light: { gc: { col: 2.8 } }, def: { bri: 77 }, pad: 'x'.repeat(1500) }); // > 8 BLE chunks
+      const ledmap = JSON.stringify({ n: 'snake', width: 8, height: 8, map: Array.from({ length: 64 }, (_, i) => 63 - i) });
+      const fsDir = path.join(OUT_DIR, `${this.name}.fs`);
+      fs.rmSync(fsDir, { recursive: true, force: true });
+      fs.mkdirSync(fsDir, { recursive: true });
+      fs.writeFileSync(path.join(fsDir, 'cfg.json'), cfg);
+      fs.writeFileSync(path.join(fsDir, 'ledmap.json'), ledmap);
+      const part = fs.readFileSync(path.join(ROOT, 'esp32/partitions-8mb.csv'), 'utf8').split('\n')
+        .map((l) => l.split(',').map((x) => x.trim())).find((r) => r[0] === 'spiffs');
+      const fsOff = parseInt(part[3], 16), fsSize = parseInt(part[4], 16);
+      const mk = process.env.MKLITTLEFS || path.join(process.env.HOME ?? '', '.platformio/packages/tool-mklittlefs/mklittlefs');
+      check(fs.existsSync(mk), `no mklittlefs at ${mk} (pio pkg install -g --tool platformio/tool-mklittlefs, or set MKLITTLEFS)`);
+      const img = path.join(OUT_DIR, `${this.name}.littlefs.bin`);
+      const r = spawnSync(mk, ['-c', fsDir, '-b', '4096', '-p', '256', '-s', String(fsSize), img], { encoding: 'utf8' });
+      check(r.status === 0, `mklittlefs failed: ${r.stderr || r.stdout}`);
+
+      // A normal first boot gives a whole flash (bootloader, partition table, app); then its
+      // filesystem region is swapped for WLED's.
+      const s3 = build(S3);
+      const base = path.join(OUT_DIR, `${this.name}.base.bin`);
+      await runEmu({ name: `${this.name}-base`, images: s3, seconds: 3, flashOut: base });
+      const flash = fs.readFileSync(base);
+      fs.readFileSync(img).copy(flash, fsOff);
+      const converted = path.join(OUT_DIR, `${this.name}.flash.bin`);
+      fs.writeFileSync(converted, flash);
+
+      const h = await handles(S3);
+      const I = need(h, 'DEVICE_INFO').handle, L = need(h, 'LAYOUT_GET');
+      const sc = new Script().connect(CONNECT).mtu(3.05, 517).subscribe(3.1, L.ccc)
+        .readLong(3.5, I)
+        .write(3.6, L.handle, [0xf0]).write(5.0, L.handle, [0xf1]).write(6.0, L.handle, [0xff])
+        .readLong(6.5, I).reboot(7.0).connect(10.5).mtu(10.55, 517).readLong(11.0, I);
+      const run = await runEmu({ name: this.name, images: { flashImage: converted, app: s3.app, elf: s3.elf }, ble: true, board: 'atech14', script: sc, seconds: 11.5 });
+      checkHealthy(run, { expectedResets: 1 });
+      check(run.has('LittleFS mounted', 0) && !run.has('formatting', 0),
+        () => `WLED's filesystem was not mounted as is:\n${run.console(0).filter((l) => /LittleFS|WLED/.test(l)).join('\n')}`, run);
+      check(run.has("[WLED] Found WLED's cfg.json", 0), 'the firmware did not notice WLED\'s cfg.json', run);
+
+      const before = json(run, oneRead(run, I, 3.5, 'device info'), 'device info');
+      check(before.feat >= 8 && before.wled === 1, () => `device info before import: ${JSON.stringify(before)}`, run);
+
+      // Reassemble each answer: [u16 totalLen][u16 offset][bytes] frames, in arrival order.
+      const frames = run.bleOf('notify').filter((n) => n.handle === L.handle);
+      const answers = [];
+      let cur = null;
+      for (const f of frames) {
+        const total = f.value.readUInt16LE(0), off = f.value.readUInt16LE(2);
+        if (total === 0) { answers.push(Buffer.alloc(0)); continue; }
+        if (!cur || off === 0) { cur = { buf: Buffer.alloc(total), got: 0 }; answers.push(cur); }
+        f.value.copy(cur.buf, off, 4); cur.got += f.value.length - 4;
+      }
+      const text = (a) => (a && a.buf ? a.buf.toString('utf8') : '');
+      check(answers.length === 3, `expected three answers (cfg.json, ledmap.json, retire ack), got ${answers.length}`, run);
+      check(answers[0].got === cfg.length && text(answers[0]) === cfg, () => `cfg.json came back as ${answers[0].got} bytes, differing from the ${cfg.length} on flash`, run);
+      check(text(answers[1]) === ledmap, 'ledmap.json came back different', run);
+      check(answers[2].length === 0, 'the retire request was not acknowledged with an empty answer', run);
+      check(run.has('[WLED] Imported files retired', 0), 'the device did not log retiring the files', run);
+
+      const after = json(run, oneRead(run, I, 6.5, 'device info after retiring'), 'device info');
+      check(after.wled === undefined, `device info still offers WLED's files after retiring: ${JSON.stringify(after)}`, run);
+      const rebooted = json(run, oneRead(run, I, 11.0, 'device info after reboot'), 'device info');
+      check(rebooted.wled === undefined && !run.has("[WLED] Found WLED's cfg.json", 1), 'after a reboot WLED\'s files are offered again', run);
+    },
+  },
+
+  {
     name: 'gatt',
     what: 'every endpoint in main.cpp\'s ENDPOINTS table is served, with the table\'s properties, and nothing else is',
     async run() {

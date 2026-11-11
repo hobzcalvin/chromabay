@@ -128,6 +128,7 @@ export interface DeviceInfo {
   sleep?: number;           // sleep-timer minutes (0 = off)
   rgbtest?: number;         // 1 = boot RGB test on
   heap?: number;
+  wled?: number;            // 1 = WLED's cfg.json is still on the device's filesystem (feat>=8; see wledMigration.ts)
   id?: string;              // factory eFuse MAC, 12 hex: the device_id its own Sentry events carry (feat>=7)
 }
 
@@ -1935,57 +1936,69 @@ export async function getStripLayout(
   deviceId: string,
   stripIndex: number
 ): Promise<{ width: number; height: number; map: number[] } | null> {
+  const bytes = await readLayoutChannel(deviceId, stripIndex & 0xff, 8000);
+  if (!bytes || bytes.length < 6) return null;
+  const p = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const W = p.getUint16(0, true), H = p.getUint16(2, true), count = p.getUint16(4, true);
+  const map: number[] = [];
+  for (let k = 0; k < count && 6 + k * 2 + 1 < bytes.length; k++) map.push(p.getInt16(6 + k * 2, true));
+  return { width: W, height: H, map };
+}
+
+// WLED's own files, still on a board converted from WLED over the air (firmware feat >= 8 says
+// so with device info "wled":1). Served over LAYOUT_GET under these request codes.
+export const WLED_FILES = { CFG: 0xf0, LEDMAP: 0xf1, LAST: 0xfa, RETIRE: 0xff } as const;
+export const WLED_IMPORT_FEAT = 8;
+
+/** Read one of WLED's files from the device as text (null if absent or unreadable). */
+export async function readWledFile(deviceId: string, code: number): Promise<string | null> {
+  const bytes = await readLayoutChannel(deviceId, code & 0xff, 15000);
+  return bytes ? new TextDecoder().decode(bytes) : null;
+}
+
+/** Tell the device its WLED files have been imported: it renames them so it asks only once. */
+export async function retireWledFiles(deviceId: string): Promise<void> {
+  await readLayoutChannel(deviceId, WLED_FILES.RETIRE, 5000);
+}
+
+/**
+ * One request on the LAYOUT_GET channel: write the 1-byte code, then reassemble the NOTIFY
+ * frames [u16 totalLen][u16 offset][bytes]. totalLen 0 = nothing there (resolves null), as does
+ * a timeout. Counts REAL bytes received (deduped by offset) rather than the max offset seen:
+ * BLE notifications can arrive out of order or drop, and completing early would leave
+ * zero-filled holes (a corrupt layout); a missing chunk keeps us waiting, then times out.
+ */
+async function readLayoutChannel(deviceId: string, code: number, timeoutMs: number): Promise<Uint8Array | null> {
   let total = -1, received = 0;
   let buf: Uint8Array | null = null;
-  const seenOffsets = new Set<number>(); // dedupe chunks + count real bytes (not max-offset)
-  let settle: ((v: any) => void) | null = null;
-  let cleanedUp = false;
-
-  const cleanup = async () => {
-    if (cleanedUp) return; cleanedUp = true;
-    try {
-      await stopNotifications(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_LAYOUT_GET).catch(() => {});
-    } catch { /* ignore */ }
-  };
+  const seenOffsets = new Set<number>();
+  let settle: ((v: Uint8Array | null) => void) | null = null;
 
   const onFrame = (dv: DataView) => {
     if (!settle || dv.byteLength < 4) return;
     const totalLen = dv.getUint16(0, true);
     const offset = dv.getUint16(2, true);
-    if (totalLen === 0) { const s = settle; settle = null; s(null); return; } // no layout
+    if (totalLen === 0) { const s = settle; settle = null; s(null); return; }
     if (total < 0) { total = totalLen; buf = new Uint8Array(total); received = 0; }
     const dataLen = dv.byteLength - 4;
     for (let i = 0; i < dataLen && offset + i < total; i++) buf![offset + i] = dv.getUint8(4 + i);
-    // Count REAL bytes received (dedup by offset), not the max offset seen. BLE notifications
-    // can arrive out of order or drop; completing on max-offset would finish early with
-    // zero-filled holes → cells read as LED 0 (lit) → a corrupt "reloaded" layout. This way
-    // a missing chunk keeps us waiting (then times out to null) instead of showing garbage.
     if (!seenOffsets.has(offset)) { seenOffsets.add(offset); received += Math.min(dataLen, total - offset); }
-    if (received >= total && buf) {
-      const p = new DataView(buf.buffer);
-      const W = p.getUint16(0, true), H = p.getUint16(2, true), count = p.getUint16(4, true);
-      const map: number[] = [];
-      for (let k = 0; k < count && 6 + k * 2 + 1 < buf.length; k++) map.push(p.getInt16(6 + k * 2, true));
-      const s = settle; settle = null; s({ width: W, height: H, map });
-    }
+    if (received >= total && buf) { const s = settle; settle = null; s(buf); }
   };
 
-  const result = await new Promise<any>(async (resolve, reject) => {
-    settle = resolve;
-    const timer = setTimeout(() => { if (settle) { const s = settle; settle = null; s(null); } }, 8000);
-    const origSettle = settle;
-    settle = (v: any) => { clearTimeout(timer); origSettle(v); };
+  const result = await new Promise<Uint8Array | null>(async (resolve) => {
+    const timer = setTimeout(() => { if (settle) { const s = settle; settle = null; s(null); } }, timeoutMs);
+    settle = (v) => { clearTimeout(timer); resolve(v); };
     try {
       await startBinaryNotifications(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_LAYOUT_GET, onFrame);
-      // Request the strip's layout (1-byte write).
       await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_LAYOUT_GET,
-        new DataView(new Uint8Array([stripIndex & 0xff]).buffer));
+        new DataView(new Uint8Array([code & 0xff]).buffer));
     } catch (err) {
       if (settle) { const s = settle; settle = null; s(null); }
-      console.error('[Layout] read-back failed:', err);
+      console.error('[Layout channel] read failed:', err);
     }
   });
-  await cleanup();
+  await stopNotifications(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_LAYOUT_GET).catch(() => {});
   return result;
 }
 

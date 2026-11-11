@@ -58,3 +58,15 @@ test('rejects things that are not a WLED config', () => {
   expect(() => wledConfigToChromaBay({ 0: { n: 'preset' } })).toThrow(/doesn't look like a WLED configuration/);
   expect(() => wledConfigToChromaBay({ hw: { led: { ins: [{ type: 43, pin: [1], len: 1 }] } } })).toThrow(/No LED outputs/);
 });
+
+test('a WLED ledmap.json becomes strip 1 layout; 1D maps take the matrix size', async () => {
+  const { wledLedmapToLayout } = await import('../wledImport');
+  expect(wledLedmapToLayout('{"n":"snake","width":2,"height":2,"map":[0,1,3,-1]}')).toEqual({ width: 2, height: 2, map: [0, 1, 3, -1] });
+  expect(wledLedmapToLayout({ map: [3, 2, 1, 0] }, { width: 2, height: 2 })).toEqual({ width: 2, height: 2, map: [3, 2, 1, 0] });
+  expect(wledLedmapToLayout({ map: [2, 1, 0] })).toEqual({ width: 3, height: 1, map: [2, 1, 0] });
+  expect(wledLedmapToLayout({ width: 3, height: 3, map: [0, 1] })).toBeNull();
+  const map = Array.from({ length: 256 }, (_, i) => 255 - i);
+  const r = wledConfigToChromaBay(cfg, { map });
+  expect(r.layout).toEqual({ width: 16, height: 16, map });
+  expect(describeWledImport(r)).toContain('custom layout');
+});

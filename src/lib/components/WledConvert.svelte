@@ -76,9 +76,11 @@
       const resp = await fetch(`http://${WLED_AP_HOST}/json/cfg`, { signal: ctl.signal });
       clearTimeout(t);
       const cfg = await resp.json();
-      const parsed = wledConfigToChromaBay(cfg);
-      saveWledImport(cfg);
-      keptNote = ` Saved its WLED settings (${describeWledImport(parsed)}): open the device's Show Settings → LED Configuration → Import from WLED to use them.`;
+      let ledmap: unknown;
+      try { const r = await fetch(`http://${WLED_AP_HOST}/ledmap.json`, { signal: AbortSignal.timeout(3000) }); if (r.ok) ledmap = await r.json(); } catch { /* no ledmap */ }
+      const parsed = wledConfigToChromaBay(cfg, ledmap);
+      saveWledImport(cfg, ledmap);
+      keptNote = ` Its WLED settings (${describeWledImport(parsed)}) will be applied automatically when you connect to it.`;
     } catch (e) {
       console.warn('[WLED convert] could not read WLED config (continuing):', e);
     }
@@ -139,8 +141,8 @@
         <ol>
           <li>Download the ChromaBay <strong>firmware .bin</strong> for your board's chip (below).</li>
           <li>Open the device's WLED web UI (e.g. <code>http://4.3.2.1</code> on its AP, or its IP on your network).</li>
-          <li>Go to <strong>Config → Security &amp; Updates</strong>. First tap <strong>Backup configuration</strong> to save WLED's <code>cfg.json</code>: once it runs ChromaBay, import that file under the device's <strong>Show Settings → LED Configuration → Import from WLED</strong> to keep its pins, LED count and chipset.</li>
-          <li>Then, under <strong>Manual OTA update</strong>, choose the ChromaBay file and upload. WLED reboots into ChromaBay.</li>
+          <li>Go to <strong>Config → Security &amp; Updates</strong> and, under <strong>Manual OTA update</strong>, choose the ChromaBay file and upload. WLED reboots into ChromaBay.</li>
+          <li>Connect to it in this app. WLED's settings (LED outputs, brightness, name, button, and its <code>ledmap.json</code> layout) are still on the board and are applied automatically. If they don't come across, import WLED's <code>cfg.json</code> (from <strong>Backup configuration</strong>) under the device's <strong>Show Settings → LED Configuration → Import from WLED</strong>.</li>
         </ol>
         <FirmwareDownloads kind="app" />
       </div>
