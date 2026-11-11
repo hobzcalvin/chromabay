@@ -1,7 +1,7 @@
 {
-  "version": "1.1.371",
-  "downloadUrl": "https://chromabay.app/live-update-1.1.371.zip",
-  "buildDate": "2026-11-11T06:19:09Z",
-  "commitHash": "9aac50c608dea89d6ddd7f6c04309590adb8b5f9",
-  "commitMessage": "Don't auto-dump device libraries on firmware that freezes while dumping"
+  "version": "1.1.372",
+  "downloadUrl": "https://chromabay.app/live-update-1.1.372.zip",
+  "buildDate": "2026-11-11T18:37:22Z",
+  "commitHash": "93e3e62721de187984b7999278659ac38f198b51",
+  "commitMessage": "Switching from WLED keeps the device's settings, automatically"
 }
