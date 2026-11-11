@@ -70,10 +70,10 @@ jobs:
             echo "Using manual timestamp version: $VERSION"
           else
             # Plain push to main: MAJOR.MINOR from package.json + monotonic CI build
-            # number as the third component → e.g. 1.1.279. The App Store binary is
-            # 1.1.0, so every normal deploy on the 1.1.x line compares newer and is
-            # eligible for live update. Keep package.json on 1.1.0 until the next
-            # native App Store version intentionally moves this compatibility line.
+            # number as the third component → e.g. 1.2.401. The live App Store binary is
+            # 1.2.0, so every normal deploy on the 1.2.x line compares newer and is
+            # eligible for live update. Bump package.json MAJOR.MINOR only once the next
+            # App Store version is LIVE (a pending store build must stay above this line).
             BASE_VERSION=$(node -p "require('./package.json').version.split('.').slice(0,2).join('.')")
             VERSION="${BASE_VERSION}.${{ github.run_number }}"
             echo "Using base+build version: $VERSION"
