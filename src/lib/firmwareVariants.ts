@@ -6,6 +6,8 @@
 //
 // Only BLE-capable variants are here: ESP32-S2 and ESP8266 have no Bluetooth, so ChromaBay
 // (BLE-first) can't run on them even though WLED does.
+import { get } from 'svelte/store';
+import { firmwareChannel } from './channel';
 
 export interface ChipVariant {
   chip: string;      // esptool --chip / device-reported / registry `chip`
@@ -41,9 +43,10 @@ export const CHIP_VARIANTS: ChipVariant[] = [
   },
 ];
 
-/** Where a given version's images live on gh-pages (mirrors the firmware CI layout). */
-export function firmwareUrls(version: string, chip: string) {
-  const base = `https://chromabay.app/firmware/esp32/${version}/${chip}`;
+/** Where a given version's images live on gh-pages (mirrors the firmware CI layout). An
+ *  experimental channel's builds live under x/<id>/ (see $lib/channel.ts). */
+export function firmwareUrls(version: string, chip: string, channel = get(firmwareChannel)) {
+  const base = `https://chromabay.app${channel ? `/x/${channel}` : ''}/firmware/esp32/${version}/${chip}`;
   return {
     factory: `${base}/chromabay-factory.bin`, // full merged image (USB / esptool)
     app: `${base}/firmware.bin`,              // app image (BLE OTA / WLED manual upload)

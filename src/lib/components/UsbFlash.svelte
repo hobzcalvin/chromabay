@@ -5,11 +5,13 @@
   // manifest lists a build per chip (ESP32 / S3 / C3); esp-web-tools auto-detects the
   // connected chip and installs the matching one, refusing a mismatch.
   import { Capacitor } from '@capacitor/core';
+  import { firmwareManifestUrl } from '$lib/channel';
   import FirmwareDownloads from './FirmwareDownloads.svelte';
 
   // Single source of truth: the manifest the firmware CI publishes, pointing at the newest
   // merged factory image. No manifest/.bin committed in this repo.
-  const MANIFEST_URL = 'https://chromabay.app/firmware/esp32/chromabay-manifest.json';
+  // Main's manifest, or the experimental channel picked on the Devices page ($lib/channel.ts).
+  const MANIFEST_URL = firmwareManifestUrl();
 
   let open = $state(false);
   type Phase = 'idle' | 'checking' | 'ready' | 'unavailable' | 'wrongbrowser' | 'native';

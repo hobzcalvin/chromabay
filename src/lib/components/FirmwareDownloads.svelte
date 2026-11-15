@@ -5,11 +5,13 @@
   // The version comes from the same esp-web-tools manifest the USB flasher reads, so there's
   // one source of truth and nothing committed in the repo.
   import { onMount } from 'svelte';
+  import { firmwareManifestUrl } from '$lib/channel';
   import { CHIP_VARIANTS, firmwareUrls } from '$lib/firmwareVariants';
 
   let { kind = 'factory' }: { kind?: 'factory' | 'app' } = $props();
 
-  const MANIFEST_URL = 'https://chromabay.app/firmware/esp32/chromabay-manifest.json';
+  // Main's manifest, or the experimental channel picked on the Devices page ($lib/channel.ts).
+  const MANIFEST_URL = firmwareManifestUrl();
   let phase = $state<'loading' | 'ready' | 'error'>('loading');
   let version = $state<string | null>(null);
 

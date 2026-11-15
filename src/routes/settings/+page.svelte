@@ -7,6 +7,7 @@
   } from '$lib/stores/authStore';
   import { startOnboarding } from '$lib/stores/onboardingStore';
   import { Capacitor } from '@capacitor/core';
+  import ChannelSwitcher from '$lib/components/ChannelSwitcher.svelte';
 
   // Inside the iOS app, a link to its own App Store page is pointless.
   const showAppStore = !Capacitor.isNativePlatform();
@@ -235,6 +236,8 @@
       </a>
     {/if}
   </div>
+  <h2 class="section">App build</h2>
+  <ChannelSwitcher />
 </main>
 
 <style>

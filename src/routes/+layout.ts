@@ -67,7 +67,10 @@ if (browser && Capacitor.isNativePlatform() && !dev && !isLocalBuild) {
           console.log('📱 UPDATE: Current version:', currentVersion);
           
           // Fetch version manifest from GitHub Pages
-          const manifestUrl = `https://chromabay.app/version.json?t=${Date.now()}`;
+          // Follow this build's own channel: main, or the experimental branch it came from
+          // (see $lib/channel.ts). Switching channel is done from Settings, not here.
+          const { liveUpdateManifestUrl } = await import('$lib/channel');
+          const manifestUrl = `${liveUpdateManifestUrl()}?t=${Date.now()}`;
           console.log('📱 UPDATE: Fetching manifest from:', manifestUrl);
           
           const response = await fetch(manifestUrl);

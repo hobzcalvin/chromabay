@@ -12,10 +12,12 @@
   import { flashFirmwareViaWledHttp, WLED_AP_HOST, WLED_AP_SSID, WLED_AP_PASS } from '$lib/wledOta';
   import { fetchFirmwareRegistry, resolveFirmware, prefetchFirmware, firmwareCacheKey } from '$lib/ble';
   import FirmwareDownloads from './FirmwareDownloads.svelte';
+  import { firmwareRegistryUrl } from '$lib/channel';
   import { wledConfigToChromaBay, describeWledImport, saveWledImport } from '$lib/wledImport';
 
   const isNative = Capacitor.getPlatform() !== 'web';
-  const REGISTRY_URL = 'https://chromabay.app/firmware/esp32/esp32_firmware_registry.json';
+  // Main's firmware, or the experimental channel picked on the Devices page ($lib/channel.ts).
+  const REGISTRY_URL = firmwareRegistryUrl();
 
   let open = $state(false);
   let cached = $state<{ key: string; version: string; date: string; cachedAt: number }[]>([]);

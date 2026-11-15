@@ -1,0 +1,118 @@
+name: Experimental channel
+
+# Any branch with an `experimental.json` at its root is an experimental channel: every push
+# builds the app and the firmware exactly like a main release (the same workflows, called with
+# a channel) and publishes them under https://chromabay.app/x/<id>/. The app's Settings → App
+# build switches to it, and Devices → Firmware Update → Build installs its firmware; both
+# switch back to main the same way. See src/lib/channel.ts.
+#
+#   experimental.json   { "id": "audio", "title": "Audio reactivity",
+#                         "description": "One line for the switcher", "firmware": true }
+#
+#   id         url slug, [a-z0-9-], unique across live channels
+#   firmware   false to publish only the app (default true)
+#
+# Branches without the file cost one short job per push and publish nothing. Deleting a
+# channel's branch removes it from x/channels.json and deletes its files (the `delete` event
+# runs this file from the default branch, so that part needs it merged to main).
+
+on:
+  push:
+    branches-ignore:
+      - main
+      - gh-pages
+  delete:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  # A newer push to the same branch supersedes one still building.
+  group: experimental-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
+
+jobs:
+  detect:
+    name: Is this an experimental channel?
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      id: ${{ steps.read.outputs.id }}
+      title: ${{ steps.read.outputs.title }}
+      description: ${{ steps.read.outputs.description }}
+      firmware: ${{ steps.read.outputs.firmware }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: experimental.json
+          sparse-checkout-cone-mode: false
+      - id: read
+        run: |
+          node - <<'JS' >> "$GITHUB_OUTPUT"
+          const fs = require('fs');
+          if (!fs.existsSync('experimental.json')) { console.log('id='); process.exit(0); }
+          const c = JSON.parse(fs.readFileSync('experimental.json', 'utf8'));
+          if (!/^[a-z0-9][a-z0-9-]{0,31}$/.test(c.id ?? '')) {
+            console.error(`experimental.json: "id" must be 1-32 of [a-z0-9-], got ${JSON.stringify(c.id)}`);
+            process.exit(1);
+          }
+          const one = (v) => String(v ?? '').replace(/[\r\n]+/g, ' ').trim();
+          console.log(`id=${c.id}`);
+          console.log(`title=${one(c.title) || c.id}`);
+          console.log(`description=${one(c.description)}`);
+          console.log(`firmware=${c.firmware === false ? 'false' : 'true'}`);
+          JS
+          cat "$GITHUB_OUTPUT"
+
+  app:
+    name: App
+    needs: detect
+    if: needs.detect.outputs.id != ''
+    uses: ./.github/workflows/deploy.yml
+    with:
+      channel: ${{ needs.detect.outputs.id }}
+      channel_title: ${{ needs.detect.outputs.title }}
+      channel_description: ${{ needs.detect.outputs.description }}
+    secrets: inherit
+
+  firmware:
+    name: Firmware
+    needs: detect
+    if: needs.detect.outputs.id != '' && needs.detect.outputs.firmware != 'false'
+    uses: ./.github/workflows/esp32-release.yml
+    with:
+      channel: ${{ needs.detect.outputs.id }}
+    secrets: inherit
+
+  retire:
+    name: Retire a deleted branch's channel
+    if: github.event_name == 'delete' && github.event.ref_type == 'branch'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: "gh-pages-publish"
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/channel-index.mjs
+          sparse-checkout-cone-mode: false
+      - env:
+          BRANCH: ${{ github.event.ref }}
+        run: |
+          set -euo pipefail
+          git clone --depth=1 --branch=gh-pages "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" gh
+          [ -f gh/x/channels.json ] || { echo "no channels"; exit 0; }
+          IDS=$(node scripts/channel-index.mjs remove-branch gh/x/channels.json "$BRANCH")
+          [ -n "$IDS" ] || { echo "$BRANCH was not a channel"; exit 0; }
+          for id in $IDS; do
+            # Only ever a single path segment under x/ (ids are validated on publish).
+            [[ "$id" =~ ^[a-z0-9][a-z0-9-]*$ ]] && rm -rf "gh/x/$id" && echo "removed x/$id"
+          done
+          cd gh
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add -A x
+          git commit -m "Retire channel(s) $IDS (branch $BRANCH deleted)"
+          git push origin gh-pages
