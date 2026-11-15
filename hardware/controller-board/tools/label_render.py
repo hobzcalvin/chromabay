@@ -23,7 +23,7 @@ NAMES = {
     "J1": "USB-C (charge + data)", "SW1": "Power slide switch", "SW2": "User button",
     "D1": "Charge (red) / status (green) LED", "MK1": "PDM microphone (port hole)",
     "J4": "JST-PH battery (swappable)", "J3": "Battery wire pads + - NTC",
-    "J2": "LED OUT 1: G V C D (lever terminal opt.)", "J5": "LED OUT 2-4 pads (G V C2 D2..D4)",
+    "J2": "OUT1 push-in: G V (WAGO 2060)", "J6": "OUT1 push-in: C1 D1 (WAGO 2060)", "J5": "LED pads: G V C1 D1 .. C4 D4",
     "U2": "BQ25606 charger / power path", "L1": "Charger inductor 1 uH",
     "U3": "TPS61088 5 V boost", "L2": "Boost inductor 1 uH", "Q1": "Battery reverse-polarity FET",
     "Q2": "LED power switch (P-FET)", "Q3": "LED switch driver", "F1": "3 A resettable fuse",

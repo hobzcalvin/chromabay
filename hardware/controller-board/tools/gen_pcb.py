@@ -41,13 +41,14 @@ ANCHORS = {
     "MK1": (9.5, 8.6, 0),           # port hole -> case channel -> end face, under the LED
     # left side: swappable battery (JST-PH opening faces the left wall) + wire pads
     "J4": (6.65, 17.5, 270), "J3": (1.6, 25.0, 270),
-    # right side: LED outputs; G V C1 D1 take an optional lever terminal facing the right wall
-    "J2": (31.4, 11.5, 0), "J5": (34.6, 27.0, 0),
+    # right side: OUT1 on two WAGO 2060 push-in blocks (wire entry facing the right wall), then
+    # every output on 2.54 mm solder pads
+    "J2": (28.0, 12.0, 180), "J6": (28.0, 19.9, 180), "J5": (34.6, 26.5, 0),
     # power stage
     "U2": (16.0, 14.5, 0), "L1": (16.0, 21.5, 0), "Q1": (10.0, 25.5, 0),
     "U3": (9.0, 34.0, 0), "L2": (3.0, 35.0, 90), "Q2": (16.0, 30.0, 0), "Q3": (19.5, 32.5, 0),
     # logic
-    "U7": (13.5, 43.0, 90), "U6": (3.6, 44.5, 0), "U4": (21.5, 38.5, 0), "U5": (23.0, 46.0, 0),
+    "U7": (13.5, 43.0, 90), "U6": (8.0, 46.5, 0), "U4": (21.5, 38.5, 0), "U5": (23.0, 46.0, 0),
     # ESP32-S3 module: the antenna overhangs the far edge (Espressif's preferred placement)
     "U1": (18.0, 60.1, 180),
 }
@@ -219,7 +220,7 @@ def main():
         put(fp, x, y, rot)
         placed.append(bbox_mm(fp, 0.15))
     # User pads: one column each side of the module, labels toward the module.
-    tps = [p for p in design.parts if p["ref"].startswith("TP") and p["value"] not in ("TXD0", "RXD0")]
+    tps = [p for p in design.parts if p["ref"].startswith("TP") and p["value"] in TP_ORDER]
     tps.sort(key=lambda p: TP_ORDER.index(p["value"]))
     for i, p in enumerate(tps):
         fp = load(p)
@@ -236,6 +237,24 @@ def main():
         txt.SetPosition(P(x + 1.0 if left else x - 1.0, y))
         board.Add(txt)
         placed.append(bbox_mm(fp, 0.1))
+
+    # Spare-GPIO pads: one column on the left edge above the user pads.
+    gpio_pads = [p for p in design.parts if p["ref"].startswith("TP") and p["value"].startswith("IO")]
+    for i, p in enumerate(gpio_pads):
+        fp = load(p)
+        x, y = 1.3, H - 28.75 + i * 2.0
+        put(fp, x, y, 0)
+        txt = pcbnew.PCB_TEXT(board)
+        txt.SetText(p["value"] + ("*" if p["value"] in ("IO3", "IO45", "IO46") else ""))
+        txt.SetLayer(pcbnew.F_SilkS)
+        txt.SetTextSize(pcbnew.VECTOR2I(MM(0.6), MM(0.6)))
+        txt.SetTextThickness(MM(0.1))
+        txt.SetHorizJustify(pcbnew.GR_TEXT_H_ALIGN_LEFT)
+        txt.SetPosition(P(x + 1.0, y))
+        board.Add(txt)
+        placed.append(bbox_mm(fp, 0.1))
+        placed.append((x + 0.7, y - 0.5, x + 4.6, y + 0.5))   # keep the label clear
+    tps = tps + gpio_pads
 
     # ---- passives + jumpers: auto-place near the IC pad they share a net with
     anchor_refs = set(ANCHORS) | {p["ref"] for p in tps}

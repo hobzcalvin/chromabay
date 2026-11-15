@@ -18,17 +18,34 @@ import design  # noqa: E402
 FAB = os.path.join(BOARD, "fab")
 os.makedirs(FAB, exist_ok=True)
 
-groups = collections.OrderedDict()
-for p in design.parts:
-    if not p["lcsc"] or p["dnp"]:
-        continue
-    key = (p["value"], p["footprint"].split(":", 1)[1], p["lcsc"])
-    groups.setdefault(key, []).append(p["ref"])
-with open(os.path.join(FAB, "bom-jlc.csv"), "w", newline="") as f:
-    w = csv.writer(f)
-    w.writerow(["Comment", "Designator", "Footprint", "LCSC Part #"])
-    for (value, fp, lcsc), refs in groups.items():
-        w.writerow([value, ",".join(refs), fp, lcsc])
+# One PCB, three assembly builds (see DESIGN.md "Builds"): parts left off per build.
+BUILDS = {
+    "complete": set(),               # all-in-one: JST battery plug + push-in LED terminals
+    "plug": {"J2", "J6"},            # JST battery plug, LEDs soldered to pads
+    "core": {"J2", "J6", "J4"},      # everything soldered: battery + LEDs to pads
+}
+
+def run(build, skip):
+    groups = collections.OrderedDict()
+    for p in design.parts:
+        if not p["lcsc"] or p["dnp"] or p["ref"] in skip:
+            continue
+        key = (p["value"], p["footprint"].split(":", 1)[1], p["lcsc"])
+        groups.setdefault(key, []).append(p["ref"])
+    with open(os.path.join(FAB, f"bom-jlc-{build}.csv"), "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["Comment", "Designator", "Footprint", "LCSC Part #"])
+        for (value, fp, lcsc), refs in groups.items():
+            w.writerow([value, ",".join(refs), fp, lcsc])
+    assembled = {r for refs in groups.values() for r in refs}
+    with open(os.path.join(FAB, f"cpl-jlc-{build}.csv"), "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["Designator", "Mid X", "Mid Y", "Layer", "Rotation"])
+        for r in rows:
+            if r["Ref"] in assembled:
+                w.writerow([r["Ref"], r["PosX"] + "mm", r["PosY"] + "mm", "Top", r["Rot"]])
+    print(f"{build:9} bom: {len(groups)} lines, cpl: {len(assembled)} placements")
+
 
 with tempfile.TemporaryDirectory() as tmp:
     pos = os.path.join(tmp, "pos.csv")
@@ -37,12 +54,6 @@ with tempfile.TemporaryDirectory() as tmp:
                     os.path.join(BOARD, "chromabay-controller.kicad_pcb")], check=True,
                    capture_output=True)
     rows = list(csv.DictReader(open(pos)))
-assembled = {r for refs in groups.values() for r in refs}
-with open(os.path.join(FAB, "cpl-jlc.csv"), "w", newline="") as f:
-    w = csv.writer(f)
-    w.writerow(["Designator", "Mid X", "Mid Y", "Layer", "Rotation"])
-    for r in rows:
-        if r["Ref"] in assembled:
-            w.writerow([r["Ref"], r["PosX"] + "mm", r["PosY"] + "mm", "Top", r["Rot"]])
-print(f"bom: {len(groups)} lines, cpl: {len(assembled)} placements -> {FAB}")
-print("Check part rotations in JLC's preview before ordering (easyeda footprints usually match).")
+for build, skip in BUILDS.items():
+    run(build, skip)
+print("->", FAB, "(check part rotations in JLC's preview before ordering)")

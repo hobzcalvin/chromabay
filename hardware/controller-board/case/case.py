@@ -3,8 +3,8 @@
 
     python3 case/case.py [variant ...]
 
-Variants: external, slim, thick (battery bay under the board), each also as "<name>-terminal"
-with a raised lid section for the optional lever terminal on LED output 1.
+Variants: external, slim, thick (battery bay under the board). Every variant has the OUT1 push-in
+terminal window, so the all-in-one build (cell inside, LEDs pushed into the terminals) never opens.
 
 Writes case/out/<variant>-bottom.stl, <variant>-lid.stl and (with a cell) <variant>-cell.stl.
 Built in PCB coordinates (x across, y along with 0 = business end, z up from the board's bottom
@@ -22,7 +22,6 @@ OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "out")
 BOARD_W, BOARD_L, PCB_T = 36.0, 68.0, 1.6
 ANT_OVERHANG = 5.2      # ESP32-S3-MINI-1 antenna hangs past the board end
 COMP_H = 5.6            # tallest part above the PCB without the terminal (JST-PH 5.5 mm)
-TERM_H = 12.9           # KF141R lever terminal
 WALL, FLOOR, ROOF = 1.6, 1.2, 1.2
 GAP = 0.3               # board-to-wall clearance
 LID_CLEAR = 0.4
@@ -46,27 +45,22 @@ END = [  # end-face cutouts: (name, x_centre, z_centre, width, height, corner ra
 ]
 MIC_X, MIC_Y = 9.5, 8.6            # bottom-port mic -> channel under the board -> end face
 SIDE_NOTCHES = [  # (side, y_centre, width, label): U-notches at the seam, laid-in wires
-    ("left", 17.5, 4.4, "BAT"),       # JST-PH battery lead
-    ("right", 15.3, 6.0, "OUT1"),     # lever terminal / output 1 wires
-    ("right", 35.9, 5.0, "OUT2-4"),   # output 2-4 pads
+    ("left", 17.5, 4.4, "BAT"),       # JST-PH battery lead (or wires to the battery pads)
+    ("right", 38.0, 6.0, "OUT pads"), # wires soldered to the LED output pads
 ]
-TERMINAL_BOX = (21.4, 8.3, 36.0, 22.4)   # x0, y0, x1, y1 of the lever terminal body
+# OUT1 push-in terminals (2x WAGO 2060, 4.5 mm tall): a window in the right wall lines up with the
+# four wire entries, and a slot in the lid roof reaches the release buttons. Wiring OUT1 never
+# needs the case opened.
+WAGO_WINDOW = (8.3, 23.6, 4.8)     # y0, y1, height above the PCB top
+WAGO_SLOT = (30.6, 8.6, 34.6, 23.3)  # x0, y0, x1, y1 of the button slot in the lid
 
 
-def build(name, bay, cell, terminal=False):
+def build(name, bay, cell):
     z0 = -(bay + FLOOR)
     z1 = TOP + COMP_H + LID_CLEAR + ROOF
     W, L = BOARD_W + 2 * (GAP + WALL), CAV_L + 2 * (GAP + WALL)
     body = (cq.Workplane("XY").box(W, L, z1 - z0, centered=False)
             .translate((-(GAP + WALL), -(GAP + WALL), z0)).edges("|Z").fillet(CORNER_R))
-    if terminal:   # raised section over the lever terminal
-        tx0, ty0, tx1, ty1 = TERMINAL_BOX
-        hump = (cq.Workplane("XY").box(tx1 - tx0 + 2 * WALL + 0.6, ty1 - ty0 + 2 * WALL + 0.6,
-                                       TERM_H + LID_CLEAR + ROOF, centered=False)
-                .translate((tx0 - WALL - 0.3, ty0 - WALL - 0.3, TOP)).edges("|Z").fillet(1.5))
-        body = body.union(hump)
-        body = body.cut(cq.Workplane("XY").box(tx1 - tx0 + 0.6, ty1 - ty0 + 0.6, TERM_H + LID_CLEAR,
-                                               centered=False).translate((tx0 - 0.3, ty0 - 0.3, TOP)))
     cav = (cq.Workplane("XY").box(BOARD_W + 2 * GAP, CAV_L + 2 * GAP, (z1 - ROOF) - (z0 + FLOOR),
                                   centered=False).translate((-GAP, -GAP, z0 + FLOOR))
            .edges("|Z").fillet(0.8))
@@ -87,6 +81,13 @@ def build(name, bay, cell, terminal=False):
     for _, x, z, w, h, r in END:
         c = cq.Workplane("XZ").center(x, z).rect(w, h).extrude(-3).translate((0, ey, 0))
         body = body.cut(c.edges("|Y").fillet(r) if r else c)
+    # OUT1 push-in terminals: wire-entry window in the right wall + button slot in the lid roof
+    wy0, wy1, wh = WAGO_WINDOW
+    body = body.cut(cq.Workplane("XY").box(WALL + 1.0, wy1 - wy0, wh, centered=False)
+                    .translate((BOARD_W + GAP - 0.2, wy0, TOP)))
+    sx0, sy0, sx1, sy1 = WAGO_SLOT
+    body = body.cut(cq.Workplane("XY").box(sx1 - sx0, sy1 - sy0, ROOF + 2, centered=False)
+                    .translate((sx0, sy0, z1 - ROOF - 1)).edges("|Z").fillet(0.8))
     # side U-notches at the seam for wires (laid in, not threaded)
     for side, y, w, _ in SIDE_NOTCHES:
         xw = -(GAP + WALL) - 0.5 if side == "left" else BOARD_W + GAP + WALL + 0.5
@@ -119,7 +120,7 @@ def build(name, bay, cell, terminal=False):
                     .transformed(rotate=(0, 0, 180))
                     .text("ChromaBay", 4.0, 0.4, combine=False, halign="center", valign="center"))
     os.makedirs(OUT, exist_ok=True)
-    tag = name + ("-terminal" if terminal else "")
+    tag = name
     cq.exporters.export(bottom, os.path.join(OUT, f"{tag}-bottom.stl"), tolerance=0.05)
     cq.exporters.export(lid, os.path.join(OUT, f"{tag}-lid.stl"), tolerance=0.05)
     if cell:
@@ -127,13 +128,9 @@ def build(name, bay, cell, terminal=False):
         c = (cq.Workplane("XY").box(cw, cl, ch, centered=False)
              .translate(((BOARD_W - cw) / 2, -CELL_Y0 - cl, -0.4 - ch)).edges("|Y").fillet(1.0))
         cq.exporters.export(c, os.path.join(OUT, f"{name}-cell.stl"), tolerance=0.05)
-    hz = (TOP + TERM_H + LID_CLEAR + ROOF) if terminal else z1
-    print(f"{tag:18} outer {W:.1f} x {L:.1f} x {z1 - z0:.1f} mm"
-          + (f" (terminal hump to {hz - z0:.1f} mm)" if terminal else ""))
+    print(f"{tag:10} outer {W:.1f} x {L:.1f} x {z1 - z0:.1f} mm")
 
 
 if __name__ == "__main__":
-    names = sys.argv[1:] or [v for v in VARIANTS] + [v + "-terminal" for v in VARIANTS]
-    for n in names:
-        base = n.replace("-terminal", "")
-        build(base, **VARIANTS[base], terminal=n.endswith("-terminal"))
+    for n in sys.argv[1:] or list(VARIANTS):
+        build(n, **VARIANTS[n])

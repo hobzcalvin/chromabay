@@ -1,7 +1,7 @@
 # ChromaBay battery LED controller: board + case design
 
 Status: **KiCad rev A: schematic done (ERC clean), parts placed on 36 × 68 mm (DRC/parity clean), not yet
-routed.** See [README.md](README.md) for the files, renders and how to regenerate them. Where rev A
+routed.** One PCB, three builds (Core / Plug / Complete); see section 0. See [README.md](README.md) for the files, renders and how to regenerate them. Where rev A
 differs from this spec, section 0 wins.
 
 In product terms, this is a battery-powered, ChromaBay-first take on the GLEDOPTO ESP32 mini
@@ -31,7 +31,7 @@ Revision history:
 
 ## 0. Rev A as built in KiCad (supersedes the spec below where they differ)
 
-**Status:** the schematic is ERC-clean and all 113 parts are placed, with 0 schematic-parity issues. The
+**Status:** the schematic is ERC-clean and all 124 parts are placed, with 0 schematic-parity issues. The
 remaining DRC items are unrouted connections and silkscreen cosmetics. **The board isn't routed yet** (see "Routing").
 
 | Topic | Now | Why |
@@ -40,12 +40,53 @@ remaining DRC items are unrouted connections and silkscreen cosmetics. **The boa
 | ESP32 antenna | **Overhangs the far edge by ~5 mm** | Espressif's preferred placement. It frees the dead copper keep-out strips beside the module (the empty space in the earlier renders). |
 | Business end | **User button, LED, USB-C, power switch all face out the end**; the mic port exits there too, through a channel under the board | The three controls you'll touch most share one face. |
 | Battery | **JST-PH 2-pin, SMD, side-entry (opening faces the left wall)** + small + / − / NTC wire pads | Swappable packs. The pads are for packs without a plug. **Check polarity per pack**: + and − are on the silk. |
-| LED outputs | **OUT1 (G V C D) on a KF141R-2.54-4P lever-terminal footprint** at the right edge, wire entry facing out. **OUT2–4 + their own G/V** on a 2.54 mm pad strip below it | The terminal is optional (hand-solder, LCSC C475126, ~$0.30). Without it, solder wires into the same holes. |
+| LED outputs | **OUT1 on two WAGO 2060 push-in blocks** (G V + C1 D1; SMD, reflowed by JLC, **4.5 mm tall**, 18–24 AWG, wire entry facing the right wall). **All 8 LED lines + G/V also on a 2.54 mm solder-pad strip** | Replaced the 12.8 mm-tall lever terminal: same footprint area, fits under the normal lid, and needs no hand soldering. The case has a wall window for the wires and a lid slot for the release buttons, so wiring never needs the case opened. |
+| Spare GPIO | **IO3\*, IO11, IO26, IO43, IO44, IO45\*, IO46\*** on their own pads (left edge). Plus the existing user pads: T1–T4, SDA/SCL, ext-mic BCLK/WS/SD, BOOT | Every free pin is broken out. \*Strapping pins: don't pull IO45/IO46 high at boot. IO43/44 are UART0 (boot log). |
 | Wires | Exit through **U-notches at the case seam on the long sides**, right next to the business end | The end face is full with the controls and USB. |
 | BOOT / RESET | BOOT is a user pad (GPIO0). No RESET: the power switch is the reset | Saves parts and area. Native USB flashing rarely needs BOOT. |
 | UART pads | Dropped | USB serial/JTAG covers logging. |
 | Mic | INGHAi GMA3526H10-B26 PDM, $1.00 (datasheet pinout verified) | The ICS-43434 is $3.67 at JLC. |
 | ESD | SRV05-4 ×3 (USB D+/D-/CC; outputs) | JLC Preferred-Extended, no loading fee. |
+
+### Builds: one board, three ways to use it
+
+The same PCB serves all three. They differ only in which connectors JLC fits (`fab/bom-jlc-<build>.csv`)
+and which case you print:
+
+| Build | Battery | LEDs | Case | PCBA / board at 5 · 10 · 30 |
+|---|---|---|---|---|
+| **Core** (full custom) | Solder to the + / − / NTC pads (18 AWG holes, any connector you like) | Solder to the pad strip, all 4 outputs | Optional (any variant, or none) | $28.21 · $20.74 · $15.51 |
+| **Plug** | JST-PH | Solder to the pads | Any | $28.88 · $21.10 · $15.66 |
+| **Complete** (GLEDOPTO-style, solder-free) | JST-PH, cell inside the slim/thick case | Push wires into OUT1 from outside; OUT2–4 still on pads | Slim or thick; never needs opening | $30.18 · $22.10 · $16.37 |
+
+**Recommendation: build everything as "Complete".** It's only ~$1.36/board more than Core at 10 boards, one SKU is
+simpler, and Core users can ignore the JST and WAGO (every signal is still on solder pads). Make separate builds
+only if you order 30+ of one kind.
+
+### What each feature costs (`python3 tools/cost_options.py 10`, live prices, per board at 10 boards incl. the per-order fee share)
+
+| Change | Saves / board | Trade-off |
+|---|---|---|
+| Fuel gauge → voltage divider | **$2.01** | Battery % from voltage only (±10–15% under LED load) |
+| Drop the IMU | **$1.47** | No motion, taps or wake-on-shake |
+| IMU → LIS2DH12 (accel only) | $0.43 | No gyro (swing speed/rotation) |
+| Drop the onboard mic | **$1.31** | External I2S mic pads still work |
+| Drop the WAGO push-ins | $1.00 | No solder-free LED wiring |
+| Drop output ESD | $0.57 | Hot-plugging strips gets riskier |
+| Drop the JST-PH | $0.36 | No plug-and-play battery |
+| Drop reverse-polarity FET | $0.21 | Not recommended: a backwards pack can kill the charger |
+| **Order 30 instead of 10** | **$5.70** | Inventory |
+
+Things that **don't** move the price: board thickness (0.8 vs 1.6 mm), board size at this scale, and swapping
+cheap Extended parts for "Basic" ones (JLC has no Basic equivalents for most of them). Going from 4 layers to 2
+would save ~$0.50–1/board but makes routing and power/RF layout much harder: not worth it.
+**The ESP32-S3 module ($4.17) and the per-order fees (~$65–80) are the floor.**
+
+### LED pins and hardware acceleration
+All 8 LED lines (IO15/16/17/18/21/33/34/35) can use every S3 output peripheral. The S3's GPIO matrix routes RMT
+(4 TX channels), both general-purpose SPI hosts (SPI2/SPI3, fine up to ~40 MHz through the matrix; APA102 rarely needs
+more than 20) and the I2S/LCD parallel peripheral (all 8 lines at once) to any of these pins. **Keep the module an N8 or
+N4R2:** octal-PSRAM variants (N8R8 etc.) take IO33–37.
 
 ### Checks done (datasheets)
 - **BQ25606** `IBATFET_OCP` ≥ 6.0 A, so the boost stays on SYS. Floating D+/D- means "unknown adapter", so the ILIM pin sets the input limit (200 Ω → 2.4 A).
@@ -74,9 +115,9 @@ someone fluent in KiCad.
   USB-C socket that get pushed on. The 0.8 mm board saved 0.8 mm, but the JST-PH alone adds more height than that.
 - **Stack height (no terminal):** JST-PH 5.5 mm is now the tallest part, then USB-C 3.2, ESP32 2.55, inductors 2.0. The board
   with parts is ~7.1 mm.
-- **Case:** external battery 39.8 × 77 × 11 mm, slim cell (603450, ~1.1 Ah) 16.6 mm, thick cell (103450, ~2 Ah) 20.6 mm. With
-  the lever terminal, a raised section over it reaches 18.3 / 23.9 / 27.9 mm.
-- **What costs thickness:** the JST-PH (+2.3 mm over the USB-C) and the lever terminal (+7 mm locally). A flat JST-SH or
+- **Case:** external battery 39.8 × 77 × 11 mm, slim cell (603450, ~1.1 Ah) 16.6 mm, thick cell (103450, ~2 Ah) 20.6 mm.
+  The WAGO push-ins (4.5 mm) fit under the normal lid. No hump.
+- **What costs thickness:** the JST-PH (+2.3 mm over the USB-C). A flat JST-SH or
   Molex PicoBlade battery plug would save ~2 mm, but those are rated 1 A, too little for this load. **The JST-PH is the right
   call for swappable packs.**
 

@@ -192,22 +192,26 @@ part("U9", *SRV, {1: "OUT_C1", 3: "OUT_D1", 4: "OUT_C2", 6: "OUT_D2", 2: "GND", 
      "shifter", note="output ESD")
 part("U10", *SRV, {1: "OUT_C3", 3: "OUT_D3", 4: "OUT_C4", 6: "OUT_D4", 2: "GND", 5: "5V_BOOST"},
      "shifter", note="output ESD")
-part("J2", "Connector_Generic:Conn_01x04", "LED OUT 1", "cb:OutputTerminal", None,
-     {1: "GND", 2: "VLED", 3: "OUT_C1", 4: "OUT_D1"}, "shifter",
-     note="KF141R-2.54-4P lever terminal footprint (optional, LCSC C475126, hand-solder) or wires")
-part("J5", "Connector_Generic:Conn_01x08", "LED OUT 2-4", "cb:OutputPads", None,
-     {1: "GND", 2: "VLED", 3: "OUT_C2", 4: "OUT_D2", 5: "OUT_C3", 6: "OUT_D3", 7: "OUT_C4", 8: "OUT_D4"},
-     "shifter", note="wire pads; outputs 2-4 share this G/V pair")
+# OUT1 solder-free: two WAGO 2060 push-in blocks (SMD, reflowed by JLC, 4.5 mm tall, 18-24 AWG,
+# wire entry facing the right wall). Every output, OUT1 included, is also on the J5 solder pads.
+WAGO = ("Connector_Generic:Conn_01x02", "lcsc:CONN-SMD_2060-452", "C2765055")
+part("J2", WAGO[0], "OUT1 power (G V)", WAGO[1], WAGO[2], {1: "GND", 2: "VLED"}, "shifter",
+     note="WAGO 2060-452/998-404 push-in")
+part("J6", WAGO[0], "OUT1 data (C1 D1)", WAGO[1], WAGO[2], {1: "OUT_C1", 2: "OUT_D1"}, "shifter",
+     note="WAGO 2060-452/998-404 push-in")
+part("J5", "Connector_Generic:Conn_01x10", "LED OUT pads", "cb:OutputPads", None,
+     {1: "GND", 2: "VLED", **{3 + i: f"OUT_{n}" for i, n in enumerate(OUT)}}, "shifter",
+     note="all 8 LED lines + G/V as 2.54 mm wire pads")
 
 # ---------------------------------------------------------------- ESP32-S3
 GPIO = {  # module pin number -> net
-    4: "BOOT", 5: "CC1_SENSE", 6: "CC2_SENSE", 7: "NC_IO3", 8: "T1", 9: "T2", 10: "T3", 11: "T4",
-    12: "SDA", 13: "SCL", 14: "IMU_INT1", 15: "NC_IO11", 16: "CHG_PG", 17: "IMU_INT2",
+    4: "BOOT", 5: "CC1_SENSE", 6: "CC2_SENSE", 7: "IO3", 8: "T1", 9: "T2", 10: "T3", 11: "T4",
+    12: "SDA", 13: "SCL", 14: "IMU_INT1", 15: "IO11", 16: "CHG_PG", 17: "IMU_INT2",
     18: "GAUGE_ALRT", 19: "LS_C1", 20: "LS_D1", 21: "LS_C2", 22: "LS_D2", 23: "USB_DM",
-    24: "USB_DP", 25: "LS_C3", 26: "NC_IO26", 27: "EXT_WS", 28: "LS_D3", 29: "LS_C4",
+    24: "USB_DP", 25: "LS_C3", 26: "IO26", 27: "EXT_WS", 28: "LS_D3", 29: "LS_C4",
     30: "EXT_SD", 31: "LS_D4", 32: "SHIFT_OE", 33: "LED_EN", 34: "PDM_CLK", 35: "PDM_DATA",
-    36: "EXT_BCLK", 37: "STATUS_LED", 38: "USER_BTN", 39: "NC_TXD0", 40: "NC_RXD0", 41: "NC_IO45",
-    44: "NC_IO46", 45: "ESP_EN", 3: "3V3"}
+    36: "EXT_BCLK", 37: "STATUS_LED", 38: "USER_BTN", 39: "IO43", 40: "IO44", 41: "IO45",
+    44: "IO46", 45: "ESP_EN", 3: "3V3"}
 for gnd in [1, 2, 42, 43] + list(range(46, 61)) + ["GND"]:
     GPIO[gnd] = "GND"
 part("U1", "lcsc:ESP32-S3-MINI-1-N8", "ESP32-S3-MINI-1-N8", "lcsc:BULETM-SMD_ESP32-S3-MINI-1-N8",
@@ -251,7 +255,10 @@ C("1uF", "MIC_VDD", "GND", "sensors")
 C("100nF", "MIC_VDD", "GND", "sensors")
 
 # ---------------------------------------------------------------- User pads
-for name, net in [("3V3", "3V3"), ("GND", "GND"), ("SDA", "SDA"), ("SCL", "SCL"),
+# Every otherwise-unused GPIO gets a pad. IO3/IO45/IO46 are strapping pins: don't pull IO45 or
+# IO46 high at boot. IO43/IO44 are UART0 TX/RX (boot log).
+for name, net in [("IO3", "IO3"), ("IO11", "IO11"), ("IO26", "IO26"), ("IO43", "IO43"), ("IO44", "IO44"),
+                  ("IO45", "IO45"), ("IO46", "IO46"), ("3V3", "3V3"), ("GND", "GND"), ("SDA", "SDA"), ("SCL", "SCL"),
                   ("T1", "T1"), ("T2", "T2"), ("T3", "T3"), ("T4", "T4"), ("BOOT", "BOOT"),
                   ("MIC_BCLK", "EXT_BCLK"), ("MIC_WS", "EXT_WS"), ("MIC_SD", "EXT_SD")]:
     TP(name, net, "pads")
