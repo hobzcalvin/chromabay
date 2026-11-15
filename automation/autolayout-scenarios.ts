@@ -36,6 +36,7 @@ export const SCENARIOS: SimScenario[] = [
   { name: 'harsh-mains-flicker-bright', layout: { kind: 'grid', cols: 10, rows: 10 }, ambient: 0.3, flickerHz: 120, flickerDepth: 0.7, exposureMs: 3, ledLevel: 0.5 },
   { name: 'harsh-pwm-400hz-short-exp', layout: { kind: 'grid', cols: 10, rows: 10 }, pwmHz: 400, exposureMs: 2 },
   { name: 'harsh-pwm-1k2-close-dense', layout: { kind: 'grid', cols: 8, rows: 8 }, coverage: 0.5, spotFrac: 0.3, bloom: 0.12, ledLevel: 1.5, pwmHz: 1200, exposureMs: 4 },
+  { name: 'harsh-panel-fills-frame', layout: { kind: 'grid', cols: 16, rows: 16, serpentine: true }, coverage: 0.97, spotFrac: 0.25, bloom: 0.08 },
   { name: 'harsh-defocused', layout: { kind: 'grid', cols: 10, rows: 10 }, minSpotPx: 4.5 },
   { name: 'harsh-low-res-camera', layout: { kind: 'grid', cols: 16, rows: 16, serpentine: true }, imgW: 160, imgH: 90, noise: 4 },
   { name: 'harsh-partly-out-of-frame', layout: { kind: 'grid', cols: 10, rows: 10 }, offsetX: 0.4 },

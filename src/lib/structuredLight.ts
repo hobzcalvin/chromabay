@@ -64,6 +64,9 @@ export type DecodeV2Diag = {
   duplicates: number;        // codes seen at >1 separate place (reflections)
   parityRejects: number;     // pixels whose code failed the parity check (comp)
   collisions: number;        // IDs dropped for sitting on another ID's spot
+  continuityFixes: number;   // IDs moved/dropped for sitting far from both wiring neighbours
+  gainCorrected?: boolean;   // false when no background was visible to read exposure from (panel fills frame)
+  flicker?: number;          // set when flicker bands were detected and divided out (mean row-gain deviation)
 };
 
 export type DecodeV2Result = {
@@ -78,7 +81,7 @@ export function decodeStructuredLight(frames: Frame[], o: DecodeV2Opts): DecodeV
   const log = o.onLog ?? (() => {});
   const L = seqLength(o.kind, o.bits);
   const F = frames.length;
-  const diag: DecodeV2Diag = { found: 0, frames: F, cleanFrames: 0, cycles: 0, periodMs: 0, edgeSharpness: 0, maskPx: 0, codedPx: 0, maxContrast: 0, clippedPct: 0, outOfRange: 0, duplicates: 0, parityRejects: 0, collisions: 0 };
+  const diag: DecodeV2Diag = { found: 0, frames: F, cleanFrames: 0, cycles: 0, periodMs: 0, edgeSharpness: 0, maskPx: 0, codedPx: 0, maxContrast: 0, clippedPct: 0, outOfRange: 0, duplicates: 0, parityRejects: 0, collisions: 0, continuityFixes: 0 };
   const fail = (reason: string): DecodeV2Result => ({ ok: false, reason, points: [], conf: [], diag });
   if (F < 3 * L) return fail('capture too short for one full flash cycle');
   const w = frames[0].w, h = frames[0].h, N = w * h;
@@ -89,23 +92,87 @@ export function decodeStructuredLight(frames: Frame[], o: DecodeV2Opts): DecodeV
   // does, leaves residual swings across any lit/graded background — in a bright room the whole
   // frame then "blinks" and buries the LEDs.) LED pixels are a small minority: the median ignores them.
   const inv = new Float32Array(F);
+  const step = Math.max(1, Math.floor(N / 20000)), S = Math.ceil(N / step);
+  const ref = new Float32Array(S);
   {
-    const step = Math.max(1, Math.floor(N / 20000)), S = Math.ceil(N / step);
-    const K = Math.min(F, 15), ref = new Float32Array(S), col = new Float32Array(K);
+    const K = Math.min(F, 15), col = new Float32Array(K);
     for (let j = 0; j < S; j++) { for (let k = 0; k < K; k++) col[k] = frames[Math.floor((k * F) / K)].gray[j * step]; col.sort(); ref[j] = col[K >> 1]; }
+    // Background = sampled pixels that don't strongly blink. When the LEDs fill most of the frame
+    // (a panel shot close-up) there is no background: the ALL-ON frame raised the "median" and the
+    // gain fit divided the flash itself out (IDs came out scrambled). Then skip the correction — the
+    // balanced code keeps exposure steady enough.
+    const rmin = new Uint8Array(S).fill(255), rmax = new Uint8Array(S);
+    for (let f = 0; f < F; f++) { const g = frames[f].gray; for (let j = 0; j < S; j++) { const v = g[j * step]; if (v < rmin[j]) rmin[j] = v; if (v > rmax[j]) rmax[j] = v; } }
+    let top = 0; for (let j = 0; j < S; j++) top = Math.max(top, rmax[j] - rmin[j]);
+    const bg = new Uint8Array(S); let nbg = 0, nStrong = 0;
+    for (let j = 0; j < S; j++) { const r = rmax[j] - rmin[j]; if (r >= 0.5 * top) nStrong++; else if (ref[j] >= 16 && ref[j] <= 240) { bg[j] = 1; nbg++; } }
+    const noBackground = nStrong > 0.4 * S || nbg < 0.1 * S;
+    diag.gainCorrected = !noBackground;
     const ratios: number[] = [];
     for (let f = 0; f < F; f++) {
       ratios.length = 0; const g = frames[f].gray;
-      for (let j = 0; j < S; j++) if (ref[j] >= 16 && ref[j] <= 240) ratios.push(g[j * step] / ref[j]);
+      if (noBackground) { inv[f] = 1; continue; }
+      for (let j = 0; j < S; j++) if (bg[j]) ratios.push(g[j * step] / ref[j]);
       ratios.sort((a, b) => a - b);
       const r = ratios.length > 50 ? ratios[ratios.length >> 1] : 1;
       inv[f] = r > 0.05 ? 1 / r : 1;
     }
   }
-  // Candidate pixels: anything with a real temporal swing.
-  const pmin = new Float32Array(N).fill(1e9), pmax = new Float32Array(N).fill(-1e9);
-  for (let f = 0; f < F; f++) { const g = frames[f].gray, m = inv[f]; for (let i = 0; i < N; i++) { const v = g[i] * m; if (v < pmin[i]) pmin[i] = v; if (v > pmax[i]) pmax[i] = v; } }
-  let maxSwing = 0; for (let i = 0; i < N; i++) maxSwing = Math.max(maxSwing, pmax[i] - pmin[i]);
+  // gain[f·h + y]: multiplier that flattens frame f, row y. Per-frame (above) unless banding is found.
+  const gain = new Float32Array(F * h);
+  for (let f = 0; f < F; f++) gain.fill(inv[f], f * h, f * h + h);
+  const pmin = new Float32Array(N), pmax = new Float32Array(N);
+  let maxSwing = 0;
+  const swing = () => {
+    pmin.fill(1e9); pmax.fill(-1e9);
+    for (let f = 0; f < F; f++) { const g = frames[f].gray, o = f * h; for (let y = 0, i = 0; y < h; y++) { const m = gain[o + y]; for (let x = 0; x < w; x++, i++) { const v = g[i] * m; if (v < pmin[i]) pmin[i] = v; if (v > pmax[i]) pmax[i] = v; } } }
+    maxSwing = 0; for (let i = 0; i < N; i++) maxSwing = Math.max(maxSwing, pmax[i] - pmin[i]);
+  };
+  swing();
+
+  // Timing-only gains (see the flicker block); null = same as `gain`.
+  let tgain: Float32Array | null = null;
+  // Flicker bands. Mains-lit rooms (100/120 Hz) with a short exposure + rolling shutter paint moving
+  // horizontal bands over everything, which bury the frame edges the timing fit needs (and every
+  // pixel "blinks"). Bands are uniform along a row, so estimate each row's gain from BACKGROUND
+  // pixels in that row (away from anything that strongly blinks), and divide it out. Only switched
+  // on when the per-row gains actually disagree, so ordinary captures are untouched.
+  {
+    const strongPx = new Uint8Array(N); let nStrong = 0;
+    for (let i = 0; i < N; i++) if (pmax[i] - pmin[i] >= 0.3 * maxSwing) { strongPx[i] = 1; nStrong++; }
+    // When nearly everything "blinks", that IS the flicker — use every pixel (LEDs are still a
+    // minority of each row) rather than excluding the whole frame.
+    if (nStrong > 0.4 * N) strongPx.fill(0);
+    const R = Math.max(3, Math.round(w / 40)), excl = new Uint8Array(N), tmp = new Uint8Array(N);
+    for (let y = 0; y < h; y++) { let run = -1e9; for (let x = 0; x < w; x++) { if (strongPx[y * w + x]) run = x; if (x - run <= R) tmp[y * w + x] = 1; } run = 1e9; for (let x = w - 1; x >= 0; x--) { if (strongPx[y * w + x]) run = x; if (run - x <= R) tmp[y * w + x] = 1; } }
+    for (let x = 0; x < w; x++) { let run = -1e9; for (let y = 0; y < h; y++) { if (tmp[y * w + x]) run = y; if (y - run <= R) excl[y * w + x] = 1; } run = 1e9; for (let y = h - 1; y >= 0; y--) { if (tmp[y * w + x]) run = y; if (run - y <= R) excl[y * w + x] = 1; } }
+    const rowR = new Float32Array(F * h).fill(NaN), buf: number[] = [];
+    let dev = 0, devN = 0;
+    for (let f = 0; f < F; f++) {
+      const g = frames[f].gray;
+      for (let y = 0; y < h; y++) {
+        buf.length = 0;
+        for (let j = Math.ceil((y * w) / step); j * step < (y + 1) * w; j++) { const i = j * step; if (!excl[i] && ref[j] >= 16 && ref[j] <= 240) buf.push(g[i] / ref[j]); }
+        if (buf.length < 10) continue;
+        buf.sort((a, b) => a - b); const r = buf[buf.length >> 1]; rowR[f * h + y] = r;
+        dev += Math.abs(r * inv[f] - 1); devN++;
+      }
+    }
+    // Used for the TIMING fit only (and only if it gives sharper edges): in a panel wired by rows,
+    // the code bits are themselves row patterns, and dividing rows out would erase them — the
+    // per-pixel read keeps per-frame gains, where flicker merely averages away.
+    if (devN > 0.3 * F * h && dev / devN > 0.03) {
+      diag.flicker = +(dev / devN).toFixed(3);
+      tgain = new Float32Array(F * h);
+      for (let f = 0; f < F; f++) {
+        const o = f * h;
+        // fill rows with no background (inside the array) from the nearest rows that have it
+        let last = NaN; for (let y = 0; y < h; y++) { if (Number.isFinite(rowR[o + y])) last = rowR[o + y]; else if (Number.isFinite(last)) rowR[o + y] = last; }
+        last = NaN; for (let y = h - 1; y >= 0; y--) { if (Number.isFinite(rowR[o + y])) last = rowR[o + y]; else rowR[o + y] = Number.isFinite(last) ? last : 1 / inv[f]; }
+        for (let y = 0; y < h; y++) { const win: number[] = []; for (let d = -2; d <= 2; d++) { const yy = y + d; if (yy >= 0 && yy < h) win.push(rowR[o + yy]); } win.sort((a, b) => a - b); const r = win[win.length >> 1]; tgain[o + y] = r > 0.05 ? 1 / r : inv[f]; }
+      }
+    }
+  }
   const noise = o.noiseFloor ?? 10;
   if (maxSwing < noise) return fail('nothing in view is blinking — is the device calibrating and in frame?');
   const mask: number[] = []; for (let i = 0; i < N; i++) if (pmax[i] - pmin[i] >= Math.max(noise, 0.12 * maxSwing)) mask.push(i);
@@ -117,32 +184,38 @@ export function decodeStructuredLight(frames: Frame[], o: DecodeV2Opts): DecodeV
   // Timing/phase use only the strongest-swinging pixels (the LED cores), capped for cost.
   const strong = mask.filter((i) => pmax[i] - pmin[i] >= 0.35 * maxSwing);
   const tmask = strong.length > 6000 ? strong.filter((_, k) => k % Math.ceil(strong.length / 6000) === 0) : strong;
-  const eT: number[] = [], eV: number[] = [];
-  for (let f = 1; f < F; f++) {
-    const a = frames[f - 1].gray, b = frames[f].gray, ma = inv[f - 1], mb = inv[f]; let s = 0;
-    for (const i of tmask) s += Math.abs(b[i] * mb - a[i] * ma);
-    eT.push((frames[f].t + frames[f - 1].t) / 2); eV.push(s);
-  }
-  // Robust baseline: subtract the median energy so only edge spikes vote.
-  const eMed = [...eV].sort((x, y) => x - y)[eV.length >> 1];
-  const eW = eV.map((v) => Math.max(0, v - eMed));
-  const PB = 40;
-  let best = { score: -1, P: o.frameMs, t0: 0 };
-  for (let P = o.frameMs * 0.92; P <= o.frameMs * 1.15; P += 0.25) {
-    const hb = new Float64Array(PB); let tot = 0;
-    for (let k = 0; k < eT.length; k++) { const ph = ((eT[k] % P) + P) % P; hb[Math.floor((ph / P) * PB) % PB] += eW[k]; tot += eW[k]; }
-    // Edge train = a sharp peak in phase. Score with a 3-bin window (frame-time quantisation).
-    for (let b = 0; b < PB; b++) {
-      const s = hb[(b + PB - 1) % PB] + hb[b] + hb[(b + 1) % PB];
-      if (s > best.score) {
-        // refine phase: weighted circular mean inside the window
-        let cx = 0, cy = 0; for (let d = -1; d <= 1; d++) { const bb = (b + d + PB) % PB, ang = ((bb + 0.5) / PB) * 2 * Math.PI; cx += hb[bb] * Math.cos(ang); cy += hb[bb] * Math.sin(ang); }
-        const ang = (Math.atan2(cy, cx) + 2 * Math.PI) % (2 * Math.PI);
-        best = { score: s, P, t0: (ang / (2 * Math.PI)) * P };
-        diag.edgeSharpness = tot ? s / tot : 0;
+  const fitTiming = (G: Float32Array) => {
+    const eT: number[] = [], eV: number[] = [];
+    for (let f = 1; f < F; f++) {
+      const a = frames[f - 1].gray, b = frames[f].gray, oa = (f - 1) * h, ob = f * h; let s = 0;
+      for (const i of tmask) { const y = (i / w) | 0; s += Math.abs(b[i] * G[ob + y] - a[i] * G[oa + y]); }
+      eT.push((frames[f].t + frames[f - 1].t) / 2); eV.push(s);
+    }
+    // Robust baseline: subtract the median energy so only edge spikes vote.
+    const eMed = [...eV].sort((x, y) => x - y)[eV.length >> 1];
+    const eW = eV.map((v) => Math.max(0, v - eMed));
+    const PB = 40;
+    let best = { score: -1, P: o.frameMs, t0: 0, sharp: 0 };
+    for (let P = o.frameMs * 0.92; P <= o.frameMs * 1.15; P += 0.25) {
+      const hb = new Float64Array(PB); let tot = 0;
+      for (let k = 0; k < eT.length; k++) { const ph = ((eT[k] % P) + P) % P; hb[Math.floor((ph / P) * PB) % PB] += eW[k]; tot += eW[k]; }
+      // Edge train = a sharp peak in phase. Score with a 3-bin window (frame-time quantisation).
+      for (let b = 0; b < PB; b++) {
+        const s = hb[(b + PB - 1) % PB] + hb[b] + hb[(b + 1) % PB];
+        if (s > best.score) {
+          // refine phase: weighted circular mean inside the window
+          let cx = 0, cy = 0; for (let d = -1; d <= 1; d++) { const bb = (b + d + PB) % PB, ang = ((bb + 0.5) / PB) * 2 * Math.PI; cx += hb[bb] * Math.cos(ang); cy += hb[bb] * Math.sin(ang); }
+          const ang = (Math.atan2(cy, cx) + 2 * Math.PI) % (2 * Math.PI);
+          best = { score: s, P, t0: (ang / (2 * Math.PI)) * P, sharp: 0 };
+          best.sharp = tot ? s / tot : 0;
+        }
       }
     }
-  }
+    return best;
+  };
+  let best = fitTiming(gain);
+  if (tgain) { const alt = fitTiming(tgain); if (alt.sharp > best.sharp) best = alt; }
+  diag.edgeSharpness = best.sharp;
   const P = best.P, t0 = best.t0;
   diag.periodMs = +P.toFixed(1);
   log(`timing: period ${P.toFixed(1)}ms (nominal ${o.frameMs}), edge sharpness ${(diag.edgeSharpness * 100).toFixed(0)}%`);
@@ -164,8 +237,8 @@ export function decodeStructuredLight(frames: Frame[], o: DecodeV2Opts): DecodeV
   const Araw = new Float32Array(M * L), Craw = new Int32Array(L);
   for (let f = 0; f < F; f++) {
     if (slotOf[f] < 0) continue; const r = ((slotOf[f] % L) + L) % L; Craw[r]++;
-    const g = frames[f].gray, m = inv[f];
-    for (let k = 0; k < M; k++) Araw[k * L + r] += g[mask[k]] * m;
+    const g = frames[f].gray, o = f * h;
+    for (let k = 0; k < M; k++) { const i = mask[k]; Araw[k * L + r] += g[i] * gain[o + ((i / w) | 0)]; }
   }
   if (Craw.some((c) => c === 0)) return fail(`capture missed some of the ${L} flash frames — capture longer`);
   for (let k = 0; k < M; k++) for (let r = 0; r < L; r++) Araw[k * L + r] /= Craw[r];
@@ -252,6 +325,7 @@ export function decodeStructuredLight(frames: Frame[], o: DecodeV2Opts): DecodeV
   const strongest = [...byId.values()].map((cs) => Math.max(...cs.map((c) => c.sw))).sort((a, b) => a - b);
   const medW = strongest.length ? strongest[strongest.length >> 1] : 0;
   const points: (Pt | null)[] = new Array(o.numLeds).fill(null), conf = new Array(o.numLeds).fill(0);
+  const alts = new Map<number, Pt[]>();   // other sightings of a code (reflections), best first
   for (const [id, cs] of byId) {
     // Several places carry this code (a reflection in a floor/window/glossy wall, or a halo split
     // off its LED): take the SHARPEST — highest peak contrast — among the substantial ones. A
@@ -267,11 +341,33 @@ export function decodeStructuredLight(frames: Frame[], o: DecodeV2Opts): DecodeV
     // beyond an edge/corner LED is lit by that LED alone, so it decodes cleanly as its code — and,
     // being large and one-sided, dragged the whole-component centroid ~½ pitch outward (all four
     // corners of a bloomy close-up came out misplaced).
-    let peak = 0; for (const p of c.px) peak = Math.max(peak, contrast[p]);
-    let qw = 0, qx = 0, qy = 0;
-    for (const p of c.px) { const e = contrast[p] - 0.5 * peak; if (e <= 0) continue; qw += e; qx += e * (p % w); qy += e * ((p / w) | 0); }
-    points[id] = qw > 0 ? { x: qx / qw / w, y: qy / qw / w } : { x: c.sx / c.sw / w, y: c.sy / c.sw / w }; conf[id] = c.sw;
+    const posOf = (q: Comp): Pt => {
+      let peak = 0; for (const p of q.px) peak = Math.max(peak, contrast[p]);
+      let qw = 0, qx = 0, qy = 0;
+      for (const p of q.px) { const e = contrast[p] - 0.5 * peak; if (e <= 0) continue; qw += e; qx += e * (p % w); qy += e * ((p / w) | 0); }
+      return qw > 0 ? { x: qx / qw / w, y: qy / qw / w } : { x: q.sx / q.sw / w, y: q.sy / q.sw / w };
+    };
+    points[id] = posOf(c); conf[id] = c.sw;
+    if (real.length > 1) alts.set(id, real.slice(1).map(posOf));
     diag.found++;
+  }
+  // Strip continuity: LED i is wired next to i±1, so it sits near them. If BOTH wiring neighbours
+  // were found and both are > 2 typical gaps away, this position is suspect — usually a
+  // reflection that won because the real spot didn't read. Try the code's other sightings; if
+  // none fits, drop it rather than misplace it. (One far neighbour is normal: a row wrap.)
+  {
+    const ids = points.map((p, i) => (p ? i : -1)).filter((i) => i >= 0);
+    const nnd = ids.map((i) => { let m = Infinity; for (const j of ids) if (j !== i) m = Math.min(m, Math.hypot(points[i]!.x - points[j]!.x, points[i]!.y - points[j]!.y)); return m; }).filter(Number.isFinite).sort((a, b) => a - b);
+    const gap = nnd.length ? nnd[nnd.length >> 1] : 0;
+    const far = (p: Pt, j: number) => Math.hypot(p.x - points[j]!.x, p.y - points[j]!.y) > 2 * gap;
+    if (gap > 0) for (const i of ids) {
+      const a = i - 1, b = i + 1;
+      if (a < 0 || b >= o.numLeds || !points[a] || !points[b]) continue;
+      if (!(far(points[i]!, a) && far(points[i]!, b))) continue;
+      const fix = (alts.get(i) ?? []).find((q) => !far(q, a) || !far(q, b));
+      if (fix) points[i] = fix; else { points[i] = null; conf[i] = 0; diag.found--; }
+      diag.continuityFixes++;
+    }
   }
   // Two IDs on the same spot: one is a misread of the other (a bit error the parity didn't catch, or
   // legacy mode which has none). Keep the stronger. "Same spot" = closer than ⅓ of the typical gap.

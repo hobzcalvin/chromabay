@@ -213,12 +213,16 @@ static uint8_t calibBrightness = 40;  // per-channel white level while flashing 
                                       // Kept LOW on purpose: at full 255 the LEDs saturate the
                                       // camera and bloom into one solid blob, so adjacent LEDs
                                       // can't be told apart. Dim => distinct dots => decodable.
-// Targeted pass (feat>=9): optional LSB-first bitmask of the LEDs that take part (bytes 6.. of the
-// write). Others stay dark, so a dim/occluded LED can flash at full level without its neighbours'
-// glow burying it. Fixed buffer (not a vector): the BLE callback writes while loop() reads, and a
-// torn frame is harmless where a reallocation would not be. 512 B = 4096 LEDs.
-static uint8_t calibMask[512];
-static volatile uint16_t calibMaskLen = 0;   // 0 = every LED
+// Targeted pass (feat>=9), bytes 6.. of the write: [u16 targetLen][target bitmask][u8 anchorBri]
+// [anchor bitmask] (LSB-first per LED). Target LEDs flash at the write's brightness, anchor LEDs at
+// anchorBri, the rest stay dark — so a dim/occluded LED can flash at full level without its
+// neighbours' glow (or the exposure drop of many bright LEDs) burying it, while a few anchors at the
+// normal level let the app register the pass against earlier ones. Fixed buffers (not vectors):
+// the BLE callback writes while loop() reads; a torn frame is harmless, a reallocation is not.
+static uint8_t calibMask[512], calibAnchor[512];
+static volatile uint16_t calibMaskLen = 0;   // 0 = every LED, no targeting
+static volatile uint16_t calibAnchorLen = 0;
+static uint8_t calibAnchorBri = 40;
 static uint8_t calibMode = 1;         // 0 = strobe (ALL off/on only — for fast exposure tuning),
                                       // 1 = full structured-light sequence (off/on + bit planes).
 static uint32_t calibStartMs = 0;
@@ -1412,10 +1416,18 @@ static void onCalibrationWrite(const uint8_t* data, size_t len, Endpoints::Link&
             // auto sizes from the LONGEST strip, which disagreed with the app on uneven devices.
             if (v.length() >= 5 && (uint8_t)v[4] >= 1 && (uint8_t)v[4] <= 16) bits = (uint8_t)v[4];
             calibFrameMs = (v.length() >= 6 && (uint8_t)v[5] >= 4) ? (uint32_t)(uint8_t)v[5] * 10u : CALIB_FRAME_MS;
-            {
-                size_t mlen = v.length() > 6 ? std::min(v.length() - 6, sizeof(calibMask)) : 0;
-                calibMaskLen = 0;
-                if (mlen) { memcpy(calibMask, v.data() + 6, mlen); calibMaskLen = (uint16_t)mlen; }
+            calibMaskLen = 0; calibAnchorLen = 0;
+            if (v.length() >= 8) {
+                const uint8_t* d = (const uint8_t*)v.data();
+                size_t tlen = std::min((size_t)(d[6] | (d[7] << 8)), std::min(v.length() - 8, sizeof(calibMask)));
+                memcpy(calibMask, d + 8, tlen);
+                size_t at = 8 + (size_t)(d[6] | (d[7] << 8));
+                if (v.length() > at) {
+                    calibAnchorBri = d[at] ? d[at] : 40;
+                    size_t alen = std::min(v.length() - at - 1, sizeof(calibAnchor));
+                    memcpy(calibAnchor, d + at + 1, alen); calibAnchorLen = (uint16_t)alen;
+                }
+                calibMaskLen = (uint16_t)std::max<size_t>(tlen, 1);   // targeting on (even if empty)
             }
             calibBits = bits; calibStrip = strip; calibStartMs = millis(); calibrating = true;
             DiagLog::note("calib start mode %d", calibMode);
@@ -2651,7 +2663,12 @@ void renderCalibrationFrame() {
         for (uint16_t i = 0; i < n; i++) {
             bool on;
             if (!targetStrip) on = false;              // non-target strips stay dark
-            else if (calibMaskLen && ((i >> 3) >= calibMaskLen || !((calibMask[i >> 3] >> (i & 7)) & 1u))) on = false; // not in the targeted set
+            bool anchor = false;
+            if (targetStrip && calibMaskLen) {
+                bool inT = (i >> 3) < calibMaskLen && ((calibMask[i >> 3] >> (i & 7)) & 1u);
+                anchor = !inT && (i >> 3) < calibAnchorLen && ((calibAnchor[i >> 3] >> (i & 7)) & 1u);
+                if (!inT && !anchor) { st->setPixelColor(i, CRGB(0, 0, 0)); continue; }   // not in the targeted set
+            }
             else if (calibMode == 2) on = true;         // steady ALL-ON (detection: tune exposure)
             else if (calibMode == 0) on = (frame == 1); // strobe: 0=off, 1=on
             else if (calibMode == 3) {                  // inverse pairs
@@ -2665,7 +2682,7 @@ void renderCalibrationFrame() {
             }
             else if (frame == 0) on = true;             // full: ALL-ON reference + sync anchor
             else on = ((i >> (frame - 1)) & 1u) != 0;   // full: bit (frame-1) of the LED index
-            uint8_t b = calibBrightness;
+            uint8_t b = anchor ? calibAnchorBri : calibBrightness;
             st->setPixelColor(i, on ? CRGB(b, b, b) : CRGB(0, 0, 0));
         }
     }

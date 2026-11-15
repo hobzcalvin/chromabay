@@ -44,7 +44,8 @@ ON−OFF contrast < 30; then decode. Up to two more passes fill in what was miss
 clipping plausibly hides LEDs, otherwise brighter — merging only new IDs, registered (affine fit on
 shared IDs) so a handheld camera's drift between passes doesn't misplace them. Last, a **targeted
 pass** (firmware calibration mask) flashes only the still-missing LEDs at full level with the rest
-dark: a dim/occluded LED is buried in its neighbours' glow at any shared level, never alone.
+dark (plus a few anchors at the normal level, for registration): a dim/occluded LED is buried in
+its neighbours' glow at any shared level, never alone.
 
 **Wiring fit** (`fitWiring` in `autoLayout.ts`). Most installs are a W×H matrix wired by rows or
 columns, straight or serpentine. For every such wiring of `numLeds`, fit a homography from ideal
@@ -54,11 +55,24 @@ construction — jitter up to 0.2 pitch, perspective, 30% of LEDs missing or out
 places undetected LEDs by their wiring. Free-form installs get null and fall back to the lattice fit
 (which now grows LED-to-LED instead of snapping to one global grid, so bent arrays hold together).
 
-**Bench results, harsh set** (32 scenarios / 4642 LEDs, adding: fairy lights at random angles,
+**Bench results, harsh set** (33 scenarios / 4898 LEDs, adding: fairy lights at random angles,
 wavy curtain, 10× brightness spread, 20% occluded, floor reflection, 120 Hz mains flicker with short
-exposure, LED PWM at 400 Hz / 1.2 kHz, defocus, 160×90 camera, partly out of frame, all at once):
-closed loop + wiring fit → **99.4% LEDs located, 0 misplaced, 31/31 layouts exact** (the missing
-0.6% are dead or out of frame — the wiring fit still places them). Scans take 10–40 s.
+exposure, LED PWM at 400 Hz / 1.2 kHz, panel filling the frame, defocus, 160×90 camera, partly out
+of frame, all at once), each on 3 random installs/captures (`--seed=0/2/3`): closed loop + wiring
+fit → **99.4–99.5% LEDs located, 0 misplaced, 96/96 layouts exact** (the missing ~0.5% are dead or
+out of frame — the wiring fit still places them). Scans take 10–40 s.
+
+More things the harsh set forced:
+- **Exposure gain from background only.** When the panel fills the frame there is no background;
+  the gain fit then divided the flash itself out (IDs scrambled) — so it's skipped.
+- **Flicker bands** (mains light + short exposure + rolling shutter) are flattened per row, but only
+  for the *timing fit* (kept if it gives sharper edges): in a row-wired panel the code bits are row
+  patterns, and per-row flattening of the pixel read would erase them.
+- **Strip continuity.** An LED far (>2 gaps) from BOTH wiring neighbours is suspect (a reflection
+  that won): use the code's other sighting, or drop it.
+- **Targeted pass anchors.** It also lights ~12 found LEDs (away from where the missing ones should
+  be) at the main pass's level so it can be registered; the missing ones alone go to 255.
+- If two passes can't be registered, keep whichever read more LEDs (a bad first pass no longer wins).
 
 **Bench results, first set** (synthetic; `autolayout-sim.ts`, 20 scenarios / 3274 LEDs):
 

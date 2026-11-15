@@ -8,10 +8,10 @@ import { buildLedmap, fitWiring, rectifyPoints } from '../autoLayout';
 // automation/autolayout-sim.ts; this is the fast regression subset).
 
 async function auto(sc: SimScenario) {
-  let mask: number[] | undefined, kind: any = 'strobe', bri = 40, seed = 7, last: any, first: any;
+  let anc: any, mask: number[] | undefined, kind: any = 'strobe', bri = 40, seed = 7, last: any, first: any;
   const io = {
-    flash: async (k: any, b: number, only?: number[]) => { kind = k; bri = b; mask = only; },
-    capture: async (ms: number) => { last = simulateCapture({ ...sc, seq: kind, ledLevel: (sc.ledLevel ?? 0.6) * bri / 40, durationMs: ms, seed: seed++, onlyLeds: mask }); if (kind !== 'strobe') first ??= last; return last.frames; },
+    flash: async (k: any, b: number, only?: number[], an?: any) => { kind = k; bri = b; mask = only; anc = an; },
+    capture: async (ms: number) => { last = simulateCapture({ ...sc, seq: kind, ledLevel: (sc.ledLevel ?? 0.6) * bri / 40, durationMs: ms, seed: seed++, onlyLeds: mask, anchorLeds: anc?.leds, anchorScale: anc ? anc.brightness / bri : 1 }); if (kind !== 'strobe') first ??= last; return last.frames; },
   };
   const ref = simulateCapture({ ...sc, cycles: 1 });
   const r = await runAutoScan(io, { numLeds: ref.numLeds, bits: ref.bits, kind: 'comp', frameMs: 220 });
@@ -73,7 +73,7 @@ describe('harsh conditions', () => {
   it('dim/occluded LEDs are recovered by the targeted pass', async () => {
     const { r, ps } = await auto({ name: 't', layout: { kind: 'grid', cols: 10, rows: 10 }, occludeFrac: 0.2 });
     expect(ps.wrong).toBe(0); expect(r.found).toBe(100);
-  });
+  }, 60000);   // several passes, incl. the targeted one
 
   it('wiring fit: exact from a jittered, perspective, 30%-missing serpentine', () => {
     const sim = simulateCapture({ name: 't', layout: { kind: 'grid', cols: 32, rows: 8, serpentine: true }, posJitter: 0.15, tilt: 0.3, rotDeg: 20, cycles: 1 });

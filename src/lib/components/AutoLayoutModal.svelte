@@ -157,10 +157,10 @@
     const t0 = performance.now(), expMs = skipTune ? 9000 : 15000;
     const pt = setInterval(() => { if (myGen !== gen) { clearInterval(pt); return; } progress = Math.min(0.98, (performance.now() - t0) / expMs); }, 100);
     const io = {
-      flash: async (k: 'strobe' | 'legacy' | 'comp', b: number, onlyLeds?: number[]) => {
+      flash: async (k: 'strobe' | 'legacy' | 'comp', b: number, onlyLeds?: number[], anchors?: { leds: number[]; brightness: number }) => {
         if (myGen !== gen) throw new Error('cancelled');
         if (!onlyLeds) calBright = b;
-        await startCalibration(deviceId, stripIndex, b, k === 'strobe' ? 'strobe' : k === 'comp' ? 'pairs' : 'full', bits, FRAME_MS, onlyLeds);
+        await startCalibration(deviceId, stripIndex, b, k === 'strobe' ? 'strobe' : k === 'comp' ? 'pairs' : 'full', bits, FRAME_MS, onlyLeds, anchors);
         await sleep(FRAME_MS * 2);                    // let the device + camera exposure settle
       },
       capture: async (ms: number) => {

@@ -384,7 +384,9 @@ export function rotateLedmap(l: Ledmap, quarterTurns: number): Ledmap {
 
 // ---- wiring-model fit ---------------------------------------------------------------------
 
-export type WiringFit = { ledmap: Ledmap; cols: number; rows: number; serpentine: boolean; byColumn: boolean; residual: number; inliers: number; T?: (q: { c: number; r: number }) => Pt };
+export type WiringFit = { ledmap: Ledmap; cols: number; rows: number; serpentine: boolean; byColumn: boolean; residual: number; inliers: number; T?: (q: { c: number; r: number }) => Pt;
+  /** Where LED i should appear in the image (same units as the input points). */
+  predict?: (i: number) => Pt };
 
 /** Ideal grid position of LED i for a W×H matrix with the given wiring. */
 export function wiringPos(i: number, W: number, H: number, serpentine: boolean, byColumn: boolean): { c: number; r: number } {
@@ -436,9 +438,11 @@ export function fitWiring(pts: (Pt | null)[], numLeds: number): WiringFit | null
   fits.sort((a, b) => a.residual - b.residual);
   const best = fits[0];
   // Accept only a tight fit that is clearly better than the runner-up (distinct hypotheses).
-  if (best.residual > 0.35 || best.inliers < 0.85) return null;
+  // Tight fits need only beat the runner-up; loose ones (very sloppy hand-placed lights) must have
+  // NO plausible rival. Wrong answers are worse than none: the caller then falls back.
+  if (best.residual > 0.5 || best.inliers < 0.85) return null;
   const rival = fits.find((f) => !sameMap(f.ledmap, best.ledmap));
-  if (rival && rival.residual < 1.5 * best.residual + 0.02) return null;
+  if (rival && rival.residual < (best.residual > 0.35 ? 2.5 : 1.5) * best.residual + 0.02) return null;
   // Present it as the camera sees it: columns run left→right, rows top→bottom (no rotate needed).
   const { width: W, height: H } = best.ledmap, T = best.T!;
   const o = T({ c: 0, r: 0 }), a = T({ c: 1, r: 0 }), b = T({ c: 0, r: 1 });
@@ -451,7 +455,8 @@ export function fitWiring(pts: (Pt | null)[], numLeds: number): WiringFit | null
     else { x = bx < 0 ? H - 1 - r : r; y = ay < 0 ? W - 1 - c : c; }
     out[y * nW + x] = best.ledmap.map[r * W + c];
   }
-  return { ...best, cols: nW, rows: nH, ledmap: { width: nW, height: nH, map: out } };
+  const sp = best.serpentine, bc = best.byColumn;
+  return { ...best, cols: nW, rows: nH, ledmap: { width: nW, height: nH, map: out }, predict: (i) => T(wiringPos(i, W, H, sp, bc)) };
 }
 
 // Same layout up to rotation/mirror (a homography can mirror, so row- vs column-major wiring of

@@ -67,6 +67,8 @@ export type SimScenario = {
   pwmDuty?: number;               // PWM duty = flash brightness / 255 (default 40/255)
   offsetX?: number;               // shift the array sideways by this fraction of the frame (partly out of view)
   onlyLeds?: number[];            // targeted pass: only these LEDs flash (firmware calibration mask)
+  anchorLeds?: number[];          // …plus these, at anchorScale × the pass's level
+  anchorScale?: number;
 };
 
 export type SimResult = {
@@ -143,7 +145,9 @@ export function simulateCapture(sc: SimScenario): SimResult {
   const level = sc.ledLevel ?? 0.6, ledVar = sc.ledVar ?? 0.15;
   const gainLed = phys.map(() => level * (1 + ledVar * (2 * irnd() - 1)) * (sc.ledVarLog ? Math.exp(gauss(irnd) * sc.ledVarLog) : 1));
   for (const d of sc.deadLeds ?? []) if (d < n) gainLed[d] = 0;
-  const inMask = sc.onlyLeds ? new Set(sc.onlyLeds) : null;
+  const anch = new Set(sc.anchorLeds ?? []);
+  const inMask = sc.onlyLeds ? new Set([...sc.onlyLeds, ...anch]) : null;
+  if (sc.onlyLeds) for (const i of anch) if (!sc.onlyLeds.includes(i)) gainLed[i] *= sc.anchorScale ?? 1;
   // Off-axis LEDs: dimmer and their spot stretches along a random axis (projected emitter).
   const spotA = new Float32Array(n).fill(sigma), spotB = new Float32Array(n).fill(sigma), spotPhi = new Float32Array(n);
   if (sc.facingDeg) for (let i = 0; i < n; i++) {

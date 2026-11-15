@@ -13,11 +13,12 @@
 import type { Frame } from './cameraDecode';
 import type { Pt } from './autoLayout';
 import { decodeStructuredLight, seqLength, type DecodeV2Diag } from './structuredLight';
+import { fitWiring } from './autoLayout';
 
 export type ScanIO = {
   /** Start the device flashing `kind` at per-channel `brightness` (1..255); `onlyLeds` = just
    *  these LEDs take part (targeted pass), the rest stay dark. */
-  flash(kind: 'strobe' | 'legacy' | 'comp', brightness: number, onlyLeds?: number[]): Promise<void>;
+  flash(kind: 'strobe' | 'legacy' | 'comp', brightness: number, onlyLeds?: number[], anchors?: { leds: number[]; brightness: number }): Promise<void>;
   /** Capture `ms` of camera frames (grayscale max-channel at processing resolution). */
   capture(ms: number): Promise<Frame[]>;
 };
@@ -111,13 +112,19 @@ export async function runAutoScan(io: ScanIO, o: ScanOpts): Promise<ScanResult> 
       // A handheld camera moves between passes: map this pass into the first pass's frame via the
       // LEDs both passes found (affine least squares; translation only if too few in common).
       const map = found ? registration(r.points, pts) : (p: Pt) => p;
-      if (!map) { say('camera moved too much between passes — keeping the first pass'); break; }
+      if (!map) {
+        // Can't line this pass up with what we have: either the camera moved a lot, or one of the
+        // two passes is bad. Keep whichever read more LEDs and carry on from there.
+        if (r.diag.found > found) { say('passes disagree — keeping the stronger one'); pts.fill(null); found = 0; for (let i = 0; i < o.numLeds; i++) if (r.points[i]) { pts[i] = r.points[i]; found++; } }
+        else say('passes disagree — keeping the earlier one');
+      } else {
       const gap = typicalGap(pts.some(Boolean) ? pts : r.points);
       for (let i = 0; i < o.numLeds; i++) {
         const p0 = r.points[i]; if (!p0 || pts[i]) continue;
         const p = map(p0);
         if (gap > 0 && pts.some((q) => q && Math.hypot(q.x - p.x, q.y - p.y) < gap / 3)) continue;
         pts[i] = p; found++;
+      }
       }
     }
     if (found >= o.numLeds) break;
@@ -138,16 +145,38 @@ export async function runAutoScan(io: ScanIO, o: ScanOpts): Promise<ScanResult> 
   // Worth it when a minority is missing (a majority missing is framing/focus, not dim LEDs).
   const missing = pts.map((p, i) => (p ? -1 : i)).filter((i) => i >= 0);
   if ((o.targeted ?? o.kind === 'comp') && o.kind === 'comp' && found >= 4 && missing.length && missing.length <= 0.5 * o.numLeds) {
+    // Also light ~12 found LEDs spread across the array as ANCHORS, so this pass can be registered
+    // to the earlier ones like any other (a handheld camera drifts). Skip any whose wiring
+    // neighbour is missing — it's likely physically next to a dim LED and would glow over it.
+    // Where should each missing LED be? From the recognised wiring if any, else between its found
+    // wiring neighbours. Anchors must stay ≥3 gaps from all of those, or their glow (and the
+    // exposure drop they cause) buries the very LEDs this pass is for.
+    const gap0 = typicalGap(pts);
+    const expected: Pt[] = [];
+    const wf = fitWiring(pts, o.numLeds);
+    if (wf?.predict) for (const i of missing) expected.push(wf.predict(i));
+    else for (const i of missing) { const nb = [pts[i - 1], pts[i + 1]].filter((q): q is Pt => !!q); if (nb.length) expected.push({ x: nb.reduce((a, q) => a + q.x, 0) / nb.length, y: nb.reduce((a, q) => a + q.y, 0) / nb.length }); }
+    const missSet = new Set(missing);
+    const cand = pts.map((p, i) => (p && !missSet.has(i - 1) && !missSet.has(i + 1) && expected.every((e) => Math.hypot(e.x - p.x, e.y - p.y) > 3 * gap0) ? i : -1)).filter((i) => i >= 0);
+    const anchors: number[] = [];
+    if (cand.length) {                                  // farthest-point sampling
+      anchors.push(cand[0]);
+      while (anchors.length < Math.min(12, cand.length)) {
+        let bi = -1, bd = -1;
+        for (const i of cand) { let d = Infinity; for (const a of anchors) d = Math.min(d, Math.hypot(pts[i]!.x - pts[a]!.x, pts[i]!.y - pts[a]!.y)); if (d > bd) { bd = d; bi = i; } }
+        anchors.push(bi);
+      }
+    }
     say(`targeted pass: flashing the ${missing.length} LEDs not yet found…`);
-    await io.flash(o.kind, 255, missing);
+    await io.flash(o.kind, 255, missing, { leds: anchors, brightness: [...tried][0] });   // anchors at the main pass's level
     const fr = await io.capture(decMs); captureMs += decMs;
     const r = decodeStructuredLight(fr, { kind: o.kind, bits: o.bits, frameMs: o.frameMs, numLeds: o.numLeds });
-    // Few LEDs lit → too few in common with earlier passes to register against; the camera is
-    // assumed still for this pass (a handheld drift shows up as a gap check failure below).
-    if (r.ok) {
+    const map = r.ok ? registration(r.points, pts) : null;
+    if (r.ok && map) {
       const gap = typicalGap(pts);
       for (const i of missing) {
-        const p = r.points[i]; if (!p) continue;
+        const p0 = r.points[i]; if (!p0) continue;
+        const p = map(p0);
         if (gap > 0 && pts.some((q) => q && Math.hypot(q.x - p.x, q.y - p.y) < gap / 3)) continue;
         pts[i] = p; found++;
       }

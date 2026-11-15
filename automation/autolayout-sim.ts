@@ -30,10 +30,10 @@ const PIPES: { name: string; seq: SeqKind; run: (sim: any, sc: SimScenario) => {
 // Bench IO for runAutoScan: each capture renders the scenario at the brightness the loop chose.
 // Firmware brightness b scales LED radiance linearly; the scenario's ledLevel is the level at 40.
 function autoRun(sim0: any, sc: SimScenario) {
-  let mask: number[] | undefined, kind: any = 'strobe', bri = 40, seed = 100 + 1000 * seedArg, last: any = sim0, firstDecode: any = null;
+  let anc: any, mask: number[] | undefined, kind: any = 'strobe', bri = 40, seed = 100 + 1000 * seedArg, last: any = sim0, firstDecode: any = null;
   const io = {
-    flash: async (k: any, b: number, only?: number[]) => { kind = k; bri = b; mask = only; },
-    capture: async (ms: number) => { last = simulateCapture({ ...sc, seq: kind, ledLevel: (sc.ledLevel ?? 0.6) * bri / 40, pwmDuty: bri / 255, durationMs: ms, seed: seed++, onlyLeds: mask }); if (kind !== 'strobe') firstDecode ??= last; return last.frames; },
+    flash: async (k: any, b: number, only?: number[], an?: any) => { kind = k; bri = b; mask = only; anc = an; },
+    capture: async (ms: number) => { last = simulateCapture({ ...sc, seq: kind, ledLevel: (sc.ledLevel ?? 0.6) * bri / 40, pwmDuty: bri / 255, durationMs: ms, seed: seed++, onlyLeds: mask, anchorLeds: anc?.leds, anchorScale: anc ? anc.brightness / bri : 1 }); if (kind !== 'strobe') firstDecode ??= last; return last.frames; },
   };
   let out: any;
   // runAutoScan is async but every await above resolves immediately; drain it synchronously-ish.
