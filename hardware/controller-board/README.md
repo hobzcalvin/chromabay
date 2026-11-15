@@ -3,7 +3,8 @@
 A battery-powered ESP32-S3 LED controller: USB-C charging with a power path, a 5 V / 2 A LED rail, 4 clock+data
 outputs (or 8 single-wire), a PDM mic, a 6-axis IMU, a swappable JST-PH battery and solder-free push-in LED terminals, on
 36 × 68 mm (1.6 mm) with the button, USB-C and power switch all at one end.
-The design reasoning is in [DESIGN.md](DESIGN.md).
+The design reasoning is in [DESIGN.md](DESIGN.md). **Interactive 3D mock:** [viewer/index.html](viewer/index.html)
+(needs the model files; see "Regenerate").
 
 **Status:** the schematic is complete and ERC-clean. All 124 parts are placed and the board passes DRC and schematic
 parity, apart from expected unrouted connections and silkscreen cosmetics. **The board is not routed yet**, so it
@@ -30,7 +31,8 @@ isn't ready to order. Freerouting got it to ~40–90 unrouted but doesn't close.
 | `case/case.py` → `case/out/*.stl` | Parametric clamshell case: `external`, `slim` (603450 cell), `thick` (103450 cell) |
 | `tools/route.py` | Freerouting autoroute (DSN export → route → SES import → zone fill) |
 | `tools/label_render.py` | Labeled top-view render |
-| `renders/` | Board renders (KiCad) and case/battery renders (three.js) |
+| `renders/` | Board renders (KiCad), labeled interaction-point view, case/battery renders (three.js) |
+| `viewer/index.html` | Rotatable 3D mock: board + case variants + clickable connection markers |
 
 ## Regenerate
 

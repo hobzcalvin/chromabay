@@ -14,7 +14,7 @@ C1206 = "lcsc:C1206"
 
 # LCSC codes for passives (all JLC Basic or Preferred-Extended = no extended-part fee).
 RES = {  # value -> LCSC
-    "0R": "C17168", "33R": "C25105", "200R": "C25087", "680R": "C25130", "1k": "C11702",
+    "0R": "C17168", "33R": "C25105", "200R": "C25087", "680R": "C25130", "1k": "C11702", "1M": "C26083",
     "1.5k": "C25867", "4.7k": "C25900", "5.1k": "C25905", "10k": "C25744", "33k": "C25779",
     "68k": "C36871", "24k": "C25769", "100k": "C25741", "150k": "C25755", "220k": "C25767", "22k": "C25768",
 }
@@ -116,12 +116,13 @@ part("Q1", "lcsc:AONR21321", "AONR21321", "lcsc:DFN-8_L3.0-W3.0-P0.65-BL", "C541
       9: "BAT_IN"}, "battery", note="reverse-polarity protection")
 R("10k", "Q1_G", "GND", "battery")
 
-# ---------------------------------------------------------------- Fuel gauge
-part("U4", "lcsc:MAX17048G+T10", "MAX17048", "lcsc:TDFN-8_L2.0-W2.0-P0.50-BL-EP1.2", "C2682616", {
-    1: "GND", 2: "BAT", 3: "BAT", 4: "GND", 5: "GAUGE_ALRT", 6: "GND", 7: "SCL", 8: "SDA",
-    9: "GND"}, "gauge")
-C("1uF", "BAT", "GND", "gauge")
-R("10k", "GAUGE_ALRT", "3V3", "gauge")
+# ---------------------------------------------------------------- Battery voltage sense
+# (Replaces the MAX17048 gauge: -$2/board.) 1M/1M halves BAT for ADC1 on IO10; 2 uA standing
+# drain is fine (years on any pack). Firmware maps voltage -> % with a LiPo curve, ideally
+# sampled while the LEDs are dim.
+R("1M", "BAT", "BAT_SENSE", "gauge", "battery sense divider top")
+R("1M", "BAT_SENSE", "GND", "gauge", "battery sense divider bottom")
+C("100nF", "BAT_SENSE", "GND", "gauge", note="ADC sample reservoir")
 
 # ---------------------------------------------------------------- Power switch + 3.3 V
 part("SW1", "lcsc:MSK12C02", "POWER", "lcsc:SW-TH_MSK12C02", "C431540",
@@ -193,11 +194,12 @@ part("U9", *SRV, {1: "OUT_C1", 3: "OUT_D1", 4: "OUT_C2", 6: "OUT_D2", 2: "GND", 
 part("U10", *SRV, {1: "OUT_C3", 3: "OUT_D3", 4: "OUT_C4", 6: "OUT_D4", 2: "GND", 5: "5V_BOOST"},
      "shifter", note="output ESD")
 # OUT1 solder-free: two WAGO 2060 push-in blocks (SMD, reflowed by JLC, 4.5 mm tall, 18-24 AWG,
-# wire entry facing the right wall). Every output, OUT1 included, is also on the J5 solder pads.
+# wire entry facing the right wall). Pins are assigned so the four entries read G V C D from the
+# business end. Every output, OUT1 included, is also on the J5 solder pads.
 WAGO = ("Connector_Generic:Conn_01x02", "lcsc:CONN-SMD_2060-452", "C2765055")
-part("J2", WAGO[0], "OUT1 power (G V)", WAGO[1], WAGO[2], {1: "GND", 2: "VLED"}, "shifter",
+part("J2", WAGO[0], "OUT1 power (G V)", WAGO[1], WAGO[2], {1: "VLED", 2: "GND"}, "shifter",
      note="WAGO 2060-452/998-404 push-in")
-part("J6", WAGO[0], "OUT1 data (C1 D1)", WAGO[1], WAGO[2], {1: "OUT_C1", 2: "OUT_D1"}, "shifter",
+part("J6", WAGO[0], "OUT1 data (C1 D1)", WAGO[1], WAGO[2], {1: "OUT_D1", 2: "OUT_C1"}, "shifter",
      note="WAGO 2060-452/998-404 push-in")
 part("J5", "Connector_Generic:Conn_01x10", "LED OUT pads", "cb:OutputPads", None,
      {1: "GND", 2: "VLED", **{3 + i: f"OUT_{n}" for i, n in enumerate(OUT)}}, "shifter",
@@ -206,8 +208,8 @@ part("J5", "Connector_Generic:Conn_01x10", "LED OUT pads", "cb:OutputPads", None
 # ---------------------------------------------------------------- ESP32-S3
 GPIO = {  # module pin number -> net
     4: "BOOT", 5: "CC1_SENSE", 6: "CC2_SENSE", 7: "IO3", 8: "T1", 9: "T2", 10: "T3", 11: "T4",
-    12: "SDA", 13: "SCL", 14: "IMU_INT1", 15: "IO11", 16: "CHG_PG", 17: "IMU_INT2",
-    18: "GAUGE_ALRT", 19: "LS_C1", 20: "LS_D1", 21: "LS_C2", 22: "LS_D2", 23: "USB_DM",
+    12: "SDA", 13: "SCL", 14: "BAT_SENSE", 15: "IO11", 16: "CHG_PG", 17: "IMU_INT2",
+    18: "IMU_INT1", 19: "LS_C1", 20: "LS_D1", 21: "LS_C2", 22: "LS_D2", 23: "USB_DM",
     24: "USB_DP", 25: "LS_C3", 26: "IO26", 27: "EXT_WS", 28: "LS_D3", 29: "LS_C4",
     30: "EXT_SD", 31: "LS_D4", 32: "SHIFT_OE", 33: "LED_EN", 34: "PDM_CLK", 35: "PDM_DATA",
     36: "EXT_BCLK", 37: "STATUS_LED", 38: "USER_BTN", 39: "IO43", 40: "IO44", 41: "IO45",

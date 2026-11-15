@@ -1,0 +1,337 @@
+<title>ChromaBay Controller 3D</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: a bench view. The model fills the stage; a narrow instrument rail on the right holds
+   build options and a pin list. The rail drops below the stage on phones. */
+:root {
+  --bg: #eef1ee; --panel: #f8faf8; --ink: #17201b; --muted: #5d6a62; --line: #d3dbd5;
+  --accent: #0b7a5f; --pad: #c0392b; --part: #0b7a5f; --config: #6b4fe0; --stage: #e3e8e4;
+  --font: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #111613; --panel: #171e1a; --ink: #e4ebe6; --muted: #93a39a; --line: #2a352f;
+  --accent: #3fc79c; --pad: #ff7a66; --part: #3fc79c; --config: #a996ff; --stage: #0c100e; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #111613; --panel: #171e1a; --ink: #e4ebe6; --muted: #93a39a; --line: #2a352f;
+  --accent: #3fc79c; --pad: #ff7a66; --part: #3fc79c; --config: #a996ff; --stage: #0c100e; color-scheme: dark }
+html, body { height: 100%; }
+[hidden] { display: none !important; }
+body { background: var(--bg); color: var(--ink); font: 14px/1.45 var(--font); }
+.app { display: grid; grid-template-columns: minmax(0, 1fr) 320px; height: 100%;
+  padding-left: max(0px, env(safe-area-inset-left, 0px)); padding-right: max(0px, env(safe-area-inset-right, 0px)); }
+.stage { position: relative; min-width: 0; background: var(--stage); overflow: hidden; }
+canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+.rail { background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto;
+  padding-block: 18px 24px; padding-left: 18px; padding-right: max(18px, env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+h1 { font-size: 17px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+.sub { color: var(--muted); font-size: 12.5px; margin: 2px 0 0; font-family: var(--mono); }
+.group { display: flex; flex-direction: column; gap: 8px; }
+.label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: 500; }
+.seg { display: flex; flex-wrap: wrap; gap: 6px; }
+.seg button, .views button { font: 500 12.5px var(--font); color: var(--ink); background: transparent;
+  border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--panel); }
+.seg button:focus-visible, .views button:focus-visible, .pins button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.row { display: flex; align-items: center; gap: 10px; }
+.row input[type="range"] { flex: 1; accent-color: var(--accent); }
+.check { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+.check input { accent-color: var(--accent); }
+.views { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.pins { display: flex; flex-direction: column; gap: 10px; }
+.pins h3 { margin: 0; font-size: 12px; font-weight: 600; }
+.pins ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.pins button { all: unset; box-sizing: border-box; width: 100%; display: flex; gap: 8px; align-items: baseline;
+  padding: 3px 6px; border-radius: 4px; cursor: pointer; font-size: 12.5px; }
+.pins button:hover, .pins button.on { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.dot { width: 8px; height: 8px; border-radius: 50%; flex: none; transform: translateY(-1px); }
+.k-pad { background: var(--pad); } .k-part { background: var(--part); } .k-config { background: var(--config); }
+.tip { position: absolute; pointer-events: none; background: var(--panel); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; font-size: 12.5px; white-space: nowrap;
+  transform: translate(-50%, calc(-100% - 12px)); box-shadow: 0 2px 10px rgba(0,0,0,.12); }
+.tip small { display: block; color: var(--muted); font-family: var(--mono); font-size: 11px; }
+.hint { position: absolute; left: 12px; bottom: max(10px, env(safe-area-inset-bottom, 0px)); color: var(--muted);
+  font-size: 12px; font-family: var(--mono); pointer-events: none; }
+.loading { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-family: var(--mono); }
+.note { color: var(--muted); font-size: 12px; margin: 0; }
+@media (max-width: 760px) {
+  .app { grid-template-columns: 1fr; grid-template-rows: 58vh auto; height: auto; }
+  .rail { border-left: 0; border-top: 1px solid var(--line); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+}
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; } }
+</style>
+
+<div class="app">
+  <div class="stage" id="stage">
+    <div class="loading" id="loading">Loading board…</div>
+    <div class="tip" id="tip" hidden></div>
+    <div class="hint">drag to rotate · scroll / pinch to zoom · right-drag to pan</div>
+  </div>
+  <aside class="rail">
+    <div>
+      <h1>ChromaBay Controller</h1>
+      <p class="sub">rev A · 36 × 68 mm · 1.6 mm 4-layer · placed, not yet routed</p>
+    </div>
+    <div class="group">
+      <span class="label">Case</span>
+      <div class="seg" id="caseSeg" role="group" aria-label="Case variant">
+        <button id="case-none" data-v="none" aria-pressed="false">Bare board</button>
+        <button id="case-external" data-v="external" aria-pressed="false">External battery</button>
+        <button id="case-slim" data-v="slim" aria-pressed="true">Slim cell</button>
+        <button id="case-thick" data-v="thick" aria-pressed="false">Thick cell</button>
+      </div>
+      <div class="seg" id="lidSeg" role="group" aria-label="Lid">
+        <button id="lid-solid" data-v="solid" aria-pressed="true">Lid on</button>
+        <button id="lid-glass" data-v="glass" aria-pressed="false">See-through lid</button>
+        <button id="lid-off" data-v="off" aria-pressed="false">Lid off</button>
+      </div>
+      <div class="row"><span class="label" style="min-width:52px">Explode</span>
+        <input type="range" id="explode" min="0" max="1" step="0.01" value="0" aria-label="Explode"></div>
+      <label class="check"><input type="checkbox" id="markers" checked> Show connection markers</label>
+    </div>
+    <div class="group">
+      <span class="label">Views</span>
+      <div class="views">
+        <button id="v-iso" data-view="iso">Three-quarter</button>
+        <button id="v-end" data-view="end">Business end</button>
+        <button id="v-top" data-view="top">Top</button>
+        <button id="v-right" data-view="right">LED side</button>
+        <button id="v-left" data-view="left">Battery side</button>
+        <button id="v-under" data-view="under">Underneath</button>
+      </div>
+    </div>
+    <div class="group">
+      <span class="label">What you touch and connect</span>
+      <div class="pins" id="pins"></div>
+      <p class="note">Red: wire pads and terminals. Green: controls and ports. Purple: solder jumpers (bridge or cut to configure).</p>
+    </div>
+  </aside>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
+<script>
+(async function () {
+  const stage = document.getElementById('stage');
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  stage.prepend(renderer.domElement);
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(32, 1, 1, 2000);
+  const controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x445048, 0.75));
+  const key = new THREE.DirectionalLight(0xffffff, 0.85); key.position.set(-60, 120, -50); scene.add(key);
+  const fill = new THREE.DirectionalLight(0xffffff, 0.35); fill.position.set(80, 40, 120); scene.add(fill);
+
+  // Frames: board + case are in board mm, x across, z along (0 = business end), y up from the board's underside.
+  const BOARD_W = 36, BOARD_L = 68, PCB_T = 1.6;
+  const root = new THREE.Group(); scene.add(root);
+  const toWorld = new THREE.Matrix4().makeRotationX(-Math.PI / 2);   // model (x, -y_pcb, z_up) -> world (x, z_up, y_pcb)
+
+  function resize() {
+    const r = stage.getBoundingClientRect();
+    renderer.setSize(r.width, r.height, false);
+    camera.aspect = r.width / Math.max(1, r.height); camera.updateProjectionMatrix();
+  }
+  new ResizeObserver(resize).observe(stage); resize();
+
+  // Models ship base64-encoded as .txt (the host serves text types only).
+  async function bin(name) {
+    const r = await fetch(name + '.b64.txt'); if (!r.ok) throw new Error(name + ' (' + r.status + ')');
+    const s = atob((await r.text()).trim()); const u = new Uint8Array(s.length);
+    for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
+    return u.buffer;
+  }
+  const gltf = await new Promise(async (ok, bad) => {
+    try { new THREE.GLTFLoader().parse(await bin('board.glb'), '', ok, bad); } catch (e) { bad(e); } });
+  const board = gltf.scene;
+  board.traverse(o => { if (o.isMesh) { o.geometry.computeVertexNormals(); o.material.side = THREE.DoubleSide; } });
+  const boardHolder = new THREE.Group();
+  boardHolder.add(board);
+  board.applyMatrix4(toWorld); board.position.y += 0.8;          // VRML puts the board's mid-plane at 0
+  root.add(boardHolder);
+  document.getElementById('loading').hidden = true;
+
+  const stl = new THREE.STLLoader();
+  const cache = {};
+  function loadSTL(name) {
+    if (!cache[name]) cache[name] = bin(name).then(b => { const g = stl.parse(b); g.computeVertexNormals(); return g; }).catch(() => null);
+    return cache[name];
+  }
+  const mats = {
+    bottom: new THREE.MeshStandardMaterial({ color: 0xcfd3cd, roughness: 0.8 }),
+    lid: new THREE.MeshStandardMaterial({ color: 0x2d3433, roughness: 0.65 }),
+    glass: new THREE.MeshStandardMaterial({ color: 0xbfd2cc, roughness: 0.2, transparent: true, opacity: 0.25, depthWrite: false }),
+    cell: new THREE.MeshStandardMaterial({ color: 0xa9b1b6, roughness: 0.35, metalness: 0.55 }),
+  };
+  const caseGroup = new THREE.Group(); root.add(caseGroup);
+  let parts = {};
+  const state = { caseV: 'slim', lid: 'solid', explode: 0 };
+  async function buildCase() {
+    caseGroup.clear(); parts = {};
+    const v = state.caseV;
+    const jobs = [];
+    if (v !== 'none') { jobs.push(['bottom', v + '-bottom.stl']); jobs.push(['lid', v + '-lid.stl']); }
+    if (v === 'slim' || v === 'thick') jobs.push(['cell', v + '-cell.stl']);
+    for (const [k, f] of jobs) {
+      const g = await loadSTL(f); if (!g) continue;
+      const m = new THREE.Mesh(g, k === 'lid' ? mats.lid : mats[k]);
+      m.applyMatrix4(toWorld); caseGroup.add(m); parts[k] = m;
+    }
+    applyState();
+  }
+  function applyState() {
+    const e = state.explode;
+    boardHolder.position.y = e * 10;
+    if (parts.cell) parts.cell.position.y = e * 3;
+    if (parts.bottom) parts.bottom.position.y = -e * 6;
+    if (parts.lid) {
+      parts.lid.visible = state.lid !== 'off';
+      parts.lid.material = state.lid === 'glass' ? mats.glass : mats.lid;
+      parts.lid.position.y = e * 28;
+    }
+    markerGroup.position.y = boardHolder.position.y;
+  }
+
+  // Connection markers
+  const points = await (await fetch('points.json')).json();
+  const markerGroup = new THREE.Group(); root.add(markerGroup);
+  const kindColor = k => new THREE.Color(css(k === 'config' ? '--config' : k === 'part' ? '--part' : '--pad'));
+  const markers = [];
+  const sph = new THREE.SphereGeometry(0.55, 16, 12);
+  points.forEach((p, i) => {
+    const h = p.kind === 'part' ? PCB_T + 4.2 : PCB_T + 0.6;
+    const m = new THREE.Mesh(sph, new THREE.MeshBasicMaterial({ color: kindColor(p.kind), depthTest: true }));
+    m.position.set(p.xy[0], h, p.xy[1]); m.userData = { i, p };
+    markerGroup.add(m); markers.push(m);
+  });
+
+  const GROUPS = [
+    ['Controls and ports', p => p.kind === 'part'],
+    ['Battery', p => /Battery/.test(p.label)],
+    ['LED outputs', p => /OUT1|LED pad/.test(p.label)],
+    ['User and spare pads', p => p.ref.startsWith('TP')],
+    ['Solder jumpers', p => p.kind === 'config'],
+  ];
+  const pinsEl = document.getElementById('pins');
+  const listButtons = [];
+  for (const [title, test] of GROUPS) {
+    const items = points.map((p, i) => [p, i]).filter(([p]) => test(p))
+      .sort((a, b) => (a[0].xy[1] - b[0].xy[1]) || (a[0].xy[0] - b[0].xy[0]));
+    if (!items.length) continue;
+    const box = document.createElement('div');
+    const h = document.createElement('h3'); h.textContent = title; box.appendChild(h);
+    const ul = document.createElement('ul');
+    for (const [p, i] of items) {
+      const li = document.createElement('li'); const b = document.createElement('button');
+      b.id = 'pin-' + i;
+      b.innerHTML = `<span class="dot k-${p.kind}"></span><span></span>`;
+      b.lastChild.textContent = p.label;
+      b.addEventListener('click', () => focusPoint(i));
+      li.appendChild(b); ul.appendChild(li); listButtons[i] = b;
+    }
+    box.appendChild(ul); pinsEl.appendChild(box);
+  }
+
+  const tip = document.getElementById('tip');
+  let pinned = -1, hovered = -1;
+  function showTip(i) {
+    if (i < 0 || !document.getElementById('markers').checked) { tip.hidden = true; return; }
+    const p = points[i];
+    tip.innerHTML = '<span></span><small></small>';
+    tip.firstChild.textContent = p.label; tip.lastChild.textContent = p.ref;
+    tip.hidden = false; positionTip(i);
+  }
+  function positionTip(i) {
+    const v = new THREE.Vector3(); markers[i].getWorldPosition(v); v.project(camera);
+    const r = stage.getBoundingClientRect();
+    tip.style.left = ((v.x + 1) / 2 * r.width) + 'px'; tip.style.top = ((1 - v.y) / 2 * r.height) + 'px';
+  }
+  function highlight(i) {
+    markers.forEach((m, k) => m.scale.setScalar(k === i ? 1.9 : 1));
+    listButtons.forEach((b, k) => b && b.classList.toggle('on', k === i));
+  }
+
+  // camera views + tweened focus
+  const center = new THREE.Vector3(BOARD_W / 2, 3, BOARD_L / 2 + 2);
+  const VIEWS = {
+    iso:   [new THREE.Vector3(-70, 85, -60), center],
+    end:   [new THREE.Vector3(BOARD_W / 2 - 10, 18, -70), new THREE.Vector3(BOARD_W / 2, 4, 6)],
+    top:   [new THREE.Vector3(BOARD_W / 2, 135, BOARD_L / 2 + 0.01), center],
+    right: [new THREE.Vector3(115, 30, 22), new THREE.Vector3(BOARD_W, 4, 26)],
+    left:  [new THREE.Vector3(-80, 30, 22), new THREE.Vector3(0, 4, 24)],
+    under: [new THREE.Vector3(-40, -90, -30), center],
+  };
+  let tween = null;
+  function flyTo(pos, target, ms = 650) {
+    const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const p0 = camera.position.clone(), t0 = controls.target.clone(), start = performance.now();
+    tween = now => {
+      const k = reduce ? 1 : Math.min(1, (now - start) / ms), e = k < .5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+      camera.position.lerpVectors(p0, pos, e); controls.target.lerpVectors(t0, target, e);
+      if (k >= 1) tween = null;
+    };
+  }
+  function focusPoint(i) {
+    pinned = i; highlight(i);
+    const v = new THREE.Vector3(); markers[i].getWorldPosition(v);
+    const dir = camera.position.clone().sub(controls.target).normalize();
+    flyTo(v.clone().add(dir.multiplyScalar(75)), v);
+    showTip(i);
+  }
+  document.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => {
+    pinned = -1; highlight(-1); tip.hidden = true;
+    const [p, t] = VIEWS[b.dataset.view]; flyTo(p, t);
+  }));
+  camera.position.copy(VIEWS.iso[0]); controls.target.copy(VIEWS.iso[1]);
+
+  // hover / tap picking
+  const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
+  function pick(ev) {
+    const r = renderer.domElement.getBoundingClientRect();
+    mouse.set(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
+    ray.setFromCamera(mouse, camera);
+    const hit = ray.intersectObjects(markerGroup.visible ? markers : [])[0];
+    return hit ? hit.object.userData.i : -1;
+  }
+  renderer.domElement.addEventListener('pointermove', ev => {
+    const i = pick(ev); if (i !== hovered) { hovered = i; if (pinned < 0) { highlight(i); showTip(i); } }
+    renderer.domElement.style.cursor = i >= 0 ? 'pointer' : 'grab';
+  });
+  renderer.domElement.addEventListener('click', ev => { const i = pick(ev); if (i >= 0) focusPoint(i); else { pinned = -1; highlight(-1); tip.hidden = true; } });
+
+  // controls
+  function seg(id, keyName, after) {
+    const el = document.getElementById(id);
+    el.addEventListener('click', ev => {
+      const b = ev.target.closest('button'); if (!b) return;
+      el.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+      state[keyName] = b.dataset.v; after();
+    });
+  }
+  seg('caseSeg', 'caseV', buildCase);
+  seg('lidSeg', 'lid', applyState);
+  document.getElementById('explode').addEventListener('input', e => { state.explode = +e.target.value; applyState(); });
+  document.getElementById('markers').addEventListener('change', e => { markerGroup.visible = e.target.checked; if (!e.target.checked) tip.hidden = true; });
+
+  await buildCase();
+  (function loop(now) {
+    if (tween) tween(now);
+    controls.update();
+    const i = pinned >= 0 ? pinned : hovered; if (i >= 0 && !tip.hidden) positionTip(i);
+    renderer.render(scene, camera);
+    requestAnimationFrame(loop);
+  })(performance.now());
+})().catch(err => {
+  const l = document.getElementById('loading');
+  l.hidden = false; l.textContent = 'Could not load the 3D model: ' + err.message;
+});
+</script>

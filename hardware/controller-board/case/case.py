@@ -46,13 +46,13 @@ END = [  # end-face cutouts: (name, x_centre, z_centre, width, height, corner ra
 MIC_X, MIC_Y = 9.5, 8.6            # bottom-port mic -> channel under the board -> end face
 SIDE_NOTCHES = [  # (side, y_centre, width, label): U-notches at the seam, laid-in wires
     ("left", 17.5, 4.4, "BAT"),       # JST-PH battery lead (or wires to the battery pads)
-    ("right", 38.0, 6.0, "OUT pads"), # wires soldered to the LED output pads
+    ("right", 39.5, 6.0, "OUT pads"), # wires soldered to the LED output pads
 ]
 # OUT1 push-in terminals (2x WAGO 2060, 4.5 mm tall): a window in the right wall lines up with the
 # four wire entries, and a slot in the lid roof reaches the release buttons. Wiring OUT1 never
 # needs the case opened.
-WAGO_WINDOW = (8.3, 23.6, 4.8)     # y0, y1, height above the PCB top
-WAGO_SLOT = (30.6, 8.6, 34.6, 23.3)  # x0, y0, x1, y1 of the button slot in the lid
+WAGO_WINDOW = (9.9, 25.2, 4.8)     # y0, y1, height above the PCB top
+WAGO_SLOT = (30.6, 10.2, 34.6, 24.9)  # x0, y0, x1, y1 of the button slot in the lid
 
 
 def build(name, bay, cell):

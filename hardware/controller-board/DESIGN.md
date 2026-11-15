@@ -41,6 +41,7 @@ remaining DRC items are unrouted connections and silkscreen cosmetics. **The boa
 | Business end | **User button, LED, USB-C, power switch all face out the end**; the mic port exits there too, through a channel under the board | The three controls you'll touch most share one face. |
 | Battery | **JST-PH 2-pin, SMD, side-entry (opening faces the left wall)** + small + / − / NTC wire pads | Swappable packs. The pads are for packs without a plug. **Check polarity per pack**: + and − are on the silk. |
 | LED outputs | **OUT1 on two WAGO 2060 push-in blocks** (G V + C1 D1; SMD, reflowed by JLC, **4.5 mm tall**, 18–24 AWG, wire entry facing the right wall). **All 8 LED lines + G/V also on a 2.54 mm solder-pad strip** | Replaced the 12.8 mm-tall lever terminal: same footprint area, fits under the normal lid, and needs no hand soldering. The case has a wall window for the wires and a lid slot for the release buttons, so wiring never needs the case opened. |
+| Battery sense | **1M/1M divider on IO10 (ADC1)** instead of the MAX17048 gauge; IMU INT1 moved to IO14 | −$2.01/board. 2 µA standing drain. |
 | Spare GPIO | **IO3\*, IO11, IO26, IO43, IO44, IO45\*, IO46\*** on their own pads (left edge). Plus the existing user pads: T1–T4, SDA/SCL, ext-mic BCLK/WS/SD, BOOT | Every free pin is broken out. \*Strapping pins: don't pull IO45/IO46 high at boot. IO43/44 are UART0 (boot log). |
 | Wires | Exit through **U-notches at the case seam on the long sides**, right next to the business end | The end face is full with the controls and USB. |
 | BOOT / RESET | BOOT is a user pad (GPIO0). No RESET: the power switch is the reset | Saves parts and area. Native USB flashing rarely needs BOOT. |
@@ -55,9 +56,9 @@ and which case you print:
 
 | Build | Battery | LEDs | Case | PCBA / board at 5 · 10 · 30 |
 |---|---|---|---|---|
-| **Core** (full custom) | Solder to the + / − / NTC pads (18 AWG holes, any connector you like) | Solder to the pad strip, all 4 outputs | Optional (any variant, or none) | $28.21 · $20.74 · $15.51 |
-| **Plug** | JST-PH | Solder to the pads | Any | $28.88 · $21.10 · $15.66 |
-| **Complete** (GLEDOPTO-style, solder-free) | JST-PH, cell inside the slim/thick case | Push wires into OUT1 from outside; OUT2–4 still on pads | Slim or thick; never needs opening | $30.18 · $22.10 · $16.37 |
+| **Core** (full custom) | Solder to the + / − / NTC pads (18 AWG holes, any connector you like) | Solder to the pad strip, all 4 outputs | Optional (any variant, or none) | $25.64 · $18.72 · $13.86 |
+| **Plug** | JST-PH | Solder to the pads | Any | $26.31 · $19.08 · $14.02 |
+| **Complete** (GLEDOPTO-style, solder-free) | JST-PH, cell inside the slim/thick case | Push wires into OUT1 from outside; OUT2–4 still on pads | Slim or thick; never needs opening | $27.61 · $20.08 · $14.72 |
 
 **Recommendation: build everything as "Complete".** It's only ~$1.36/board more than Core at 10 boards, one SKU is
 simpler, and Core users can ignore the JST and WAGO (every signal is still on solder pads). Make separate builds
@@ -67,7 +68,7 @@ only if you order 30+ of one kind.
 
 | Change | Saves / board | Trade-off |
 |---|---|---|
-| Fuel gauge → voltage divider | **$2.01** | Battery % from voltage only (±10–15% under LED load) |
+| ~~Fuel gauge → voltage divider~~ | **done** ($2.01) | Battery % now comes from a 1M/1M divider on IO10 (ADC1), ±10–15% under LED load |
 | Drop the IMU | **$1.47** | No motion, taps or wake-on-shake |
 | IMU → LIS2DH12 (accel only) | $0.43 | No gyro (swing speed/rotation) |
 | Drop the onboard mic | **$1.31** | External I2S mic pads still work |
@@ -429,11 +430,11 @@ instead of LSM6DS3 (no gyro, −$0.40). New JLC accounts get a coupon pack (incl
 | BOOT (user pad: touch to GND at power-on) | 0 |
 | CC1 / CC2 sense (ADC) | 1 / 2 |
 | Touch/spare pads T1–T4 | 4, 5, 6, 7 |
-| I2C SDA / SCL (gauge 0x36, IMU 0x6A, pads) | 8 / 9 |
-| IMU INT1 (wake) / INT2 | 10 / 13 |
+| I2C SDA / SCL (IMU 0x6A, pads) | 8 / 9 |
+| Battery voltage sense (ADC1, BAT/2) | 10 |
+| IMU INT1 (wake) / INT2 | 14 / 13 |
 | (unused) | 11 |
 | Charger /PG | 12 |
-| Gauge ALRT | 14 |
 | C1/D1, C2/D2, C3/D3, C4/D4 | 15/16, 17/18, 21/33, 34/35 |
 | Shifter /OE · LED_EN (boost + load switch) | 36 · 37 |
 | PDM mic CLK / DATA | 38 / 39 |

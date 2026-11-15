@@ -1,0 +1,461 @@
+[
+ {
+  "ref": "J1",
+  "label": "USB-C: charge + data",
+  "kind": "part",
+  "xy": [
+   18.0,
+   4.849999999999994
+  ]
+ },
+ {
+  "ref": "SW1",
+  "label": "Power switch",
+  "kind": "part",
+  "xy": [
+   31.400000000000006,
+   3.4000000000000057
+  ]
+ },
+ {
+  "ref": "SW2",
+  "label": "Button",
+  "kind": "part",
+  "xy": [
+   3.700000000000003,
+   2.700000000000003
+  ]
+ },
+ {
+  "ref": "D1",
+  "label": "LED: red = charging, green = status",
+  "kind": "part",
+  "xy": [
+   9.5,
+   1.7000000000000028
+  ]
+ },
+ {
+  "ref": "MK1",
+  "label": "Mic (sound port)",
+  "kind": "part",
+  "xy": [
+   9.5,
+   8.599999999999994
+  ]
+ },
+ {
+  "ref": "JP3",
+  "label": "NTC: onboard / pack",
+  "kind": "config",
+  "xy": [
+   27.200000000000003,
+   39.69999999999999
+  ]
+ },
+ {
+  "ref": "J4",
+  "label": "Battery JST-PH -",
+  "kind": "pad",
+  "xy": [
+   9.579999999999998,
+   16.5
+  ]
+ },
+ {
+  "ref": "J4",
+  "label": "Battery JST-PH +",
+  "kind": "pad",
+  "xy": [
+   9.579999999999998,
+   18.5
+  ]
+ },
+ {
+  "ref": "TP2",
+  "label": "Ext power switch B",
+  "kind": "pad",
+  "xy": [
+   34.69999999999999,
+   65.4
+  ]
+ },
+ {
+  "ref": "TP21",
+  "label": "Ext mic SD",
+  "kind": "pad",
+  "xy": [
+   34.69999999999999,
+   61.400000000000006
+  ]
+ },
+ {
+  "ref": "TP5",
+  "label": "IO26",
+  "kind": "pad",
+  "xy": [
+   1.2999999999999972,
+   43.25
+  ]
+ },
+ {
+  "ref": "TP10",
+  "label": "3.3 V out",
+  "kind": "pad",
+  "xy": [
+   1.2999999999999972,
+   53.400000000000006
+  ]
+ },
+ {
+  "ref": "TP7",
+  "label": "IO44 (UART RX)",
+  "kind": "pad",
+  "xy": [
+   1.2999999999999972,
+   47.25
+  ]
+ },
+ {
+  "ref": "TP8",
+  "label": "IO45 (strap: keep low at boot)",
+  "kind": "pad",
+  "xy": [
+   1.2999999999999972,
+   49.25
+  ]
+ },
+ {
+  "ref": "TP19",
+  "label": "Ext mic BCLK",
+  "kind": "pad",
+  "xy": [
+   34.69999999999999,
+   57.400000000000006
+  ]
+ },
+ {
+  "ref": "TP4",
+  "label": "IO11",
+  "kind": "pad",
+  "xy": [
+   1.2999999999999972,
+   41.25
+  ]
+ },
+ {
+  "ref": "JP7",
+  "label": "Cut: disable mic",
+  "kind": "config",
+  "xy": [
+   22.200000000000003,
+   50.599999999999994
+  ]
+ },
+ {
+  "ref": "JP1",
+  "label": "Bridge: charge +0.45 A",
+  "kind": "config",
+  "xy": [
+   19.0,
+   43.5
+  ]
+ },
+ {
+  "ref": "TP14",
+  "label": "Touch/IO T1",
+  "kind": "pad",
+  "xy": [
+   1.2999999999999972,
+   61.400000000000006
+  ]
+ },
+ {
+  "ref": "TP13",
+  "label": "I2C SCL",
+  "kind": "pad",
+  "xy": [
+   1.2999999999999972,
+   59.400000000000006
+  ]
+ },
+ {
+  "ref": "TP17",
+  "label": "Touch/IO T4",
+  "kind": "pad",
+  "xy": [
+   34.69999999999999,
+   53.400000000000006
+  ]
+ },
+ {
+  "ref": "J2",
+  "label": "OUT1 push-in V (5 V)",
+  "kind": "pad",
+  "xy": [
+   32.629999999999995,
+   15.599999999999994
+  ]
+ },
+ {
+  "ref": "J2",
+  "label": "OUT1 push-in G",
+  "kind": "pad",
+  "xy": [
+   32.629999999999995,
+   11.599999999999994
+  ]
+ },
+ {
+  "ref": "J6",
+  "label": "OUT1 push-in D (data)",
+  "kind": "pad",
+  "xy": [
+   32.629999999999995,
+   23.5
+  ]
+ },
+ {
+  "ref": "J6",
+  "label": "OUT1 push-in C (clock)",
+  "kind": "pad",
+  "xy": [
+   32.629999999999995,
+   19.5
+  ]
+ },
+ {
+  "ref": "JP5",
+  "label": "Cut: ext LED supply",
+  "kind": "config",
+  "xy": [
+   6.700000000000003,
+   25.099999999999994
+  ]
+ },
+ {
+  "ref": "TP1",
+  "label": "Ext power switch A",
+  "kind": "pad",
+  "xy": [
+   34.69999999999999,
+   63.400000000000006
+  ]
+ },
+ {
+  "ref": "TP11",
+  "label": "GND",
+  "kind": "pad",
+  "xy": [
+   1.2999999999999972,
+   55.400000000000006
+  ]
+ },
+ {
+  "ref": "TP20",
+  "label": "Ext mic WS",
+  "kind": "pad",
+  "xy": [
+   34.69999999999999,
+   59.400000000000006
+  ]
+ },
+ {
+  "ref": "J3",
+  "label": "Battery pad +",
+  "kind": "pad",
+  "xy": [
+   1.5999999999999943,
+   25.0
+  ]
+ },
+ {
+  "ref": "J3",
+  "label": "Battery pad -",
+  "kind": "pad",
+  "xy": [
+   1.5999999999999943,
+   28.0
+  ]
+ },
+ {
+  "ref": "J3",
+  "label": "Battery NTC (pack thermistor)",
+  "kind": "pad",
+  "xy": [
+   1.5999999999999943,
+   31.0
+  ]
+ },
+ {
+  "ref": "TP16",
+  "label": "Touch/IO T3",
+  "kind": "pad",
+  "xy": [
+   1.2999999999999972,
+   65.4
+  ]
+ },
+ {
+  "ref": "JP2",
+  "label": "Bridge: charge +1.0 A",
+  "kind": "config",
+  "xy": [
+   28.19999899999999,
+   34.0
+  ]
+ },
+ {
+  "ref": "TP9",
+  "label": "IO46 (strap: keep low at boot)",
+  "kind": "pad",
+  "xy": [
+   1.2999999999999972,
+   51.25
+  ]
+ },
+ {
+  "ref": "TP12",
+  "label": "I2C SDA",
+  "kind": "pad",
+  "xy": [
+   1.2999999999999972,
+   57.400000000000006
+  ]
+ },
+ {
+  "ref": "TP6",
+  "label": "IO43 (UART TX)",
+  "kind": "pad",
+  "xy": [
+   1.2999999999999972,
+   45.25
+  ]
+ },
+ {
+  "ref": "TP15",
+  "label": "Touch/IO T2",
+  "kind": "pad",
+  "xy": [
+   1.2999999999999972,
+   63.400000000000006
+  ]
+ },
+ {
+  "ref": "JP4",
+  "label": "Cut: use ext power switch",
+  "kind": "config",
+  "xy": [
+   8.099999999999994,
+   49.80000000000001
+  ]
+ },
+ {
+  "ref": "J5",
+  "label": "LED pad G",
+  "kind": "pad",
+  "xy": [
+   34.599999999999994,
+   28.0
+  ]
+ },
+ {
+  "ref": "J5",
+  "label": "LED pad V (5 V)",
+  "kind": "pad",
+  "xy": [
+   34.599999999999994,
+   30.539999999999992
+  ]
+ },
+ {
+  "ref": "J5",
+  "label": "LED pad C1",
+  "kind": "pad",
+  "xy": [
+   34.599999999999994,
+   33.08000000000001
+  ]
+ },
+ {
+  "ref": "J5",
+  "label": "LED pad D1",
+  "kind": "pad",
+  "xy": [
+   34.599999999999994,
+   35.620000000000005
+  ]
+ },
+ {
+  "ref": "J5",
+  "label": "LED pad C2",
+  "kind": "pad",
+  "xy": [
+   34.599999999999994,
+   38.16
+  ]
+ },
+ {
+  "ref": "J5",
+  "label": "LED pad D2",
+  "kind": "pad",
+  "xy": [
+   34.599999999999994,
+   40.69999999999999
+  ]
+ },
+ {
+  "ref": "J5",
+  "label": "LED pad C3",
+  "kind": "pad",
+  "xy": [
+   34.599999999999994,
+   43.24000000000001
+  ]
+ },
+ {
+  "ref": "J5",
+  "label": "LED pad D3",
+  "kind": "pad",
+  "xy": [
+   34.599999999999994,
+   45.78
+  ]
+ },
+ {
+  "ref": "J5",
+  "label": "LED pad C4",
+  "kind": "pad",
+  "xy": [
+   34.599999999999994,
+   48.31999999999999
+  ]
+ },
+ {
+  "ref": "J5",
+  "label": "LED pad D4",
+  "kind": "pad",
+  "xy": [
+   34.599999999999994,
+   50.860000000000014
+  ]
+ },
+ {
+  "ref": "TP18",
+  "label": "BOOT (GND at power-on = flash mode)",
+  "kind": "pad",
+  "xy": [
+   34.69999999999999,
+   55.400000000000006
+  ]
+ },
+ {
+  "ref": "TP3",
+  "label": "IO3 (strap)",
+  "kind": "pad",
+  "xy": [
+   1.2999999999999972,
+   39.25
+  ]
+ }
+]
