@@ -1,7 +1,57 @@
 # Camera auto-layout
 
 Point the phone at the running LEDs, they flash a coded sequence, and we recover a WLED
-ledmap automatically. Branch `feat/auto-layout` (off `feat/arbitrary-layouts`).
+ledmap automatically.
+
+## v2 (2026-11) — current design
+
+| Piece | Where |
+|---|---|
+| Flash sequences + decoder | `src/lib/structuredLight.ts` |
+| Closed-loop scan (brightness probe → decode → retry) | `src/lib/autoScan.ts` (wired into `AutoLayoutModal.svelte`) |
+| Geometry (rectify, lattice fit, rotate) | `src/lib/autoLayout.ts` |
+| Synthetic camera + scoring | `src/lib/autoLayoutSim.ts` |
+| Offline bench (20 physical setups) | `node --import ./automation/ts-resolve.mjs automation/autolayout-sim.ts` |
+| Real-hardware rig (hands-free, CfT) | `automation/autolayout-rig.mjs --expect=16x16s --runs=5` |
+| Replay a real capture | `automation/replay-capture.ts <run.bin> --expect=…` |
+
+**Firmware mode 3 (feat 9): inverse pairs.** `[ALL-ON][ALL-OFF][bit0][¬bit0]..[bitN][¬bitN]`. Each
+bit is read per pixel as "brighter in b than in ¬b" (Scharstein & Szeliski, CVPR 2003): no
+threshold, ambient light cancels, every LED blinks (in mode 1 an all-ones code — the last LED of
+any 64/256/1024 strip — never did), and about half the LEDs are lit in every frame, so
+auto-exposure holds still. A pixel lit by two LEDs (bloom between them) reads ~equal on the bits
+they differ in and is rejected as low-confidence instead of decoding to a wrong ID. The app now
+sends `bits` (firmware sized it from the *longest* strip, mismatching the app on uneven devices).
+
+**Decoder.** (1) Exposure: divide out each frame's gain (median ratio to a temporal-median
+reference). (2) Timing: frame-to-frame change energy spikes at every device frame edge; fit the
+edge train's period + phase (device clock drifts ±8%, camera unsynced), drop edge frames.
+(3) Per pixel, average every clean frame of each slot over all cycles; find which slot is ALL-ON by
+the sequence's *structure* (pairs sum to ON+OFF), not mean brightness. (4) Read codes, cluster
+same-code pixels, position = core-only weighted centroid (a one-sided halo past edge LEDs pulled
+whole-blob centroids ½ pitch outward).
+
+**Closed loop.** The readable flash level spans ~1–200 across setups (close-up dense panel vs lit
+room), so a fixed level can't work. Probe with a strobe: dimmer while LED cores clip, brighter while
+ON−OFF contrast < 30; then decode; if incomplete and clipped, halve and retry.
+
+**Bench results** (synthetic; `autolayout-sim.ts`, 20 scenarios / 3274 LEDs):
+
+| Pipeline | LEDs correct | Wrong positions | Layouts exact |
+|---|---|---|---|
+| v1 (old decoder, mode 1) | 8.3% | 72 | 2/19 |
+| v2 decoder, mode 1 (old firmware) | 90.2% | 58 | 9/19 |
+| v2 decoder, mode 3 | 96.0% | 10 | 16/19 |
+| closed loop, mode 3 | 99.8% (every scenario at its max) | 0 | 18/19 (the 19th has dead LEDs) |
+
+The same bench found four lattice-fit bugs (even grids came out N+1×M+1, dense grids drifted,
+rectify squashed aspect, straight strips collapsed to 1×1) — fixed. **Caveat:** the simulator and
+decoder were written together; real captures are the arbiter. Known risk: very close/dense setups
+bottom out at flash level 1–2, where WS2812 output is coarse.
+
+---
+
+## v1 notes (historical)
 
 ## Status
 
@@ -53,7 +103,7 @@ hard physical limit:
   (Pure frame-differencing can't do this — a moving lit pattern differs at every edge; you must
   register. Rotation/zoom registration is the next step if translation isn't enough.)
 
-### Adaptive auto-scan (`autoMap`) — two phases, ~60s budget
+### Adaptive auto-scan (`autoMap`) — two phases, ~60s budget (never merged; superseded by `autoScan.ts`)
 
 **Phase 1 — exposure sweep (strobe).** The device STROBES all LEDs on/off; we sweep flash
 brightness low→high (`[8,13,20,30,44,64,92,130]`), grab a short burst at each, and pick the

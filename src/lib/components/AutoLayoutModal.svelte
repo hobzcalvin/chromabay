@@ -7,18 +7,22 @@
   // The result shows the ALL-ON photo with every found LED overlaid + the logical grid preview, so the
   // user can judge how well it went. No realtime per-frame analysis (it only ever undercounted + janked).
   import { onMount } from 'svelte';
-  import { startCalibration, stopCalibration, uploadStripLayout } from '$lib/ble';
-  import { captureAndDecode, captureRawFrames, measureSwing } from '$lib/cameraDecode';
+  import { startCalibration, stopCalibration, uploadStripLayout, CALIB_PAIRS_FEAT } from '$lib/ble';
+  import { captureRawFrames, measureSwing, type Frame } from '$lib/cameraDecode';
+  import { runAutoScan, type ScanResult } from '$lib/autoScan';
   import { buildLedmap, rectifyPoints, rotateLedmap, type Pt, type Ledmap } from '$lib/autoLayout';
   import LayoutPreview from './LayoutPreview.svelte';
 
   function portal(node: HTMLElement) { document.body.appendChild(node); return { destroy() { node.remove(); } }; }
 
-  let { deviceId, stripIndex, numLeds, onClose }:
-    { deviceId: string; stripIndex: number; numLeds: number; onClose: () => void } = $props();
+  let { deviceId, stripIndex, numLeds, feat = 1, onClose }:
+    { deviceId: string; stripIndex: number; numLeds: number; feat?: number; onClose: () => void } = $props();
 
   const FRAME_MS = 220;
   const bits = Math.max(1, Math.ceil(Math.log2(Math.max(2, numLeds))));
+  // feat>=9 firmware runs inverse pairs (mode 3) and takes our `bits`; older firmware runs the
+  // legacy [ON][bits] sequence, which the v2 decoder also reads (less robustly).
+  const seqKind: 'comp' | 'legacy' = feat >= CALIB_PAIRS_FEAT ? 'comp' : 'legacy';
   // Processing resolution scales with array size (≈34 px/LED across the width); a 5×5 stays at 320, a
   // 20×20 → 512 (capped for capture/CPU cost).
   const MAP_W = Math.min(512, Math.max(320, Math.round(Math.sqrt(numLeds) * 34)));
@@ -117,42 +121,74 @@
     return null;
   }
 
-  // PHASE 3 — structured-light capture + decode → result.
-  async function runCapture(myGen: number) {
-    phase = 'capture'; points = []; overlay = null; progress = 0; capLabel = 'Capturing…';
-    status = 'Capturing… hold steady';
-    const expMs = FRAME_MS * 3 + (1 + bits) * FRAME_MS * 6 + 600;
-    const t0 = performance.now();
+  // PHASE 2+3 — closed loop (src/lib/autoScan.ts): probe brightness with a strobe until the LED
+  // cores are neither faint nor clipped, then run the structured-light sequence and decode it
+  // (dimming + retrying if it came back clipped and incomplete). Benchmarked offline by
+  // automation/autolayout-sim.ts against the same code.
+  let lastScanFrames: Frame[] = [];
+  // Raw capture file (replay with automation/replay-capture.ts): 'CBC1' = legacy sequence,
+  // 'CBC2' = inverse pairs; u16 w,h,bits,frameMs,numLeds,frameCount; per frame f32 t + w*h gray.
+  function encodeCapture(frames: Frame[]): ArrayBuffer {
+    const w = frames[0].w, h = frames[0].h, n = Math.min(frames.length, 65535);
+    const buf = new ArrayBuffer(16 + n * (4 + w * h));
+    const dv = new DataView(buf), u8 = new Uint8Array(buf);
+    dv.setUint32(0, seqKind === 'comp' ? 0x43424332 : 0x43424331, false);
+    dv.setUint16(4, w, true); dv.setUint16(6, h, true); dv.setUint16(8, bits, true);
+    dv.setUint16(10, FRAME_MS, true); dv.setUint16(12, numLeds, true); dv.setUint16(14, n, true);
+    let off = 16;
+    for (let i = 0; i < n; i++) { const f = frames[i]; dv.setFloat32(off, f.t, true); off += 4; u8.set(f.gray, off); off += w * h; }
+    return buf;
+  }
+  // Automation: the rig pulls the last scan's raw frames (base64 capture file) for offline replay.
+  (window as any).__chromabayAutoLayoutDump = () => {
+    if (!lastScanFrames.length) return null;
+    const u8 = new Uint8Array(encodeCapture(lastScanFrames)); let bin = '';
+    for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode(...u8.subarray(i, i + 0x8000));
+    return btoa(bin);
+  };
+  async function capture(skipTune = false) {
+    const myGen = ++gen;
+    phase = 'capture'; points = []; overlay = null; progress = 0; capLabel = 'Mapping…';
+    const t0 = performance.now(), expMs = skipTune ? 9000 : 15000;
     const pt = setInterval(() => { if (myGen !== gen) { clearInterval(pt); return; } progress = Math.min(0.98, (performance.now() - t0) / expMs); }, 100);
+    const io = {
+      flash: async (k: 'strobe' | 'legacy' | 'comp', b: number) => {
+        if (myGen !== gen) throw new Error('cancelled');
+        calBright = b;
+        await startCalibration(deviceId, stripIndex, b, k === 'strobe' ? 'strobe' : k === 'comp' ? 'pairs' : 'full', bits, FRAME_MS);
+        await sleep(FRAME_MS * 2);                    // let the device + camera exposure settle
+      },
+      capture: async (ms: number) => {
+        if (myGen !== gen) throw new Error('cancelled');
+        const fr = await captureRawFrames(video, ms, MAP_W); lastScanFrames = fr; return fr;
+      },
+    };
     try {
-      await startCalibration(deviceId, stripIndex, calBright, 'full');
-      await sleep(FRAME_MS * 3);
-      const res = await captureAndDecode(video, { bits, frameMs: FRAME_MS, numLeds, cycles: 6, procWidth: MAP_W });
+      const res: ScanResult = await runAutoScan(io, {
+        numLeds, bits, kind: seqKind, frameMs: FRAME_MS, startBrightness: calBright,
+        maxProbes: skipTune ? 0 : 7, onStatus: (m) => { if (myGen === gen) status = m; },
+      });
       clearInterval(pt); progress = 1;
       if (myGen !== gen) return;
       points = res.points;
-      const got = res.diag?.found ?? 0;
-      if (res.debug?.onImage) overlay = { img: res.debug.onImage, w: res.debug.w, h: res.debug.h, pts: res.debug.decoded };
+      calBright = res.brightness;
+      if (lastScanFrames.length) {
+        // Backdrop: the brightest captured frame (an ALL-ON) with every found LED dotted on it.
+        let bi = 0, bm = -1; for (let i = 0; i < lastScanFrames.length; i++) { let m = 0; const g = lastScanFrames[i].gray; for (let j = 0; j < g.length; j += 7) m += g[j]; if (m > bm) { bm = m; bi = i; } }
+        const f = lastScanFrames[bi];
+        overlay = { img: f.gray, w: f.w, h: f.h, pts: res.points.flatMap((p) => (p ? [{ x: p.x * f.w, y: p.y * f.w }] : [])) };
+      }
       phase = 'result';
-      status = got > 0 ? `Mapped ${got}/${numLeds}. Check the overlay — rotate/adjust, then Use, or Recapture.`
-                       : "Couldn't decode the LEDs — try Recapture, move closer, or hold steadier.";
+      status = res.found > 0 ? `Mapped ${res.found}/${numLeds} at flash level ${res.brightness}. Check the overlay — rotate/adjust, then Use, or Recapture.`
+                             : `Couldn't decode the LEDs (${res.reason}) — try Recapture, move closer, or hold steadier.`;
+      // Automation hook: the bench rig (automation/autolayout-rig.mjs) reads the result from here.
+      (window as any).__chromabayAutoLayout = { at: Date.now(), found: res.found, numLeds, brightness: res.brightness,
+        kind: seqKind, diag: res.diag, probes: res.probes, points: res.points, layout: $state.snapshot(layout) };
       stopCalibration(deviceId).catch(() => {});
     } catch (e: any) {
       clearInterval(pt);
       if (myGen === gen) { status = 'Capture failed: ' + (e?.message || e); startFrame(); }
     }
-  }
-
-  // Capture button: ramp brightness (unless reusing a manual level), then capture+decode.
-  async function capture(skipTune = false) {
-    const myGen = ++gen;
-    if (!skipTune) {
-      const b = await tuneBrightness(myGen);
-      if (myGen !== gen) return;
-      if (b == null) { status = "Couldn't see the LEDs — darken the room or check the device, then Capture again."; startFrame(); return; }
-      calBright = b;
-    }
-    await runCapture(myGen);
   }
 
   function recapture() { capture(true); }     // reuse the current (possibly hand-tuned) brightness
@@ -168,21 +204,15 @@
     calBright = b;
     phase = 'capture'; capLabel = 'Recording…'; progress = 0;
     try {
-      const ms = (1 + bits) * FRAME_MS * 5 * 1.5 + FRAME_MS;   // ≈10s @25 LEDs, ≈17s @400
+      const ms = (seqKind === 'comp' ? 2 + 2 * bits : 1 + bits) * FRAME_MS * 3 + FRAME_MS;   // ≈10s @25 LEDs, ≈17s @400
       status = `Recording (~${Math.round((ms + FRAME_MS * 3) / 1000)}s, hold steady)…`;
-      await startCalibration(deviceId, stripIndex, calBright, 'full');
+      await startCalibration(deviceId, stripIndex, calBright, seqKind === 'comp' ? 'pairs' : 'full', bits, FRAME_MS);
       await sleep(FRAME_MS * 3);
       const frames = await captureRawFrames(video, ms, MAP_W);
       if (myGen !== gen) return;
       if (!frames.length) { status = 'No frames captured.'; startFrame(); return; }
       const w = frames[0].w, h = frames[0].h, n = frames.length;
-      const buf = new ArrayBuffer(16 + n * (4 + w * h));
-      const dv = new DataView(buf), u8 = new Uint8Array(buf);
-      dv.setUint32(0, 0x43424331, false); // 'CBC1'
-      dv.setUint16(4, w, true); dv.setUint16(6, h, true); dv.setUint16(8, bits, true);
-      dv.setUint16(10, FRAME_MS, true); dv.setUint16(12, numLeds, true); dv.setUint16(14, n, true);
-      let off = 16;
-      for (const f of frames) { dv.setFloat32(off, f.t, true); off += 4; u8.set(f.gray, off); off += w * h; }
+      const buf = encodeCapture(frames);
       const a = document.createElement('a');
       a.href = URL.createObjectURL(new Blob([buf], { type: 'application/octet-stream' }));
       a.download = `chromabay-capture-strip${stripIndex + 1}-${w}x${h}-${n}f.bin`;

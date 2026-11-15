@@ -10,5 +10,7 @@ set -e
 APP=$(ls -d "$HOME"/Library/Caches/ms-playwright/chromium-*/chrome-mac-*/"Google Chrome for Testing.app" | tail -1)
 PROFILE=${CFT_PROFILE:-${TMPDIR:-/tmp}/chromabay-cft-profile}
 URL=${1:-https://chromabay.app/devices}
+# --use-fake-ui-for-media-stream auto-accepts the page's camera prompt, so the auto-layout rig
+# (autolayout-rig.mjs) runs hands-free. macOS still asks once to let this app use the camera.
 open -na "$APP" --args --remote-debugging-port=9334 --user-data-dir="$PROFILE" \
-  --no-first-run --no-default-browser-check "$URL"
+  --no-first-run --no-default-browser-check --use-fake-ui-for-media-stream "$URL"

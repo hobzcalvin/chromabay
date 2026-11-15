@@ -27,5 +27,5 @@ export const SCENARIOS: SimScenario[] = [
   // --- geometry / motion ---
   { name: 'oblique-rotated', layout: { kind: 'grid', cols: 12, rows: 8, serpentine: true }, rotDeg: 17, tilt: 0.35 },
   { name: 'handheld-shake', layout: { kind: 'grid', cols: 10, rows: 10 }, shakePx: 0.35 },
-  { name: 'dead-leds', layout: { kind: 'grid', cols: 10, rows: 10 }, deadLeds: [0, 7, 33, 64, 99] },
+  { name: 'dead-leds', layout: { kind: 'grid', cols: 10, rows: 10 }, deadLeds: [7, 33, 45, 64, 88] },
 ];

@@ -13,6 +13,7 @@
 //  - handheld camera motion, per-LED brightness variation, dead LEDs, perspective/rotation.
 import type { Frame } from './cameraDecode';
 import type { Ledmap, Pt } from './autoLayout';
+import { seqLength, seqOn, type SeqKind } from './structuredLight';
 
 export type SimLayout =
   | { kind: 'grid'; cols: number; rows: number; serpentine?: boolean }
@@ -51,6 +52,8 @@ export type SimScenario = {
   deviceJitterMs?: number;        // per-frame show() latency (default 8)
   shakePx?: number;               // handheld random-walk σ per frame, px (default 0)
   cycles?: number;                // flash cycles captured (default 5)
+  seq?: SeqKind;                  // flash sequence the device runs (default 'legacy' = today's firmware)
+  durationMs?: number;            // capture length override (default: `cycles` full cycles)
 };
 
 export type SimResult = {
@@ -98,8 +101,9 @@ export function simulateCapture(sc: SimScenario): SimResult {
   const { pts: phys, expected } = layoutPositions(sc.layout);
   const n = phys.length, bits = Math.max(1, Math.ceil(Math.log2(Math.max(2, n))));
   const frameMs = sc.frameMs ?? 220, devScale = sc.deviceClockScale ?? 1.03, devJit = sc.deviceJitterMs ?? 8;
-  const cycleLen = 1 + bits, cycles = sc.cycles ?? 5;
-  const durMs = (2 + bits) * frameMs * cycles + frameMs;   // same window captureAndDecode records
+  const seq: SeqKind = sc.seq ?? 'legacy';
+  const cycleLen = seqLength(seq, bits), cycles = sc.cycles ?? (seq === 'legacy' ? 5 : 3);
+  const durMs = sc.durationMs ?? (cycleLen + 1) * frameMs * cycles + frameMs;
 
   // Physical → image: centre, scale to coverage, roll, then a mild perspective (tilt about x).
   let mnx = Infinity, mny = Infinity, mxx = -Infinity, mxy = -Infinity;
@@ -130,7 +134,7 @@ export function simulateCapture(sc: SimScenario): SimResult {
   const bound = new Float64Array(nDev + 1);
   for (let k = 0; k <= nDev; k++) bound[k] = -devStart + k * frameMs * devScale + rnd() * devJit;
   const devFrameAt = (t: number) => { let k = Math.floor((t + devStart) / (frameMs * devScale)); k = Math.max(0, Math.min(nDev - 1, k)); while (k > 0 && t < bound[k]) k--; while (k < nDev - 1 && t >= bound[k + 1]) k++; return k; };
-  const ledOn = (i: number, k: number) => { const f = k % cycleLen; return f === 0 ? true : ((i >> (f - 1)) & 1) === 1; };
+  const ledOn = (i: number, k: number) => seqOn(seq, bits, k % cycleLen, i);
 
   // Static ambient radiance image.
   const amb = new Float32Array(N), a0 = sc.ambient ?? 0.02, ag = sc.ambientGradient ?? 0;
@@ -141,7 +145,7 @@ export function simulateCapture(sc: SimScenario): SimResult {
   const expMs = sc.exposureMs ?? 16, rs = sc.rollingShutterMs ?? 20, noise = sc.noise ?? 2;
   const ae = sc.autoExposure ?? true, aeT = sc.aeTarget ?? 0.18, aeS = sc.aeSpeed ?? 0.12;
   const shake = sc.shakePx ?? 0;
-  let gain = 1, sx = 0, sy = 0;
+  let gain = 1, sx = 0, sy = 0, msx = 0, msy = 0, kept = 0;
   const frames: Frame[] = [];
   const rad = new Float32Array(N);
   const SUB = 6;                                               // sub-samples across the exposure window
@@ -173,9 +177,11 @@ export function simulateCapture(sc: SimScenario): SimResult {
       gray[p] = v < 0 ? 0 : v > 255 ? 255 : v;
     }
     if (ae) gain = Math.min(64, Math.max(0.25, gain * Math.pow(aeT / Math.max(1e-4, mean / N), aeS)));
-    frames.push({ t, gray, w: W, h: H });
+    frames.push({ t, gray, w: W, h: H }); msx += sx; msy += sy; kept++;
   }
-  return { frames, numLeds: n, bits, truth: img0, expected, spacingPx };
+  // Truth = mean pose over the capture (a still-camera decoder can at best recover the average).
+  const truth = img0.map((p) => ({ x: p.x + msx / Math.max(1, kept), y: p.y + msy / Math.max(1, kept) }));
+  return { frames, numLeds: n, bits, truth, expected, spacingPx };
 }
 
 function medianNN(pts: Pt[]): number {

@@ -1900,19 +1900,27 @@ export async function uploadStripLayout(
  * Start the auto-layout calibration flash on the device: each LED blinks its index as a
  * structured-light sequence the camera decodes. `stripIndex` 0xFF flashes all strips.
  */
-export async function startCalibration(deviceId: string, stripIndex = 0xff, brightness = 40, mode: 'strobe' | 'full' | 'detect' = 'full'): Promise<void> {
+export async function startCalibration(deviceId: string, stripIndex = 0xff, brightness = 40, mode: 'strobe' | 'full' | 'detect' | 'pairs' = 'full',
+  bits?: number, frameMs?: number): Promise<void> {
   // brightness: per-channel white level (1..255) the strips flash at. Keep low — full brightness
   // saturates the camera and blooms LEDs into one blob; ~40 keeps them as distinct dots. 0 => firmware default.
   // mode: 'detect' = steady ALL-ON (tune exposure + detect blobs), 'strobe' = ALL on/off,
   //       'full' = structured-light (ON + bit planes).
-  const m = mode === 'strobe' ? 0 : mode === 'detect' ? 2 : 1;
+  //       'pairs' = inverse-pair structured light (firmware feat>=9, see structuredLight.ts).
+  // bits / frameMs (feat>=9): the code length and flash rate to use; older firmware ignores them.
+  const m = mode === 'strobe' ? 0 : mode === 'detect' ? 2 : mode === 'pairs' ? 3 : 1;
+  const bytes = [1, stripIndex & 0xff, Math.max(1, Math.min(255, Math.round(brightness))), m];
+  if (bits) { bytes.push(bits & 0xff); if (frameMs) bytes.push(Math.max(4, Math.min(255, Math.round(frameMs / 10)))); }
   await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_CALIBRATION,
-    new DataView(new Uint8Array([1, stripIndex & 0xff, brightness & 0xff, m]).buffer));
+    new DataView(new Uint8Array(bytes).buffer));
 }
 export async function stopCalibration(deviceId: string): Promise<void> {
   await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_CALIBRATION,
     new DataView(new Uint8Array([0]).buffer));
 }
+
+/** Firmware level with inverse-pair calibration (mode 3) + app-chosen bits/frame time. */
+export const CALIB_PAIRS_FEAT = 9;
 
 /** Firmware level that has the BLINK_PINS endpoint. */
 export const BLINK_PINS_FEAT = 5;

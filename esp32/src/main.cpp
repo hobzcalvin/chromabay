@@ -99,7 +99,8 @@ PatternRendererBase* patternRenderer = nullptr;
 #define CHARACTERISTIC_UUID_LAYOUT_SET "a0be83f5-8dc9-47f0-ab40-b19721d20ed1"
 // Layout read-back: write u8 stripIndex to request; device NOTIFYs the layout chunked.
 #define CHARACTERISTIC_UUID_LAYOUT_GET "a0be83f6-8dc9-47f0-ab40-b19721d20ed1"
-// Auto-layout camera calibration: write [u8 cmd(1=start,0=stop)][u8 stripIndex(0xFF=all)][u8 brightness(0=>default 40)][u8 mode(0=strobe,1=full;default 1)].
+// Auto-layout camera calibration: write [u8 cmd(1=start,0=stop)][u8 stripIndex(0xFF=all)][u8 brightness(0=>default 40)]
+// [u8 mode(0=strobe,1=full,2=steady on,3=inverse pairs;default 1)][u8 bits(0=auto)][u8 frameMs/10 (0=>220)] (bits/frame: feat>=9).
 #define CHARACTERISTIC_UUID_CALIBRATION "a0be83f7-8dc9-47f0-ab40-b19721d20ed1"
 
 // Timestamp Sync Characteristic - for synchronizing time across devices
@@ -221,6 +222,7 @@ static uint32_t calibStartMs = 0;
 // sharp image). 220ms ≈ 6-7 frames/slot, which is the value that decoded reliably. Camera motion
 // is handled by registration in the decoder, not by blinking faster.
 static const uint32_t CALIB_FRAME_MS = 220;
+static uint32_t calibFrameMs = CALIB_FRAME_MS;  // per-session override (feat>=9 write byte 5)
 
 // Blink Pins: a wiring aid. For BLINK_DURATION_MS every strip's data pin (and clock pin, on
 // 4-wire chipsets) is released from its LED driver and driven as a plain GPIO, high for one
@@ -1400,10 +1402,14 @@ static void onCalibrationWrite(const uint8_t* data, size_t len, Endpoints::Link&
                 if (s && s->getLength() > maxN) maxN = s->getLength();
             }
             uint8_t bits = 1; while ((1u << bits) < maxN) bits++;
+            // The app knows which strip it is mapping and may send its own code length (feat>=9):
+            // auto sizes from the LONGEST strip, which disagreed with the app on uneven devices.
+            if (v.length() >= 5 && (uint8_t)v[4] >= 1 && (uint8_t)v[4] <= 16) bits = (uint8_t)v[4];
+            calibFrameMs = (v.length() >= 6 && (uint8_t)v[5] >= 4) ? (uint32_t)(uint8_t)v[5] * 10u : CALIB_FRAME_MS;
             calibBits = bits; calibStrip = strip; calibStartMs = millis(); calibrating = true;
             DiagLog::note("calib start mode %d", calibMode);
             Serial.printf("[Calib] START strip=%d bits=%d bright=%d mode=%d (cycle=%d frames @ %dms)\n",
-                          strip, bits, calibBrightness, calibMode, calibMode == 0 ? 2 : 2 + bits, (int)CALIB_FRAME_MS);
+                          strip, bits, calibBrightness, calibMode, calibMode == 0 ? 2 : calibMode == 3 ? 2 + 2 * bits : 1 + bits, (int)calibFrameMs);
         } else {
             calibrating = false;
             Serial.println("[Calib] STOP");
@@ -2619,8 +2625,12 @@ void renderCalibrationFrame() {
     // OFF level from the bit frames it's dark in):
     //   strobe (mode 0): [OFF][ON]                  — fast exposure tuning only, cycleLen 2
     //   full   (mode 1): [ALL-ON][bit0]..[bit(b-1)] — structured light, cycleLen 1+bits
-    uint32_t cycleLen = (calibMode == 0) ? 2u : (1u + calibBits);
-    uint32_t frame = ((millis() - calibStartMs) / CALIB_FRAME_MS) % cycleLen;
+    //   pairs  (mode 3): [ALL-ON][ALL-OFF][bit0][~bit0]..[bit(b-1)][~bit(b-1)], cycleLen 2+2·bits.
+    //                    Each bit is read as "brighter in b than in ~b": no threshold, ambient
+    //                    cancels, every LED blinks (mode 1's all-ones code never does), and the
+    //                    lit count is ~constant so auto-exposure stays put. src/lib/structuredLight.ts.
+    uint32_t cycleLen = (calibMode == 0) ? 2u : (calibMode == 3) ? (2u + 2u * calibBits) : (1u + calibBits);
+    uint32_t frame = ((millis() - calibStartMs) / calibFrameMs) % cycleLen;
     for (size_t s = 0; s < ledMgr.getNumStrips(); s++) {
         LedConfig::LedBus* st = ledMgr.getStrip(s);
         if (!st) continue;
@@ -2631,6 +2641,11 @@ void renderCalibrationFrame() {
             if (!targetStrip) on = false;              // non-target strips stay dark
             else if (calibMode == 2) on = true;         // steady ALL-ON (detection: tune exposure)
             else if (calibMode == 0) on = (frame == 1); // strobe: 0=off, 1=on
+            else if (calibMode == 3) {                  // inverse pairs
+                if (frame == 0) on = true;
+                else if (frame == 1) on = false;
+                else on = (((i >> ((frame - 2) >> 1)) & 1u) != 0) != (((frame - 2) & 1u) != 0);
+            }
             else if (frame == 0) on = true;             // full: ALL-ON reference + sync anchor
             else on = ((i >> (frame - 1)) & 1u) != 0;   // full: bit (frame-1) of the LED index
             uint8_t b = calibBrightness;

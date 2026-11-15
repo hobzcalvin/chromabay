@@ -406,6 +406,7 @@
     deviceId={deviceId}
     stripIndex={autoLayoutStrip}
     numLeds={settings.ledConfig?.strips?.[autoLayoutStrip]?.numLeds ?? 0}
+    feat={settings.deviceInfo?.feat ?? 1}
     onClose={() => (autoLayoutStrip = null)}
   />
 {/if}
