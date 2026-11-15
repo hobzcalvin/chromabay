@@ -3,91 +3,137 @@
 Status: **design spec only.** There is no schematic or layout yet. This is the brief to build
 the KiCad project (and the case) from.
 
-A small ESP32-S3 board meant to work as a Swiss Army knife. It:
+In product terms, this is a battery-powered, ChromaBay-first take on the GLEDOPTO ESP32 mini
+controllers (e.g. GL-C-310WL). It:
 
-- charges a single-cell LiPo/Li-ion over USB-C and runs while plugged in
+- charges a single-cell LiPo over USB-C and runs while plugged in
 - has a real off switch and a user button
 - makes a 5 V LED rail
-- has 4 level-shifted clock+data outputs (one on a screwless terminal)
-- has an I2S microphone (plus pads for an external one) and a 6-axis motion sensor
+- has 4 level-shifted clock+data outputs
+- has an I2S microphone (plus external-mic pads) and a 6-axis motion sensor
 
-Every external interface sits on **one business end**, so it drops into a 3D-printed
-clamshell case where nothing needs the case opened in normal use.
+Every external interface sits on **one business end**. The board is **~3.5 mm thick** in its
+slim build, with a flat pouch cell against the underside and a family of 3D-printed cases.
 
 Revision history:
 - **Rev 2:** dropped 12 V; 5 V / 2 A rail; 4 × clock+data; mic + IMU.
-- **Rev 3:** ~1:2 board shape (~30 × 62 mm), single-sided; one business end; push-in terminal
-  for output 1; dedicated user button; external-mic pads; front-facing indicator LEDs; case
-  spec; itemized BOM.
+- **Rev 3:** ~1:2 shape, single-sided, one business end, case spec, BOM.
+- **Rev 4:**
+  - Qwiic cut; wiring area shrunk ~55%.
+  - Lever terminal made optional, with its footprint doubling as solder pads.
+  - Low-profile part picks for a ~3.5 mm slim build.
+  - Battery against the underside, with safety rules; case variants.
+  - Battery reverse-polarity protection and output ESD.
+  - Lessons from GLEDOPTO.
 
 ---
 
-## 1. Does this exist off the shelf?
+## 1. Reference products and lessons
 
-Not as one board. The near misses:
+### GLEDOPTO GL-C-310WL (the closest commercial analog)
+Published specs (manual / retailer listings):
 
-| Board | Has | Missing |
+- 5–24 V DC in; 6 A per channel, 10 A total
+- push-in terminals for 0.5–1.5 mm² (24–16 AWG) wire, 8–9 mm strip length
+- onboard I2S mic; button; two "extended" GPIO pads for user customization
+- PC housing, IP20, **42 × 38 × 17 mm**, ~18 g; ships with WLED
+
+Lessons we take:
+
+1. **The mic and spare GPIO pads sell it.** People pick these boards for audio-reactive builds
+   and hack the extra pins. Keep both, and label them.
+2. **Label wires on the case, not just the PCB silkscreen.** Once the board is in a case, the
+   silkscreen is invisible. Our case prints or embosses G / V / C / D next to each exit, plus
+   the strip length for the terminal.
+3. **Lever terminals are what make these boards fast to use.** But they're **tall** (roughly
+   10–15 mm), which is most of why the GLEDOPTO case is 17 mm thick. We keep them optional
+   (section 5).
+4. **WLED compatibility widens the audience.** Publish a WLED pin config / usermod for this
+   board too, so it isn't ChromaBay-only. ChromaBay already converts WLED devices, so it can go
+   either way.
+5. **Common failure modes in this category to design out:**
+   - wiring the supply in backwards (we add **battery reverse-polarity protection**)
+   - static and hot-plug damage on data lines (we add **ESD diodes** on all 8 outputs, plus
+     33 Ω series resistors)
+   - 3.3 V data that's marginal on long runs (we use a real 5 V AHCT buffer, not a MOSFET
+     shifter)
+   - shorted strips (we add a polyfuse)
+
+### Other near misses
+- QT Py S3 + LiPo BFF, FeatherS3, PowerFeather, Olimex S3-LiPo: charging, but no LED rail or
+  shifting.
+- Sparkle Motion, QuinLED: shifting, but no battery.
+
+---
+
+## 2. Requirements: kept, cut, relaxed
+
+| Requirement | Verdict | Why / cost |
 |---|---|---|
-| Adafruit QT Py ESP32-S3 + LiPo BFF | S3, LiPo charging | 5 V boost at LED currents, level shifting, mic, IMU |
-| Unexpected Maker FeatherS3 / TinyS3, PowerFeather S3, Olimex S3-DevKit-LiPo | S3, charging, power path | Boost, level shifting |
-| Adafruit Sparkle Motion, QuinLED Dig-Uno/Quad | Level-shifted outputs | Battery, charger |
-| ESP32-S3 Super Mini + TP4056 + boost module + shifter | All the functions, cheap | It's four boards, and the TP4056 has no power path |
-
-**Prototype path until boards arrive:** QT Py ESP32-S3 + LiPo BFF → Pololu 5 V 2 A+ step-up →
-74AHCT125 breakout, plus ICS-43434 and LSM6DS3TR-C breakouts on STEMMA QT.
-
----
-
-## 2. Requirements: what was kept, cut or relaxed
-
-| Requirement | Verdict | Why |
-|---|---|---|
-| 12 V LED rail | **Cut** (rev 2) | Clock+data strips are 5 V parts. 12 V added parts and ruled out the cheaper 5 V-only boost chips. **External LED power mode** (section 7) covers big or 12 V strips. |
-| 5 V @ 3 A continuous | **2 A continuous, ~3 A peaks** (rev 2) | 3 A meant ~5 A from the battery near empty. The 200 LEDs / 4 h / low target (≈ 1 A) still has 2× headroom. |
-| Battery ~500 mAh to ~10 Ah, 1S | Kept | Charge-current jumpers and big pads. |
-| Charge while running | Kept | NVDC charger. |
-| 4 × clock+data outputs | Kept | One 8-channel buffer. Output 1 on a push-in terminal, 2–4 on pads. |
-| 0.75" × long | **Replaced by ~1:2, ~30 × 62 mm** (rev 3) | Same parts, better shape (section 3). |
-| Single-sided assembly | Kept | Cheaper PCBA. Fits at ~30 × 62. |
-| One business end for all ports | Kept | It sets the layout order (section 10). |
-
-### Sizing reference
-
-| Scenario | Avg mA/LED (incl. ~0.5–1 mA idle) | LED power | Battery-side W | 4 h energy | 1S capacity |
-|---|---|---|---|---|---|
-| Very dim | 2 | 2 W | ~2.7 W | ~11 Wh | ~3 Ah (one 18650) |
-| **"Low" (target, 200 LEDs)** | 5 | 5 W | ~6 W | ~24 Wh | **~6.5 Ah (two 18650s in parallel)** |
-| Board max (2 A cont.) | — | 10 W | ~11.5 W | — | 6.5 Ah lasts ~2 h |
+| 12 V rail | Cut (rev 2) | 5 V clock+data strips. External LED power mode covers 12 V. |
+| 5 V @ 3 A cont. | 2 A cont. / ~3 A peak (rev 2) | Battery current, heat, BATFET. Target (≈1 A) has 2× headroom. |
+| Qwiic | **Cut** (rev 4) | I2C still reachable on the spare pads (SDA/SCL/3V3/GND). |
+| Lever terminal | **Optional** (rev 4) | Its footprint doubles as solder holes, so it costs zero extra area. It sets the thickness when fitted (section 3). |
+| ~3 mm thick (6 mm max) | **~3.5 mm slim build is realistic; ~3 mm is not.** | Floor = ESP32-S3-MINI-1 (2.55 mm) + PCB. See section 3. |
+| Flat battery under the board | Kept | Needs a separator layer and an uncovered business-end strip (section 9). |
+| Battery-footprint cell vs "200 LEDs for 4 h" | **Can't do both.** | A cell the size of the board (~30 × 50 mm) is ~1–2 Ah. 200 LEDs at low brightness for 4 h needs ~6.5 Ah, so **that's the external-battery variant.** A board-sized cell gives ~1–2 h at 200 LEDs, or ~4 h at ~60 LEDs. |
+| Single-sided, one business end | Kept | |
 
 ---
 
-## 3. Where the board area goes
+## 3. Area and thickness budget
 
-It isn't a lot of chips. It's **connectors, user-facing parts, and two switching power stages**,
-each of which needs an inductor and big capacitors. Footprint estimates, including courtyard:
+### Area (rev 4)
 
 | Block | ≈ mm² | Share |
 |---|---|---|
-| ESP32-S3-MINI-1 (antenna overhangs the edge, so no extra keep-out) | 320 | 19% |
-| Wire connections: push-in terminal (O1), pad rows O2–O4, battery pads + strain-relief holes, ext-mic pads | 330 | 20% |
-| Charger power stage (BQ25606 is a *switching* charger: IC + inductor + caps + NTC) | 100 | 6% |
-| Boost power stage (IC + inductor + caps) + load switch + polyfuse | 150 | 9% |
-| Business-end parts: USB-C, slide switch, button, mic, 2 LEDs | 150 | 9% |
-| Level shifter + series resistors | 80 | 5% |
-| IMU, fuel gauge, LDO, ESD, JST-PH, Qwiic, reset/boot, ~60 passives | 240 | 14% |
-| Routing, clearances, 2 mounting holes | ~300 | 18% |
-| **Total** | **~1,700–1,900 mm²** | **≈ 30 × 62 mm** |
+| ESP32-S3-MINI-1 (antenna overhangs far edge) | 320 | 21% |
+| Business-end parts: mid-mount USB-C, slide switch, button, mic, 2 LEDs | 150 | 10% |
+| Charger power stage | 100 | 7% |
+| Boost stage + load switch + polyfuse + reverse-polarity FET | 160 | 11% |
+| **Wire connections** (shared outputs block, battery pads, tiny ext-mic/spare pads) | **150** | **10%** (was 330) |
+| Level shifter + series R + output ESD | 90 | 6% |
+| IMU, gauge, LDO, ESD, BOOT/RESET, passives | 210 | 14% |
+| Routing, clearances, 2 holes | ~320 | 21% |
+| **Total** | **~1,500 mm²** | **≈ 28 × 56 mm** |
 
-In rev 2, the 19 mm width forced everything into one long file, so routing got worse and the
-board got to ~90 mm. At 1:2 it packs properly.
+How wiring shrank:
 
-Easy ways to shrink further, if wanted:
+- Qwiic cut.
+- Outputs share their power pads. One **G, V** pair plus **C1 D1 C2 D2 C3 D3 C4 D4**: 10
+  holes in one row instead of 16 pads.
+- O1's four positions (G V C1 D1) sit at the lever-terminal pitch, so populating the terminal
+  is optional.
+- Ext-mic and spare pads moved to small 1.27 mm pads.
+- The battery keeps its big pads, since it carries the most current.
 
-- Drop Qwiic (−30 mm²).
-- Use a smaller generic push-in terminal instead of a WAGO (−50 mm²).
-- Pads only for O2–O4 at 2.0 mm pitch (−40 mm²).
+### Thickness (slim build, no terminal, no battery)
 
-That gets to about **28 × 56 mm**.
+| Item | Height above PCB |
+|---|---|
+| ESP32-S3-MINI-1 | **2.55 mm (the floor)** |
+| USB-C **mid-mount** (sits in a PCB cutout) | ~1.6–2.0 mm |
+| Boost + charger inductors, **4 × 4 × 2 mm** class | ~2.1 mm |
+| Side-actuated slide switch (MSK-12C02 class) and tact switch | ~1.5–2 mm |
+| Mic, IMU, ICs, passives | ≤ 1.2 mm |
+| **PCB: 0.8 mm 4-layer** | — |
+| **Total** | **≈ 3.4–3.6 mm** |
+
+Things that would push it past ~3.5 mm:
+
+| Part | Added height | Notes |
+|---|---|---|
+| JST-PH battery connector | ~4–5 mm | Replaced by solder pads in slim builds. A JST-PH footprint stays for thick builds. |
+| Top-mount USB-C | ~3.2 mm | Use mid-mount. |
+| 5 × 5 × 3 mm inductors | ~3 mm | Cheaper and more current. That's the trade. |
+| Lever terminal | ~10–15 mm | Optional build only. |
+
+Low-profile inductors are the one place thinness costs money. Brand-name 4 × 4 × 2 mm parts at
+the needed ≥ 6 A saturation (Coilcraft XEL4020 class) are ~$0.80 each, versus ~$0.25 for
+generic 5 × 5 × 3 mm. Generic 4 × 4 × 2 mm parts exist at lower current. Verify at the
+WEBENCH step.
+
+**So: ~3.5 mm slim, ~6 mm with JST-PH, ~12–15 mm with the lever terminal.**
 
 ---
 
@@ -95,11 +141,11 @@ That gets to about **28 × 56 mm**.
 
 ```
 USB-C ─ ESD, 5.1k CC ─VBUS─► BQ25606 charger (NVDC) ─VSYS 3.0–4.4 V─┬─► 3.3 V LDO (EN=SW_ON) ─► ESP32-S3-MINI-1
-  │ D+/D- ─► S3 native USB          ▲ BAT                           │                         ├─ I2C: MAX17048, LSM6DS3TR-C, Qwiic
-  │ CC1/CC2 ─► ADC                  │                               │                         ├─ I2S bus: ICS-43434 (L) + ext-mic pads (R)
-                 1S battery (JST-PH + big pads, NTC)                │                         ├─ user button, status LED, touch pads
-SLIDE SWITCH (+ ext pads) ─► SW_ON                                  │                         └─ 8 GPIO ─► SN74AHCT245 ─33Ω─► O1..O4 (CLK, DAT)
-                                                                    └─► 5 V boost (EN=LED_EN) ─┬─► P-FET load switch ─► polyfuse ─► [EXT jumper] ─► O1..O4 5V/GND
+  │ D+/D- ─► S3 native USB          ▲ BAT                           │                         ├─ I2C: MAX17048, LSM6DS3TR-C, spare pads
+  │ CC1/CC2 ─► ADC        [reverse-polarity P-FET]                   │                         ├─ I2S: ICS-43434 (L) + ext-mic pads (R)
+                 1S battery (big pads / JST-PH, NTC)                │                         ├─ button, status LED, touch/spare pads
+SLIDE SWITCH (+ ext pads) ─► SW_ON                                  │                         └─ 8 GPIO ─► SN74AHCT245 ─33Ω+ESD─► C1 D1 … C4 D4
+                                                                    └─► 5 V boost (EN=LED_EN) ─┬─► P-FET load switch ─► polyfuse ─► [EXT] ─► V / G
                                                                                                └─► AHCT245 VCC
 ```
 
@@ -107,273 +153,200 @@ SLIDE SWITCH (+ ext pads) ─► SW_ON                                  │     
 
 ## 5. Part choices
 
-### ESP32-S3 module: **ESP32-S3-MINI-1-N8** (or -N4R2 for PSRAM)
-- Pads underneath, so the boards get assembled (JLCPCB PCBA). Native USB straight to USB-C.
-- **Antenna overhangs the far end** (opposite the business end), away from the wires, the
-  battery and the boost.
+| Function | Part | Notes |
+|---|---|---|
+| MCU | **ESP32-S3-MINI-1-N8** (or -N4R2) | 2.55 mm tall. Native USB. Antenna overhangs the far edge. |
+| Charger + power path | **TI BQ25606** | NVDC (runs + charges at once). Charge current set by jumper, **default 500 mA**, 1 A / 2 A options. ILIM 3 A, VINDPM. ⚠️ Verify `IBATFET_OCP` comfortably exceeds ~3.5 A. |
+| Battery reverse protection | Low-Rds P-FET (≤ 10 mΩ, 2 × 2 mm DFN), gate to GND | Works for both charge and discharge once on. Blocks a backwards pack. |
+| Fuel gauge | **MAX17048** | Optional cost cut: ADC divider. |
+| LED boost | **TPS61022** (fallback TPS61088), 5.1 V | 4 × 4 × 2 mm inductor for slim builds. No load disconnect, hence the load switch. |
+| Load switch | P-FET high side + RC soft start, polyfuse after | |
+| 3.3 V | 600 mA+ LDO with EN | |
+| Level shifter | **SN74AHCT245** | TSSOP-20, or a 2.5 × 4.5 mm QFN to save area. 33 Ω + a low-cap ESD array on the outputs. |
+| Mic | **ICS-43434** (bottom port) + external-mic pads on the same I2S bus | Onboard = left channel; set the external mic to right; or cut-jumper the onboard one. Port hole sits in the uncovered business-end strip (section 9). |
+| Motion | **LSM6DS3TR-C** | Wake-on-motion on an RTC GPIO. |
+| USB-C | 16-pin **mid-mount** | PCB cutout at the edge, for low profile. |
+| Power switch | Side-actuated slide switch, ~1.5 mm tall | Logic-level only. |
+| User button | Side-actuated tact switch on a dedicated GPIO (not GPIO0) | BOOT + RESET as tiny internal buttons, for recovery only. |
+| LEDs | Charge (hardware, on STAT) + status, side-emitting at the end edge | |
 
-### Charger + power path: **TI BQ25606** (standalone, switching)
-- NVDC: runs from USB when plugged in, charges with what's left, and adds battery current when
-  the LEDs need more.
-- **Charge current by solder jumper, default 500 mA**; bridge for 1 A or 2 A. Firmware can't
-  override it.
-- ILIM 3 A; VINDPM protects weak USB ports. Onboard NTC by default, or the pack's own
-  thermistor on a 3rd pad.
-- ⚠️ **Verify** `IBATFET_OCP` comfortably exceeds ~3.5 A. TI E2E reports BATFET turn-off when
-  BAT sags at ~3.0 V under heavy load. Keep the BAT path fat and have firmware cut LEDs first.
-
-### Fuel gauge: **MAX17048** (I2C 0x36)
-- Real battery % and a low-battery alert pin. Optional cost cut: replace it with a $0.02 ADC
-  divider and a voltage→% curve. That saves ~$1 + one PCBA extended-part fee, but % is less
-  accurate under LED load.
-
-### LED boost: **TI TPS61022** (fallback TPS61088), 5.1 V
-- Pick via WEBENCH at 3.0 V in → 5.1 V @ 2 A continuous / 3 A peak. ~1 µH shielded inductor,
-  ≥ 6–8 A saturation.
-- No load disconnect in either part, hence the load switch. Boost EN = LED_EN.
-
-### LED load switch: P-FET high side + RC soft start, then a polyfuse
-- When it's off, the strip is fully unpowered (no ~1 mA/LED idle drain). The polyfuse means a
-  shorted strip can't kill the board.
-
-### 3.3 V: 600 mA+ LDO with EN (AP2112K-3.3 / TLV75733 class)
-
-### Level shifter: **SN74AHCT245** (TSSOP-20)
-- 8 lines = 4 × (CLK, DAT), or 8 single-wire lines. 33 Ω series each. VCC from boost output.
-  /OE pulled up until firmware enables it; data held low while LED power is off.
-
-### Microphone: **TDK ICS-43434** (I2S, bottom-port) + external-mic pads
-- **At the business end**, about 2–3 mm from the edge. Its bottom port opens through a ~0.8 mm
-  PCB hole into a short acoustic channel molded into the case bottom, which exits at the end
-  face (section 9).
-- Keep it on the opposite side of the end from the charger inductor, with its own ferrite + cap
-  on 3.3 V.
-- **External mic:** a 5-pad row (3V3, GND, BCLK, WS, SD) shares the onboard mic's I2S bus. The
-  ICS-43434's SELECT pin is tied to the left channel, so an external I2S mic set to the right
-  channel (any INMP441/ICS-43434 breakout has an L/R pin) works **alongside** it: stereo, or
-  pick one in firmware. A cut-jumper turns the onboard mic off if you only want the external
-  one. Use the external mic when the board is buried somewhere acoustically dead.
-
-### Motion: **ST LSM6DS3TR-C** (accel + gyro, I2C 0x6A)
-- Tap/double-tap, tilt and wake-on-motion. INT1 is on an RTC GPIO, so a shake wakes the board
-  from deep sleep. Cheaper option: LIS2DH12 (accel only, about −$0.80).
-
-### User-facing parts (all on the business end)
-- **Slide switch** (side-actuated, right-angle) for power. It's a logic-level switch, so it's
-  tiny and cheap; see section 8.
-- **User button**: side-actuated tact switch on a dedicated GPIO. Click = next pattern, double
-  click = brightness, per documentation/BUTTON_CONTROL_PLAN.md. It's deliberately **not**
-  GPIO0: holding a GPIO0 button while switching on drops the S3 into download mode, which would
-  confuse people. A small BOOT + RESET pair sits inside the case for recovery only (normal USB
-  flashing doesn't need them).
-- **Charge LED + status LED**, side-emitting or right-angle, at the end edge so they show
-  through light-pipe holes in the case. Cut-jumper disables both.
-- **USB-C** 16-pin, mid-mount if the case height allows (lower profile), with ESD array + VBUS
-  TVS. CC lines also go to ADC pins to detect source capability.
-
-### Wire connections
-- **O1: 4-position push-in (screwless) terminal, G / V / C / D**, vertical (top) entry. The
-  wire comes in through the case seam, over the business-end parts, and drops straight into
-  the terminal, so it doesn't compete with USB-C for edge space. Candidates:
-  - **WAGO 2060 series** (SMD, reflowable, 0.2–0.75 mm² / 24–18 AWG, push-button release).
-    Pick the vertical-entry variant; check the current rating.
-  - A generic SMD push-in block. About a quarter of the price; check JLC stock.
-  - Rated well over 2 A either way.
-- **O2–O4:** each a 4-pad row (G/V/C/D) at 2.54 mm pitch. Solder wires, or fit a pin header or
-  JST-XH.
-- **Battery:** two big pads for 16–18 AWG with strain-relief holes (wire up through the hole,
-  fold, solder), plus an NTC pad, for big external packs. Also **JST-PH** (Adafruit/SparkFun
-  polarity, big +/− silk, optional reverse-polarity indicator LED) for a small pouch cell
-  inside the case.
-- **Qwiic/STEMMA QT**, external switch pads, 4 touch/spare pads.
+### Wire connections (rev 4)
+- **Output row: G V C1 D1 C2 D2 C3 D3 C4 D4**, plated through-holes in one row right behind
+  the business end:
+  - **Solder wires straight in** (slim builds). Holes give better strain relief than surface
+    pads.
+  - **Or fit a 4-position lever terminal over G V C1 D1** (and a second one over C2–D3 if you
+    want). The terminal's pitch sets the hole pitch for those positions. Candidates:
+    - WAGO 2601 series (3.5 mm pitch, lever, up to ~1.5 mm²)
+    - generic lever PCB terminals at 3.5 mm. That's the GLEDOPTO style: flip the lever, insert
+      the wire, close.
+  - THT terminal = hand-solder, or JLC THT assembly. It's never under the battery (section 9).
+- **Battery:** two big pads + strain-relief holes, NTC pad. JST-PH footprint for thick builds
+  only.
+- **Small pads (1.27 mm):** ext mic (3V3 GND BCLK WS SD), I2C (SDA SCL), 4 touch/spare, external
+  switch.
 
 ---
 
-## 6. Jumper/config summary (all default to the safe choice)
+## 6. Jumpers (default = safe)
 
 | Jumper | Default | Options |
 |---|---|---|
 | CHG | 500 mA | 1 A, 2 A |
-| NTC | Onboard NTC | Pack thermistor on 3rd pad |
-| SW | Onboard slide switch | Cut → external switch on SW pads |
-| EXT | Outputs powered by onboard 5 V | Cut → external LED supply |
-| MIC | Onboard mic on | Cut → external mic only |
-| LEDS | Indicators on | Cut to disable |
-
----
+| NTC | Onboard NTC (under the battery side, so it senses the cell) | Pack thermistor pad |
+| SW | Onboard slide switch | External switch |
+| EXT | Outputs on onboard 5 V | External LED supply |
+| MIC | Onboard mic on | External only |
+| LEDS | On | Off |
 
 ## 7. External LED power mode
+Cut EXT: the V pad is disconnected from the boost. Power the strip from its own 5 V or 12 V
+supply, share G, and the board sends clean 5 V data.
 
-Cut **EXT** and the output 5 V pads no longer connect to the onboard boost. Power the strip from
-its own supply (5 V, or 12 V for WS2815-type), share GND, and the board just sends clean 5 V
-data. The battery then only runs the ESP32.
-
----
-
-## 8. Power switch behavior
-
-- Logic-level: SW_ON enables the 3.3 V LDO. With the ESP off, LED_EN is pulled low, so the
-  boost and load switch are off too.
-- Off draw is tens of µA, which is years on a 3 Ah cell. **Charging works with it off**, and
-  the charge LED still shows.
-- External switch or reed switch on the SW pads. Optional cut-trace pads in series with BAT for
-  a true zero-current storage disconnect.
+## 8. Power switch
+Logic-level: SW_ON enables the LDO. With the ESP off, LED_EN is pulled low, so the boost and
+load switch are off. Off draw is tens of µA. **It still charges when switched off.**
 
 ---
 
-## 9. Case (3D printed clamshell)
+## 9. Battery-under-board and case variants
 
-**Concept:** two halves split horizontally at the PCB top surface. The PCB sits on a ledge in
-the bottom half, and the top half clamps it.
+### The battery sits flat against the underside
+- **Board ~28 × 56 mm; battery footprint ~30 × 50 mm.** The cell stops ~6 mm short of the
+  business end. That uncovered strip is where the mic port hole, the mid-mount USB-C cutout and
+  any THT terminal leads go.
+- Standard pouch sizes that fit (name = thickness·width·length; capacities typical, vary by
+  vendor):
 
-- **Outer size (estimate):** ~34 × 66 × 12 mm without an internal battery. With an under-board
-  pouch bay (e.g. 1000–1500 mAh, ≤ 50 × 30 × 6 mm), it's ~34 × 66 × 19 mm.
-- The battery bay stops short of the antenna end so the cell doesn't detune it.
+  | Cell | Size | Capacity | Energy |
+  |---|---|---|---|
+  | 603050 | 6 × 30 × 50 mm | ~1000 mAh | 3.7 Wh |
+  | 803050 | 8 × 30 × 50 mm | ~1300 mAh | |
+  | 103050 | 10 × 30 × 50 mm | ~1800–2000 mAh | ~7 Wh |
+  | 2 × 603050 | in parallel, ~12 mm | ~2000 mAh | |
 
-### Business end face (left → right, all usable with the case closed)
+- **Safety rules (non-negotiable for a pouch against a PCB):**
+  - **Separator** between board and cell: a 0.5 mm printed plate in the case, or polyimide tape +
+    0.2 mm FR4/PET shim for caseless builds. The cell must never touch via edges, solder joints
+    or component leads.
+  - **No THT parts or sharp leads over the cell.** Trim the leads in the uncovered strip.
+  - The charger and boost dissipate ~1 W at full load. The NTC sits on the cell side of the
+    board so charging backs off if the stack gets warm.
+  - The cell must have a protection circuit (PCM). It gets the case's "swell room": 0.5–1 mm of
+    clearance above the cell's rated thickness.
 
-| Feature | How |
-|---|---|
-| User button | Printed flexure tab or captive plunger in the wall, over the side-actuated tact switch |
-| Mic port | ~1 mm hole → molded channel in the bottom half → under the PCB mic hole. Mesh/fabric patch inside optional (wind/dust). |
-| Charge + status LEDs | Small holes or light pipes (clear filament, or a 1.75 mm clear PLA stub) |
-| USB-C | Cutout sized for a cable overmold (~12.5 × 7 mm), not just the receptacle |
-| Power slide switch | Recessed slot so it doesn't get bumped on accidentally |
-| Wire exits | Half-round notches in **both** halves that form holes when closed, so wires are laid in rather than threaded. 2–3 notch sizes: battery 16–18 AWG pair, strip 4-wire, thin (ext mic / sensors). Unused notches are break-out tabs. |
+### Case family (parametric, 3D printed clamshell)
+One parametric model (OpenSCAD or build123d, `hardware/controller-board/case/`), driven by the
+KiCad outline and a feature-position JSON. Variants are parameter sets:
 
-### Inside
-- Zip-tie anchors / a comb just inside the wire notches: strain relief so a yank pulls on the
-  case, not on the terminal or solder pads.
-- Open the case: the push-in terminal levers, battery JST-PH, pads, BOOT/RESET and jumpers are
-  all reachable.
-- Closure: 2 × M2 self-tapping screws into printed bosses (survives repeated opening better
-  than snap-fits). The PCB has 2 matching holes near the far end.
-- External mounting: zip-tie slots / strap loops on the bottom half; optional belt-clip or
-  magnet pocket variant.
+| Variant | Contents | Approx. outer size |
+|---|---|---|
+| **External battery** | Board only; battery and strip wires both exit the seam | ~32 × 60 × 8 mm |
+| **Slim cell** | Board + 603050 (~1000 mAh) | ~32 × 60 × 14 mm |
+| **Thick cell** | Board + 103050 or 2 × 603050 (~2000 mAh) | ~32 × 60 × 18 mm |
+| **Terminal** (modifier, any of the above) | Adds a raised head at the business end for the lever terminal, with lever access through the lid | +~10 mm at the head only |
 
-### Build method
-- **Parametric OpenSCAD (or build123d)** in `hardware/controller-board/case/`, driven by the
-  KiCad board outline and connector coordinates (exported STEP + a small JSON of feature
-  positions). If the PCB moves, the cutouts follow.
-- Parameters: battery bay (none / pouch L×W×H / external), notch set, mounting variant, wall
-  thickness.
-- Prints without supports: both halves print open-side-up, and the mic channel is a groove
-  closed off by the PCB.
-- Later fab methods (SLS/MJF nylon, injection mold) use the same geometry with draft added.
-- Wands and other embedded builds skip the case and mount the bare board. All interfaces on
-  one end makes that easy too: the end faces the wand's handle cap.
-
----
-
-## 10. Layout (single-sided, ~30 × 62 mm, 4 layers)
-
-From the business end back:
-
-1. **Edge row (~8 mm):** button · mic (+ PCB port hole) · charge/status LEDs · **USB-C** (center)
-   · slide switch.
-2. **Wiring zone (~14 mm):** O1 push-in terminal (vertical entry), O2–O4 pad rows, battery pads
-   with strain-relief holes, ext-mic pads, external switch pads. Everything that takes a wire is
-   right behind the end face, so wires reach the seam notches in a few mm.
-3. **Power zone (~14 mm):** charger + inductor (on the side away from the mic), boost + inductor,
-   load switch, polyfuse, JST-PH (facing inward toward the battery bay). This keeps the
-   high-current loop short: battery pads → charger → boost → output pads.
-4. **Logic zone (~10 mm):** AHCT245, MAX17048, LSM6DS3TR-C (near the middle), LDO, Qwiic,
-   touch pads, BOOT/RESET, jumpers.
-5. **ESP32-S3-MINI-1 (~20 mm)** with the **antenna overhanging the far edge**; 2 × M2 holes
-   beside it.
+All variants share:
+- **Business end face**, all usable with the case closed:
+  - user button (printed flexure)
+  - mic port (channel under the uncovered strip)
+  - charge/status LED light holes
+  - USB-C (sized for a cable overmold)
+  - recessed power slide switch
+  - **wire notches at the seam**: half-round notches in both halves, so wires are laid in
+    rather than threaded. Battery pair, strip 4-wire and a thin one; break-out tabs for unused
+    ones.
+- **Wire labels** embossed beside each notch (G V C D, + −). The silkscreen is hidden once the
+  board is in the case.
+- **Inside:** zip-tie strain-relief comb behind the notches; 0.5 mm battery separator plate;
+  2 × M2 self-tapping screws.
+- **Outside:** zip-tie slots / strap loops; optional magnet or belt-clip pocket.
+- Prints support-free.
 
 ---
 
-## 11. BOM estimate (qty ~10, LCSC-ish unit prices, rough)
+## 10. Layout (single-sided, ~28 × 56 mm, 0.8 mm 4-layer)
+
+From the business end:
+
+1. **Edge row:** button · mic + port hole · LEDs · **mid-mount USB-C** · slide switch
+   (uncovered strip).
+2. **Wiring row:** output through-hole row (G V C1 D1 … C4 D4), battery pads + strain-relief
+   holes, small pads (uncovered strip / just past it).
+3. **Power zone:** reverse-polarity FET, charger + inductor (away from the mic), boost +
+   inductor, load switch, polyfuse, NTC.
+4. **Logic zone:** AHCT245 + ESD, gauge, IMU, LDO, BOOT/RESET, jumpers.
+5. **ESP32-S3-MINI-1** with the antenna overhanging the far edge (the battery stops short of it
+   too); 2 × M2 holes.
+
+---
+
+## 11. BOM estimate (qty ~10, rough)
 
 | Part | Est. $ |
 |---|---|
 | ESP32-S3-MINI-1-N8 | 3.00 |
-| BQ25606 + inductor | 1.40 |
-| TPS61022 + inductor (TPS61088 ≈ +$0.70) | 1.05 |
+| BQ25606 | 1.20 |
+| TPS61022 | 0.80 |
+| 2 inductors, 4 × 4 × 2 mm ≥ 6 A (generic 5 × 5 × 3 mm ≈ $0.50 for both) | 1.60 |
 | MAX17048 | 1.00 |
 | LSM6DS3TR-C | 1.20 |
 | ICS-43434 | 1.20 |
-| Push-in terminal 4P (WAGO; generic ≈ $0.40) | 1.50 |
-| SN74AHCT245, LDO, 3 FETs, polyfuse | 0.50 |
-| USB-C, ESD, TVS | 0.30 |
-| Slide switch, 3 tact switches, JST-PH, JST-SH | 0.45 |
+| SN74AHCT245, LDO, 4 FETs, polyfuse, output ESD array | 0.70 |
+| Mid-mount USB-C, USB ESD, TVS | 0.35 |
+| Slide switch, 3 tact switches | 0.35 |
 | ~60 passives, NTC, LEDs | 0.60 |
-| 4-layer PCB, ~30 × 62 mm | 0.80 |
-| **Parts total** | **≈ $13** |
-| Case (PLA) | ≈ $0.30 |
+| 0.8 mm 4-layer PCB, ~28 × 56 mm | 0.80 |
+| **Parts total** | **≈ $12.80** |
+| Optional lever terminal (WAGO; generic ≈ $0.40) | +1.50 |
+| Optional JST-PH | +0.10 |
 
-**What actually inflates the cost: assembly fees, not parts.** JLC charges a per-order setup
-fee, a stencil, and about **$3 per unique "extended" part per order**. This board has roughly
-10 of those (module, charger, boost, gauge, IMU, mic, shifter, USB-C, terminal, switches), so
-call it **~$40 fixed per order**:
-
-| Order size | All-in per board (est.) |
-|---|---|
-| 5 | ~$21 |
-| 10 | ~$17 |
-| 30 | ~$14–15 |
-
-Under $20 from about 10 boards up. (JLC's fee structure changes; re-check when ordering.)
-
-If cost needs to drop:
-
-- Generic terminal (−$1.10).
-- ADC divider instead of the fuel gauge (−$1 and one fee).
-- LIS2DH12 instead of the LSM6DS3TR-C (−$0.80).
-- Swap parts for JLC "basic" equivalents where possible (no fee).
+JLC assembly: ~$40 fixed per order (setup + ~$3 per unique extended part, ~10 of them), so
+**~$17/board at 10, ~$14 at 30.** Under $20 from ~10 boards up.
 
 ---
 
 ## 12. Firmware work this board implies (ChromaBay `esp32/`)
 
-Today the firmware has no battery, power-limit, mic or IMU code.
-
-1. **Power limiting** (incl. per-LED idle current), lowered on weak USB / low battery.
-2. **Battery telemetry:** MAX17048 % + voltage, STAT/PG, shown on the app's Devices tab.
-3. **Low battery:** dim at ~15%, cut LED_EN at ~3.3 V, deep sleep before empty.
-4. **LED_EN / /OE sequencing.**
-5. **Clock+data outputs:** the current APA102/SK9822 driver (`led_wrapper.h`) bit-bangs on any
-   pins, so all 4 outputs work today, but it blocks the CPU while sending. Upgrade: 2 outputs on
-   the S3's hardware SPI hosts; all 4 in hardware needs an LCD-peripheral parallel driver.
-6. **Mic:** I2S RX (L, R or stereo) → level/FFT bands as pattern-engine inputs (needs new input
-   nodes, faked in the WASM preview).
-7. **IMU:** accel/gyro as pattern inputs, taps as button events, wake-on-motion.
-8. **User button:** implement BUTTON_CONTROL_PLAN.md on the dedicated button GPIO.
-9. **Board profile:** "ChromaBay Controller" preset (pins, outputs, sensors).
-
----
+1. Power limiting (incl. idle current), lowered on weak USB / low battery.
+2. Battery telemetry (gauge %, STAT/PG) in the app.
+3. Low-battery dim → LED cutoff → deep sleep.
+4. LED_EN / /OE sequencing.
+5. Clock+data: the current bit-bang driver (`led_wrapper.h`) runs all 4 outputs today. Later:
+   2 on hardware SPI, or an LCD-parallel driver for all 4.
+6. Mic (I2S L/R/stereo) and IMU as pattern-engine inputs; taps as button events;
+   wake-on-motion.
+7. User button per BUTTON_CONTROL_PLAN.md.
+8. Board profile preset; **plus a published WLED config** for this board.
 
 ## 13. Pin map (draft, ESP32-S3-MINI-1)
 
-| Function | GPIO | Notes |
-|---|---|---|
-| USB D− / D+ | 19 / 20 | Native USB |
-| BOOT (internal, recovery) | 0 | Strapping |
-| CC1 / CC2 sense | 1 / 2 | ADC1 |
-| Touch/spare T1–T4 | 4, 5, 6, 7 | Touch + ADC1 |
-| I2C SDA / SCL | 8 / 9 | Gauge, IMU, Qwiic |
-| IMU INT1 (wake) / INT2 | 10 / 13 | RTC-capable |
-| Charger STAT / /PG | 11 / 12 | Open-drain |
-| Gauge ALRT | 14 | |
-| O1 CLK / DAT | 15 / 16 | → AHCT245 |
-| O2 CLK / DAT | 17 / 18 | |
-| O3 CLK / DAT | 21 / 33 | |
-| O4 CLK / DAT | 34 / 35 | |
-| Shifter /OE | 36 | Pull-up = off |
-| LED_EN | 37 | Pull-down = off |
-| I2S BCLK / WS / SD (onboard + ext mic) | 38 / 39 / 40 | |
-| Status LED | 41 | |
-| User button | 42 | Pull-up, active low |
-| Spare | 47, 48 | |
+| Function | GPIO |
+|---|---|
+| USB D− / D+ | 19 / 20 |
+| BOOT (internal) | 0 |
+| CC1 / CC2 sense | 1 / 2 |
+| Touch/spare T1–T4 | 4, 5, 6, 7 |
+| I2C SDA / SCL (gauge, IMU, pads) | 8 / 9 |
+| IMU INT1 (wake) / INT2 | 10 / 13 |
+| Charger STAT / /PG | 11 / 12 |
+| Gauge ALRT | 14 |
+| C1/D1, C2/D2, C3/D3, C4/D4 | 15/16, 17/18, 21/33, 34/35 |
+| Shifter /OE · LED_EN | 36 · 37 |
+| I2S BCLK / WS / SD | 38 / 39 / 40 |
+| Status LED · User button | 41 · 42 |
+| Spare | 47, 48 |
 
-Avoid strapping pins 3, 45, 46. Verify against the MINI-1 variant chosen (33–37 must be free).
+Avoid strapping pins 3, 45, 46. Verify against the chosen MINI-1 variant.
 
 ---
 
 ## 14. Open questions / next steps
 
-1. BQ25606 `IBATFET_OCP`; WEBENCH TPS61022 vs TPS61088.
-2. JLC stock + basic/extended status: ICS-43434, LSM6DS3TR-C, BQ25606, boost, push-in terminal.
-3. Internal battery bay: which pouch size should the default case target?
-4. KiCad schematic → layout → export outline/feature JSON → parametric case → PCBA order (~10).
+1. **Infinity Scarab fit:** need its internal cavity dimensions (L × W × H) and where the
+   USB/switch can poke out. If it's ≥ 28 × 56 × 3.6 mm (slim, no battery), it fits as-is. A
+   smaller cavity means cutting optional parts in the order of least value.
+2. BQ25606 `IBATFET_OCP`; WEBENCH TPS61022 vs TPS61088 with 4 × 4 × 2 mm inductors.
+3. JLC stock / basic-vs-extended: ICS-43434, LSM6DS3TR-C, BQ25606, boost, mid-mount USB-C,
+   low-profile inductors.
+4. KiCad schematic → layout → outline/feature JSON → parametric case → PCBA order (~10).
