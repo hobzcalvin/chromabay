@@ -18,7 +18,7 @@ KICAD_SYM = "/usr/share/kicad/symbols"
 LIBS = {
     "lcsc": os.path.join(BOARD, "lib", "lcsc.kicad_sym"),
     **{n: f"{KICAD_SYM}/{n}.kicad_sym" for n in
-       ["Device", "Jumper", "Connector", "Connector_Generic", "Mechanical", "power"]},
+       ["Device", "Jumper", "Connector", "Connector_Generic", "Connector_Generic_MountingPin", "Mechanical", "power"]},
 }
 NS = uuid.UUID("6f1d3c2a-5b7e-4c1a-9d2e-0c4b8a7f3e21")
 

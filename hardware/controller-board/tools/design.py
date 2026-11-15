@@ -16,11 +16,11 @@ C1206 = "lcsc:C1206"
 RES = {  # value -> LCSC
     "0R": "C17168", "33R": "C25105", "200R": "C25087", "680R": "C25130", "1k": "C11702",
     "1.5k": "C25867", "4.7k": "C25900", "5.1k": "C25905", "10k": "C25744", "33k": "C25779",
-    "68k": "C36871", "100k": "C25741", "150k": "C25755", "220k": "C25767", "22k": "C25768",
+    "68k": "C36871", "24k": "C25769", "100k": "C25741", "150k": "C25755", "220k": "C25767", "22k": "C25768",
 }
 CAP = {  # (value, size) -> LCSC
     ("100nF", "0402"): "C1525", ("1uF", "0402"): "C52923", ("2.2uF", "0402"): "C12530",
-    ("22nF", "0402"): "C1532", ("4.7nF", "0402"): "C1538", ("47pF", "0402"): "C1567",
+    ("22nF", "0402"): "C1532", ("10nF", "0402"): "C15195", ("4.7nF", "0402"): "C1538", ("47pF", "0402"): "C1567",
     ("1uF", "0603"): "C15849", ("4.7uF", "0603"): "C19666", ("10uF", "0603"): "C19702",
     ("10uF", "0805"): "C15850", ("22uF", "0805"): "C45783", ("100uF", "1206"): "C15008",
 }
@@ -96,7 +96,7 @@ part("JP2", "Jumper:SolderJumper_2_Open", "CHG+1.0A", "Jumper:SolderJumper-2_P1.
      None, {1: "CHG_ICHG", 2: "ICHG_J2"}, "charger")
 # Thermistor: REGN - 5.1k - TS - 33k - GND, NTC from TS to GND (onboard or pack's own via JP3).
 R("5.1k", "CHG_REGN", "CHG_TS", "charger", "TS divider (103AT-class NTC)")
-R("33k", "CHG_TS", "GND", "charger", "TS divider")
+R("24k", "CHG_TS", "GND", "charger", "TS divider: with 5.1k + NCP15XH103 -> charge window ~0.7..61 C")
 part("JP3", "Jumper:SolderJumper_3_Bridged12", "NTC SEL", "Jumper:SolderJumper-3_P1.3mm_Bridged12_RoundedPad1.0x1.5mm",
      None, {1: "NTC_ONBOARD", 2: "CHG_TS", 3: "NTC_EXT"}, "charger")
 part("TH1", "Device:Thermistor_NTC", "10k NTC", "lcsc:R0402", "C77131",
@@ -104,11 +104,12 @@ part("TH1", "Device:Thermistor_NTC", "10k NTC", "lcsc:R0402", "C77131",
 R("10k", "CHG_PG", "3V3", "charger", "PG pull-up")
 
 # ---------------------------------------------------------------- Battery input
-part("J3", "Connector_Generic:Conn_01x03", "BATTERY", "cb:BatteryPads", None,
+part("J3", "Connector_Generic:Conn_01x03", "BATTERY", "cb:BatteryPadsSmall", None,
      {1: "BAT_IN", 2: "GND", 3: "NTC_EXT"}, "battery",
-     note="big 16-18 AWG pads with strain-relief holes, + NTC pad")
-# (No JST-PH footprint: at 4-5 mm tall it breaks the slim build. Solder a JST-PH pigtail to
-# the battery pads for packs that come with one.)
+     note="wire pads for packs without a plug, + NTC pad")
+part("J4", "Connector_Generic_MountingPin:Conn_01x02_MountingPin", "JST-PH 2P",
+     "lcsc:CONN-SMD_P2.00_S2B-PH-SM4-TB-LF-SN", "C54582899", {1: "GND", 2: "BAT_IN", "MP": "GND"}, "battery",
+     note="swappable battery. CHECK POLARITY against your pack: silk shows + and -")
 # Reverse-polarity protection: P-FET, drain to the connector, source to the charger, gate to GND.
 part("Q1", "lcsc:AONR21321", "AONR21321", "lcsc:DFN-8_L3.0-W3.0-P0.65-BL", "C541711",
      {1: "BAT", 2: "BAT", 3: "BAT", 4: "Q1_G", 5: "BAT_IN", 6: "BAT_IN", 7: "BAT_IN", 8: "BAT_IN",
@@ -152,9 +153,9 @@ R("150k", "BST_FSW", "BST_SW", "boost", "RFREQ: ~1 MHz")
 C("22nF", "BST_SS", "GND", "boost", note="soft start ~5 ms")
 R("220k", "5V_BOOST", "BST_FB", "boost", "Vout = 1.204*(1+220/68) = 5.10 V")
 R("68k", "BST_FB", "GND", "boost")
-R("22k", "BST_COMP", "BST_COMP_RC", "boost", "compensation (verify)")
-C("4.7nF", "BST_COMP_RC", "GND", "boost", note="compensation (verify)")
-C("47pF", "BST_COMP", "GND", "boost", note="compensation (verify)")
+R("10k", "BST_COMP", "BST_COMP_RC", "boost", "R5 = pi*Vout*Rsense*fc*Co/((1-D)*Vref*Gea), fc=15kHz, Co~75uF eff -> 10.7k")
+C("10nF", "BST_COMP_RC", "GND", "boost", note="C5 = Ro*Co/(2*R5) -> 6.4..9.6 nF")
+C("47pF", "BST_COMP", "GND", "boost", note="C8 = Resr*Co/R5 ~ 40 pF")
 R("150k", "BST_ILIM", "GND", "boost", "peak switch limit 1.19e6/150k = 7.9 A")
 for _ in range(3):
     C("22uF", "5V_BOOST", "GND", "boost", "0805")
@@ -191,18 +192,21 @@ part("U9", *SRV, {1: "OUT_C1", 3: "OUT_D1", 4: "OUT_C2", 6: "OUT_D2", 2: "GND", 
      "shifter", note="output ESD")
 part("U10", *SRV, {1: "OUT_C3", 3: "OUT_D3", 4: "OUT_C4", 6: "OUT_D4", 2: "GND", 5: "5V_BOOST"},
      "shifter", note="output ESD")
-part("J2", "Connector_Generic:Conn_01x10", "LED OUT", "cb:OutputRow", None,
-     {1: "GND", 2: "VLED", **{3 + i: f"OUT_{n}" for i, n in enumerate(OUT)}}, "shifter",
-     note="G V C1 D1 at 3.5 mm (fits a 4-pole lever terminal), C2..D4 at 2.54 mm")
+part("J2", "Connector_Generic:Conn_01x04", "LED OUT 1", "cb:OutputTerminal", None,
+     {1: "GND", 2: "VLED", 3: "OUT_C1", 4: "OUT_D1"}, "shifter",
+     note="KF141R-2.54-4P lever terminal footprint (optional, LCSC C475126, hand-solder) or wires")
+part("J5", "Connector_Generic:Conn_01x08", "LED OUT 2-4", "cb:OutputPads", None,
+     {1: "GND", 2: "VLED", 3: "OUT_C2", 4: "OUT_D2", 5: "OUT_C3", 6: "OUT_D3", 7: "OUT_C4", 8: "OUT_D4"},
+     "shifter", note="wire pads; outputs 2-4 share this G/V pair")
 
 # ---------------------------------------------------------------- ESP32-S3
 GPIO = {  # module pin number -> net
     4: "BOOT", 5: "CC1_SENSE", 6: "CC2_SENSE", 7: "NC_IO3", 8: "T1", 9: "T2", 10: "T3", 11: "T4",
-    12: "SDA", 13: "SCL", 14: "IMU_INT1", 15: "IO11", 16: "CHG_PG", 17: "IMU_INT2",
+    12: "SDA", 13: "SCL", 14: "IMU_INT1", 15: "NC_IO11", 16: "CHG_PG", 17: "IMU_INT2",
     18: "GAUGE_ALRT", 19: "LS_C1", 20: "LS_D1", 21: "LS_C2", 22: "LS_D2", 23: "USB_DM",
     24: "USB_DP", 25: "LS_C3", 26: "NC_IO26", 27: "EXT_WS", 28: "LS_D3", 29: "LS_C4",
     30: "EXT_SD", 31: "LS_D4", 32: "SHIFT_OE", 33: "LED_EN", 34: "PDM_CLK", 35: "PDM_DATA",
-    36: "EXT_BCLK", 37: "STATUS_LED", 38: "USER_BTN", 39: "TXD0", 40: "RXD0", 41: "NC_IO45",
+    36: "EXT_BCLK", 37: "STATUS_LED", 38: "USER_BTN", 39: "NC_TXD0", 40: "NC_RXD0", 41: "NC_IO45",
     44: "NC_IO46", 45: "ESP_EN", 3: "3V3"}
 for gnd in [1, 2, 42, 43] + list(range(46, 61)) + ["GND"]:
     GPIO[gnd] = "GND"
@@ -212,18 +216,11 @@ C("10uF", "3V3", "GND", "mcu", "0603")
 C("100nF", "3V3", "GND", "mcu")
 R("10k", "ESP_EN", "3V3", "mcu")
 C("1uF", "ESP_EN", "GND", "mcu", note="EN delay")
-R("10k", "BOOT", "3V3", "mcu")
-# BOOT / RESET: tweezer pads instead of buttons (native USB flashing rarely needs BOOT; saves
-# ~60 mm2 on a board this small). Short the pads to trigger.
-part("JP8", "Jumper:SolderJumper_2_Open", "BOOT", "Jumper:SolderJumper-2_P1.3mm_Open_RoundedPad1.0x1.5mm",
-     None, {1: "BOOT", 2: "GND"}, "mcu", note="short with tweezers while resetting = download mode")
-part("JP9", "Jumper:SolderJumper_2_Open", "RESET", "Jumper:SolderJumper-2_P1.3mm_Open_RoundedPad1.0x1.5mm",
-     None, {1: "ESP_EN", 2: "GND"}, "mcu", note="short with tweezers = reset")
+# BOOT is a user pad (GPIO0; touch it to GND while switching on = download mode). No RESET: the
+# power switch is the reset. GPIO0 and the user button use the S3's internal pull-ups.
 part("SW2", "lcsc:K2-1114SA-A4SW-06", "USER", "lcsc:KEY-SMD_4P-L4.8-W4.6-P1.70-LS6.2", "C136662",
      {1: "USER_BTN", 2: "USER_BTN", 3: "GND", 4: "GND"}, "mcu", note="side-actuated, business end")
-R("10k", "USER_BTN", "3V3", "mcu")
-TP("TXD0", "TXD0", "mcu")
-TP("RXD0", "RXD0", "mcu")
+# (No UART pads: the S3's native USB serial/JTAG covers logging and recovery. TXD0/RXD0 left unconnected.)
 
 # ---------------------------------------------------------------- Indicators
 # (Dark builds: the status LED is firmware-controlled; the charge LED can be disabled by
@@ -255,7 +252,7 @@ C("100nF", "MIC_VDD", "GND", "sensors")
 
 # ---------------------------------------------------------------- User pads
 for name, net in [("3V3", "3V3"), ("GND", "GND"), ("SDA", "SDA"), ("SCL", "SCL"),
-                  ("T1", "T1"), ("T2", "T2"), ("T3", "T3"), ("T4", "T4"), ("IO11", "IO11"),
+                  ("T1", "T1"), ("T2", "T2"), ("T3", "T3"), ("T4", "T4"), ("BOOT", "BOOT"),
                   ("MIC_BCLK", "EXT_BCLK"), ("MIC_WS", "EXT_WS"), ("MIC_SD", "EXT_SD")]:
     TP(name, net, "pads")
 

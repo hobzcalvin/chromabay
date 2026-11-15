@@ -25,7 +25,7 @@ for _p in design.parts:
         for _pin in find(_u, "pin"):
             PIN_NAMES[(_p["symbol"], first(_pin, "number")[1])] = first(_pin, "name")[1]
 
-W, H = 32.0, 64.0          # board size, mm (business end at y = 0, antenna end at y = H)
+W, H = 36.0, 68.0          # board size, mm (business end at y = 0, antenna end at y = H)
 OX, OY = 100.0, 100.0      # board origin inside the KiCad page
 MM = pcbnew.FromMM
 
@@ -36,30 +36,27 @@ def P(x, y):
 
 # ref: (x, y, rotation_deg)   -- board coordinates
 ANCHORS = {
-    # business end (y = 0): button, LED, USB-C, power switch
-    # Switches sit on the long sides right at the business end so the end face stays free for
-    # USB-C, the LED/mic holes and the two wire notches.
-    "SW2": (2.4, 5.0, 270), "D1": (24.4, 1.7, 180), "J1": (16.0, 4.85, 180), "SW1": (28.6, 5.0, 90),
-    "MK1": (24.4, 7.2, 0),
-    # wiring row
-    "J2": (16.1, 12.2, 0),
-    # battery + level shifter
-    "J3": (5.8, 19.4, 0), "Q1": (13.2, 16.8, 0), "U7": (23.2, 21.4, 90),
-    "U9": (18.4, 15.6, 0), "U10": (27.4, 15.6, 0),
+    # business end (y = 0): user button, LED, USB-C, power switch -- all facing out the end
+    "SW2": (3.7, 2.7, 180), "D1": (9.5, 1.7, 180), "J1": (18.0, 4.85, 180), "SW1": (31.4, 3.4, 180),
+    "MK1": (9.5, 8.6, 0),           # port hole -> case channel -> end face, under the LED
+    # left side: swappable battery (JST-PH opening faces the left wall) + wire pads
+    "J4": (6.65, 17.5, 270), "J3": (1.6, 25.0, 270),
+    # right side: LED outputs; G V C1 D1 take an optional lever terminal facing the right wall
+    "J2": (31.4, 11.5, 0), "J5": (34.6, 27.0, 0),
     # power stage
-    "L2": (3.6, 31.4, 90), "U3": (9.6, 30.8, 0), "Q2": (14.2, 25.6, 0), "Q3": (17.6, 26.2, 0),
-    "U2": (22.8, 31.4, 0), "L1": (28.4, 31.6, 90),
+    "U2": (16.0, 14.5, 0), "L1": (16.0, 21.5, 0), "Q1": (10.0, 25.5, 0),
+    "U3": (9.0, 34.0, 0), "L2": (3.0, 35.0, 90), "Q2": (16.0, 30.0, 0), "Q3": (19.5, 32.5, 0),
     # logic
-    "U6": (9.6, 39.4, 0), "U5": (16.0, 38.8, 0), "U4": (22.6, 38.8, 0),
-    # ESP32-S3 module, antenna at the far end
-    "U1": (16.0, 51.05, 180),
+    "U7": (13.5, 43.0, 90), "U6": (3.6, 44.5, 0), "U4": (21.5, 38.5, 0), "U5": (23.0, 46.0, 0),
+    # ESP32-S3 module: the antenna overhangs the far edge (Espressif's preferred placement)
+    "U1": (18.0, 60.1, 180),
 }
 # User pads: two columns in the strip right of the module.
-TP_ORDER = ["3V3", "GND", "SDA", "SCL", "T1", "T2", "T3", "T4", "IO11", "MIC_BCLK", "MIC_WS",
+TP_ORDER = ["3V3", "GND", "SDA", "SCL", "T1", "T2", "T3", "T4", "BOOT", "MIC_BCLK", "MIC_WS",
             "MIC_SD", "EXTSW_A", "EXTSW_B", "TXD0", "RXD0"]
 
-KEEPOUT_ANTENNA = (8.0, 57.2, 24.0, 64.0)   # x0, y0, x1, y1: no copper under the antenna
-NO_PLACE = [KEEPOUT_ANTENNA, (0, 0, W, 0.4)]
+KEEPOUT_ANTENNA = None   # antenna overhangs the board edge
+NO_PLACE = [(0, 0, W, 0.4)]
 
 
 def fp_lib_path(nick):
@@ -94,7 +91,7 @@ def main():
     board = pcbnew.NewBoard(os.path.join(BOARD_DIR, "chromabay-controller.kicad_pcb"))
     board.SetCopperLayerCount(4)
     ds = board.GetDesignSettings()
-    ds.SetBoardThickness(MM(0.8))
+    ds.SetBoardThickness(MM(1.6))
     ds.m_TrackMinWidth = MM(0.127)
     ds.m_MinClearance = MM(0.1)
     ds.m_ViasMinSize = MM(0.45)
@@ -221,24 +218,22 @@ def main():
         fp = load(by_ref[ref])
         put(fp, x, y, rot)
         placed.append(bbox_mm(fp, 0.15))
-    tps = [p for p in design.parts if p["ref"].startswith("TP")]
+    # User pads: one column each side of the module, labels toward the module.
+    tps = [p for p in design.parts if p["ref"].startswith("TP") and p["value"] not in ("TXD0", "RXD0")]
     tps.sort(key=lambda p: TP_ORDER.index(p["value"]))
     for i, p in enumerate(tps):
         fp = load(p)
-        col, row = i % 2, i // 2
-        put(fp, 26.5 + col * 2.4, 43.4 + row * 2.15, 0)
+        left = i < 7
+        row = i if left else i - 7
+        x, y = (1.3 if left else W - 1.3), H - 14.6 + row * 2.0
+        put(fp, x, y, 0)
         txt = pcbnew.PCB_TEXT(board)
         txt.SetText(p["value"].replace("MIC_", "M").replace("EXTSW_", "SW"))
         txt.SetLayer(pcbnew.F_SilkS)
-        txt.SetTextSize(pcbnew.VECTOR2I(MM(0.55), MM(0.55)))
+        txt.SetTextSize(pcbnew.VECTOR2I(MM(0.6), MM(0.6)))
         txt.SetTextThickness(MM(0.1))
-        tx = 24.6 if col == 0 else 31.0
-        txt.SetHorizJustify(pcbnew.GR_TEXT_H_ALIGN_RIGHT if col == 0 else pcbnew.GR_TEXT_H_ALIGN_LEFT)
-        txt.SetPosition(P(tx + 0.4, 43.4 + row * 2.15))
-        # labels would fall off the board on the right column; put them on the back instead
-        if col == 1:
-            txt.SetLayer(pcbnew.B_SilkS); txt.SetMirrored(True)
-            txt.SetPosition(P(29.7, 43.4 + row * 2.15)); txt.SetHorizJustify(pcbnew.GR_TEXT_H_ALIGN_CENTER)
+        txt.SetHorizJustify(pcbnew.GR_TEXT_H_ALIGN_LEFT if left else pcbnew.GR_TEXT_H_ALIGN_RIGHT)
+        txt.SetPosition(P(x + 1.0 if left else x - 1.0, y))
         board.Add(txt)
         placed.append(bbox_mm(fp, 0.1))
 
@@ -262,7 +257,7 @@ def main():
             if netname in ("GND", "3V3", "VSYS", "5V_BOOST") and best:
                 continue
             for ref in ANCHORS:
-                if ref == p["ref"] or ref.startswith(("H", "J4")):
+                if ref == p["ref"]:
                     continue
                 pp = pad_pos(ref, netname)
                 if pp and netname not in ("GND",):
@@ -281,7 +276,7 @@ def main():
         fp = load(p)
         tx, ty = target(p)
         done = False
-        for radius in [i * 0.25 for i in range(0, 120)]:
+        for radius in [i * 0.3 for i in range(0, 150)]:
             steps = max(1, int(2 * math.pi * radius / 0.5))
             for k in range(steps):
                 a = 2 * math.pi * k / steps
@@ -323,20 +318,6 @@ def main():
     zone(pcbnew.In1_Cu, "GND", (0, 0, W, H))
     zone(pcbnew.B_Cu, "GND", (0, 0, W, H))
     zone(pcbnew.F_Cu, "GND", (0, 0, W, H))
-    ko = pcbnew.ZONE(board)
-    ko.SetIsRuleArea(True)
-    ko.SetDoNotAllowTracks(True); ko.SetDoNotAllowVias(True); ko.SetDoNotAllowCopperPour(True)
-    ko.SetDoNotAllowPads(False); ko.SetDoNotAllowFootprints(False)
-    ls = pcbnew.LSET()
-    for l in (pcbnew.F_Cu, pcbnew.In1_Cu, pcbnew.In2_Cu, pcbnew.B_Cu):
-        ls.AddLayer(l)
-    ko.SetLayerSet(ls)
-    ol = ko.Outline(); ol.NewOutline()
-    x0, y0, x1, y1 = KEEPOUT_ANTENNA
-    for x, y in [(x0 - 1.5, y0), (x1 + 1.5, y0), (x1 + 1.5, H + 1), (x0 - 1.5, H + 1)]:
-        ol.Append(MM(OX + x), MM(OY + y))
-    ko.SetZoneName("antenna keepout")
-    board.Add(ko)
 
     # ---- silkscreen: name, rev, business-end labels
     def silk(text, x, y, size=0.8, layer=pcbnew.F_SilkS, mirror=False):
@@ -344,8 +325,8 @@ def main():
         t.SetText(text); t.SetLayer(layer); t.SetMirrored(mirror)
         t.SetTextSize(pcbnew.VECTOR2I(MM(size), MM(size))); t.SetTextThickness(MM(size * 0.15))
         t.SetPosition(P(x, y)); board.Add(t)
-    silk("ChromaBay Controller rev A", 16, 32.5, 1.0, pcbnew.B_SilkS, True)
-    silk("battery side - keep separator between board and cell", 16, 34.5, 0.6, pcbnew.B_SilkS, True)
+    silk("ChromaBay Controller rev A", 18, 34.0, 1.0, pcbnew.B_SilkS, True)
+    silk("battery side - keep separator between board and cell", 18, 36.0, 0.6, pcbnew.B_SilkS, True)
 
     board.BuildConnectivity()
     out = os.path.join(BOARD_DIR, "chromabay-controller.kicad_pcb")

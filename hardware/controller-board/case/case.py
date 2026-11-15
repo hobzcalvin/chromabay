@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """Parametric 3D-printable clamshell case for the ChromaBay controller (CadQuery).
 
-    python3 case/case.py [variant ...]      variants: external, slim, thick   (default: all)
+    python3 case/case.py [variant ...]
 
-Writes case/out/<variant>-bottom.step/.stl and <variant>-lid.step/.stl, plus a battery
-placeholder. Coordinates match the PCB: x across (0..BOARD_W), y along (0 = business end),
-z up from the board's bottom face. (Exported models use y = -y_pcb so they are right-handed.) Board features the case must line up with are the
-constants in the FEATURES block - keep them in sync with tools/gen_pcb.py.
+Variants: external, slim, thick (battery bay under the board), each also as "<name>-terminal"
+with a raised lid section for the optional lever terminal on LED output 1.
+
+Writes case/out/<variant>-bottom.stl, <variant>-lid.stl and (with a cell) <variant>-cell.stl.
+Built in PCB coordinates (x across, y along with 0 = business end, z up from the board's bottom
+face) and mirrored to a right-handed frame on export (y_model = -y_pcb). The FEATURES block must
+match tools/gen_pcb.py.
 """
 import os
 import sys
@@ -16,131 +19,121 @@ import cadquery as cq
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "out")
 
 # ---------------------------------------------------------------- board + general
-BOARD_W, BOARD_L, PCB_T = 32.0, 64.0, 0.8
-COMP_H = 3.3            # tallest part above the PCB (USB-C 3.2 mm)
+BOARD_W, BOARD_L, PCB_T = 36.0, 68.0, 1.6
+ANT_OVERHANG = 5.2      # ESP32-S3-MINI-1 antenna hangs past the board end
+COMP_H = 5.6            # tallest part above the PCB without the terminal (JST-PH 5.5 mm)
+TERM_H = 12.9           # KF141R lever terminal
 WALL, FLOOR, ROOF = 1.6, 1.2, 1.2
 GAP = 0.3               # board-to-wall clearance
-LID_CLEAR = 0.5         # above the tallest part
+LID_CLEAR = 0.4
 CORNER_R = 2.5
+CAV_L = BOARD_L + ANT_OVERHANG
 
-VARIANTS = {            # battery bay height under the PCB (0 = no internal cell)
+VARIANTS = {            # battery bay height under the PCB
     "external": dict(bay=1.0, cell=None),
-    "slim": dict(bay=6.6, cell=(30.0, 45.0, 6.0)),     # 603045 pouch, ~900 mAh
-    "thick": dict(bay=10.6, cell=(30.0, 45.0, 10.0)),  # 103045 pouch, ~1500 mAh
+    "slim": dict(bay=6.6, cell=(34.0, 50.0, 6.0)),     # 603450 pouch, ~1100-1200 mAh
+    "thick": dict(bay=10.6, cell=(34.0, 50.0, 10.0)),  # 103450 pouch, ~2000 mAh
 }
-CELL_Y0 = 10.0          # cell starts here (business-end strip stays clear for the mic channel)
+CELL_Y0 = 10.0          # the business-end strip under the board stays solid (mic channel)
 
 # ---------------------------------------------------------------- FEATURES (from gen_pcb.py)
-USB_X, USB_Z = 16.0, PCB_T + 1.6            # receptacle centre
-USB_CUT = (9.6, 3.8)                        # plug shell 8.4 x 2.6 + clearance
-LED_X, LED_Z = 24.4, PCB_T + 0.6            # side-view LED
-MIC_X, MIC_Y = 24.4, 7.6                    # bottom-port mic (port hole through the PCB)
-BTN_Y, BTN_Z = 5.0, PCB_T + 0.8             # user button, left long side
-SW_Y, SW_Z = 5.0, PCB_T + 0.75              # power slide switch, right long side
-NOTCHES = [  # (x_centre, width, depth into the lid, label) at the seam on the end face
-    (7.2, 4.6, 2.4, "BAT + O1"),
-    (28.0, 4.6, 2.4, "O2-O4"),
+TOP = PCB_T             # PCB top surface z
+END = [  # end-face cutouts: (name, x_centre, z_centre, width, height, corner radius)
+    ("button", 3.7, TOP + 0.9, 3.6, 2.2, 0.6),
+    ("led", 9.5, TOP + 0.55, 1.8, 1.6, 0.6),
+    ("usb", 18.0, TOP + 1.6, 9.6, 3.8, 1.2),
+    ("switch", 31.4, TOP + 0.75, 5.2, 1.9, 0.4),
 ]
+MIC_X, MIC_Y = 9.5, 8.6            # bottom-port mic -> channel under the board -> end face
+SIDE_NOTCHES = [  # (side, y_centre, width, label): U-notches at the seam, laid-in wires
+    ("left", 17.5, 4.4, "BAT"),       # JST-PH battery lead
+    ("right", 15.3, 6.0, "OUT1"),     # lever terminal / output 1 wires
+    ("right", 35.9, 5.0, "OUT2-4"),   # output 2-4 pads
+]
+TERMINAL_BOX = (21.4, 8.3, 36.0, 22.4)   # x0, y0, x1, y1 of the lever terminal body
 
 
-def outer(bay):
+def build(name, bay, cell, terminal=False):
     z0 = -(bay + FLOOR)
-    z1 = PCB_T + COMP_H + LID_CLEAR + ROOF
-    return z0, z1
-
-
-def shell_box(bay):
-    z0, z1 = outer(bay)
-    w, l = BOARD_W + 2 * (GAP + WALL), BOARD_L + 2 * (GAP + WALL)
-    return (cq.Workplane("XY").box(w, l, z1 - z0, centered=False)
-            .translate((-(GAP + WALL), -(GAP + WALL), z0))
-            .edges("|Z").fillet(CORNER_R)), z0, z1
-
-
-def cavity(z0, z1):
-    return (cq.Workplane("XY").box(BOARD_W + 2 * GAP, BOARD_L + 2 * GAP, z1 - z0, centered=False)
-            .translate((-GAP, -GAP, z0)).edges("|Z").fillet(max(0.5, CORNER_R - WALL)))
-
-
-def build(name, bay, cell):
-    body, z0, z1 = shell_box(bay)
-    seam = PCB_T                                      # split at the PCB top surface
-    # Inner cavity: under-board bay + board + component space
-    body = body.cut(cavity(z0 + FLOOR, z1 - ROOF))
-    # Ledge the PCB rests on (1.2 mm wide rim around the bay), only when there is a bay below
-    rim = cavity(-0.0001 - 0.6, 0).cut(
-        cq.Workplane("XY").box(BOARD_W - 2.4, BOARD_L - 2.4, 1, centered=False).translate((1.2, 1.2, -0.7)))
+    z1 = TOP + COMP_H + LID_CLEAR + ROOF
+    W, L = BOARD_W + 2 * (GAP + WALL), CAV_L + 2 * (GAP + WALL)
+    body = (cq.Workplane("XY").box(W, L, z1 - z0, centered=False)
+            .translate((-(GAP + WALL), -(GAP + WALL), z0)).edges("|Z").fillet(CORNER_R))
+    if terminal:   # raised section over the lever terminal
+        tx0, ty0, tx1, ty1 = TERMINAL_BOX
+        hump = (cq.Workplane("XY").box(tx1 - tx0 + 2 * WALL + 0.6, ty1 - ty0 + 2 * WALL + 0.6,
+                                       TERM_H + LID_CLEAR + ROOF, centered=False)
+                .translate((tx0 - WALL - 0.3, ty0 - WALL - 0.3, TOP)).edges("|Z").fillet(1.5))
+        body = body.union(hump)
+        body = body.cut(cq.Workplane("XY").box(tx1 - tx0 + 0.6, ty1 - ty0 + 0.6, TERM_H + LID_CLEAR,
+                                               centered=False).translate((tx0 - 0.3, ty0 - 0.3, TOP)))
+    cav = (cq.Workplane("XY").box(BOARD_W + 2 * GAP, CAV_L + 2 * GAP, (z1 - ROOF) - (z0 + FLOOR),
+                                  centered=False).translate((-GAP, -GAP, z0 + FLOOR))
+           .edges("|Z").fillet(0.8))
+    body = body.cut(cav)
+    # ledge the PCB sits on (1.2 mm rim), and a shelf under the antenna overhang
+    rim = (cq.Workplane("XY").box(BOARD_W + 2 * GAP, BOARD_L + 2 * GAP, bay, centered=False)
+           .translate((-GAP, -GAP, -bay))
+           .cut(cq.Workplane("XY").box(BOARD_W - 2.4, BOARD_L - 2.4, bay + 1, centered=False)
+                .translate((1.2, 1.2, -bay - 0.5))))
     body = body.union(rim)
-    # Business-strip block under the board with the mic channel (keeps the cell out of y < CELL_Y0)
-    if bay > 1.5:
-        block = (cq.Workplane("XY").box(BOARD_W + 2 * GAP, CELL_Y0 - 0.5 + GAP, bay, centered=False)
-                 .translate((-GAP, -GAP, -bay)))
-        body = body.union(block)
-    # Mic acoustic channel: end face -> under the mic port, 1.2 x 1.0 mm, just under the PCB
-    chan = cq.Workplane("XY").box(1.2, MIC_Y + GAP + WALL + 0.6, 1.0, centered=False).translate(
-        (MIC_X - 0.6, -(GAP + WALL) - 0.1, -1.0))
-    body = body.cut(chan)
-    # Battery-wire pass-through from the bay to the top side (left wall, beside the battery pads)
-    if bay > 1.5:
-        body = body.cut(cq.Workplane("XY").box(1.6, 6.0, bay + 1.0, centered=False)
-                        .translate((-GAP - 0.4, 14.0, -bay)))
-
-    # ---- end face (y < 0) cutouts
+    # business-end strip under the board stays solid; the mic channel is cut through it
+    body = body.union(cq.Workplane("XY").box(BOARD_W + 2 * GAP, CELL_Y0 + GAP - 0.5, bay,
+                                             centered=False).translate((-GAP, -GAP, -bay)))
+    body = body.cut(cq.Workplane("XY").box(1.4, MIC_Y + GAP + WALL + 0.7, 1.0, centered=False)
+                    .translate((MIC_X - 0.7, -(GAP + WALL) - 0.1, -1.0)))
+    # end-face cutouts (business end): button, LED window, USB-C, power switch
     ey = -(GAP + WALL) - 0.5
-    usb = cq.Workplane("XZ").center(USB_X, USB_Z).rect(*USB_CUT).extrude(-3).translate((0, ey, 0))
-    usb = usb.edges("|Y").fillet(1.2)
-    body = body.cut(usb)
-    body = body.cut(cq.Workplane("XZ").center(LED_X, LED_Z + 0.4).circle(0.9).extrude(-3).translate((0, ey, 0)))
-    for x, w, d, _ in NOTCHES:   # U-notches open toward the seam, split between both halves
-        n = cq.Workplane("XZ").center(x, seam).rect(w, 2 * d).extrude(-3).translate((0, ey, 0))
-        body = body.cut(n.edges("|Y").fillet(min(w, 2 * d) / 2 - 0.01))
-    # ---- long sides near the business end: button (left) + power switch (right)
-    sx = -(GAP + WALL) - 0.5
-    body = body.cut(cq.Workplane("YZ").center(BTN_Y, BTN_Z).rect(3.6, 2.0).extrude(3).translate((sx, 0, 0)))
-    body = body.cut(cq.Workplane("YZ").center(SW_Y, SW_Z).rect(5.0, 1.8).extrude(-3)
-                    .translate((BOARD_W + GAP + WALL + 0.5, 0, 0)))
-    # ---- strain-relief comb posts just inside the notches (zip-tie anchors), on the bottom half
-    for x, w, d, _ in NOTCHES:
-        for dx in (-w / 2 - 1.2, w / 2 + 1.2):
-            body = body.union(cq.Workplane("XY").box(1.0, 1.0, 1.6, centered=True)
-                              .translate((x + dx, 1.4, seam + 0.8)))
-    # ---- two M2 screw bosses at the antenna end corners (outside the antenna keep-out)
-    for bx in (2.6, BOARD_W - 2.6):
-        boss = cq.Workplane("XY").circle(2.0).extrude(z1 - ROOF - seam).translate((bx, BOARD_L - 2.6, seam))
-        body = body.union(boss)
-        body = body.cut(cq.Workplane("XY").circle(0.8).extrude(z1 - z0 + 2).translate((bx, BOARD_L - 2.6, z0 - 1)))
+    for _, x, z, w, h, r in END:
+        c = cq.Workplane("XZ").center(x, z).rect(w, h).extrude(-3).translate((0, ey, 0))
+        body = body.cut(c.edges("|Y").fillet(r) if r else c)
+    # side U-notches at the seam for wires (laid in, not threaded)
+    for side, y, w, _ in SIDE_NOTCHES:
+        xw = -(GAP + WALL) - 0.5 if side == "left" else BOARD_W + GAP + WALL + 0.5
+        n = cq.Workplane("YZ").center(y, TOP + 0.6).rect(w, 4.4).extrude(3 if side == "left" else -3)
+        body = body.cut(n.edges("|X").fillet(min(w, 4.4) / 2 - 0.01).translate((xw, 0, 0)))
+    # battery lead pass-through from the bay up to the JST-PH (left wall, next to the plug)
+    if bay > 1.5:
+        body = body.cut(cq.Workplane("XY").box(1.4, 5.0, bay + 1.0, centered=False)
+                        .translate((-GAP - 0.3, 20.0, -bay)))
+    # zip-tie / strain-relief posts inside each side notch (bottom half, below the seam)
+    for side, y, w, _ in SIDE_NOTCHES:
+        x = 0.9 if side == "left" else BOARD_W - 0.9
+        for dy in (-w / 2 - 1.3, w / 2 + 1.3):
+            body = body.union(cq.Workplane("XY").box(1.0, 1.0, 1.4).translate((x, y + dy, TOP + 0.7)))
+    # two M2 screw bosses past the antenna end
+    for bx in (2.4, BOARD_W - 2.4):
+        by = CAV_L - 2.4
+        body = body.union(cq.Workplane("XY").circle(1.9).extrude(z1 - ROOF - z0 - FLOOR)
+                          .translate((bx, by, z0 + FLOOR)))
+        body = body.cut(cq.Workplane("XY").circle(0.8).extrude(z1 - z0 + 2).translate((bx, by, z0 - 1)))
 
-    # ---- split into bottom (z < seam) and lid (z > seam)
-    big = 200
+    big = 300
+    seam = TOP
     bottom = body.intersect(cq.Workplane("XY").box(big, big, big, centered=(True, True, False))
                             .translate((0, 0, seam - big)))
     lid = body.intersect(cq.Workplane("XY").box(big, big, big, centered=(True, True, False))
                          .translate((0, 0, seam)))
-    # The PCB frame has y running *down* the page; flip to a right-handed CAD frame (y up, business
-    # end at y = 0, board occupying y in [-BOARD_L, 0]) so the case isn't a mirror image of the board.
     bottom, lid = bottom.mirror("XZ"), lid.mirror("XZ")
-    # labels embossed on the lid top
-    zt = z1
-    # text reads correctly when the business end faces you
-    lid = lid.union(cq.Workplane("XY").workplane(offset=zt).center(BOARD_W / 2, -BOARD_L * 0.55)
-                    .transformed(rotate=(0, 0, 180)).text("ChromaBay", 4.0, 0.4, combine=False, halign="center", valign="center"))
-    for x, w, d, label in NOTCHES:
-        lid = lid.union(cq.Workplane("XY").workplane(offset=zt).center(x, -5.0)
-                        .transformed(rotate=(0, 0, 180)).text(label, 1.8, 0.3, combine=False, halign="center", valign="center"))
-
+    lid = lid.union(cq.Workplane("XY").workplane(offset=z1).center(BOARD_W / 2 - 3, -BOARD_L * 0.62)
+                    .transformed(rotate=(0, 0, 180))
+                    .text("ChromaBay", 4.0, 0.4, combine=False, halign="center", valign="center"))
     os.makedirs(OUT, exist_ok=True)
-    for part, shape in (("bottom", bottom), ("lid", lid)):
-        cq.exporters.export(shape, os.path.join(OUT, f"{name}-{part}.step"))
-        cq.exporters.export(shape, os.path.join(OUT, f"{name}-{part}.stl"), tolerance=0.05)
+    tag = name + ("-terminal" if terminal else "")
+    cq.exporters.export(bottom, os.path.join(OUT, f"{tag}-bottom.stl"), tolerance=0.05)
+    cq.exporters.export(lid, os.path.join(OUT, f"{tag}-lid.stl"), tolerance=0.05)
     if cell:
         cw, cl, ch = cell
         c = (cq.Workplane("XY").box(cw, cl, ch, centered=False)
              .translate(((BOARD_W - cw) / 2, -CELL_Y0 - cl, -0.4 - ch)).edges("|Y").fillet(1.0))
         cq.exporters.export(c, os.path.join(OUT, f"{name}-cell.stl"), tolerance=0.05)
-    print(name, "outer size: %.1f x %.1f x %.1f mm" % (BOARD_W + 2 * (GAP + WALL),
-                                                       BOARD_L + 2 * (GAP + WALL), z1 - z0))
+    hz = (TOP + TERM_H + LID_CLEAR + ROOF) if terminal else z1
+    print(f"{tag:18} outer {W:.1f} x {L:.1f} x {z1 - z0:.1f} mm"
+          + (f" (terminal hump to {hz - z0:.1f} mm)" if terminal else ""))
 
 
 if __name__ == "__main__":
-    for v in sys.argv[1:] or list(VARIANTS):
-        build(v, **VARIANTS[v])
+    names = sys.argv[1:] or [v for v in VARIANTS] + [v + "-terminal" for v in VARIANTS]
+    for n in names:
+        base = n.replace("-terminal", "")
+        build(base, **VARIANTS[base], terminal=n.endswith("-terminal"))

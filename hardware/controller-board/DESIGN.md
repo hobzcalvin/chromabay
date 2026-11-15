@@ -1,6 +1,6 @@
 # ChromaBay battery LED controller: board + case design
 
-Status: **KiCad rev A: schematic done (ERC clean), parts placed (DRC/parity clean), not yet
+Status: **KiCad rev A: schematic done (ERC clean), parts placed on 36 × 68 mm (DRC/parity clean), not yet
 routed.** See [README.md](README.md) for the files, renders and how to regenerate them. Where rev A
 differs from this spec, section 0 wins.
 
@@ -29,26 +29,62 @@ Revision history:
 
 ---
 
-## 0. Rev A (first KiCad pass): what changed when it met real parts
+## 0. Rev A as built in KiCad (supersedes the spec below where they differ)
 
-| Topic | Spec said | Rev A does | Why |
-|---|---|---|---|
-| Board size | ~28 × 56 mm | **32 × 64 mm** (still 1:2) | With real footprints, 28 × 56 placed only ~85% of parts with no room left to route. 32 × 64 places everything with routing room on 4 layers. A hand layout could probably get back to ~30 × 60. |
-| Power switch + user button | On the end face | **On the two long sides, right at the business end** | The end face only has room for USB-C, the two wire notches and the LED/mic holes. |
-| Microphone | ICS-43434 (I2S) | **INGHAi GMA3526H10-B26 (PDM), $1.00** | The ICS-43434 is $3.67 at JLC. The S3 decodes PDM in hardware. External I2S mic pads are still on their own pins. |
-| Low-profile inductors | "~$0.80 each (Coilcraft)" | **Sunlord MWSA0402S-1R0MT, 4.4 × 4.2 × 2.0 mm, 7 A sat, $0.15** | Rev 4's premium was wrong. Thin is basically free. |
-| BOOT / RESET | Tiny buttons | **Tweezer pads** (short to trigger) | Saves ~60 mm²; native USB flashing rarely needs BOOT. |
-| Mounting holes | 2 × M2 | **None**; the case clamps the edges | ~50 mm². |
-| JST-PH footprint | Optional | **Dropped**; solder a JST pigtail to the battery pads | 4–5 mm tall and 9 × 10 mm. |
-| Output ESD | TPD4E05U06 | **SRV05-4** (also on USB D+/D-/CC) | JLC "Preferred Extended" = no loading fee; one part instead of two. |
-| Indicator disable jumper | JP | Dropped | The status LED is firmware-controlled; remove one 1k resistor to kill the charge LED. |
-| Charge current options | 0.5 / 1 / 2 A | **0.45 / 0.9 / 1.45 / 1.9 A** (1.5k base, jumpers add 1.5k and 680R) | Basic-part resistor values. |
-| BQ25606 `IBATFET_OCP` | "verify" | **≥ 6.0 A (datasheet)** | Comfortably above the ~3.5 A worst case. Boost stays on SYS. |
-| Charger D+/D- | — | Left floating → "unknown adapter" → ILIM pin sets 2.4 A | Keeps BC1.2 detection off the ESP32's USB lines. VINDPM protects weak ports. |
-| Boost compensation | — | Placeholder values (22k / 4.7 nF / 47 pF) | **Must be checked in TI WEBENCH before ordering.** |
+**Status:** the schematic is ERC-clean and all 113 parts are placed, with 0 schematic-parity issues. The
+remaining DRC items are unrouted connections and silkscreen cosmetics. **The board isn't routed yet** (see "Routing").
 
-Remaining before ordering: routing (with the charger and boost power loops hand-routed), the
-WEBENCH check, a JLC rotation check of the CPL, then a 2–5 board validation run.
+| Topic | Now | Why |
+|---|---|---|
+| Board | **36 × 68 mm, 1.6 mm, 4-layer** (1:1.9) | 32 × 60 placed at ~100% part coverage, with nowhere left for traces. Freerouting stalled at ~120 unrouted there. 36 × 68 leaves routing channels. |
+| ESP32 antenna | **Overhangs the far edge by ~5 mm** | Espressif's preferred placement. It frees the dead copper keep-out strips beside the module (the empty space in the earlier renders). |
+| Business end | **User button, LED, USB-C, power switch all face out the end**; the mic port exits there too, through a channel under the board | The three controls you'll touch most share one face. |
+| Battery | **JST-PH 2-pin, SMD, side-entry (opening faces the left wall)** + small + / − / NTC wire pads | Swappable packs. The pads are for packs without a plug. **Check polarity per pack**: + and − are on the silk. |
+| LED outputs | **OUT1 (G V C D) on a KF141R-2.54-4P lever-terminal footprint** at the right edge, wire entry facing out. **OUT2–4 + their own G/V** on a 2.54 mm pad strip below it | The terminal is optional (hand-solder, LCSC C475126, ~$0.30). Without it, solder wires into the same holes. |
+| Wires | Exit through **U-notches at the case seam on the long sides**, right next to the business end | The end face is full with the controls and USB. |
+| BOOT / RESET | BOOT is a user pad (GPIO0). No RESET: the power switch is the reset | Saves parts and area. Native USB flashing rarely needs BOOT. |
+| UART pads | Dropped | USB serial/JTAG covers logging. |
+| Mic | INGHAi GMA3526H10-B26 PDM, $1.00 (datasheet pinout verified) | The ICS-43434 is $3.67 at JLC. |
+| ESD | SRV05-4 ×3 (USB D+/D-/CC; outputs) | JLC Preferred-Extended, no loading fee. |
+
+### Checks done (datasheets)
+- **BQ25606** `IBATFET_OCP` ≥ 6.0 A, so the boost stays on SYS. Floating D+/D- means "unknown adapter", so the ILIM pin sets the input limit (200 Ω → 2.4 A).
+  Charge current 0.45 / 0.9 / 1.45 / 1.9 A via JP1/JP2.
+- **Battery temperature window** with the NCP15XH103 (B = 3380) NTC: rev 1's 5.1k/33k divider cut off charging at ~7 °C. It's now
+  **5.1k/24k → charging allowed ~0.7 °C to ~61 °C**, close to the 103AT design window.
+- **TPS61088 compensation:** computed from the datasheet equations (Rsense 0.08 Ω, gm 190 µA/V, fc 15 kHz at 3 A from a 3.0 V cell,
+  ~75 µF effective output C after DC bias): **R5 = 10k, C5 = 10 nF, C8 = 47 pF**. RFREQ 150k ≈ 1 MHz, ILIM 150k ≈ 7.9 A peak,
+  inductor peak 6.3 A at 3 A out from 3.0 V (< 7 A sat). Still worth one WEBENCH run or a load-step test on the first boards.
+- **Reverse-polarity FET** AONR21321: < 29.5 mΩ at −4.5 V. At 3.5 A from a low cell that's about 0.5 W, warm but fine. At the
+  typical ~2 A it's ~0.15 W.
+- **LED:** LTST-S326KGJRKT C1 = red = charge (driven by the charger, works with the switch off), C2 = green = status (firmware).
+- **Mic** pinout (DATA, SELECT, GND, CLOCK, VDD) and the **IMU**'s unused SDx/SCx pins (tied to GND, allowed) match their datasheets.
+- **Not verifiable from the datasheets I could extract:** which pins of the two 4-pin switches (SW2 button, SW1 MSK12C02) are
+  internally paired. The design assumes the usual 1-2 / 3-4 pairing. Check against the physical part or JLC's preview.
+
+### Routing
+Freerouting runs headless (`tools/route.py`). On 36 × 68 it got from 222 to 40–90 unrouted connections in 55 passes,
+then oscillated and never closed. That's typical for a dense mixed-signal board, and the charger and boost power loops
+shouldn't be autorouted anyway. Plan: hand-route the two converters' power loops, the battery → FET → charger path and the
+5 V → load switch → fuse → J2/J5 path as copper pours in KiCad, then let Freerouting fill in the signals. Expect 1–2 days for
+someone fluent in KiCad.
+
+### Thickness and sturdiness
+- **1.6 mm board** (up from 0.8): stiffer, standard JLC stock, no cost difference. It also matters for a lever terminal and a
+  USB-C socket that get pushed on. The 0.8 mm board saved 0.8 mm, but the JST-PH alone adds more height than that.
+- **Stack height (no terminal):** JST-PH 5.5 mm is now the tallest part, then USB-C 3.2, ESP32 2.55, inductors 2.0. The board
+  with parts is ~7.1 mm.
+- **Case:** external battery 39.8 × 77 × 11 mm, slim cell (603450, ~1.1 Ah) 16.6 mm, thick cell (103450, ~2 Ah) 20.6 mm. With
+  the lever terminal, a raised section over it reaches 18.3 / 23.9 / 27.9 mm.
+- **What costs thickness:** the JST-PH (+2.3 mm over the USB-C) and the lever terminal (+7 mm locally). A flat JST-SH or
+  Molex PicoBlade battery plug would save ~2 mm, but those are rated 1 A, too little for this load. **The JST-PH is the right
+  call for swappable packs.**
+
+### Other constraints worth a second look
+- **Board-sized internal cells are small.** A 603450 is ~1.1 Ah: about 1 h at the 200-LED "low" target, or ~4 h at ~60 LEDs.
+  Long run times mean the external-battery case.
+- **JST-PH is rated 2 A.** The LED rail can pull ~3.3 A from the cell at full 2 A output. Firmware should cap LED current when on
+  battery, or use the wire pads for big loads.
 
 ---
 
@@ -307,33 +343,27 @@ From the business end:
 
 ## 11. BOM and JLC cost (live JLC prices, Nov 2026: `python3 tools/jlc_cost.py`)
 
-45 unique parts, 94 placements, ~387 solder joints per board. **16 unique Extended parts** at
-$3.07 each per order; Basic and Preferred-Extended parts are free to load.
+44 unique parts, 93 placements, ~378 joints per board. 17 unique Extended parts at $3.07 each per order (Basic and
+Preferred-Extended load free). Economic PCBA: setup $8.18, stencil $1.53, $0.0016 per joint.
 
-| Order size | Parts / board | PCBA fees / order | PCBA cost / board |
-|---|---|---|---|
-| 2 | $15.85 | $60 | ~$46 |
-| 5 | $15.85 | $62 | ~$28 |
-| 10 | $14.26 | $65 | **~$21** |
-| 30 | $12.95 | $77 | **~$15.50** |
+| Boards | Parts / board | PCBA fees / order | PCBA / board | + bare 4-layer PCB (est.) | **≈ total / board** |
+|---|---|---|---|---|---|
+| 2 (min PCBA qty; JLC still makes 5 PCBs) | $15.89 | $63 | $47.45 | ~$10 / 5 pcs | **~$50** |
+| 5 | $15.89 | $65 | $28.88 | ~$10 / 5 pcs | **~$31** |
+| 10 | $14.31 | $68 | $21.10 | ~$15 / 10 pcs | **~$22.60** |
+| 30 | $12.99 | $80 | $15.66 | ~$30 / 30 pcs | **~$16.70** |
 
-These exclude the bare 4-layer PCB (small: a few dollars per order at this size), shipping and US
-import duty, which is currently the wildcard on JLC orders.
+**Bare PCB is an estimate.** JLC advertises 4-layer, 5 pcs, ≤ 100 × 100 mm "from $2" for promos/new users, and ~$7 normally.
+Real quotes for 36 × 68 mm at 1.6 mm usually land in the $7–15 range for 5–10 pcs. Upload the Gerbers to get the exact number.
+Not included: shipping (~$15–25 DHL/FedEx) and US import duty on JLC orders, which is currently significant and changes often.
+Optional lever terminal: ~$0.30, hand-soldered, or added as a THT line at JLC (extra THT fee).
 
-Biggest lines per board: ESP32-S3-MINI-1-N8 $4.17, MAX17048 $1.70, BQ25606 $1.51, TPS61088
-$1.15, LSM6DS3TR-C $1.15, mic $1.00. Together they're ~70% of the parts cost.
+**First validation run:** 5 boards ≈ $150 + shipping/duty. That's the minimum sensible run: the fixed fees are nearly the same
+for 2 or 5.
 
-Fee structure (JLC Economic PCBA): setup $8.18 + stencil $1.53 per order, $3.07 per unique
-Extended part, $0.0016 per joint. New accounts get a coupon pack that includes a $10 SMT coupon,
-and JLC issues monthly coupons.
-
-Ways to cut cost, roughly in order of value:
-1. **Order 10+** instead of 5. Fees are ~$65 per order no matter what.
-2. Swap the MAX17048 for an ADC divider: −$1.70/board and −$3.07/order, at the cost of a less
-   accurate battery %.
-3. Replace remaining cheap Extended parts (NTC, polyfuse, slide switch, LED, LDO) with Basic or
-   Preferred equivalents: −$3.07/order each.
-4. LIS2DH12 instead of LSM6DS3TR-C (no gyro): −$0.40/board.
+Cost cuts, roughly in order of value: order 10+; ADC divider instead of the MAX17048 (−$1.70/board, −$3.07/order); swap
+cheap Extended parts (NTC, polyfuse, slide switch, LED, LDO, JST) for Basic/Preferred ones (−$3.07/order each); LIS2DH12
+instead of LSM6DS3 (no gyro, −$0.40). New JLC accounts get a coupon pack (incl. a $10 SMT coupon), and JLC issues monthly coupons.
 
 ---
 
@@ -355,12 +385,12 @@ Ways to cut cost, roughly in order of value:
 | Function | GPIO |
 |---|---|
 | USB D− / D+ | 19 / 20 |
-| BOOT (tweezer pads) | 0 |
+| BOOT (user pad: touch to GND at power-on) | 0 |
 | CC1 / CC2 sense (ADC) | 1 / 2 |
 | Touch/spare pads T1–T4 | 4, 5, 6, 7 |
 | I2C SDA / SCL (gauge 0x36, IMU 0x6A, pads) | 8 / 9 |
 | IMU INT1 (wake) / INT2 | 10 / 13 |
-| Spare pad IO11 | 11 |
+| (unused) | 11 |
 | Charger /PG | 12 |
 | Gauge ALRT | 14 |
 | C1/D1, C2/D2, C3/D3, C4/D4 | 15/16, 17/18, 21/33, 34/35 |
@@ -368,7 +398,6 @@ Ways to cut cost, roughly in order of value:
 | PDM mic CLK / DATA | 38 / 39 |
 | External I2S mic BCLK / WS / SD (pads) | 40 / 47 / 48 |
 | Status LED · User button | 41 · 42 |
-| UART TXD0 / RXD0 (pads) | 43 / 44 |
 
 The charger's STAT pin drives the charge LED only; firmware reads charge state from /PG plus the
 gauge's charge-rate register.
