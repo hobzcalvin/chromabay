@@ -1,7 +1,7 @@
 {
-  "version": "1.2.1-audio",
-  "downloadUrl": "https://chromabay.app/x/audio/live-update-1.2.1-audio.zip",
-  "buildDate": "2026-11-15T06:23:34Z",
-  "commitHash": "ce713158932551430ce6e9854c7f78ca477ea118",
-  "commitMessage": "Audio reactivity: device mic input, audio automation, Audio node"
+  "version": "1.2.2-audio",
+  "downloadUrl": "https://chromabay.app/x/audio/live-update-1.2.2-audio.zip",
+  "buildDate": "2026-11-15T08:03:31Z",
+  "commitHash": "944b299e6e711b0320693f8e002205d04eb54643",
+  "commitMessage": "Merge main (experimental channels now on main) into the audio channel"
 }
