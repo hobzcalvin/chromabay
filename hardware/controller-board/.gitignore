@@ -1,0 +1,8 @@
+*.kicad_prl
+*-backups/
+fp-info-cache
+#auto_saved_files#
+_autosave-*
+lib/lcsc.3dshapes/*.step
+case/out/*.step
+__pycache__/

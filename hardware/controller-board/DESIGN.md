@@ -1,7 +1,8 @@
 # ChromaBay battery LED controller: board + case design
 
-Status: **design spec only.** There is no schematic or layout yet. This is the brief to build
-the KiCad project (and the case) from.
+Status: **KiCad rev A: schematic done (ERC clean), parts placed (DRC/parity clean), not yet
+routed.** See [README.md](README.md) for the files, renders and how to regenerate them. Where rev A
+differs from this spec, section 0 wins.
 
 In product terms, this is a battery-powered, ChromaBay-first take on the GLEDOPTO ESP32 mini
 controllers (e.g. GL-C-310WL). It:
@@ -25,6 +26,29 @@ Revision history:
   - Battery against the underside, with safety rules; case variants.
   - Battery reverse-polarity protection and output ESD.
   - Lessons from GLEDOPTO.
+
+---
+
+## 0. Rev A (first KiCad pass): what changed when it met real parts
+
+| Topic | Spec said | Rev A does | Why |
+|---|---|---|---|
+| Board size | ~28 × 56 mm | **32 × 64 mm** (still 1:2) | With real footprints, 28 × 56 placed only ~85% of parts with no room left to route. 32 × 64 places everything with routing room on 4 layers. A hand layout could probably get back to ~30 × 60. |
+| Power switch + user button | On the end face | **On the two long sides, right at the business end** | The end face only has room for USB-C, the two wire notches and the LED/mic holes. |
+| Microphone | ICS-43434 (I2S) | **INGHAi GMA3526H10-B26 (PDM), $1.00** | The ICS-43434 is $3.67 at JLC. The S3 decodes PDM in hardware. External I2S mic pads are still on their own pins. |
+| Low-profile inductors | "~$0.80 each (Coilcraft)" | **Sunlord MWSA0402S-1R0MT, 4.4 × 4.2 × 2.0 mm, 7 A sat, $0.15** | Rev 4's premium was wrong. Thin is basically free. |
+| BOOT / RESET | Tiny buttons | **Tweezer pads** (short to trigger) | Saves ~60 mm²; native USB flashing rarely needs BOOT. |
+| Mounting holes | 2 × M2 | **None**; the case clamps the edges | ~50 mm². |
+| JST-PH footprint | Optional | **Dropped**; solder a JST pigtail to the battery pads | 4–5 mm tall and 9 × 10 mm. |
+| Output ESD | TPD4E05U06 | **SRV05-4** (also on USB D+/D-/CC) | JLC "Preferred Extended" = no loading fee; one part instead of two. |
+| Indicator disable jumper | JP | Dropped | The status LED is firmware-controlled; remove one 1k resistor to kill the charge LED. |
+| Charge current options | 0.5 / 1 / 2 A | **0.45 / 0.9 / 1.45 / 1.9 A** (1.5k base, jumpers add 1.5k and 680R) | Basic-part resistor values. |
+| BQ25606 `IBATFET_OCP` | "verify" | **≥ 6.0 A (datasheet)** | Comfortably above the ~3.5 A worst case. Boost stays on SYS. |
+| Charger D+/D- | — | Left floating → "unknown adapter" → ILIM pin sets 2.4 A | Keeps BC1.2 detection off the ESP32's USB lines. VINDPM protects weak ports. |
+| Boost compensation | — | Placeholder values (22k / 4.7 nF / 47 pF) | **Must be checked in TI WEBENCH before ordering.** |
+
+Remaining before ordering: routing (with the charger and boost power loops hand-routed), the
+WEBENCH check, a JLC rotation check of the CPL, then a 2–5 board validation run.
 
 ---
 
@@ -265,7 +289,7 @@ All variants share:
 
 ---
 
-## 10. Layout (single-sided, ~28 × 56 mm, 0.8 mm 4-layer)
+## 10. Layout (single-sided, 0.8 mm 4-layer; rev A is 32 × 64 mm, see section 0)
 
 From the business end:
 
@@ -281,28 +305,35 @@ From the business end:
 
 ---
 
-## 11. BOM estimate (qty ~10, rough)
+## 11. BOM and JLC cost (live JLC prices, Nov 2026: `python3 tools/jlc_cost.py`)
 
-| Part | Est. $ |
-|---|---|
-| ESP32-S3-MINI-1-N8 | 3.00 |
-| BQ25606 | 1.20 |
-| TPS61022 | 0.80 |
-| 2 inductors, 4 × 4 × 2 mm ≥ 6 A (generic 5 × 5 × 3 mm ≈ $0.50 for both) | 1.60 |
-| MAX17048 | 1.00 |
-| LSM6DS3TR-C | 1.20 |
-| ICS-43434 | 1.20 |
-| SN74AHCT245, LDO, 4 FETs, polyfuse, output ESD array | 0.70 |
-| Mid-mount USB-C, USB ESD, TVS | 0.35 |
-| Slide switch, 3 tact switches | 0.35 |
-| ~60 passives, NTC, LEDs | 0.60 |
-| 0.8 mm 4-layer PCB, ~28 × 56 mm | 0.80 |
-| **Parts total** | **≈ $12.80** |
-| Optional lever terminal (WAGO; generic ≈ $0.40) | +1.50 |
-| Optional JST-PH | +0.10 |
+45 unique parts, 94 placements, ~387 solder joints per board. **16 unique Extended parts** at
+$3.07 each per order; Basic and Preferred-Extended parts are free to load.
 
-JLC assembly: ~$40 fixed per order (setup + ~$3 per unique extended part, ~10 of them), so
-**~$17/board at 10, ~$14 at 30.** Under $20 from ~10 boards up.
+| Order size | Parts / board | PCBA fees / order | PCBA cost / board |
+|---|---|---|---|
+| 2 | $15.85 | $60 | ~$46 |
+| 5 | $15.85 | $62 | ~$28 |
+| 10 | $14.26 | $65 | **~$21** |
+| 30 | $12.95 | $77 | **~$15.50** |
+
+These exclude the bare 4-layer PCB (small: a few dollars per order at this size), shipping and US
+import duty, which is currently the wildcard on JLC orders.
+
+Biggest lines per board: ESP32-S3-MINI-1-N8 $4.17, MAX17048 $1.70, BQ25606 $1.51, TPS61088
+$1.15, LSM6DS3TR-C $1.15, mic $1.00. Together they're ~70% of the parts cost.
+
+Fee structure (JLC Economic PCBA): setup $8.18 + stencil $1.53 per order, $3.07 per unique
+Extended part, $0.0016 per joint. New accounts get a coupon pack that includes a $10 SMT coupon,
+and JLC issues monthly coupons.
+
+Ways to cut cost, roughly in order of value:
+1. **Order 10+** instead of 5. Fees are ~$65 per order no matter what.
+2. Swap the MAX17048 for an ADC divider: −$1.70/board and −$3.07/order, at the cost of a less
+   accurate battery %.
+3. Replace remaining cheap Extended parts (NTC, polyfuse, slide switch, LED, LDO) with Basic or
+   Preferred equivalents: −$3.07/order each.
+4. LIS2DH12 instead of LSM6DS3TR-C (no gyro): −$0.40/board.
 
 ---
 
@@ -319,25 +350,28 @@ JLC assembly: ~$40 fixed per order (setup + ~$3 per unique extended part, ~10 of
 7. User button per BUTTON_CONTROL_PLAN.md.
 8. Board profile preset; **plus a published WLED config** for this board.
 
-## 13. Pin map (draft, ESP32-S3-MINI-1)
+## 13. Pin map (rev A, ESP32-S3-MINI-1-N8; source of truth: `tools/design.py`)
 
 | Function | GPIO |
 |---|---|
 | USB D− / D+ | 19 / 20 |
-| BOOT (internal) | 0 |
-| CC1 / CC2 sense | 1 / 2 |
-| Touch/spare T1–T4 | 4, 5, 6, 7 |
-| I2C SDA / SCL (gauge, IMU, pads) | 8 / 9 |
+| BOOT (tweezer pads) | 0 |
+| CC1 / CC2 sense (ADC) | 1 / 2 |
+| Touch/spare pads T1–T4 | 4, 5, 6, 7 |
+| I2C SDA / SCL (gauge 0x36, IMU 0x6A, pads) | 8 / 9 |
 | IMU INT1 (wake) / INT2 | 10 / 13 |
-| Charger STAT / /PG | 11 / 12 |
+| Spare pad IO11 | 11 |
+| Charger /PG | 12 |
 | Gauge ALRT | 14 |
 | C1/D1, C2/D2, C3/D3, C4/D4 | 15/16, 17/18, 21/33, 34/35 |
-| Shifter /OE · LED_EN | 36 · 37 |
-| I2S BCLK / WS / SD | 38 / 39 / 40 |
+| Shifter /OE · LED_EN (boost + load switch) | 36 · 37 |
+| PDM mic CLK / DATA | 38 / 39 |
+| External I2S mic BCLK / WS / SD (pads) | 40 / 47 / 48 |
 | Status LED · User button | 41 · 42 |
-| Spare | 47, 48 |
+| UART TXD0 / RXD0 (pads) | 43 / 44 |
 
-Avoid strapping pins 3, 45, 46. Verify against the chosen MINI-1 variant.
+The charger's STAT pin drives the charge LED only; firmware reads charge state from /PG plus the
+gauge's charge-rate register.
 
 ---
 

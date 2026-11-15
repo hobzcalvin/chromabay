@@ -1,0 +1,5 @@
+(fp_lib_table
+  (version 7)
+  (lib (name "lcsc")(type "KiCad")(uri "${KIPRJMOD}/lib/lcsc.pretty")(options "")(descr "JLC/LCSC parts via easyeda2kicad"))
+  (lib (name "cb")(type "KiCad")(uri "${KIPRJMOD}/lib/cb.pretty")(options "")(descr "ChromaBay board-specific footprints"))
+)
