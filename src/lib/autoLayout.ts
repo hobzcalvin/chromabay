@@ -67,8 +67,18 @@ export function rectifyPoints(pts: (Pt | null)[]): (Pt | null)[] {
   const real = pts.filter((p): p is Pt => !!p);
   if (real.length < 4) return pts.slice();
   const [tl, tr, br, bl] = quadCorners(real);
-  const h = homography([tl, tr, br, bl], [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }]);
-  return pts.map((p) => (p ? applyH(h, p) : null)); // keep index alignment; gaps stay gaps
+  // Map to a rectangle with the outline's own aspect (mean opposite-side lengths), not the unit
+  // square: squashing a 32×8 panel square made its rows 4× denser than its columns and the lattice
+  // fit then counted 32×32.
+  const d = (a: Pt, b: Pt) => Math.hypot(a.x - b.x, a.y - b.y);
+  const qw = (d(tl, tr) + d(bl, br)) / 2, qh = (d(tl, bl) + d(tr, br)) / 2;
+  const sw = qw >= qh ? 1 : qw / (qh || 1), sh = qh >= qw ? 1 : qh / (qw || 1);
+  const h = homography([tl, tr, br, bl], [{ x: 0, y: 0 }, { x: sw, y: 0 }, { x: sw, y: sh }, { x: 0, y: sh }]);
+  const out = pts.map((p) => (p ? applyH(h, p) : null)); // keep index alignment; gaps stay gaps
+  // A degenerate outline (a straight strip: its 4 "corners" are collinear) has no homography —
+  // the solve yields NaN/huge values. Leave such clouds unrectified rather than poison the grid.
+  const ok = out.every((p) => !p || (Number.isFinite(p.x) && Number.isFinite(p.y) && Math.abs(p.x) < 10 && Math.abs(p.y) < 10));
+  return ok ? out : pts.slice();
 }
 
 // ---- grid quantization (snapping) --------------------------------------------------------
@@ -115,18 +125,43 @@ function fitLattice(real: { p: Pt; i: number }[], maxDim: number): { W: number; 
   if (disps.length < n) return null;
   // dominant axis from an angle histogram; second axis ⟂ to it
   const B = 36, hist = new Float64Array(B);
-  for (const d of disps) hist[Math.min(B - 1, Math.floor((d.ang / Math.PI) * B))]++;
-  let a1b = 0; for (let k = 0; k < B; k++) if (hist[k] > hist[a1b]) a1b = k;
+  // Vote only with near-neighbour steps (≤1.25× the NN distance): lattice basis vectors are the
+  // SHORTEST displacements, and a diagonal (√2 longer) must never win the second axis.
+  for (const d of disps) if (d.m <= 1.25 * cell) hist[Math.min(B - 1, Math.floor((d.ang / Math.PI) * B))]++;
+  // Circular 3-bin smoothing: a perfectly axis-aligned grid puts its 0°/90° votes on a bin edge, so
+  // float noise splits them across two bins and a diagonal could out-vote the real axis.
+  const sm = new Float64Array(B); for (let k = 0; k < B; k++) sm[k] = hist[(k + B - 1) % B] + 2 * hist[k] + hist[(k + 1) % B];
+  let a1b = 0; for (let k = 0; k < B; k++) if (sm[k] > sm[a1b]) a1b = k;
   const a1 = ((a1b + 0.5) / B) * Math.PI, a2 = a1 + Math.PI / 2;
   const lenAlong = (ang: number) => {
     const tol = (22 * Math.PI) / 180, ls: number[] = [];
     for (const d of disps) { const da = Math.abs((((d.ang - ang + Math.PI / 2) % Math.PI) + Math.PI) % Math.PI - Math.PI / 2); if (da < tol) ls.push(d.m); }
     ls.sort((x, y) => x - y); return ls.length ? ls[ls.length >> 1] : cell;
   };
-  let v1 = { x: Math.cos(a1) * lenAlong(a1), y: Math.sin(a1) * lenAlong(a1) };
-  let v2 = { x: Math.cos(a2) * lenAlong(((a2 % Math.PI) + Math.PI) % Math.PI), y: Math.sin(a2) * lenAlong(((a2 % Math.PI) + Math.PI) % Math.PI) };
+  // Refine each axis to the MEAN of the displacements near it (sign-folded), not the histogram bin
+  // centre: a bin is 5° wide, and on a 32-wide grid a 2.5° axis error is ~1.4 cells by the edge —
+  // enough to misassign whole columns. The second axis is the strongest direction ≥45° from the
+  // first (not assumed ⟂), so shear/perspective is followed too.
+  const meanAxis = (ang: number, len: number): Pt | null => {
+    const ux = Math.cos(ang), uy = Math.sin(ang); let sx = 0, sy = 0, c = 0;
+    for (const d of disps) {
+      const sgn = d.dx * ux + d.dy * uy >= 0 ? 1 : -1, ex = sgn * d.dx, ey = sgn * d.dy;
+      const along = ex * ux + ey * uy, across = Math.abs(-ex * uy + ey * ux);
+      if (along > 0.6 * len && along < 1.4 * len && across < 0.3 * len) { sx += ex; sy += ey; c++; }
+    }
+    return c ? { x: sx / c, y: sy / c } : null;
+  };
+  let a2b = -1; for (let k = 0; k < B; k++) { const sep = Math.min(Math.abs(k - a1b), B - Math.abs(k - a1b)); if (sep >= B / 4 && (a2b < 0 || sm[k] > sm[a2b])) a2b = k; }
+  const a2r = a2b >= 0 && sm[a2b] > 0 ? ((a2b + 0.5) / B) * Math.PI : a2;
+  const l1 = lenAlong(a1), l2 = lenAlong(((a2r % Math.PI) + Math.PI) % Math.PI);
+  let v1 = meanAxis(a1, l1) ?? { x: Math.cos(a1) * l1, y: Math.sin(a1) * l1 };
+  let v2 = meanAxis(a2r, l2) ?? { x: Math.cos(a2) * l2, y: Math.sin(a2) * l2 };
   if (v1.x * v2.y - v1.y * v2.x < 0) { const t = v1; v1 = v2; v2 = t; } // fix handedness → only rotations, never a mirror
+  // Origin on a real LED (the one nearest the centroid), NOT the centroid itself: for an even-sized
+  // grid the centroid falls between nodes, the two halves round away from it inconsistently, and
+  // the lattice came out one row + one column too big (8x8 -> 9x9). Found by automation/autolayout-sim.ts.
   let ox = 0, oy = 0; for (const p of P) { ox += p.x; oy += p.y; } ox /= n; oy /= n;
+  { let bd = Infinity, bp = P[0]; for (const p of P) { const d = (p.x - ox) ** 2 + (p.y - oy) ** 2; if (d < bd) { bd = d; bp = p; } } ox = bp.x; oy = bp.y; }
   const assign = (v1: Pt, v2: Pt, ox: number, oy: number): LatticeCell[] => {
     const det = v1.x * v2.y - v1.y * v2.x || 1e-9;
     const ia = v2.y / det, ib = -v2.x / det, ic = -v1.y / det, id = v1.x / det;
@@ -144,7 +179,10 @@ function fitLattice(real: { p: Pt; i: number }[], maxDim: number): { W: number; 
     }
     return [A[0][3] / (A[0][0] || 1e-9), A[1][3] / (A[1][1] || 1e-9), A[2][3] / (A[2][2] || 1e-9)];
   };
-  for (let it = 0; it < 4; it++) {
+  // A single row/column (a straight strip) makes the 3×3 normal equations singular and the refine
+  // collapsed every LED into one cell (150-LED line → 1×1). The initial assignment is already right.
+  const oneD = cells.every((c) => c.r === cells[0].r) || cells.every((c) => c.c === cells[0].c);
+  for (let it = 0; it < (oneD ? 0 : 4); it++) {
     let Scc = 0, Srr = 0, Scr = 0, Sc = 0, Sr = 0, Sux = 0, Srx = 0, Sx = 0, Suy = 0, Sry = 0, Sy = 0;
     for (let k = 0; k < n; k++) { const c = cells[k], p = P[k]; Scc += c.c * c.c; Srr += c.r * c.r; Scr += c.c * c.r; Sc += c.c; Sr += c.r; Sux += c.c * p.x; Srx += c.r * p.x; Sx += p.x; Suy += c.c * p.y; Sry += c.r * p.y; Sy += p.y; }
     const M = [[Scc, Scr, Sc], [Scr, Srr, Sr], [Sc, Sr, n]];
@@ -158,7 +196,7 @@ function fitLattice(real: { p: Pt; i: number }[], maxDim: number): { W: number; 
   const W = maxc - minc + 1, H = maxr - minr + 1;
   for (const c of cells) { c.c -= minc; c.r -= minr; }
   // sanity: a real grid is reasonably tight (no runaway dimension from a bad fit)
-  if (W < 1 || H < 1 || W > maxDim || H > maxDim || W > n || H > n || W * H > n * 4) return null;
+  if (!Number.isFinite(W) || !Number.isFinite(H) || W < 1 || H < 1 || W > maxDim || H > maxDim || W > n || H > n || W * H > n * 4) return null;
   return { W, H, cells };
 }
 
@@ -192,7 +230,7 @@ function orientToImage(cells: LatticeCell[], W: number, H: number, pos: Pt[]): {
  *                rotation/perspective); <0.5 → fine grid preserving real spacing (gaps appear).
  * @param maxDim  cap on either grid dimension.
  */
-export function buildLedmap(pts: (Pt | null)[], snap = 1, maxDim = 64): Ledmap {
+export function buildLedmap(pts: (Pt | null)[], snap = 1, maxDim = 256): Ledmap { // 256 = firmware kLayoutMaxDim
   // Only place LEDs we actually have a position for; null entries (undecoded) stay gaps.
   const real = pts.map((p, i) => ({ p, i })).filter((e): e is { p: Pt; i: number } => !!e.p);
   if (real.length === 0) return { width: 0, height: 0, map: [] };

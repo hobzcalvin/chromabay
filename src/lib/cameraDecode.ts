@@ -154,10 +154,19 @@ export async function captureAndDecode(video: HTMLVideoElement, opts: DecodeOpts
   const cycles = opts.cycles ?? 5;
   const captureMs = opts.captureMs ?? (2 + bits) * frameMs * cycles + frameMs; // device emits OFF + ON + bits
   const procWidth = opts.procWidth ?? 320;
-  const noiseFloor = opts.noiseFloor ?? 12;
-  const log = opts.onLog ?? (() => {});
 
   const frames = await captureBurst(video, captureMs, procWidth);
+  return decodeFrames(frames, opts);
+}
+
+/**
+ * The pure half of `captureAndDecode`: decode an already-captured burst. No DOM — runs in Node, so
+ * the offline harness (automation/autolayout-sim.ts) and recorded captures go through exactly this.
+ */
+export function decodeFrames(frames: Frame[], opts: DecodeOpts): DecodeResult {
+  const bits = opts.bits, frameMs = opts.frameMs;
+  const noiseFloor = opts.noiseFloor ?? 12;
+  const log = opts.onLog ?? (() => {});
   if (frames.length < 12) return { points: [], ok: false, reason: 'too few camera frames captured' };
   const w = frames[0].w, h = frames[0].h, N = w * h, F = frames.length;
   log(`captured ${F} frames @ ${w}x${h}`);
