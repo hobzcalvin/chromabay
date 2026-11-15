@@ -1,7 +1,7 @@
 {
-  "version": "1.2.375",
-  "downloadUrl": "https://chromabay.app/live-update-1.2.375.zip",
-  "buildDate": "2026-11-15T08:02:19Z",
-  "commitHash": "2b3dff2bb3bc834856e0374754f782f55bf3e7e0",
-  "commitMessage": "Experimental channels: publish any branch's app + firmware under /x/<id>"
+  "version": "1.2.376",
+  "downloadUrl": "https://chromabay.app/live-update-1.2.376.zip",
+  "buildDate": "2026-11-15T23:56:58Z",
+  "commitHash": "24af748b3ee0375eee5f1cb2ae44221aa87cfad1",
+  "commitMessage": "Merge remote-tracking branch 'origin/main' into claude/epic-einstein-s6kqbg"
 }
