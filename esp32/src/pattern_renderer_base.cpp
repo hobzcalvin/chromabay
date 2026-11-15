@@ -193,8 +193,10 @@ void PatternRendererBase::deallocateBuffers() {
 uint16_t PatternRendererBase::getMatrixWidth() const {
     if (!ledManager || ledManager->getNumStrips() == 0) return 8; // Default fallback
 
-    // Multiple strips share ONE canvas (see render()): the widest strip's width × the
-    // tallest's height, with each strip's cell (x, y) at canvas (x, y).
+    // Multiple strips MIRROR the same pattern (see render()): the canvas is sized to
+    // the widest strip, and each strip samples the full canvas independently. Using
+    // the max (not strip 0) keeps the canvas stable when a smaller strip is added or
+    // removed, so strips don't share a coordinate space.
     if (ledManager->getNumStrips() > 1) {
         uint16_t maxW = 0;
         for (size_t i = 0; i < ledManager->getNumStrips(); i++) {
@@ -226,7 +228,7 @@ uint16_t PatternRendererBase::getMatrixWidth() const {
 uint16_t PatternRendererBase::getMatrixHeight() const {
     if (!ledManager || ledManager->getNumStrips() == 0) return 8; // Default fallback
 
-    // Shared multi-strip canvas: height is the tallest strip (see getMatrixWidth).
+    // Mirror multi-strip mode: canvas height is the tallest strip (see getMatrixWidth).
     if (ledManager->getNumStrips() > 1) {
         uint16_t maxH = 0;
         for (size_t i = 0; i < ledManager->getNumStrips(); i++) {
@@ -676,57 +678,65 @@ void PatternRendererBase::render() {
         return;
     }
 
-    // All strips share ONE canvas: the widest strip's width × the tallest strip's height
-    // (getMatrixWidth/Height). Cell (x, y) of every strip — grid, matrix or custom layout — is
-    // canvas cell (x, y), so strips sit in one coordinate space, anchored top-left: a 10-wide
-    // strip covers the left half of a 20-wide one, and strips that share cells show the same
-    // color there. The graph renders once per frame at the canvas size (the buffers are already
-    // allocated at exactly that), instead of once per strip size.
-    const uint16_t cw = getMatrixWidth();
-    const uint16_t ch = getMatrixHeight();
-    if (cw == 0 || ch == 0) { ledManager->show(); return; }
-    const CRGB* composite = fading ? renderCrossfadeAt(cw, ch) : nullptr;
-    if (!fading) renderGraphAt(currentPattern, cw, ch);
-    // While fading, the composite IS the frame, wherever it was assembled.
-    const CRGB* patternBuffer = fading ? composite : getBuffer(currentPattern.outputBuffer);
-    if (!patternBuffer) { ledManager->show(); return; }
+    // Each strip is its OWN canvas: run the full operator graph at the strip's own
+    // dimensions into its own LED space. A 1xN linear strip renders the effects at
+    // 1xN; a WxH matrix renders at WxH — independent coordinate spaces. The shared
+    // buffers are sized to the largest strip and reused per strip: we output to the
+    // strip immediately after rendering, before the next strip overwrites them.
+    const uint32_t bufferCap = getTotalPixels(); // capacity = largest strip's pixels
+
+    // Strips that share the same canvas dimensions render an IDENTICAL graph (same w,h, same
+    // frame time) — so render once and reuse the buffers for each consecutive same-size strip.
+    // Two 40×40 curtains then cost one graph render per frame instead of two. The buffers aren't
+    // touched between a strip's output mapping and the next strip, so reuse is safe.
+    uint16_t lastRenderW = 0, lastRenderH = 0; bool haveRender = false;
+    const CRGB* composite = nullptr; // while fading: where this canvas size's dissolve landed
 
     for (size_t s = 0; s < ledManager->getNumStrips(); s++) {
         LedConfig::LedBus* strip = ledManager->getStrip(s);
         if (!strip) continue;
         const auto& config = strip->getConfig();
 
-        // Clip to the canvas (never past it: it's the widest × tallest, so this only bites
-        // if a strip's config changed under us).
         uint16_t w = strip->effectiveWidth();   // layout virtual matrix, else configured/linear
         uint16_t h = strip->effectiveHeight();
         if (w == 0 || h == 0) continue;
-        const uint16_t sw = w < cw ? w : cw;
-        const uint16_t sh = h < ch ? h : ch;
+        // Safety net: never render past the allocated buffers (shouldn't trigger —
+        // buffers are sized to the widest x tallest strip).
+        if ((uint32_t)w * (uint32_t)h > bufferCap) {
+            w = (uint16_t)(bufferCap / h);
+            if (w == 0) continue;
+        }
+
+        if (!haveRender || w != lastRenderW || h != lastRenderH) {
+            if (fading) composite = renderCrossfadeAt(w, h); else renderGraphAt(currentPattern, w, h);
+            lastRenderW = w; lastRenderH = h; haveRender = true;
+        }
+
+        // While fading, the composite IS the frame, wherever it was assembled.
+        const CRGB* patternBuffer = fading ? composite : getBuffer(currentPattern.outputBuffer);
+        if (!patternBuffer) continue;
 
         if (strip->hasLayout()) {
-            // Arbitrary layout (WLED ledmap): walk the layout's W×H grid; each cell lights the
-            // LED it maps to (gaps are -1), taking the canvas cell at the same (x, y).
-            for (uint16_t y = 0; y < sh; y++) {
-                for (uint16_t x = 0; x < sw; x++) {
-                    int32_t led = strip->layoutLedAt((uint32_t)y * w + x);
-                    if (led >= 0) strip->setPixelColor((uint16_t)led, patternBuffer[(uint32_t)y * cw + x]);
-                }
+            // Arbitrary layout (WLED ledmap): walk the W×H grid; each cell lights the LED it
+            // maps to (gaps are -1). w*h == layoutWidth*layoutHeight.
+            uint32_t cells = (uint32_t)w * (uint32_t)h;
+            for (uint32_t c = 0; c < cells; c++) {
+                int32_t led = strip->layoutLedAt(c);
+                if (led >= 0) strip->setPixelColor((uint16_t)led, patternBuffer[c]);
             }
         } else if (config.isMatrix()) {
-            // 2D matrix (a strip is a 1-row or 1-column one): xyToIndex owns
-            // rotation/flip/serpentine mapping.
-            for (uint16_t y = 0; y < sh; y++) {
-                for (uint16_t x = 0; x < sw; x++) {
+            // 2D matrix: xyToIndex owns rotation/flip/serpentine mapping.
+            for (uint16_t y = 0; y < h; y++) {
+                for (uint16_t x = 0; x < w; x++) {
                     int ledIndex = config.xyToIndex(x, y);
                     if (ledIndex >= 0 && ledIndex < config.numLeds) {
-                        strip->setPixelColor(ledIndex, patternBuffer[(uint32_t)y * cw + x]);
+                        strip->setPixelColor(ledIndex, patternBuffer[(uint32_t)y * w + x]);
                     }
                 }
             }
         } else {
-            // Linear strip with no dimensions: the first row of the canvas, 1:1.
-            uint32_t pixelCount = sw;
+            // Linear strip: direct 1:1 (w == numLeds, h == 1).
+            uint32_t pixelCount = (uint32_t)w * (uint32_t)h;
             if (pixelCount > (uint32_t)config.numLeds) pixelCount = config.numLeds;
             for (uint32_t i = 0; i < pixelCount; i++) {
                 strip->setPixelColor((uint16_t)i, patternBuffer[i]);

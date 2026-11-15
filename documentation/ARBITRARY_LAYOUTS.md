@@ -22,11 +22,10 @@ that grid cell, or `-1` for a gap. Identical to WLED's
 [ledmap.json](https://kno.wled.ge/advanced/mapping/). The operator graph renders at `W×H`;
 `render()` walks the cells and lights each mapped LED.
 
-**Multi-strip:** all of a device's strips share **one coordinate space**. The pattern renders
-once on a canvas the widest strip's width × the tallest strip's height, and cell `(x, y)` of
-every strip (grid, matrix or ledmap) is canvas cell `(x, y)`, anchored top-left — a 10-wide
-strip covers the left half of a 20-wide one. To place strips side by side or around each other,
-give them ledmaps with the same `W×H` and put each strip's LEDs in its own cells.
+**Multi-strip:** strips stay independent (each has its own ledmap), exactly like today. To
+make two strips share one coordinate space, give them the **same `W×H`** and place each
+strip's LEDs in the appropriate cells — both render the same pattern at the same resolution,
+so the image is continuous across them. Mismatched sizes → independent, as before.
 
 ## Phase 1 — rendering core (implemented)
 
