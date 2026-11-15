@@ -70,3 +70,30 @@ test('a WLED ledmap.json becomes strip 1 layout; 1D maps take the matrix size', 
   expect(r.layout).toEqual({ width: 16, height: 16, map });
   expect(describeWledImport(r)).toContain('custom layout');
 });
+
+test("WLED's AudioReactive usermod settings carry over to the device's mic settings", () => {
+  // As WLED's audio_reactive.h writes them (addToConfig): pins are [sd, ws, sck, mclk].
+  const um = {
+    AudioReactive: {
+      enabled: true,
+      analogmic: { pin: 36 },
+      digitalmic: { type: 1, pin: [32, 15, 14, -1] },
+      config: { squelch: 12, gain: 80, AGC: 2 },
+      dynamics: { limiter: true, rise: 50, fall: 900 },
+      frequency: { scale: 1 },
+      sync: { port: 11988, mode: 0 },
+    },
+  };
+  const r = wledConfigToChromaBay({ ...cfg, um });
+  expect(r.audio).toEqual({ en: 1, type: 1, sd: 32, ws: 15, sck: 14, mclk: -1, sq: 12, gain: 80, agc: 2, lim: 1, rise: 50, fall: 900, scale: 1 });
+  expect(describeWledImport(r)).toContain('I2S mic on GPIO 32');
+  expect(r.warnings).toEqual([]);
+
+  // No usermod: nothing to import.
+  expect(wledConfigToChromaBay(cfg).audio).toBeUndefined();
+
+  // A codec ChromaBay can't drive is kept (so it is there once it can) but said so.
+  const codec = wledConfigToChromaBay({ ...cfg, um: { AudioReactive: { enabled: true, digitalmic: { type: 2, pin: [26, 25, 27, 0] } } } });
+  expect(codec.audio?.type).toBe(2);
+  expect(codec.warnings.join(' ')).toMatch(/ES7243/);
+});

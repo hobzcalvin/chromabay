@@ -10,6 +10,7 @@
   } from '$lib/ble';
   import { rememberWifiDevice } from '$lib/stores/wifiDeviceStore';
   import { isWifiId } from '$lib/transport';
+  import AudioSettings from './AudioSettings.svelte';
 
   // A device id is all this needs — the characteristic operations below go out over whatever
   // link that device is on, so there is nothing transport-shaped in this component.
@@ -28,7 +29,9 @@
   let saving = $state(false);
   let msg = $state('');
   let msgKind = $state<'ok' | 'err' | 'info'>('info');
-  let tab = $state<'connection' | 'schedule' | 'advanced'>('connection');
+  let tab = $state<'connection' | 'schedule' | 'audio' | 'advanced'>('connection');
+  // Audio input has its own endpoint (and its own Save, with a live meter).
+  const hasAudio = $derived(deviceInfo?.audio === 1);
 
   // Form state
   let transport = $state<'ble' | 'wifi'>('ble');
@@ -186,6 +189,9 @@
     <div class="tabs" role="tablist">
       <button role="tab" class:active={tab === 'connection'} aria-selected={tab === 'connection'} onclick={() => (tab = 'connection')}>Connection</button>
       <button role="tab" class:active={tab === 'schedule'} aria-selected={tab === 'schedule'} onclick={() => (tab = 'schedule')}>Schedule</button>
+      {#if hasAudio}
+        <button role="tab" class:active={tab === 'audio'} aria-selected={tab === 'audio'} onclick={() => (tab = 'audio')}>Audio</button>
+      {/if}
       <button role="tab" class:active={tab === 'advanced'} aria-selected={tab === 'advanced'} onclick={() => (tab = 'advanced')}>Advanced</button>
     </div>
 
@@ -248,6 +254,8 @@
           {/if}
           <p class="hint">Uses your phone's time zone. On power loss it forgets the time and the schedule pauses until the app connects (or automatically on Wi-Fi). "Off" means brightness 0 — turn brightness up any time to override until the next scheduled change.</p>
         {/if}
+      {:else if tab === 'audio'}
+        <AudioSettings {deviceId} />
       {:else}
         <label class="field row">
           <span>Sleep after (min, 0 = never)</span>
@@ -306,10 +314,12 @@
       {/if}
     </div>
 
+    {#if tab !== 'audio'}
     <div class="save-bar">
       <button class="btn primary" disabled={saving} onclick={save}>{saving ? 'Saving…' : 'Save'}</button>
       {#if msg}<span class="msg {msgKind}">{msg}</span>{/if}
     </div>
+    {/if}
   {/if}
 </div>
 

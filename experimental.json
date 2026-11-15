@@ -1,0 +1,6 @@
+{
+  "id": "audio",
+  "title": "Audio reactivity",
+  "description": "Microphone input (I2S/PDM, WLED-style settings), audio-driven automation and an Audio node.",
+  "firmware": true
+}

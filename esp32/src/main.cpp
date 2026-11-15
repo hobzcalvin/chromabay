@@ -39,6 +39,7 @@
 #include "firmware_version.h" // Include firmware version header
 #include "sentry_reporting.h" // Crash/reset-reason reporting (no-op unless a DSN is baked in)
 #include "pattern_renderer_base.h" // Include pattern renderer
+#include "audio_input.h"     // I2S/PDM microphone → Audio::g_features (audio reactivity)
 
 // Latency tracing for bench debugging, off unless built with -DCB_TIMING_TRACE: when a write
 // arrives vs when the loop applies it, and any loop step slow enough to delay that.
@@ -132,6 +133,12 @@ PatternRendererBase* patternRenderer = nullptr;
 // (comm mode, wifi ssid, sleep timer, rgb-test, wifi ip); write is a JSON patch. Used to
 // provision WiFi over BLE and to flip settings; a mode/ssid change triggers a reboot.
 #define CHARACTERISTIC_UUID_COMM_CONFIG "a0be83fa-8dc9-47f0-ab40-b19721d20ed1"
+
+// Audio input (microphone) settings + live levels. Read returns JSON: the WLED-shaped settings
+// (en/type/sd/ws/sck/mclk/sq/gain/agc/lim/rise/fall/scale), a status string and the current
+// levels, so the app can show a meter while you tune gain. Write is a msgpack patch of the same
+// keys; capture restarts with the new settings. Device info carries "audio":1 when present.
+#define CHARACTERISTIC_UUID_AUDIO_CONFIG "a0be83e3-8dc9-47f0-ab40-b19721d20ed1"
 
 // TCP transport: port the device listens on in WiFi mode, and the framed-message protocol
 // version. Each frame is [u8 channel][u32 len LE][payload]. Channels mirror the BLE
@@ -769,6 +776,7 @@ String buildDeviceInfoJson() {
     j += "\"hw_ver\":\"" + String(HARDWARE_VERSION) + "\",";
     j += "\"feat\":" + String(FIRMWARE_FEATURES) + ",";
     if (gHasWledFiles) j += "\"wled\":1,"; // WLED's settings are still on flash (see gHasWledFiles)
+    j += "\"audio\":1,"; // AUDIO_CONFIG endpoint + audio automation shapes + Audio node
     // Does THIS image support WiFi, and how big is the OTA slot the app can flash into? The
     // app compares `slot` (the size of the partition the NEXT OTA writes to — the inactive
     // app slot, read from the live partition table, so it's correct even on devices we only
@@ -2951,6 +2959,145 @@ void processCommConfig() {
 #endif
 }
 
+// ===================================================================================
+// Audio input (AUDIO_CONFIG)
+// ===================================================================================
+static uint8_t* audioCfgBuf = nullptr;
+static size_t audioCfgLen = 0;
+static volatile bool newAudioCfgAvailable = false;
+
+// Which pin, if any, the mic settings would take from the LEDs or the button.
+static int audioPinConflict(const AudioInput::Settings& a) {
+    if (!a.enabled || a.type == AudioInput::MIC_SIMULATED) return -1;
+    const bool pdm = a.type == AudioInput::MIC_PDM;
+    int pins[4] = { a.sd, a.ws, pdm ? -1 : a.sck, a.type == AudioInput::MIC_I2S_MCLK ? a.mclk : -1 };
+    auto cfg = configMgr.getCurrentConfigurationFromManager();
+    for (int p : pins) {
+        if (p < 0) continue;
+        if (p == buttonPin) return p;
+        for (const auto& st : cfg.strips) {
+            if (p == (int)st.pin) return p;
+            if (LedConfig::isFourWire(st.chipset) && p == (int)st.clockPin) return p;
+        }
+    }
+    return -1;
+}
+
+static void startAudio(const AudioInput::Settings& a) {
+    int clash = audioPinConflict(a);
+    if (clash >= 0) {
+        AudioInput::stop();
+        AudioInput::g_settings = a;
+        char msg[48]; snprintf(msg, sizeof(msg), "GPIO %d is used by LEDs/button", clash);
+        AudioInput::setStatus(msg);
+        Serial.printf("[Audio] %s\n", msg);
+        return;
+    }
+    bool ok = AudioInput::start(a);
+    Serial.printf("[Audio] %s (type %u, sd %d ws %d sck %d)\n", AudioInput::g_status, a.type, a.sd, a.ws, a.sck);
+    DiagLog::note("audio %s", ok ? "on" : AudioInput::g_status);
+}
+
+static String audioJson() {
+    const AudioInput::Settings& a = AudioInput::g_settings;
+    const Audio::Features& f = Audio::get();
+    char b[160];
+    String j = "{";
+    snprintf(b, sizeof(b), "\"en\":%d,\"type\":%u,\"sd\":%d,\"ws\":%d,\"sck\":%d,\"mclk\":%d,",
+             a.enabled ? 1 : 0, a.type, a.sd, a.ws, a.sck, a.mclk);
+    j += b;
+    snprintf(b, sizeof(b), "\"sq\":%u,\"gain\":%u,\"agc\":%u,\"lim\":%d,\"rise\":%u,\"fall\":%u,\"scale\":%u,",
+             a.cfg.squelch, a.cfg.gain, a.cfg.agc, a.cfg.limiter ? 1 : 0, a.cfg.riseMs, a.cfg.fallMs, a.cfg.scale);
+    j += b;
+    j += "\"status\":\"" + String(AudioInput::g_status) + "\",";
+    snprintf(b, sizeof(b), "\"run\":%d,\"pdm\":%d,\"blocks\":%u,\"rawpk\":%.4f,",
+             (AudioInput::g_running || Audio::g_source == Audio::SOURCE_SIMULATED) ? 1 : 0,
+             AudioInput::pdmSupported() ? 1 : 0, (unsigned)AudioInput::g_blocks, AudioInput::g_rawPeak);
+    j += b;
+    snprintf(b, sizeof(b), "\"vol\":%.3f,\"bass\":%.3f,\"mid\":%.3f,\"tre\":%.3f,\"beat\":%.3f,\"bpm\":%.1f,\"hz\":%.0f,",
+             f.volume, f.bass, f.mid, f.treble, f.beat, f.bpm, f.peakHz);
+    j += b;
+    j += "\"bands\":[";
+    for (int i = 0; i < Audio::kBands; i++) {
+        snprintf(b, sizeof(b), "%s%d", i ? "," : "", (int)lroundf(f.bands[i] * 100.0f));
+        j += b;
+    }
+    j += "]}";
+    return j;
+}
+
+static void onAudioConfigRead(Endpoints::Link& link) {
+    link.send(audioJson());
+}
+
+static void onAudioConfigWrite(const uint8_t* data, size_t len, Endpoints::Link& link) {
+    (void)link;
+    if (!data || len == 0 || len > 256) return;
+    noteActivity();
+    if (audioCfgBuf) { free(audioCfgBuf); audioCfgBuf = nullptr; audioCfgLen = 0; }
+    audioCfgBuf = (uint8_t*)malloc(len);
+    if (!audioCfgBuf) return;
+    memcpy(audioCfgBuf, data, len);
+    audioCfgLen = len;
+    newAudioCfgAvailable = true;
+}
+
+// Loop task: apply a staged AUDIO_CONFIG patch, persist it, restart capture.
+static void processAudioConfig() {
+    if (!newAudioCfgAvailable) return;
+    newAudioCfgAvailable = false;
+    uint8_t* buf = audioCfgBuf; size_t len = audioCfgLen;
+    audioCfgBuf = nullptr; audioCfgLen = 0;
+    if (!buf) return;
+    AudioInput::Settings a = AudioInput::g_settings;
+    bool restart = false;
+    mpack_tree_t tree;
+    mpack_tree_init_data(&tree, (const char*)buf, len);
+    mpack_tree_parse(&tree);
+    mpack_node_t root = mpack_tree_root(&tree);
+    if (mpack_tree_error(&tree) == mpack_ok && mpack_node_type(root) == mpack_type_map) {
+        size_t n = mpack_node_map_count(root);
+        for (size_t i = 0; i < n; i++) {
+            char key[8];
+            mpack_node_copy_cstr(mpack_node_map_key_at(root, i), key, sizeof(key));
+            mpack_node_t v = mpack_node_map_value_at(root, i);
+            if (mpack_tree_error(&tree) != mpack_ok) break;
+            auto num = [&]() -> int {
+                switch (mpack_node_type(v)) {
+                    case mpack_type_int:  return (int)mpack_node_i32(v);
+                    case mpack_type_uint: return (int)mpack_node_u32(v);
+                    case mpack_type_bool: return mpack_node_bool(v) ? 1 : 0;
+                    case mpack_type_float: return (int)lroundf(mpack_node_float(v));
+                    case mpack_type_double: return (int)lround(mpack_node_double(v));
+                    default: return 0;
+                }
+            };
+            int x = num();
+            auto pin = [](int p) -> int8_t { return (int8_t)(p < 0 || p > 48 ? -1 : p); };
+            if      (!strcmp(key, "en"))    { a.enabled = x != 0; restart = true; }
+            else if (!strcmp(key, "type"))  { a.type = (uint8_t)x; restart = true; }
+            else if (!strcmp(key, "sd"))    { a.sd = pin(x); restart = true; }
+            else if (!strcmp(key, "ws"))    { a.ws = pin(x); restart = true; }
+            else if (!strcmp(key, "sck"))   { a.sck = pin(x); restart = true; }
+            else if (!strcmp(key, "mclk"))  { a.mclk = pin(x); restart = true; }
+            else if (!strcmp(key, "sq"))    a.cfg.squelch = (uint8_t)constrain(x, 0, 255);
+            else if (!strcmp(key, "gain"))  a.cfg.gain = (uint8_t)constrain(x, 1, 255);
+            else if (!strcmp(key, "agc"))   a.cfg.agc = (uint8_t)constrain(x, 0, 3);
+            else if (!strcmp(key, "lim"))   a.cfg.limiter = x != 0;
+            else if (!strcmp(key, "rise"))  a.cfg.riseMs = (uint16_t)constrain(x, 0, 5000);
+            else if (!strcmp(key, "fall"))  a.cfg.fallMs = (uint16_t)constrain(x, 0, 10000);
+            else if (!strcmp(key, "scale")) a.cfg.scale = (uint8_t)constrain(x, 0, 3);
+        }
+    } else {
+        Serial.println("[Audio] bad msgpack patch");
+    }
+    mpack_tree_destroy(&tree);
+    free(buf);
+    AudioInput::save(a);
+    if (restart || !AudioInput::g_settings.enabled) startAudio(a);
+    else AudioInput::g_settings.cfg = a.cfg; // gain/squelch/AGC/dynamics apply live
+}
+
 // COMM_CONFIG BLE characteristic: read returns settings JSON; write stages an msgpack patch.
 static void onCommConfigRead(Endpoints::Link& link) {
     (void)link;
@@ -3460,6 +3607,7 @@ static const Endpoints::Endpoint ENDPOINTS[] = {
     { CHARACTERISTIC_UUID_LIBRARY_CMD,    NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR,              onLibraryCmdWrite,     nullptr },
     { CHARACTERISTIC_UUID_LIBRARY_DUMP,   NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY,                onLibraryDumpWrite,    nullptr },
     { CHARACTERISTIC_UUID_COMM_CONFIG,    NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE,                  onCommConfigWrite,     onCommConfigRead },
+    { CHARACTERISTIC_UUID_AUDIO_CONFIG,   NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE,                  onAudioConfigWrite,    onAudioConfigRead },
     // Crash relay. These are the rows the old hand-mirrored Wi-Fi table had to grow by hand
     // (commit b6743a0); here they are ordinary endpoints like any other.
     { CHARACTERISTIC_UUID_SENTRY_TX,      NIMBLE_PROPERTY::NOTIFY,                                        nullptr,               nullptr },
@@ -3665,6 +3813,9 @@ void setup() {
     loadDeviceName();
     Serial.printf("Device name: %s\n", deviceName.c_str());
     loadButtonPin(); // configure the physical button GPIO (if any)
+    // Microphone (if one is configured). After the LEDs and button so pin clashes are caught,
+    // and before the OTA health check, so an image that crashes starting audio rolls back.
+    startAudio(AudioInput::load());
 
     // The endpoint table is the protocol, so it is installed before either transport starts —
     // not inside the BLE branch, which on a Wi-Fi boot would leave the dispatcher empty.
@@ -3915,6 +4066,7 @@ void loop() {
             // packets are arriving (gRealtimeUntilMs in the future) we hold the streamed
             // frame and skip this, reverting automatically once packets stop.
             updateCycle();   // pick the synced playlist pattern before rendering
+            AudioInput::snapshot(); // this frame's audio features, for operators + automation
             TIMED("update", patternRenderer->update());
             TIMED("render", patternRenderer->render());
             fpsFrames++;
@@ -3948,6 +4100,7 @@ void loop() {
     processDeviceName();
     processButtonPinUpdate();
     TIMED("commcfg", processCommConfig());
+    processAudioConfig();
 
     // Take the render buffers back once an update is no longer in flight. Done here rather
     // than on each abort path because there are many ways for an update to end and only one

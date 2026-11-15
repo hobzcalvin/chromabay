@@ -12,6 +12,8 @@
   import { goto } from '$app/navigation';
   import { base } from '$app/paths';
   import { exitCycle } from '$lib/stores/cycleStore';
+  import { previewAudioSource, previewAudioError, togglePreviewMic, usesAudio } from '$lib/audioPreview';
+  import { modulators } from '$lib/stores/modulatorStore';
   // Hidden for now: import PatternSerializationPanel from '$lib/components/PatternSerializationPanel.svelte';
 
   // Initialize patterns on mount
@@ -108,6 +110,12 @@
   let deleteTimeout: ReturnType<typeof setTimeout> | undefined = $state(undefined);
   
   // Add Pattern Node dropdown state
+  // Only offer the preview-audio button when the pattern reacts to audio at all.
+  let patternUsesAudio = $derived(usesAudio(
+    $flowNodes.map((n) => String(n.data?.type ?? '')),
+    [...$modulators.values()].flatMap((m) => [...m.values()].map((c) => c.shape))
+  ));
+
   let showAddNodeDropdown = $state(false);
   let addNodeDropdownRef = $state<HTMLDivElement>();
   
@@ -499,6 +507,14 @@
     <h1>Pattern Editor</h1>
 
     <button class="interact-btn" title="Interact with this pattern" aria-label="Interact" onclick={() => goto(`${base}/interact`)}>🖐️</button>
+    {#if patternUsesAudio}
+      <button class="interact-btn audio-btn" class:live={$previewAudioSource === 'mic'}
+        title={$previewAudioSource === 'mic'
+          ? 'Preview is listening to this microphone. Click to go back to the simulated beat.'
+          : 'Preview is using a simulated beat. Click to listen to this microphone instead (the device always uses its own mic).'}
+        aria-label="Preview audio source" onclick={togglePreviewMic}>{$previewAudioSource === 'mic' ? '🎤' : '🎵'}</button>
+      {#if $previewAudioError}<span class="audio-err">{$previewAudioError}</span>{/if}
+    {/if}
 
     <PatternActions
       bind:showAddNodeDropdown 
@@ -617,6 +633,9 @@
     cursor: pointer;
   }
   .interact-btn:hover { background: rgba(0, 0, 0, 0.5); }
+  .audio-btn { left: auto; right: 0; }
+  .audio-btn.live { border-color: #22d3ee; box-shadow: 0 0 0 1px #22d3ee inset; }
+  .audio-err { position: absolute; right: 0; top: 46px; font-size: 0.75rem; color: #fca5a5; }
 
   .flow-container {
     flex: 1;

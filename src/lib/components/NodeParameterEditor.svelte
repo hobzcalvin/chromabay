@@ -2,7 +2,7 @@
   import { onMount, onDestroy, tick } from 'svelte';
   import { getNodeDefinition, setNodeParameter, getNodeParameter, deleteNode, nodeParameters, type Parameter } from '../flowStore';
   import { getParameterInteractive, setParameterInteractive, MAX_INTERACTIVE_PARAMS, interactiveParameters } from '../stores/interactiveStore';
-  import { modulators, getModulator, setModulator, clearModulator, modulatorSeedFor, SHAPES, type ModulatorConfig, type ModField } from '../stores/modulatorStore';
+  import { modulators, getModulator, setModulator, clearModulator, modulatorSeedFor, SHAPES, CLOCK_SHAPES, isAudioShape, isAudioLevelShape, isBeatLockedShape, periodLabel, periodSuffix, type ModulatorConfig, type ModField } from '../stores/modulatorStore';
   import { flattenSvgPath, encodedToPath, PRESETS } from '../svgFlatten';
   import ColorWheel from './ColorWheel.svelte';
   import { findColorGroups, colorGroupOwned, hexToHueSat, hueSatToHex, type ColorGroup } from '../color';
@@ -356,6 +356,13 @@
   function stopAutomation(param: Parameter) { clearModulator(node.id, param.name); automating = null; }
   function updateMod(param: Parameter, patch: Partial<ModulatorConfig>) {
     const cur = getModulator(node.id, param.name); if (!cur) return;
+    // `period` means something different per shape family (seconds per cycle / release
+    // seconds / beats per cycle), so moving between families picks a sensible default
+    // instead of carrying a 5 s period over as a 5 s release.
+    if (patch.shape !== undefined && patch.period === undefined) {
+      const fam = (s: number) => (isBeatLockedShape(s) ? 2 : isAudioLevelShape(s) ? 1 : 0);
+      if (fam(patch.shape) !== fam(cur.shape)) patch = { ...patch, period: [5, 0.3, 4][fam(patch.shape)] };
+    }
     setModulator(node.id, param.name, { ...cur, ...patch });
   }
   // Any automation field (envelope/min/max/period) can be exposed as its own live control
@@ -379,6 +386,13 @@
       case 3: return 'M0 13 L0 1 L16 1 L16 13 L32 13 L32 1';            // square
       case 4: return 'M0 10 L8 10 L8 3 L16 3 L16 13 L24 13 L24 6 L32 6';// random
       case 5: return 'M0 8 Q6 3 12 7 T24 6 T32 9';                      // perlin
+      case 6: return 'M0 13 L3 9 L5 11 L8 4 L11 8 L14 2 L17 9 L20 6 L23 11 L26 5 L29 10 L32 8'; // volume
+      case 7: return 'M0 13 L0 7 L6 7 L6 13 M8 13 L8 3 L14 3 L14 13 M16 13 L16 11 L32 11';     // bass
+      case 8: return 'M0 13 L10 13 L10 8 L16 8 L16 4 L22 4 L22 13 L32 13';                       // mids
+      case 9: return 'M0 13 L18 13 L18 9 L24 9 L24 3 L32 3';                                     // treble
+      case 10: return 'M0 13 L2 1 Q4 12 9 13 L10 1 Q12 12 17 13 L18 1 Q20 12 25 13 L26 1 Q28 12 32 13'; // beat pulse
+      case 11: return 'M0 1 Q4 13 8 13 T16 1 Q20 13 24 13 T32 1';        // beat wave
+      case 12: return 'M0 13 L8 1 L8 13 L16 1 L16 13 L24 1 L24 13 L32 1';// beat ramp
       default: return 'M0 7 L32 7';
     }
   }
@@ -455,7 +469,19 @@
           {/snippet}
           <div class="mod-field"><span class="mod-label">Envelope {@render handBtn('shape')}</span></div>
           <div class="shape-grid">
-            {#each SHAPES as name, si}
+            {#each SHAPES.slice(0, CLOCK_SHAPES) as name, si}
+              <button type="button" class="shape-btn" class:sel={cfg.shape === si} title={name} onclick={() => updateMod(p, { shape: si })}>
+                <svg viewBox="0 0 32 14" width="36" height="16" aria-hidden="true"><path d={shapePath(si)} fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+                <span>{name}</span>
+              </button>
+            {/each}
+          </div>
+          <!-- Audio-driven: on a device they follow its microphone; in the preview, the
+               simulated groove or this computer's mic (Audio button on the preview). -->
+          <div class="mod-label audio-heading">🎵 Audio</div>
+          <div class="shape-grid">
+            {#each SHAPES.slice(CLOCK_SHAPES) as name, k}
+              {@const si = k + CLOCK_SHAPES}
               <button type="button" class="shape-btn" class:sel={cfg.shape === si} title={name} onclick={() => updateMod(p, { shape: si })}>
                 <svg viewBox="0 0 32 14" width="36" height="16" aria-hidden="true"><path d={shapePath(si)} fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
                 <span>{name}</span>
@@ -475,7 +501,16 @@
             <input type="range" min={rng.lo} max={rng.hi} step={mstep} value={cfg.max}
               oninput={(e) => updateMod(p, { max: parseFloat(e.currentTarget.value) })} />
             <span class="mod-val">{(+cfg.max).toFixed(2)}</span></div>
-          <div class="mod-field"><span class="mod-label">Period (s) {@render handBtn('period')}</span> <input type="number" min="0.1" step="0.1" value={cfg.period} oninput={(e) => updateMod(p, { period: Math.max(0.1, parseFloat(e.currentTarget.value) || 0.1) })} /></div>
+          {#if isBeatLockedShape(cfg.shape)}
+            <div class="mod-field"><span class="mod-label">{periodLabel(cfg.shape)} {@render handBtn('period')}</span> <input type="number" min="1" max="64" step="1" value={Math.max(1, Math.round(cfg.period))} oninput={(e) => updateMod(p, { period: Math.max(1, Math.round(parseFloat(e.currentTarget.value) || 1)) })} /></div>
+          {:else if isAudioLevelShape(cfg.shape)}
+            <div class="mod-field"><span class="mod-label">{periodLabel(cfg.shape)} {@render handBtn('period')}</span> <input type="number" min="0" step="0.05" value={cfg.period} oninput={(e) => updateMod(p, { period: Math.max(0, parseFloat(e.currentTarget.value) || 0) })} /></div>
+          {:else}
+            <div class="mod-field"><span class="mod-label">Period (s) {@render handBtn('period')}</span> <input type="number" min="0.1" step="0.1" value={cfg.period} oninput={(e) => updateMod(p, { period: Math.max(0.1, parseFloat(e.currentTarget.value) || 0.1) })} /></div>
+          {/if}
+          {#if isAudioShape(cfg.shape)}
+            <p class="audio-hint">Follows the device's microphone (set it up under the device's Audio input settings). The preview uses a simulated beat unless you turn on the mic.</p>
+          {/if}
           <button type="button" class="stop-btn" onclick={() => stopAutomation(p)}>Stop automating</button>
         {/if}
       </div>
@@ -512,7 +547,7 @@
               onclick={() => openAutomation(param)} onkeydown={(e) => { if (e.key === 'Enter') openAutomation(param); }}>
               <input type="range" min={param.min ?? 0} max={param.max ?? (param.type === 'hue' ? 255 : 1)} step="any"
                 value={liveValues[param.name] ?? cfg.min} disabled />
-              <span class="auto-tag">🔄 {SHAPES[cfg.shape]} · {(+cfg.min).toFixed(1)}–{(+cfg.max).toFixed(1)} · {cfg.period}s</span>
+              <span class="auto-tag">{isAudioShape(cfg.shape) ? '🎵' : '🔄'} {SHAPES[cfg.shape] ?? '?'} · {(+cfg.min).toFixed(1)}–{(+cfg.max).toFixed(1)} · {periodSuffix(cfg.shape, cfg.period)}</span>
             </div>
           {:else if param.type === 'float'}
             <div class="float-control">
@@ -1092,6 +1127,8 @@
     padding: 6px 2px; cursor: pointer; font-size: 0.7rem;
   }
   .shape-btn.sel { border-color: #22d3ee; color: #22d3ee; background: #0e2a30; }
+  .audio-heading { margin-top: 4px; font-size: 0.75rem; color: #9ca3af; }
+  .audio-hint { margin: 0; font-size: 0.7rem; color: #9ca3af; line-height: 1.3; }
   .mod-field { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 0.8rem; color: #d1d5db; }
   .mod-label { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
   .mod-field input { width: 90px; background: #111827; border: 1px solid #374151; border-radius: 4px; color: #e5e7eb; padding: 4px 6px; }

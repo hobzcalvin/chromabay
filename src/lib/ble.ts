@@ -78,6 +78,7 @@ const CHARACTERISTIC_UUID_TX = 'a0be83e6-8dc9-47f0-ab40-b19721d20ed1';
 const CHARACTERISTIC_UUID_DEVICE_INFO = "a0be83e7-8dc9-47f0-ab40-b19721d20ed1";
 const CHARACTERISTIC_UUID_DIAGNOSTICS = "a0be83ff-8dc9-47f0-ab40-b19721d20ed1"; // state + recent device events (feat>=7)
 const CHARACTERISTIC_UUID_COMM_CONFIG = "a0be83fa-8dc9-47f0-ab40-b19721d20ed1"; // device settings (feat>=2)
+const CHARACTERISTIC_UUID_AUDIO_CONFIG = "a0be83e3-8dc9-47f0-ab40-b19721d20ed1"; // mic settings + live levels (device info "audio":1)
 const CHARACTERISTIC_UUID_OTA_CONTROL = "a0be83e8-8dc9-47f0-ab40-b19721d20ed1";
 const CHARACTERISTIC_UUID_OTA_DATA    = "a0be83e9-8dc9-47f0-ab40-b19721d20ed1";
 const CHARACTERISTIC_UUID_OTA_STATUS  = "a0be83ea-8dc9-47f0-ab40-b19721d20ed1";
@@ -130,6 +131,63 @@ export interface DeviceInfo {
   heap?: number;
   wled?: number;            // 1 = WLED's cfg.json is still on the device's filesystem (feat>=8; see wledMigration.ts)
   id?: string;              // factory eFuse MAC, 12 hex: the device_id its own Sentry events carry (feat>=7)
+  audio?: number;           // 1 = audio reactivity: the AUDIO_CONFIG endpoint, audio automation and the Audio node
+}
+
+// --- Audio input (microphone) ---------------------------------------------------------------
+// Settings mirror WLED's AudioReactive usermod: the same mic type numbers ("digitalmic:type"),
+// pin order (SD, WS, SCK, MCLK), squelch/gain/AGC, dynamics limiter and frequency scaling.
+export const MIC_TYPES: { value: number; label: string; supported: boolean }[] = [
+  { value: 1, label: 'Generic I2S', supported: true },
+  { value: 3, label: 'SPH0654', supported: true },
+  { value: 4, label: 'Generic I2S with Mclk', supported: true },
+  { value: 5, label: 'Generic I2S PDM', supported: true },
+  { value: 0, label: 'Generic Analog (not supported)', supported: false },
+  { value: 2, label: 'ES7243 (not supported yet)', supported: false },
+  { value: 6, label: 'ES8388 (not supported yet)', supported: false },
+  { value: 250, label: 'Simulated (no mic, a test beat)', supported: true },
+];
+export const MIC_PDM = 5, MIC_MCLK = 4, MIC_SIMULATED = 250;
+export const AGC_MODES = ['Off', 'Normal', 'Vivid', 'Lazy'];
+// WLED's frequency:scale values, in WLED's menu order.
+export const FREQ_SCALES: { value: number; label: string }[] = [
+  { value: 0, label: 'None' },
+  { value: 2, label: 'Linear (Amplitude)' },
+  { value: 3, label: 'Square Root (Energy)' },
+  { value: 1, label: 'Logarithmic (Loudness)' },
+];
+
+export interface AudioSettings {
+  en: number; type: number; sd: number; ws: number; sck: number; mclk: number;
+  sq: number; gain: number; agc: number; lim: number; rise: number; fall: number; scale: number;
+}
+/** What a read returns: the settings plus the device's live view of its mic. */
+export interface AudioStatus extends AudioSettings {
+  status: string;   // "listening (I2S)", "set the mic pins", "GPIO 13 is used by LEDs/button", ...
+  run: number;      // 1 = capturing (or simulating)
+  pdm: number;      // 1 = this chip can record a PDM mic
+  blocks: number;   // analysis blocks so far (rising = the mic is delivering)
+  rawpk: number;    // peak |sample| of the last read, before gain (0..1)
+  vol: number; bass: number; mid: number; tre: number; beat: number; bpm: number; hz: number;
+  bands: number[];  // 16 bands, 0..100
+}
+export type AudioSettingsPatch = Partial<AudioSettings>;
+
+export async function readAudioStatus(deviceId: string): Promise<AudioStatus | null> {
+  try {
+    const json = await readCharacteristic(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_AUDIO_CONFIG);
+    return JSON.parse(json) as AudioStatus;
+  } catch (e) {
+    console.warn('[audio] AUDIO_CONFIG unavailable:', e);
+    return null;
+  }
+}
+
+/** Write audio settings (msgpack patch). Pin/type/enable changes restart capture on the device. */
+export async function writeAudioSettings(deviceId: string, patch: AudioSettingsPatch): Promise<void> {
+  const bytes = msgpackEncode(patch) as Uint8Array;
+  await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_AUDIO_CONFIG,
+    new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength));
 }
 
 // Realtime pixel-streaming protocols. A bitmask, so a device can listen for several at once:

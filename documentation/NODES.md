@@ -19,6 +19,7 @@ a 1-row strip shows a slice through the middle.
 | **Quasicrystal** (`quasicrystal`) | Sum of N plane waves at even angles; 5 or 7 waves never repeat | Slow hypnotic rosettes; mono mode for a grey source |
 | **Pinwheel** (`pinwheel`) | N spinning arms, optional twist into a spiral | Spirals, radar sweeps, a rotating mask |
 | **Particles** (`particles`) | Fountain, fireworks, snow, or sparks, with gravity, life and trails | Motion that isn't a field |
+| **Audio** (`audio`) | The sound as an image: Level, Bass/Mid/Treble → R/G/B, Spectrum, Bars, Beat ([AUDIO_REACTIVITY.md](AUDIO_REACTIVITY.md)) | Blend → Multiply to drive any pattern from the music |
 
 ## Modifiers (one input)
 
@@ -45,6 +46,7 @@ a 1-row strip shows a slice through the middle.
 - **Stained glass**: Voronoi (cells) → Blend (Multiply) with Voronoi (edges) inverted by Threshold.
 - **Mandala**: Perlin Noise → Kaleidoscope (8 segments, spin 0.05) → Color Adjust (contrast 1.6).
 - **Shape mask**: any pattern → Blend input 1, Shape → Blend input 2, mode Multiply.
+- **Color by band**: any pattern → Blend input 1, Audio (Bass/Mid/Treble → R/G/B) → input 2, mode Multiply.
 
 `src/lib/tests/operators.test.ts` renders every operator in the WASM engine at its defaults
 and checks that the editor's input count for it matches what it reads.

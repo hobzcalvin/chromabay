@@ -9,10 +9,11 @@
 //     didn't survive), applied to the first factory-fresh ChromaBay device that connects soon
 //     after.
 // Applied: LED outputs (chipset, pins, counts, color order, matrix, gamma), brightness, the
-// device name, the button pin, and WLED's ledmap.json as strip 1's layout.
+// device name, the button pin, WLED's ledmap.json as strip 1's layout, and the AudioReactive
+// usermod's microphone settings (on firmware with audio input).
 import {
   getDeviceInfo, readWledFile, retireWledFiles, setLedConfiguration, setDeviceName, setButtonPin,
-  uploadStripLayout, WLED_FILES, WLED_IMPORT_FEAT, type DeviceInfo,
+  uploadStripLayout, writeAudioSettings, WLED_FILES, WLED_IMPORT_FEAT, type DeviceInfo,
 } from './ble';
 import { wledConfigToChromaBay, describeWledImport, loadSavedWledImport, clearSavedWledImport, type WledImport } from './wledImport';
 
@@ -51,7 +52,7 @@ export async function migrateFromWledIfNeeded(deviceId: string, info?: DeviceInf
     }
     if (!imp) return null;
 
-    await applyWledImport(deviceId, imp, { rename: isFactoryName(di?.name) });
+    await applyWledImport(deviceId, imp, { rename: isFactoryName(di?.name), audio: di?.audio === 1 });
     if (source === 'device') await retireWledFiles(deviceId).catch(() => {});
     else clearSavedWledImport();
     return { summary: describeWledImport(imp), warnings: imp.warnings, source };
@@ -62,12 +63,14 @@ export async function migrateFromWledIfNeeded(deviceId: string, info?: DeviceInf
   }
 }
 
-/** Write an import to a device: LED config (with brightness), name, button pin, layout. */
-export async function applyWledImport(deviceId: string, imp: WledImport, opts: { rename: boolean }): Promise<void> {
+/** Write an import to a device: LED config (with brightness), name, button pin, layout, mic. */
+export async function applyWledImport(deviceId: string, imp: WledImport, opts: { rename: boolean; audio?: boolean }): Promise<void> {
   await setLedConfiguration(deviceId, imp.config);
   if (opts.rename && imp.name) await setDeviceName(deviceId, imp.name.slice(0, 31)).catch((e) => console.warn('[WLED migration] name:', e));
   if (imp.buttonPin !== undefined && imp.buttonPin >= 0 && imp.buttonPin <= 39) {
     await setButtonPin(deviceId, imp.buttonPin).catch((e) => console.warn('[WLED migration] button:', e));
   }
   if (imp.layout) await uploadStripLayout(deviceId, 0, imp.layout).catch((e) => console.warn('[WLED migration] layout:', e));
+  // After the LED config, so the device checks the mic pins against the LED pins it now has.
+  if (imp.audio && opts.audio) await writeAudioSettings(deviceId, imp.audio).catch((e) => console.warn('[WLED migration] audio:', e));
 }

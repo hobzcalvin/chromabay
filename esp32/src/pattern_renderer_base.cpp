@@ -477,6 +477,8 @@ void PatternRendererBase::update() {
     // lose float precision): 1M ms ≈ 16.67 min cycle.
     frameFloatTime = globalTime % 1000000;
     frameFloatDelta = deltaTime;
+    // A simulated audio input follows the (synced) frame clock, so every device agrees.
+    Audio::tick(frameFloatTime);
 
     lastFrameTime = currentTime;
 

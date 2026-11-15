@@ -12,6 +12,7 @@ const GENERATORS = new Set<string>([
   'radial_rainbow', 'rainbow', 'raindrops', 'static', 'strobe', 'svgfill', 'symbol',
   'test', 'text', 'clock', 'venn', 'wave',
   'osc', 'shape', 'solid', 'voronoi', 'quasicrystal', 'pinwheel', 'particles',
+  'audio',
 ]);
 
 // Operators that read BOTH inputs (named `inputBuffer1` and `inputBuffer2` in render()).

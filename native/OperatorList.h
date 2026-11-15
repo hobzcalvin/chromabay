@@ -71,6 +71,8 @@
 #include "RgbSplitOperator.h"
 #include "GradientMapOperator.h"
 #include "DisplaceOperator.h"
+// Audio reactivity (native/AudioReactive.h)
+#include "AudioOperator.h"
 
 // Add your new operators here:
 // #include "RainbowOperator.h"

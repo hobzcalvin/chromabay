@@ -6,18 +6,35 @@
  */
 import { writable, get } from 'svelte/store';
 
-// Shape enum — must match native/Modulation.h.
-export const SHAPES = ['Sine', 'Triangle', 'Sawtooth', 'Square', 'Random', 'Perlin'] as const;
-export type Shape = number; // 0..5, index into SHAPES
+// Shape enum — must match native/Modulation.h. 0-5 run on the clock; 6+ follow the audio input
+// (the device's microphone; in the preview, the simulated groove or the browser mic).
+export const SHAPES = ['Sine', 'Triangle', 'Sawtooth', 'Square', 'Random', 'Perlin',
+  'Volume', 'Bass', 'Mids', 'Treble', 'Beat', 'Beat wave', 'Beat ramp'] as const;
+export type Shape = number; // index into SHAPES
+export const CLOCK_SHAPES = 6;          // shapes [0, 6) are LFOs on the clock
+export const FIRST_AUDIO_SHAPE = 6;
+/** Audio level shapes: `period` is a release time in seconds (0 = raw). */
+export function isAudioLevelShape(shape: number): boolean { return shape >= 6 && shape <= 10; }
+/** Tempo-locked shapes: `period` is the cycle length in beats. */
+export function isBeatLockedShape(shape: number): boolean { return shape === 11 || shape === 12; }
+export function isAudioShape(shape: number): boolean { return shape >= FIRST_AUDIO_SHAPE && shape < SHAPES.length; }
+/** What `period` means for a shape, for labels: seconds per cycle, release seconds, or beats. */
+export function periodLabel(shape: number): string {
+  return isBeatLockedShape(shape) ? 'Beats per cycle' : isAudioLevelShape(shape) ? 'Release (s)' : 'Period (s)';
+}
+export function periodSuffix(shape: number, period: number): string {
+  if (isBeatLockedShape(shape)) return `${Math.max(1, Math.round(period))} beat${Math.round(period) > 1 ? 's' : ''}`;
+  return isAudioLevelShape(shape) ? `${period}s release` : `${period}s`;
+}
 
 // Which of an automation's own fields can be driven live from the Interact page.
 export type ModField = 'shape' | 'min' | 'max' | 'period';
 
 export interface ModulatorConfig {
-  shape: Shape;   // 0..5
+  shape: Shape;   // index into SHAPES
   min: number;
   max: number;
-  period: number; // seconds per cycle (for Random: seconds between jumps)
+  period: number; // seconds per cycle (Random: between jumps; audio levels: release; beat-locked: beats)
   interactive?: ModField[]; // fields exposed as live controls on the Interact page (any subset)
   seed?: number;  // the saved pattern's `sd`; absent for a new automation (see modulatorSeedFor)
 }

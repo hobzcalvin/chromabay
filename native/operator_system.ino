@@ -28,6 +28,8 @@ std::vector<std::vector<ParameterValue>> operatorParameters;
 struct OpModulator { bool active = false; int shape = 0; float mn = 0.0f, mx = 1.0f, period = 1.0f; uint32_t seed = 0; Modulation::ModState st; };
 std::vector<std::vector<OpModulator>> operatorModulators;
 int nextOperatorId = 1;
+// The preview starts on the simulated groove (see setAudioSource).
+static const bool g_audioDefaultSource = (Audio::g_source = Audio::SOURCE_SIMULATED, true);
 
 extern "C" {
     // ========================================
@@ -52,6 +54,56 @@ extern "C" {
         WallClock::setTzOffsetMin((int16_t)offsetMin);
     }
     
+    // ========================================
+    // AUDIO INPUT (native/AudioReactive.h)
+    // ========================================
+    // Source: 0 none (silence), 1 live (the app pushes mic samples below), 2 simulated (a
+    // deterministic groove evaluated at each render's timestamp; the default, so audio
+    // patterns are never dead in the editor, the gallery or thumbnails).
+
+    EMSCRIPTEN_KEEPALIVE
+    void setAudioSource(int source) {
+        Audio::g_source = (uint8_t)source;
+        if (source == Audio::SOURCE_NONE) Audio::set(Audio::Features{});
+    }
+
+    static Audio::Analyzer& wasmAnalyzer() {
+        static Audio::Analyzer* a = new Audio::Analyzer(22050.0f);
+        return *a;
+    }
+
+    // Same settings the device takes (WLED AudioReactive names), so the preview of the
+    // browser mic behaves like the device would.
+    EMSCRIPTEN_KEEPALIVE
+    void setAudioConfig(int squelch, int gain, int agc, int limiter, int riseMs, int fallMs, int scale) {
+        Audio::Config& c = wasmAnalyzer().cfg;
+        c.squelch = (uint8_t)squelch; c.gain = (uint8_t)gain; c.agc = (uint8_t)agc;
+        c.limiter = limiter != 0; c.riseMs = (uint16_t)riseMs; c.fallMs = (uint16_t)fallMs;
+        c.scale = (uint8_t)scale;
+    }
+
+    // Mono float samples in [-1, 1] at `sampleRate` (the app halves 44.1/48 kHz to ~22 kHz).
+    EMSCRIPTEN_KEEPALIVE
+    void pushAudioSamples(const float* samples, int count, float sampleRate) {
+        Audio::Analyzer& a = wasmAnalyzer();
+        if (fabsf(a.sampleRate() - sampleRate) > 1.0f) a.setSampleRate(sampleRate);
+        if (a.push(samples, count) > 0 && Audio::g_source == Audio::SOURCE_LIVE) Audio::set(a.features());
+    }
+
+    // Read one feature for UI meters: 0 volume, 1 volumeRaw, 2 bass, 3 mid, 4 treble, 5 beat,
+    // 6 beatPhase, 7 bpm, 8 peakHz, 16..31 bands. Evaluates the simulation at tMs first.
+    EMSCRIPTEN_KEEPALIVE
+    float getAudioFeature(int index, uint32_t tMs) {
+        Audio::tick(tMs);
+        const Audio::Features& f = Audio::get();
+        switch (index) {
+            case 0: return f.volume; case 1: return f.volumeRaw; case 2: return f.bass;
+            case 3: return f.mid; case 4: return f.treble; case 5: return f.beat;
+            case 6: return f.beatPhase; case 7: return f.bpm; case 8: return f.peakHz;
+            default: return (index >= 16 && index < 16 + Audio::kBands) ? f.bands[index - 16] : 0.0f;
+        }
+    }
+
     EMSCRIPTEN_KEEPALIVE
     const char* getOperatorName(int index) {
         auto operatorNames = OperatorRegistry::getInstance().getOperatorNames();
@@ -319,6 +371,7 @@ extern "C" {
         uint32_t deltaTimeMs
     ) {
         if (operatorId >= 0 && operatorId < (int)activeOperators.size() && activeOperators[operatorId]) {
+            Audio::tick(timestampMs); // simulated audio follows the render clock
             static std::vector<ParameterValue> emptyParams;
             auto& parameters = (operatorId < (int)operatorParameters.size()) ?
                 operatorParameters[operatorId] :

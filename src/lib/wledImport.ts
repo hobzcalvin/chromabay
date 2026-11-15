@@ -2,7 +2,7 @@
 // or GET http://<device>/json/cfg) and turn it into ChromaBay LED settings, so moving a light
 // from WLED to ChromaBay keeps its LED count, pins, chipset, color order, matrix size, gamma
 // and brightness. Pure: no I/O here, the callers fetch or read the file.
-import type { LedConfiguration, LedStripConfig } from './ble';
+import type { LedConfiguration, LedStripConfig, AudioSettings } from './ble';
 import { LedChipsets, ColorOrders } from './ble';
 
 export interface WledLayout { width: number; height: number; map: number[] }
@@ -15,6 +15,8 @@ export interface WledImport {
   buttonPin?: number;
   /** WLED's ledmap.json as a ChromaBay layout for strip 1, when one came with the config. */
   layout?: WledLayout;
+  /** WLED's AudioReactive usermod settings (mic type, pins, gain...), when it had them. */
+  audio?: AudioSettings;
   /** Things that didn't carry over, in words a person can act on. */
   warnings: string[];
 }
@@ -146,12 +148,48 @@ export function wledConfigToChromaBay(input: unknown, ledmap?: unknown): WledImp
     else if (strips.length > 1) warnings.push("WLED's ledmap.json spans several outputs; ChromaBay keeps one layout per strip, so set those up under Custom Layout.");
     else layout = l;
   }
+  const audio = wledAudioToChromaBay(cfg, warnings);
   return {
     name,
+    audio,
     config: { globalBrightness: bri !== undefined ? Math.max(1, Math.min(255, Math.round(bri))) : 128, strips },
     buttonPin: btn ? btn.pin[0] : undefined,
     layout,
     warnings,
+  };
+}
+
+/**
+ * WLED's AudioReactive usermod config (cfg.json "um" → "AudioReactive") → ChromaBay's audio
+ * settings, which use the same numbers on purpose. Undefined when WLED had no audio config.
+ */
+export function wledAudioToChromaBay(cfg: any, warnings: string[] = []): AudioSettings | undefined {
+  const ar = cfg?.um?.AudioReactive;
+  if (!ar || typeof ar !== 'object') return undefined;
+  const dm = ar.digitalmic ?? {};
+  const pins: unknown[] = Array.isArray(dm.pin) ? dm.pin : [];
+  const pin = (i: number) => { const v = num(pins[i]); return v !== undefined && v >= 0 && v <= 48 ? v : -1; };
+  const type = num(dm.type) ?? 1;
+  const c = ar.config ?? {}, d = ar.dynamics ?? {}, f = ar.frequency ?? {};
+  const clamp = (v: number | undefined, lo: number, hi: number, def: number) =>
+    v === undefined ? def : Math.max(lo, Math.min(hi, Math.round(v)));
+  const enabled = ar.enabled === true || ar.enabled === 1;
+  if (enabled && (type === 0 || type === 2 || type === 6)) {
+    const what = type === 0 ? 'an analog microphone' : type === 2 ? 'an ES7243 codec' : 'an ES8388 codec';
+    warnings.push(`WLED's audio input used ${what}, which ChromaBay can't drive yet; the settings are kept but the mic stays off.`);
+  }
+  if (num(ar.sync?.mode)) warnings.push("WLED's audio sync over the network isn't carried over; the device listens to its own mic.");
+  return {
+    en: enabled ? 1 : 0,
+    type,
+    sd: pin(0), ws: pin(1), sck: pin(2), mclk: pin(3),
+    sq: clamp(num(c.squelch), 0, 255, 10),
+    gain: clamp(num(c.gain), 1, 255, 60),
+    agc: clamp(num(c.AGC), 0, 3, 0),
+    lim: d.limiter === false || d.limiter === 0 ? 0 : 1,
+    rise: clamp(num(d.rise), 0, 5000, 80),
+    fall: clamp(num(d.fall), 0, 10000, 1400),
+    scale: clamp(num(f.scale), 0, 3, 3),
   };
 }
 
@@ -161,7 +199,8 @@ export function describeWledImport(w: WledImport): string {
     const shape = s.height && s.height > 1 ? `${s.width}×${s.height}` : `${s.numLeds} LEDs`;
     return `${shape} on GPIO ${s.pin}`;
   });
-  return `${w.name ? `“${w.name}”: ` : ''}${parts.join(', ')}, brightness ${w.config.globalBrightness}${w.layout ? ', custom layout' : ''}`;
+  const audio = w.audio?.en ? `, ${w.audio.type === 5 ? 'PDM' : 'I2S'} mic on GPIO ${w.audio.sd}` : '';
+  return `${w.name ? `“${w.name}”: ` : ''}${parts.join(', ')}, brightness ${w.config.globalBrightness}${w.layout ? ', custom layout' : ''}${audio}`;
 }
 
 // A WLED config fetched just before converting a device, kept so the settings can be offered

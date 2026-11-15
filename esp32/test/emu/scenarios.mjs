@@ -271,7 +271,7 @@ export const scenarios = [
       const h = await handles(S3);
       const run = h.run;
       const table = endpointTable();
-      check(table.length === 27, `ENDPOINTS has ${table.length} rows; this test (and the notes) expect 27 — update both if that changed on purpose`, run);
+      check(table.length === 28, `ENDPOINTS has ${table.length} rows; this test (and the notes) expect 28 — update both if that changed on purpose`, run);
       const ours = [...h.found.values()].filter((c) => c.service === SERVICE_UUID);
       const problems = [];
       for (const e of table) {
@@ -567,6 +567,52 @@ export const scenarios = [
   },
 
   {
+    name: 'audio-input',
+    what: 'AUDIO_CONFIG: a mic pin that clashes with the button is refused with a reason; the simulated input drives an Audio node (Beat) so the LEDs pulse at 120 bpm; settings survive a reboot',
+    async run() {
+      const h = await handles(S3);
+      const A = need(h, 'AUDIO_CONFIG').handle, I = need(h, 'DEVICE_INFO').handle;
+      const B = need(h, 'BRIGHTNESS').handle, P = need(h, 'BUTTON_PIN').handle;
+      const T_SIM = 4.0, REBOOT = 7.6, RECONNECT = 11.5;
+      const sc = new Script().connect(CONNECT).mtu(3.05, 517)
+        .write(3.1, B, [200]).write(3.2, P, '17')
+        .write(3.4, A, msgpackEncode({ en: 1, type: 1, sd: 17, ws: 5, sck: 6 }))
+        .readLong(3.7, A).readLong(3.75, I)
+        .write(3.8, A, msgpackEncode({ type: 250, gain: 90 }));
+      pushPattern(sc, T_SIM, h, onePattern('EmuAudio', 'audio', { mode: 4 }), false);
+      sc.readLong(4.4, A).reboot(REBOOT).connect(RECONNECT).mtu(RECONNECT + 0.05, 517).readLong(RECONNECT + 0.3, A);
+      const run = await runEmu({ name: this.name, images: build(S3), ble: true, board: 'atech14', script: sc, seconds: RECONNECT + 0.8 });
+      checkHealthy(run, { expectedResets: 1 });
+
+      const info = json(run, oneRead(run, I, 3.75), 'device info');
+      check(info.audio === 1, () => `device info lacks "audio":1: ${JSON.stringify(info)}`, run);
+      const clash = json(run, oneRead(run, A, 3.7), 'audio config (pin clash)');
+      check(clash.en === 1 && clash.sd === 17 && clash.run === 0 && /GPIO 17 is used/.test(clash.status),
+        () => `a mic on the button's GPIO should be refused with a reason: ${JSON.stringify(clash)}`, run);
+
+      const sim = json(run, oneRead(run, A, 4.4), 'audio config (simulated)');
+      check(sim.type === 250 && sim.run === 1 && sim.status === 'simulated' && sim.gain === 90 && sim.bands.length === 16,
+        () => `simulated input not running: ${JSON.stringify(sim)}`, run);
+
+      // Beat mode: the whole strip flashes on each beat and fades, so brightness swings hard
+      // and peaks ~0.5 s apart (120 bpm on the device clock).
+      const fr = framesIn(run, T_SIM + 0.5, REBOOT - 0.1);
+      check(fr.length >= 20, `only ${fr.length} LED frames while the Audio node ran`, run);
+      const lum = fr.map((f) => f.leds.reduce((a, c) => a + c[0] + c[1] + c[2], 0) / f.leds.length);
+      const hi = Math.max(...lum), lo = Math.min(...lum);
+      check(hi > 60 && lo < hi * 0.3, () => `LEDs should pulse with the beat: brightness ${lo.toFixed(1)}..${hi.toFixed(1)}`, run);
+      const peaks = fr.filter((f, i) => i > 0 && i < fr.length - 1 && lum[i] > hi * 0.7 && lum[i] >= lum[i - 1] && lum[i] >= lum[i + 1]).map((f) => f.t);
+      const gaps = peaks.slice(1).map((t, i) => t - peaks[i]).filter((g) => g > 0.2);
+      const meanGap = gaps.reduce((a, g) => a + g, 0) / (gaps.length || 1);
+      check(gaps.length >= 3 && Math.abs(meanGap - 0.5) < 0.08, () => `beat peaks at ${peaks.map((t) => t.toFixed(2)).join(', ')} (mean gap ${meanGap.toFixed(3)} s, want 0.5)`, run);
+
+      const after = json(run, oneRead(run, A, RECONNECT + 0.3), 'audio config after reboot');
+      check(after.en === 1 && after.type === 250 && after.sd === 17 && after.gain === 90 && after.run === 1,
+        () => `audio settings after reboot: ${JSON.stringify(after)}`, run);
+    },
+  },
+
+  {
     name: 'diagnostics',
     what: 'DIAGNOSTICS (for problem reports) returns the device\'s state and a timestamped ring of what it just did: connect, brightness received and applied, pattern received and shown; its id matches device info',
     async run() {
@@ -783,6 +829,21 @@ export const scenarios = [
       fs.writeFileSync(path.join(OUT_DIR, 'lane-repack.log'), r.stdout + r.stderr);
       const fails = r.stdout.split('\n').filter((l) => l.startsWith('FAIL'));
       check(r.status === 0, `lane_repack_test failed (${fails.length} checks):\n${fails.join('\n') || r.stdout.slice(-2000)}`);
+    },
+  },
+
+  {
+    name: 'audio',
+    what: 'host unit test of the audio analyzer and audio automation (esp32/test/audio_test.cpp)',
+    async run() {
+      fs.mkdirSync(OUT_DIR, { recursive: true });
+      const exe = path.join(OUT_DIR, 'audio_test');
+      const cc = spawnSync(process.env.CXX || 'c++', ['-std=c++17', '-O1', '-Wall', path.join(ROOT, 'esp32/test/audio_test.cpp'), '-o', exe], { encoding: 'utf8' });
+      check(cc.status === 0, `audio_test.cpp did not compile:\n${cc.stderr}`);
+      const r = spawnSync(exe, { encoding: 'utf8' });
+      fs.writeFileSync(path.join(OUT_DIR, 'audio.log'), r.stdout + r.stderr);
+      const fails = r.stdout.split('\n').filter((l) => l.startsWith('FAIL'));
+      check(r.status === 0, `audio_test failed (${fails.length} checks):\n${fails.join('\n') || r.stdout.slice(-2000)}`);
     },
   },
 ];
