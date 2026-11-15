@@ -1,11 +1,11 @@
 // What each device physically looks like — its strips' shapes — remembered across sessions so
 // Interact can preview a pattern the way a device shows it, even after it disconnects.
 //
-// A device's strips each render the pattern on their own canvas (firmware
-// PatternRendererBase::render): a linear strip at numLeds×1, a matrix at W×H, a custom layout
-// (WLED ledmap) at the layout's W×H with only its mapped cells lit. A StripShape carries just
-// enough to draw that: the size, which cells hold an LED, and the wiring for matrices whose LED
-// count doesn't fill the grid.
+// A device's strips all sit in one coordinate space (firmware PatternRendererBase::render): a
+// strip covers numLeds×1 (or 1×numLeds) cells, a matrix W×H, a custom layout (WLED ledmap) the
+// layout's W×H with only its mapped cells lit, each anchored at (0, 0). A StripShape carries
+// just enough to draw that: the size, which cells hold an LED, and the wiring for matrices
+// whose LED count doesn't fill the grid.
 import { writable, get } from 'svelte/store';
 import type { LedStripConfig } from '$lib/ble';
 import { connectedDevices } from '$lib/stores/deviceStore';

@@ -33,11 +33,11 @@
   // Find the output node id reactively
   $: outputNodeId = $flowNodes.find(n => n.data.type === 'output')?.id ?? '';
 
-  // Device layout: every strip of a device renders the same pattern over the same normalized
-  // space (firmware renders each strip at its own size), so they share one "universe" grid — the
-  // largest strip's width × the tallest's height. Each LED lands in the universe cell under its
-  // own cell's centre; LEDs from several strips in one spot simply show that spot. Drawn as
-  // square cells, centred, turned 90° when that makes it bigger on this screen.
+  // Device layout: all of a device's strips share one coordinate space (firmware
+  // PatternRendererBase::render): a canvas the widest strip's width × the tallest's height,
+  // with cell (x, y) of every strip at canvas (x, y), anchored top-left. Strips that share a
+  // cell show the same color there. Drawn as square cells, centred, turned 90° when that makes
+  // it bigger on this screen.
   type Universe = { uw: number; uh: number; lit: Uint8Array; img: ImageData; rotated: boolean; cell: number; x: number; y: number };
   let universe: Universe | null = null;
   let stripCanvas = document.createElement('canvas');
@@ -53,11 +53,8 @@
       const { width: w, height: h } = shapeSize(s);
       if (!w || !h) continue;
       const cells = litCells(s);
-      for (let y = 0; y < h; y++) {
-        const uy = Math.min(uh - 1, Math.floor(((y + 0.5) * uh) / h));
-        for (let x = 0; x < w; x++) {
-          if (cells[y * w + x]) lit[uy * uw + Math.min(uw - 1, Math.floor(((x + 0.5) * uw) / w))] = 1;
-        }
+      for (let y = 0; y < h && y < uh; y++) {
+        for (let x = 0; x < w && x < uw; x++) if (cells[y * w + x]) lit[y * uw + x] = 1;
       }
     }
     const margin = 16;
@@ -76,8 +73,7 @@
     };
   }
 
-  // The canvas the pattern renders at: the device's universe (largest strip width × tallest
-  // height), so a single-strip device looks exactly the way the device renders it.
+  // The canvas the pattern renders at: the device's shared canvas, exactly as it renders it.
   function deviceRenderSize(): { width: number; height: number } | null {
     if (!shapes?.length) return null;
     const sizes = shapes.map(shapeSize).filter((z) => z.width > 0 && z.height > 0);
