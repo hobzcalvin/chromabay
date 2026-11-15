@@ -1,0 +1,11 @@
+[
+  {
+    "id": "audio",
+    "title": "Audio reactivity",
+    "description": "Microphone input (I2S/PDM, WLED-style settings), audio-driven automation and an Audio node.",
+    "branch": "claude/audio-reactivity-feasibility-ezltsj",
+    "appVersion": "1.2.1-audio",
+    "commit": "ce713158932551430ce6e9854c7f78ca477ea118",
+    "updated": "2026-11-15T06:24:32.485Z"
+  }
+]
