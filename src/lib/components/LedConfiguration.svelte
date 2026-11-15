@@ -204,15 +204,21 @@
     if (!layoutSupported || !count || layoutsReadFor === key) return;
     layoutsReadFor = key;
     (async () => {
+      let allRead = true;
       for (let i = 0; i < count; i++) {
         try {
           const r = await getStripLayout(deviceId, i);
           onDevice[i] = !!r;
           if (r && !layoutJson[i]) layoutJson[i] = JSON.stringify({ width: r.width, height: r.height, map: r.map });
           recordStripLayout(deviceId, i, r);
-        } catch (e) { console.warn('layout read failed', e); }
+        } catch (e) {
+          // Unknown, not "none": leave the remembered layout alone and say so.
+          allRead = false;
+          layoutMsg[i] = "Couldn't read this strip's layout from the device. Tap Load current to try again.";
+          console.warn('layout read failed', e);
+        }
       }
-      markDeviceLayoutSynced(deviceId);
+      if (allRead) markDeviceLayoutSynced(deviceId);
     })();
   });
 
@@ -475,6 +481,9 @@
                   </p>
                   <button class="btn secondary small" onclick={() => downloadLayout(index)}>⬇ Download current layout</button>
                   {#if layoutMsg[index]}<span class="layout-msg">{layoutMsg[index]}</span>{/if}
+                {:else if layoutMsg[index]}
+                  <p class="layout-hint">{layoutMsg[index]}</p>
+                  <button class="btn secondary small" onclick={() => loadCurrentLayout(index)}>Load current</button>
                 {/if}
                 {@const cp = configPreview(strip)}
                 {#if cp}

@@ -1929,14 +1929,18 @@ export async function blinkPins(deviceId: string): Promise<void> {
 /**
  * Read back a strip's current layout (so the user can see/copy/tweak it). Writes the strip
  * index to LAYOUT_GET; the device NOTIFYs the layout chunked ([u16 totalLen][u16 offset][bytes],
- * the bytes being the [u16 W][u16 H][u16 count][count×i16] file). Returns null if the strip
- * has no layout (grid mapping) or on timeout.
+ * the bytes being the [u16 W][u16 H][u16 count][count×i16] file). Returns null only when the
+ * device says the strip has no layout (grid mapping). THROWS when the device didn't answer in
+ * full (timeout, dropped link, no LAYOUT_GET characteristic): "couldn't read it" must never
+ * look like "there's no layout", or a caller would forget a layout the device still has.
  */
 export async function getStripLayout(
   deviceId: string,
   stripIndex: number
 ): Promise<{ width: number; height: number; map: number[] } | null> {
-  const bytes = await readLayoutChannel(deviceId, stripIndex & 0xff, 8000);
+  const r = await readLayoutChannelResult(deviceId, stripIndex & 0xff, 8000);
+  if (!r.answered) throw new Error(`Couldn't read strip ${stripIndex + 1}'s layout from the device`);
+  const bytes = r.bytes;
   if (!bytes || bytes.length < 6) return null;
   const p = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const W = p.getUint16(0, true), H = p.getUint16(2, true), count = p.getUint16(4, true);
@@ -1961,40 +1965,67 @@ export async function retireWledFiles(deviceId: string): Promise<void> {
   await readLayoutChannel(deviceId, WLED_FILES.RETIRE, 5000);
 }
 
+async function readLayoutChannel(deviceId: string, code: number, idleMs: number): Promise<Uint8Array | null> {
+  return (await readLayoutChannelResult(deviceId, code, idleMs)).bytes;
+}
+
+// One LAYOUT_GET request at a time per device. Two at once (the settings panel and Interact
+// both reading a layout) share one notify subscription: the second replaces the first's frame
+// handler, so the first never completes and times out.
+const layoutChannelLocks = new Map<string, Promise<unknown>>();
+
 /**
  * One request on the LAYOUT_GET channel: write the 1-byte code, then reassemble the NOTIFY
- * frames [u16 totalLen][u16 offset][bytes]. totalLen 0 = nothing there (resolves null), as does
- * a timeout. Counts REAL bytes received (deduped by offset) rather than the max offset seen:
- * BLE notifications can arrive out of order or drop, and completing early would leave
- * zero-filled holes (a corrupt layout); a missing chunk keeps us waiting, then times out.
+ * frames [u16 totalLen][u16 offset][bytes]. `answered` is true when the device replied in full
+ * — with the bytes, or with totalLen 0 = nothing there (bytes null). A timeout or failure is
+ * answered:false. The timeout is IDLE time: it restarts on every frame, so a big layout that's
+ * still streaming in (a 57×49 map is ~5.6 KB of small BLE notifications) isn't cut off.
+ * Counts REAL bytes received (deduped by offset) rather than the max offset seen: BLE
+ * notifications can arrive out of order or drop, and completing early would leave zero-filled
+ * holes (a corrupt layout); a missing chunk keeps us waiting, then times out.
  */
-async function readLayoutChannel(deviceId: string, code: number, timeoutMs: number): Promise<Uint8Array | null> {
+function readLayoutChannelResult(deviceId: string, code: number, idleMs: number): Promise<{ bytes: Uint8Array | null; answered: boolean }> {
+  const prev = layoutChannelLocks.get(deviceId) ?? Promise.resolve();
+  const run = prev.catch(() => {}).then(() => readLayoutChannelOnce(deviceId, code, idleMs));
+  layoutChannelLocks.set(deviceId, run);
+  run.finally(() => { if (layoutChannelLocks.get(deviceId) === run) layoutChannelLocks.delete(deviceId); }).catch(() => {});
+  return run;
+}
+
+async function readLayoutChannelOnce(deviceId: string, code: number, idleMs: number): Promise<{ bytes: Uint8Array | null; answered: boolean }> {
   let total = -1, received = 0;
   let buf: Uint8Array | null = null;
   const seenOffsets = new Set<number>();
-  let settle: ((v: Uint8Array | null) => void) | null = null;
+  type R = { bytes: Uint8Array | null; answered: boolean };
+  let settle: ((v: R) => void) | null = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const armTimer = () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => { if (settle) { const s = settle; settle = null; s({ bytes: null, answered: false }); } }, idleMs);
+  };
 
   const onFrame = (dv: DataView) => {
     if (!settle || dv.byteLength < 4) return;
+    armTimer();
     const totalLen = dv.getUint16(0, true);
     const offset = dv.getUint16(2, true);
-    if (totalLen === 0) { const s = settle; settle = null; s(null); return; }
+    if (totalLen === 0) { const s = settle; settle = null; s({ bytes: null, answered: true }); return; }
     if (total < 0) { total = totalLen; buf = new Uint8Array(total); received = 0; }
     const dataLen = dv.byteLength - 4;
     for (let i = 0; i < dataLen && offset + i < total; i++) buf![offset + i] = dv.getUint8(4 + i);
     if (!seenOffsets.has(offset)) { seenOffsets.add(offset); received += Math.min(dataLen, total - offset); }
-    if (received >= total && buf) { const s = settle; settle = null; s(buf); }
+    if (received >= total && buf) { const s = settle; settle = null; s({ bytes: buf, answered: true }); }
   };
 
-  const result = await new Promise<Uint8Array | null>(async (resolve) => {
-    const timer = setTimeout(() => { if (settle) { const s = settle; settle = null; s(null); } }, timeoutMs);
-    settle = (v) => { clearTimeout(timer); resolve(v); };
+  const result = await new Promise<R>(async (resolve) => {
+    settle = (v) => { if (timer) clearTimeout(timer); resolve(v); };
+    armTimer();
     try {
       await startBinaryNotifications(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_LAYOUT_GET, onFrame);
       await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_LAYOUT_GET,
         new DataView(new Uint8Array([code & 0xff]).buffer));
     } catch (err) {
-      if (settle) { const s = settle; settle = null; s(null); }
+      if (settle) { const s = settle; settle = null; s({ bytes: null, answered: false }); }
       console.error('[Layout channel] read failed:', err);
     }
   });

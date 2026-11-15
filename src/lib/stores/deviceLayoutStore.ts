@@ -151,10 +151,14 @@ export function syncDeviceLayout(deviceId: string): Promise<void> {
     const name = get(connectedDevices).get(deviceId)?.name;
     const cfg = await getLedConfiguration(deviceId);
     recordDeviceConfig(deviceId, name, cfg.strips);
+    // A layout that couldn't be read keeps what we already knew (a failed read is not "no
+    // layout"); the device then isn't marked synced, so the next visit tries again.
+    let allRead = true;
     for (let i = 0; i < cfg.strips.length; i++) {
-      recordStripLayout(deviceId, i, await getStripLayout(deviceId, i));
+      try { recordStripLayout(deviceId, i, await getStripLayout(deviceId, i)); }
+      catch (e) { allRead = false; console.warn('[deviceLayouts] layout read failed', deviceId, i, e); }
     }
-    synced.add(deviceId);
+    if (allRead) synced.add(deviceId);
   })().catch((e) => console.warn('[deviceLayouts] sync failed for', deviceId, e))
     .finally(() => syncing.delete(deviceId));
   syncing.set(deviceId, p);
