@@ -1,0 +1,7 @@
+{
+  "version": "1.2.1-audio",
+  "downloadUrl": "https://chromabay.app/x/audio/live-update-1.2.1-audio.zip",
+  "buildDate": "2026-11-15T06:23:34Z",
+  "commitHash": "ce713158932551430ce6e9854c7f78ca477ea118",
+  "commitMessage": "Audio reactivity: device mic input, audio automation, Audio node"
+}
