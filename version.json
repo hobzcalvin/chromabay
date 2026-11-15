@@ -1,7 +1,7 @@
 {
-  "version": "1.2.373",
-  "downloadUrl": "https://chromabay.app/live-update-1.2.373.zip",
-  "buildDate": "2026-11-11T21:18:00Z",
-  "commitHash": "b7814092f6c02a9445f3d7f20c13426a117166c7",
-  "commitMessage": "Hot-update line → 1.2.x now that 1.2.0 is live; bake the version into store builds"
+  "version": "1.2.374",
+  "downloadUrl": "https://chromabay.app/live-update-1.2.374.zip",
+  "buildDate": "2026-11-15T08:00:27Z",
+  "commitHash": "95324a00c113bf18a524937732bad1c97de42b1b",
+  "commitMessage": "Revert All of a device's strips share one coordinate space (firmware + preview)"
 }
