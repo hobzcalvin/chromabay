@@ -10,7 +10,7 @@
   import { startCalibration, stopCalibration, uploadStripLayout, CALIB_PAIRS_FEAT } from '$lib/ble';
   import { captureRawFrames, measureSwing, type Frame } from '$lib/cameraDecode';
   import { runAutoScan, type ScanResult } from '$lib/autoScan';
-  import { buildLedmap, rectifyPoints, rotateLedmap, type Pt, type Ledmap } from '$lib/autoLayout';
+  import { buildLedmap, fitWiring, rectifyPoints, rotateLedmap, type Pt, type Ledmap } from '$lib/autoLayout';
   import LayoutPreview from './LayoutPreview.svelte';
 
   function portal(node: HTMLElement) { document.body.appendChild(node); return { destroy() { node.remove(); } }; }
@@ -53,8 +53,13 @@
   // ALL-ON photo + found LED positions, for the result overlay.
   let overlay: { img: Uint8Array; w: number; h: number; pts: { x: number; y: number }[] } | null = $state(null);
 
+  // A standard W×H matrix (straight or serpentine) is recognised from its wiring order, which is exact
+  // even with jitter, perspective or LEDs the camera missed; anything else uses the generic grid fit.
+  let useWiring = $state(true);
+  const wiring = $derived(points.length ? fitWiring(points, numLeds) : null);
   const layout = $derived.by((): Ledmap | null => {
     if (!points.length) return null;
+    if (wiring && useWiring) return rotateLedmap(wiring.ledmap, turns);
     const src = rectify ? rectifyPoints(points) : points;
     return rotateLedmap(buildLedmap(src, snap), turns);
   });
@@ -152,10 +157,10 @@
     const t0 = performance.now(), expMs = skipTune ? 9000 : 15000;
     const pt = setInterval(() => { if (myGen !== gen) { clearInterval(pt); return; } progress = Math.min(0.98, (performance.now() - t0) / expMs); }, 100);
     const io = {
-      flash: async (k: 'strobe' | 'legacy' | 'comp', b: number) => {
+      flash: async (k: 'strobe' | 'legacy' | 'comp', b: number, onlyLeds?: number[]) => {
         if (myGen !== gen) throw new Error('cancelled');
-        calBright = b;
-        await startCalibration(deviceId, stripIndex, b, k === 'strobe' ? 'strobe' : k === 'comp' ? 'pairs' : 'full', bits, FRAME_MS);
+        if (!onlyLeds) calBright = b;
+        await startCalibration(deviceId, stripIndex, b, k === 'strobe' ? 'strobe' : k === 'comp' ? 'pairs' : 'full', bits, FRAME_MS, onlyLeds);
         await sleep(FRAME_MS * 2);                    // let the device + camera exposure settle
       },
       capture: async (ms: number) => {
@@ -183,7 +188,8 @@
                              : `Couldn't decode the LEDs (${res.reason}) — try Recapture, move closer, or hold steadier.`;
       // Automation hook: the bench rig (automation/autolayout-rig.mjs) reads the result from here.
       (window as any).__chromabayAutoLayout = { at: Date.now(), found: res.found, numLeds, brightness: res.brightness,
-        kind: seqKind, diag: res.diag, probes: res.probes, points: res.points, layout: $state.snapshot(layout) };
+        kind: seqKind, diag: res.diag, probes: res.probes, points: res.points, layout: $state.snapshot(layout),
+        wiring: wiring ? { cols: wiring.cols, rows: wiring.rows, serpentine: wiring.serpentine, residual: wiring.residual } : null };
       stopCalibration(deviceId).catch(() => {});
     } catch (e: any) {
       clearInterval(pt);
@@ -204,7 +210,7 @@
     calBright = b;
     phase = 'capture'; capLabel = 'Recording…'; progress = 0;
     try {
-      const ms = (seqKind === 'comp' ? 2 + 2 * bits : 1 + bits) * FRAME_MS * 3 + FRAME_MS;   // ≈10s @25 LEDs, ≈17s @400
+      const ms = (seqKind === 'comp' ? 2 + 2 * (bits + 1) : 1 + bits) * FRAME_MS * 3 + FRAME_MS;   // ≈10s @25 LEDs, ≈17s @400
       status = `Recording (~${Math.round((ms + FRAME_MS * 3) / 1000)}s, hold steady)…`;
       await startCalibration(deviceId, stripIndex, calBright, seqKind === 'comp' ? 'pairs' : 'full', bits, FRAME_MS);
       await sleep(FRAME_MS * 3);
@@ -295,8 +301,13 @@
             <button class="btn small" onclick={() => (turns = (turns + 1) % 4)}>⟳</button>
             <span>{turns * 90}°</span>
           </div>
-          <label class="al-slider">Snap <input type="range" min="0" max="1" step="0.05" bind:value={snap} /></label>
-          <label class="cb"><input type="checkbox" bind:checked={rectify} /> Force to rectangle</label>
+          {#if wiring}
+            <label class="cb"><input type="checkbox" bind:checked={useWiring} /> Recognised a {wiring.cols}×{wiring.rows}{wiring.serpentine ? ' serpentine' : ''} matrix</label>
+          {/if}
+          {#if !wiring || !useWiring}
+            <label class="al-slider">Snap <input type="range" min="0" max="1" step="0.05" bind:value={snap} /></label>
+            <label class="cb"><input type="checkbox" bind:checked={rectify} /> Force to rectangle</label>
+          {/if}
           <div class="al-result">{layout.width}×{layout.height}, {decodedCount} LEDs</div>
           <LayoutPreview width={layout.width} height={layout.height} map={layout.map} />
           <label class="al-slider">☀️ <input type="range" min="2" max="255" step="1" bind:value={calBright} /><span>{calBright}</span></label>

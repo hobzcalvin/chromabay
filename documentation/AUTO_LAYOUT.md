@@ -15,7 +15,7 @@ ledmap automatically.
 | Real-hardware rig (hands-free, CfT) | `automation/autolayout-rig.mjs --expect=16x16s --runs=5` |
 | Replay a real capture | `automation/replay-capture.ts <run.bin> --expect=…` |
 
-**Firmware mode 3 (feat 9): inverse pairs.** `[ALL-ON][ALL-OFF][bit0][¬bit0]..[bitN][¬bitN]`. Each
+**Firmware mode 3 (feat 9): inverse pairs + parity.** `[ALL-ON][ALL-OFF][bit0][¬bit0]..[bitN][¬bitN][par][¬par]`. Each
 bit is read per pixel as "brighter in b than in ¬b" (Scharstein & Szeliski, CVPR 2003): no
 threshold, ambient light cancels, every LED blinks (in mode 1 an all-ones code — the last LED of
 any 64/256/1024 strip — never did), and about half the LEDs are lit in every frame, so
@@ -31,11 +31,36 @@ the sequence's *structure* (pairs sum to ON+OFF), not mean brightness. (4) Read 
 same-code pixels, position = core-only weighted centroid (a one-sided halo past edge LEDs pulled
 whole-blob centroids ½ pitch outward).
 
+**Parity.** Under hard light (flicker, PWM, off-axis spots) the dominant error is one misread bit,
+which lands an LED exactly on a neighbour's spot. The parity pair rejects those pixels; anything
+that slips through and lands on another ID's spot loses to the stronger ID (collision guard).
+
+**Reflections.** A code seen in two places (glossy floor, window) → keep the sharpest (highest
+peak contrast) among substantial candidates; a reflection is diffuse.
+
 **Closed loop.** The readable flash level spans ~1–200 across setups (close-up dense panel vs lit
 room), so a fixed level can't work. Probe with a strobe: dimmer while LED cores clip, brighter while
-ON−OFF contrast < 30; then decode; if incomplete and clipped, halve and retry.
+ON−OFF contrast < 30; then decode. Up to two more passes fill in what was missed — dimmer if
+clipping plausibly hides LEDs, otherwise brighter — merging only new IDs, registered (affine fit on
+shared IDs) so a handheld camera's drift between passes doesn't misplace them. Last, a **targeted
+pass** (firmware calibration mask) flashes only the still-missing LEDs at full level with the rest
+dark: a dim/occluded LED is buried in its neighbours' glow at any shared level, never alone.
 
-**Bench results** (synthetic; `autolayout-sim.ts`, 20 scenarios / 3274 LEDs):
+**Wiring fit** (`fitWiring` in `autoLayout.ts`). Most installs are a W×H matrix wired by rows or
+columns, straight or serpentine. For every such wiring of `numLeds`, fit a homography from ideal
+grid coordinates to the decoded points (trimmed least squares; one grid step must be ≈ one pitch
+and the axes not parallel, or a straight strip "fits" everything) and take a clear winner. Exact by
+construction — jitter up to 0.2 pitch, perspective, 30% of LEDs missing or out of frame — and it
+places undetected LEDs by their wiring. Free-form installs get null and fall back to the lattice fit
+(which now grows LED-to-LED instead of snapping to one global grid, so bent arrays hold together).
+
+**Bench results, harsh set** (32 scenarios / 4642 LEDs, adding: fairy lights at random angles,
+wavy curtain, 10× brightness spread, 20% occluded, floor reflection, 120 Hz mains flicker with short
+exposure, LED PWM at 400 Hz / 1.2 kHz, defocus, 160×90 camera, partly out of frame, all at once):
+closed loop + wiring fit → **99.4% LEDs located, 0 misplaced, 31/31 layouts exact** (the missing
+0.6% are dead or out of frame — the wiring fit still places them). Scans take 10–40 s.
+
+**Bench results, first set** (synthetic; `autolayout-sim.ts`, 20 scenarios / 3274 LEDs):
 
 | Pipeline | LEDs correct | Wrong positions | Layouts exact |
 |---|---|---|---|

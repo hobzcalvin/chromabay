@@ -21,10 +21,14 @@ import type { Pt } from './autoLayout';
 import type { Frame } from './cameraDecode';
 
 /** 'legacy' = firmware mode 1: [ALL-ON][bit0..bit(b-1)].
- *  'comp'   = firmware mode 3: [ALL-ON][ALL-OFF][bit0][¬bit0]..[bit(b-1)][¬bit(b-1)]. */
+ *  'comp'   = firmware mode 3: [ALL-ON][ALL-OFF][bit0][¬bit0]..[bit(b-1)][¬bit(b-1)][par][¬par],
+ *             par = XOR of the ID's bits — any single misread bit fails the check and the pixel is
+ *             dropped instead of landing on a neighbour's ID (the dominant error under hard light). */
 export type SeqKind = 'legacy' | 'comp' | 'strobe';   // strobe = firmware mode 0: [ALL-OFF][ALL-ON]
 
-export function seqLength(kind: SeqKind, bits: number): number { return kind === 'comp' ? 2 + 2 * bits : kind === 'strobe' ? 2 : 1 + bits; }
+export function seqLength(kind: SeqKind, bits: number): number { return kind === 'comp' ? 2 + 2 * (bits + 1) : kind === 'strobe' ? 2 : 1 + bits; }
+
+export function parity(i: number): number { let p = 0; while (i) { p ^= i & 1; i >>>= 1; } return p; }
 
 /** Is LED `i` lit in slot `s` of the cycle? (Mirrors esp32 renderCalibrationFrame.) */
 export function seqOn(kind: SeqKind, bits: number, s: number, i: number): boolean {
@@ -33,7 +37,8 @@ export function seqOn(kind: SeqKind, bits: number, s: number, i: number): boolea
   if (s === 0) return true;
   if (s === 1) return false;
   const b = (s - 2) >> 1, inv = (s - 2) & 1;
-  return (((i >> b) & 1) === 1) !== (inv === 1);
+  const v = b < bits ? (i >> b) & 1 : parity(i);   // pair `bits` is the parity bit
+  return (v === 1) !== (inv === 1);
 }
 
 /** Bits needed so no LED's code is all-ones (an all-ones LED never blinks in 'legacy'). */
@@ -57,6 +62,8 @@ export type DecodeV2Diag = {
   clippedPct: number;        // fraction of LED pixels at 255 in ALL-ON — high ⇒ bloom, flash dimmer
   outOfRange: number;        // confident codes ≥ numLeds — corruption signal
   duplicates: number;        // codes seen at >1 separate place (reflections)
+  parityRejects: number;     // pixels whose code failed the parity check (comp)
+  collisions: number;        // IDs dropped for sitting on another ID's spot
 };
 
 export type DecodeV2Result = {
@@ -71,7 +78,7 @@ export function decodeStructuredLight(frames: Frame[], o: DecodeV2Opts): DecodeV
   const log = o.onLog ?? (() => {});
   const L = seqLength(o.kind, o.bits);
   const F = frames.length;
-  const diag: DecodeV2Diag = { found: 0, frames: F, cleanFrames: 0, cycles: 0, periodMs: 0, edgeSharpness: 0, maskPx: 0, codedPx: 0, maxContrast: 0, clippedPct: 0, outOfRange: 0, duplicates: 0 };
+  const diag: DecodeV2Diag = { found: 0, frames: F, cleanFrames: 0, cycles: 0, periodMs: 0, edgeSharpness: 0, maskPx: 0, codedPx: 0, maxContrast: 0, clippedPct: 0, outOfRange: 0, duplicates: 0, parityRejects: 0, collisions: 0 };
   const fail = (reason: string): DecodeV2Result => ({ ok: false, reason, points: [], conf: [], diag });
   if (F < 3 * L) return fail('capture too short for one full flash cycle');
   const w = frames[0].w, h = frames[0].h, N = w * h;
@@ -175,8 +182,8 @@ export function decodeStructuredLight(frames: Frame[], o: DecodeV2Opts): DecodeV
       const on = at(k, 0);
       if (o.kind === 'comp') {
         const off = at(k, 1), sw = on - off; let dev = 0;
-        for (let bb = 0; bb < o.bits; bb++) dev += Math.abs(at(k, 2 + 2 * bb) + at(k, 3 + 2 * bb) - on - off);
-        sc += sw - dev / o.bits;
+        for (let bb = 0; bb <= o.bits; bb++) dev += Math.abs(at(k, 2 + 2 * bb) + at(k, 3 + 2 * bb) - on - off);
+        sc += sw - dev / (o.bits + 1);
       } else { let mx = -Infinity; for (let c = 1; c < L; c++) mx = Math.max(mx, at(k, c)); sc += on - mx; }
     }
     if (sc > bestS) { bestS = sc; bestPh = ph; }
@@ -203,7 +210,7 @@ export function decodeStructuredLight(frames: Frame[], o: DecodeV2Opts): DecodeV
   }
   diag.maxContrast = maxC;
   const minContrast = Math.max(noise, 0.08 * maxC);
-  let coded = 0;
+  let coded = 0, parityRejects = 0;
   for (let k = 0; k < M; k++) {
     const p = mask[k], con = contrast[p]; if (con < minContrast) continue;
     const r = k * L; let id = 0, conf = Infinity;
@@ -215,6 +222,10 @@ export function decodeStructuredLight(frames: Frame[], o: DecodeV2Opts): DecodeV
       conf = Math.min(conf, Math.abs(d) / con);
     }
     if (conf < minConf) continue;
+    if (o.kind === 'comp') {                        // parity pair: a single misread bit fails here
+      const d = A[r + 2 + 2 * o.bits] - A[r + 3 + 2 * o.bits];
+      if (Math.abs(d) / con < minConf || (d > 0 ? 1 : 0) !== parity(id)) { parityRejects++; continue; }
+    }
     code[p] = id; pixW[p] = con * Math.min(1, conf); coded++;
   }
   diag.codedPx = coded;
@@ -242,10 +253,16 @@ export function decodeStructuredLight(frames: Frame[], o: DecodeV2Opts): DecodeV
   const medW = strongest.length ? strongest[strongest.length >> 1] : 0;
   const points: (Pt | null)[] = new Array(o.numLeds).fill(null), conf = new Array(o.numLeds).fill(0);
   for (const [id, cs] of byId) {
-    cs.sort((a, b) => b.sw - a.sw); const c = cs[0];
-    if (c.sw < 0.12 * medW) continue;
+    // Several places carry this code (a reflection in a floor/window/glossy wall, or a halo split
+    // off its LED): take the SHARPEST — highest peak contrast — among the substantial ones. A
+    // reflection is diffuse, so it can out-weigh the real LED in total light but never in peak.
+    const maxSw = Math.max(...cs.map((q) => q.sw));
+    const real = cs.filter((q) => q.sw >= 0.12 * medW && q.sw >= 0.3 * maxSw);   // sharp-but-tiny fragments don't qualify
+    if (!real.length) continue;
+    const peakOf = (q: Comp) => { let m = 0; for (const p of q.px) m = Math.max(m, contrast[p]); return m; };
+    real.sort((a, b) => peakOf(b) - peakOf(a)); const c = real[0];
     if (id >= o.numLeds) { diag.outOfRange++; continue; }
-    if (cs.length > 1 && cs[1].sw > 0.35 * c.sw) diag.duplicates++;
+    if (real.length > 1) diag.duplicates++;
     // Position from the CORE only (pixels above half the component's peak contrast). The bloom halo
     // beyond an edge/corner LED is lit by that LED alone, so it decodes cleanly as its code — and,
     // being large and one-sided, dragged the whole-component centroid ~½ pitch outward (all four
@@ -256,7 +273,21 @@ export function decodeStructuredLight(frames: Frame[], o: DecodeV2Opts): DecodeV
     points[id] = qw > 0 ? { x: qx / qw / w, y: qy / qw / w } : { x: c.sx / c.sw / w, y: c.sy / c.sw / w }; conf[id] = c.sw;
     diag.found++;
   }
-  log(`decoded ${diag.found}/${o.numLeds} (${coded} coded px of ${M}, ${diag.cycles} cycles, ${diag.cleanFrames} clean frames)`);
+  // Two IDs on the same spot: one is a misread of the other (a bit error the parity didn't catch, or
+  // legacy mode which has none). Keep the stronger. "Same spot" = closer than ⅓ of the typical gap.
+  {
+    const ids = points.map((p, i) => (p ? i : -1)).filter((i) => i >= 0);
+    const nn = ids.map((i) => { let m = Infinity; for (const j of ids) if (j !== i) m = Math.min(m, Math.hypot(points[i]!.x - points[j]!.x, points[i]!.y - points[j]!.y)); return m; }).filter(Number.isFinite).sort((a, b) => a - b);
+    const gap = nn.length ? nn[Math.floor(nn.length * 0.75)] : 0;
+    if (gap > 0) for (const i of ids) for (const j of ids) {
+      if (j <= i || !points[i] || !points[j]) continue;
+      if (Math.hypot(points[i]!.x - points[j]!.x, points[i]!.y - points[j]!.y) < gap / 3) {
+        const drop = conf[i] >= conf[j] ? j : i; points[drop] = null; conf[drop] = 0; diag.found--; diag.collisions++;
+      }
+    }
+  }
+  diag.parityRejects = parityRejects;
+  log(`decoded ${diag.found}/${o.numLeds} (${coded} coded px of ${M}, ${parityRejects} px failed parity, ${diag.cycles} cycles, ${diag.cleanFrames} clean frames)`);
   if (!diag.found) return fail('LEDs blink but no codes could be read — try a dimmer flash');
   return { ok: true, reason: `decoded ${diag.found}/${o.numLeds} LEDs`, points, conf, diag, debug: { w, h, contrast, code } };
 }

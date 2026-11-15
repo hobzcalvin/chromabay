@@ -34,8 +34,9 @@
 //   8  WLED migration: device info "wled":1 while WLED's cfg.json is on the filesystem, and
 //      LAYOUT_GET serves WLED's files (0xF0 cfg.json, 0xF1 ledmap.json, 0xF2.. ledmap1..9.json;
 //      0xFF retires them so the import runs once)
-//   9  calibration mode 3 (inverse pairs: [ON][OFF][bit0][~bit0]..) and trailing [u8 bits]
-//      [u8 frameMs/10] on the CALIBRATION write (app-chosen code length + flash rate)
+//   9  calibration mode 3 (inverse pairs: [ON][OFF][bit0][~bit0]..[par][~par]) and trailing [u8 bits]
+//      [u8 frameMs/10] [LSB-first LED bitmask…] on the CALIBRATION write (app-chosen code length,
+//      flash rate, and an optional subset of LEDs to flash — the targeted pass for missed LEDs)
 #define FIRMWARE_FEATURES 9
 
 // --- Firmware Signature Verification ---

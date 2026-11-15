@@ -213,6 +213,12 @@ static uint8_t calibBrightness = 40;  // per-channel white level while flashing 
                                       // Kept LOW on purpose: at full 255 the LEDs saturate the
                                       // camera and bloom into one solid blob, so adjacent LEDs
                                       // can't be told apart. Dim => distinct dots => decodable.
+// Targeted pass (feat>=9): optional LSB-first bitmask of the LEDs that take part (bytes 6.. of the
+// write). Others stay dark, so a dim/occluded LED can flash at full level without its neighbours'
+// glow burying it. Fixed buffer (not a vector): the BLE callback writes while loop() reads, and a
+// torn frame is harmless where a reallocation would not be. 512 B = 4096 LEDs.
+static uint8_t calibMask[512];
+static volatile uint16_t calibMaskLen = 0;   // 0 = every LED
 static uint8_t calibMode = 1;         // 0 = strobe (ALL off/on only — for fast exposure tuning),
                                       // 1 = full structured-light sequence (off/on + bit planes).
 static uint32_t calibStartMs = 0;
@@ -1406,10 +1412,15 @@ static void onCalibrationWrite(const uint8_t* data, size_t len, Endpoints::Link&
             // auto sizes from the LONGEST strip, which disagreed with the app on uneven devices.
             if (v.length() >= 5 && (uint8_t)v[4] >= 1 && (uint8_t)v[4] <= 16) bits = (uint8_t)v[4];
             calibFrameMs = (v.length() >= 6 && (uint8_t)v[5] >= 4) ? (uint32_t)(uint8_t)v[5] * 10u : CALIB_FRAME_MS;
+            {
+                size_t mlen = v.length() > 6 ? std::min(v.length() - 6, sizeof(calibMask)) : 0;
+                calibMaskLen = 0;
+                if (mlen) { memcpy(calibMask, v.data() + 6, mlen); calibMaskLen = (uint16_t)mlen; }
+            }
             calibBits = bits; calibStrip = strip; calibStartMs = millis(); calibrating = true;
             DiagLog::note("calib start mode %d", calibMode);
             Serial.printf("[Calib] START strip=%d bits=%d bright=%d mode=%d (cycle=%d frames @ %dms)\n",
-                          strip, bits, calibBrightness, calibMode, calibMode == 0 ? 2 : calibMode == 3 ? 2 + 2 * bits : 1 + bits, (int)calibFrameMs);
+                          strip, bits, calibBrightness, calibMode, calibMode == 0 ? 2 : calibMode == 3 ? 2 + 2 * (bits + 1) : 1 + bits, (int)calibFrameMs);
         } else {
             calibrating = false;
             Serial.println("[Calib] STOP");
@@ -2625,11 +2636,12 @@ void renderCalibrationFrame() {
     // OFF level from the bit frames it's dark in):
     //   strobe (mode 0): [OFF][ON]                  — fast exposure tuning only, cycleLen 2
     //   full   (mode 1): [ALL-ON][bit0]..[bit(b-1)] — structured light, cycleLen 1+bits
-    //   pairs  (mode 3): [ALL-ON][ALL-OFF][bit0][~bit0]..[bit(b-1)][~bit(b-1)], cycleLen 2+2·bits.
+    //   pairs  (mode 3): [ALL-ON][ALL-OFF][bit0][~bit0]..[bit(b-1)][~bit(b-1)][par][~par],
+    //                    cycleLen 2+2·(bits+1); par = XOR of the index bits (rejects 1-bit misreads).
     //                    Each bit is read as "brighter in b than in ~b": no threshold, ambient
     //                    cancels, every LED blinks (mode 1's all-ones code never does), and the
     //                    lit count is ~constant so auto-exposure stays put. src/lib/structuredLight.ts.
-    uint32_t cycleLen = (calibMode == 0) ? 2u : (calibMode == 3) ? (2u + 2u * calibBits) : (1u + calibBits);
+    uint32_t cycleLen = (calibMode == 0) ? 2u : (calibMode == 3) ? (2u + 2u * (calibBits + 1u)) : (1u + calibBits);
     uint32_t frame = ((millis() - calibStartMs) / calibFrameMs) % cycleLen;
     for (size_t s = 0; s < ledMgr.getNumStrips(); s++) {
         LedConfig::LedBus* st = ledMgr.getStrip(s);
@@ -2639,12 +2651,17 @@ void renderCalibrationFrame() {
         for (uint16_t i = 0; i < n; i++) {
             bool on;
             if (!targetStrip) on = false;              // non-target strips stay dark
+            else if (calibMaskLen && ((i >> 3) >= calibMaskLen || !((calibMask[i >> 3] >> (i & 7)) & 1u))) on = false; // not in the targeted set
             else if (calibMode == 2) on = true;         // steady ALL-ON (detection: tune exposure)
             else if (calibMode == 0) on = (frame == 1); // strobe: 0=off, 1=on
             else if (calibMode == 3) {                  // inverse pairs
                 if (frame == 0) on = true;
                 else if (frame == 1) on = false;
-                else on = (((i >> ((frame - 2) >> 1)) & 1u) != 0) != (((frame - 2) & 1u) != 0);
+                else {
+                    uint32_t b = (frame - 2) >> 1;
+                    bool v = (b < calibBits) ? (((i >> b) & 1u) != 0) : (__builtin_parity(i) != 0);
+                    on = v != (((frame - 2) & 1u) != 0);
+                }
             }
             else if (frame == 0) on = true;             // full: ALL-ON reference + sync anchor
             else on = ((i >> (frame - 1)) & 1u) != 0;   // full: bit (frame-1) of the LED index

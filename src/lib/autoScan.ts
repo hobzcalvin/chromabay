@@ -15,8 +15,9 @@ import type { Pt } from './autoLayout';
 import { decodeStructuredLight, seqLength, type DecodeV2Diag } from './structuredLight';
 
 export type ScanIO = {
-  /** Start the device flashing `kind` at per-channel `brightness` (1..255). */
-  flash(kind: 'strobe' | 'legacy' | 'comp', brightness: number): Promise<void>;
+  /** Start the device flashing `kind` at per-channel `brightness` (1..255); `onlyLeds` = just
+   *  these LEDs take part (targeted pass), the rest stay dark. */
+  flash(kind: 'strobe' | 'legacy' | 'comp', brightness: number, onlyLeds?: number[]): Promise<void>;
   /** Capture `ms` of camera frames (grayscale max-channel at processing resolution). */
   capture(ms: number): Promise<Frame[]>;
 };
@@ -29,6 +30,7 @@ export type ScanOpts = {
   startBrightness?: number;   // default 40 (firmware default)
   maxProbes?: number;         // default 7
   cycles?: number;            // flash cycles per decode capture (default 2)
+  targeted?: boolean;         // allow the targeted pass for missed LEDs (needs firmware feat>=9; default true for 'comp')
   onStatus?: (m: string) => void;
 };
 
@@ -88,22 +90,108 @@ export async function runAutoScan(io: ScanIO, o: ScanOpts): Promise<ScanResult> 
     b = next;
   }
 
-  // ---- DECODE (+ up to 2 retries dimmer if clipped and incomplete) ----
+  // ---- DECODE, then fill in: up to 3 passes, merged (HDR-style) ----
+  // One flash level can't serve every LED when they differ a lot in brightness (off-axis fairy
+  // lights, partly hidden ones, mixed batches). Each later pass only ADDS LEDs the earlier ones
+  // missed, and never one that lands on an LED already placed. Clipped + incomplete → dimmer
+  // (bloom is hiding neighbours); unclipped + incomplete → brighter (the dim ones are too faint).
   const L = seqLength(o.kind, o.bits);
   const decMs = Math.round((L * (o.cycles ?? 2) + 1.5) * o.frameMs * 1.05);
-  let best: ScanResult | null = null;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  const pts: (Pt | null)[] = new Array(o.numLeds).fill(null);
+  let found = 0, firstDiag: DecodeV2Diag | undefined, lastReason = '', okAny = false;
+  const tried = new Set<number>();
+  for (let pass = 0; pass < 3 && !tried.has(b); pass++) {
+    tried.add(b);
     await io.flash(o.kind, b);
-    say(`mapping @${b}…`);
+    say(pass ? `filling in missed LEDs @${b}… (${found}/${o.numLeds} so far)` : `mapping @${b}…`);
     const fr = await io.capture(decMs); captureMs += decMs;
     const r = decodeStructuredLight(fr, { kind: o.kind, bits: o.bits, frameMs: o.frameMs, numLeds: o.numLeds });
-    const res: ScanResult = { ok: r.ok, reason: r.reason, points: r.points, found: r.diag.found, brightness: b, captureMs, probes, diag: r.diag };
-    if (!best || res.found > best.found) best = res;
-    if (r.diag.found >= o.numLeds) break;
-    if (r.diag.clippedPct > 0.3) b = clampB(b * 0.5);
-    else if (r.diag.maxContrast < 2 * CONTRAST_MIN) b = clampB(b * 1.8);
-    else break;                                         // exposure looks fine — retrying won't help
+    lastReason = r.reason; firstDiag ??= r.diag; okAny ||= r.ok;
+    if (r.ok) {
+      // A handheld camera moves between passes: map this pass into the first pass's frame via the
+      // LEDs both passes found (affine least squares; translation only if too few in common).
+      const map = found ? registration(r.points, pts) : (p: Pt) => p;
+      if (!map) { say('camera moved too much between passes — keeping the first pass'); break; }
+      const gap = typicalGap(pts.some(Boolean) ? pts : r.points);
+      for (let i = 0; i < o.numLeds; i++) {
+        const p0 = r.points[i]; if (!p0 || pts[i]) continue;
+        const p = map(p0);
+        if (gap > 0 && pts.some((q) => q && Math.hypot(q.x - p.x, q.y - p.y) < gap / 3)) continue;
+        pts[i] = p; found++;
+      }
+    }
+    if (found >= o.numLeds) break;
+    // Which way to go: dimmer only if bloom plausibly hides LEDs (clipped AND many missing) — a
+    // clipped majority with a few missing usually means the missing ones are the DIM ones (occluded,
+    // off-axis), which need brighter. Third pass tries whichever direction is still untried.
+    const b0 = [...tried][0];
+    const triedDim = [...tried].some((x) => x < b0), triedBright = [...tried].some((x) => x > b0);
+    const wantDim = r.diag.clippedPct > 0.3 && found < 0.8 * o.numLeds;
+    if (pass === 0) b = clampB(wantDim ? b0 * 0.5 : b0 * 2.5);
+    else if (!triedBright) b = clampB(b0 * 2.5);
+    else if (!triedDim) b = clampB(b0 * 0.5);
+    else break;
   }
-  best!.captureMs = captureMs;
-  return best!;
+  // ---- TARGETED PASS: flash only what's still missing, at full level ----
+  // A dim LED between bright neighbours is buried in their glow at ANY shared level — brighter
+  // raises the glow too. With the found ones dark, it is the only light in its neighbourhood.
+  // Worth it when a minority is missing (a majority missing is framing/focus, not dim LEDs).
+  const missing = pts.map((p, i) => (p ? -1 : i)).filter((i) => i >= 0);
+  if ((o.targeted ?? o.kind === 'comp') && o.kind === 'comp' && found >= 4 && missing.length && missing.length <= 0.5 * o.numLeds) {
+    say(`targeted pass: flashing the ${missing.length} LEDs not yet found…`);
+    await io.flash(o.kind, 255, missing);
+    const fr = await io.capture(decMs); captureMs += decMs;
+    const r = decodeStructuredLight(fr, { kind: o.kind, bits: o.bits, frameMs: o.frameMs, numLeds: o.numLeds });
+    // Few LEDs lit → too few in common with earlier passes to register against; the camera is
+    // assumed still for this pass (a handheld drift shows up as a gap check failure below).
+    if (r.ok) {
+      const gap = typicalGap(pts);
+      for (const i of missing) {
+        const p = r.points[i]; if (!p) continue;
+        if (gap > 0 && pts.some((q) => q && Math.hypot(q.x - p.x, q.y - p.y) < gap / 3)) continue;
+        pts[i] = p; found++;
+      }
+    }
+  }
+  const best: ScanResult = { ok: okAny && found > 0, reason: found ? `decoded ${found}/${o.numLeds} LEDs` : lastReason, points: pts, found,
+    brightness: [...tried][0], captureMs, probes, diag: firstDiag };
+  return best;
+}
+
+// Map `from`'s coordinate frame onto `to`'s using IDs present in both. null if they disagree too much.
+function registration(from: (Pt | null)[], to: (Pt | null)[]): ((p: Pt) => Pt) | null {
+  const pairs: [Pt, Pt][] = [];
+  for (let i = 0; i < from.length; i++) if (from[i] && to[i]) pairs.push([from[i]!, to[i]!]);
+  if (!pairs.length) return null;
+  if (pairs.length < 6) {
+    const dx = median(pairs.map(([a, b]) => b.x - a.x)), dy = median(pairs.map(([a, b]) => b.y - a.y));
+    return (p) => ({ x: p.x + dx, y: p.y + dy });
+  }
+  // x' = a·x + b·y + c, y' = d·x + e·y + f (normal equations, 3×3 each)
+  let Sxx = 0, Sxy = 0, Syy = 0, Sx = 0, Sy = 0, n = 0, Xx = 0, Xy = 0, X = 0, Yx = 0, Yy = 0, Y = 0;
+  for (const [a, b] of pairs) { Sxx += a.x * a.x; Sxy += a.x * a.y; Syy += a.y * a.y; Sx += a.x; Sy += a.y; n++; Xx += b.x * a.x; Xy += b.x * a.y; X += b.x; Yx += b.y * a.x; Yy += b.y * a.y; Y += b.y; }
+  const M = [[Sxx, Sxy, Sx], [Sxy, Syy, Sy], [Sx, Sy, n]];
+  const sol = (r: number[]) => solve3(M, r);
+  const [a, b, c] = sol([Xx, Xy, X]), [d, e, f] = sol([Yx, Yy, Y]);
+  const T = (p: Pt) => ({ x: a * p.x + b * p.y + c, y: d * p.x + e * p.y + f });
+  // Sanity: residuals must be small next to the LED spacing, or this isn't the same scene.
+  const res = median(pairs.map(([p, q]) => { const t = T(p); return Math.hypot(t.x - q.x, t.y - q.y); }));
+  return res < 0.25 * (typicalGap(to) || Infinity) ? T : null;
+}
+function median(v: number[]): number { const s = [...v].sort((a, b) => a - b); return s[s.length >> 1] ?? 0; }
+function solve3(M: number[][], r: number[]): number[] {
+  const A = M.map((row, i) => [...row, r[i]]);
+  for (let i = 0; i < 3; i++) {
+    let pv = i; for (let k = i + 1; k < 3; k++) if (Math.abs(A[k][i]) > Math.abs(A[pv][i])) pv = k;
+    [A[i], A[pv]] = [A[pv], A[i]];
+    for (let k = 0; k < 3; k++) { if (k === i) continue; const f = A[k][i] / (A[i][i] || 1e-12); for (let j = i; j < 4; j++) A[k][j] -= f * A[i][j]; }
+  }
+  return [A[0][3] / (A[0][0] || 1e-12), A[1][3] / (A[1][1] || 1e-12), A[2][3] / (A[2][2] || 1e-12)];
+}
+
+// 75th-percentile nearest-neighbour distance among placed points (the typical LED gap).
+function typicalGap(pts: (Pt | null)[]): number {
+  const q = pts.filter((p): p is Pt => !!p);
+  const nn = q.map((p) => { let m = Infinity; for (const r of q) if (r !== p) m = Math.min(m, Math.hypot(p.x - r.x, p.y - r.y)); return m; }).filter(Number.isFinite).sort((a, b) => a - b);
+  return nn.length ? nn[Math.floor(nn.length * 0.75)] : 0;
 }

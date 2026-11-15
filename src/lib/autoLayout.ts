@@ -191,6 +191,7 @@ function fitLattice(real: { p: Pt; i: number }[], maxDim: number): { W: number; 
     v1 = { x: a, y: d }; v2 = { x: b, y: f }; ox = e; oy = g;
     cells = assign(v1, v2, ox, oy);
   }
+  if (!oneD) cells = growAssign(real, v1, v2, cell, cells);
   let minc = 1e9, minr = 1e9, maxc = -1e9, maxr = -1e9;
   for (const c of cells) { minc = Math.min(minc, c.c); minr = Math.min(minr, c.r); maxc = Math.max(maxc, c.c); maxr = Math.max(maxr, c.r); }
   const W = maxc - minc + 1, H = maxr - minr + 1;
@@ -198,6 +199,69 @@ function fitLattice(real: { p: Pt; i: number }[], maxDim: number): { W: number; 
   // sanity: a real grid is reasonably tight (no runaway dimension from a bad fit)
   if (!Number.isFinite(W) || !Number.isFinite(H) || W < 1 || H < 1 || W > maxDim || H > maxDim || W > n || H > n || W * H > n * 4) return null;
   return { W, H, cells };
+}
+
+// Assign integer (col,row) by growing outward from LED to LED instead of snapping every point to
+// one global lattice. Neighbours are ~one basis step apart even where the whole grid bends (a
+// wavy curtain, hand-placed lights, residual perspective), whereas global snapping accumulates
+// that bend until whole rows slip (12×12 came out 16×14 at 0.2-pitch jitter). Prim-style: always
+// take the most certain link next (smallest rounding residual in basis units); consecutive LED
+// indices get a bonus — wiring order is strong evidence of adjacency. Falls back to the global
+// assignment for anything the growth can't reach, and if growth produced collisions.
+function growAssign(real: { p: Pt; i: number }[], v1: Pt, v2: Pt, cell: number, fallback: LatticeCell[]): LatticeCell[] {
+  const n = real.length, det = v1.x * v2.y - v1.y * v2.x;
+  if (Math.abs(det) < 1e-12) return fallback;
+  const toB = (dx: number, dy: number) => ({ a: (v2.y * dx - v2.x * dy) / det, b: (-v1.y * dx + v1.x * dy) / det });
+  // neighbour lists (within 1.6 cells); a coarse grid hash keeps this ~O(n)
+  const R = 1.6 * cell, bucket = new Map<string, number[]>();
+  const key = (x: number, y: number) => `${Math.floor(x / R)},${Math.floor(y / R)}`;
+  real.forEach((e, k) => { const kk = key(e.p.x, e.p.y); (bucket.get(kk) ?? bucket.set(kk, []).get(kk)!).push(k); });
+  const nbrs: number[][] = real.map((e) => {
+    const out: number[] = []; const bx = Math.floor(e.p.x / R), by = Math.floor(e.p.y / R);
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) for (const k of bucket.get(`${bx + dx},${by + dy}`) ?? [])
+      if (real[k] !== e && Math.hypot(real[k].p.x - e.p.x, real[k].p.y - e.p.y) < R) out.push(k);
+    return out;
+  });
+  const cellOf: ({ c: number; r: number } | null)[] = new Array(n).fill(null);
+  const taken = new Map<string, number>();
+  // start at the point nearest the centroid
+  let mx = 0, my = 0; for (const e of real) { mx += e.p.x; my += e.p.y; } mx /= n; my /= n;
+  let s0 = 0, sd = Infinity; real.forEach((e, k) => { const d = (e.p.x - mx) ** 2 + (e.p.y - my) ** 2; if (d < sd) { sd = d; s0 = k; } });
+  cellOf[s0] = { c: 0, r: 0 }; taken.set('0,0', s0);
+  // simple binary-heap priority queue of candidate links
+  type Ln = { cost: number; from: number; to: number };
+  const heap: Ln[] = [];
+  const push = (l: Ln) => { heap.push(l); let i = heap.length - 1; while (i > 0) { const p = (i - 1) >> 1; if (heap[p].cost <= heap[i].cost) break; [heap[p], heap[i]] = [heap[i], heap[p]]; i = p; } };
+  const pop = (): Ln => { const top = heap[0], last = heap.pop()!; if (heap.length) { heap[0] = last; let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < heap.length && heap[l].cost < heap[m].cost) m = l; if (r < heap.length && heap[r].cost < heap[m].cost) m = r; if (m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; i = m; } } return top; };
+  const offer = (from: number) => {
+    for (const to of nbrs[from]) {
+      if (cellOf[to]) continue;
+      const d = toB(real[to].p.x - real[from].p.x, real[to].p.y - real[from].p.y);
+      const ra = Math.round(d.a), rb = Math.round(d.b);
+      if (ra === 0 && rb === 0) continue;
+      let cost = Math.hypot(d.a - ra, d.b - rb) + 0.15 * (Math.abs(ra) + Math.abs(rb) - 1); // prefer 1-step links
+      if (Math.abs(real[to].i - real[from].i) === 1) cost *= 0.5;                            // wiring neighbours
+      push({ cost, from, to });
+    }
+  };
+  offer(s0);
+  while (heap.length) {
+    const { from, to } = pop();
+    if (cellOf[to]) continue;
+    const d = toB(real[to].p.x - real[from].p.x, real[to].p.y - real[from].p.y);
+    const c = cellOf[from]!.c + Math.round(d.a), r = cellOf[from]!.r + Math.round(d.b);
+    if (taken.has(`${c},${r}`)) continue;            // another link may still place it elsewhere
+    cellOf[to] = { c, r }; taken.set(`${c},${r}`, to); offer(to);
+  }
+  // Unreached points (isolated by gaps): place by the global assignment, shifted into this frame.
+  const k0 = fallback[s0];
+  const out: LatticeCell[] = [];
+  for (let k = 0; k < n; k++) {
+    let cr = cellOf[k];
+    if (!cr) { cr = { c: fallback[k].c - k0.c, r: fallback[k].r - k0.r }; if (taken.has(`${cr.c},${cr.r}`)) return fallback; taken.set(`${cr.c},${cr.r}`, k); }
+    out.push({ i: real[k].i, c: cr.c, r: cr.r });
+  }
+  return out;
 }
 
 // Orient the grid to MATCH THE CAMERA VIEW: rotate the (c,r) assignment in 90° steps so column
@@ -316,4 +380,137 @@ export function rotateLedmap(l: Ledmap, quarterTurns: number): Ledmap {
     }
   }
   return { width: nW, height: nH, map: out };
+}
+
+// ---- wiring-model fit ---------------------------------------------------------------------
+
+export type WiringFit = { ledmap: Ledmap; cols: number; rows: number; serpentine: boolean; byColumn: boolean; residual: number; inliers: number; T?: (q: { c: number; r: number }) => Pt };
+
+/** Ideal grid position of LED i for a W×H matrix with the given wiring. */
+export function wiringPos(i: number, W: number, H: number, serpentine: boolean, byColumn: boolean): { c: number; r: number } {
+  const major = byColumn ? H : W, a = Math.floor(i / major), k = i % major;
+  const b = serpentine && a % 2 ? major - 1 - k : k;
+  return byColumn ? { c: a, r: b } : { c: b, r: a };
+}
+
+/**
+ * Most LED matrices are W×H wired row by row (straight or serpentine) — so instead of inferring a
+ * grid from the point cloud, test every such wiring of `numLeds` against it: fit a perspective
+ * transform from ideal grid coords to the decoded points (trimmed least squares) and keep the
+ * clearly best. Exact by construction, robust to jitter, perspective and missed LEDs (they are
+ * placed by their wiring, not their detection). null when nothing fits clearly — a free-form
+ * install, a partial grid — and the caller falls back to `buildLedmap`.
+ */
+export function fitWiring(pts: (Pt | null)[], numLeds: number): WiringFit | null {
+  const have = pts.map((p, i) => ({ p, i })).filter((e): e is { p: Pt; i: number } => !!e.p && e.i < numLeds);
+  if (have.length < Math.max(6, 0.4 * numLeds)) return null;
+  // observed pitch: median nearest-neighbour distance
+  const nn = have.map((e) => { let m = Infinity; for (const f of have) if (f !== e) m = Math.min(m, Math.hypot(f.p.x - e.p.x, f.p.y - e.p.y)); return m; }).sort((a, b) => a - b);
+  const pitch = nn[nn.length >> 1] || 1;
+  const fits: WiringFit[] = [];
+  for (let W = 1; W <= numLeds; W++) {
+    if (numLeds % W) continue;
+    const H = numLeds / W;
+    if (W > 256 || H > 256) continue;
+    for (const serpentine of [false, true]) for (const byColumn of [false, true]) {
+      if ((W === 1 || H === 1) && (serpentine || byColumn)) continue;   // a line has one wiring
+      const g = have.map((e) => wiringPos(e.i, W, H, serpentine, byColumn));
+      const r = robustFit(g, have.map((e) => e.p), W === 1 || H === 1);
+      if (!r) continue;
+      // Physically sensible: one grid step ≈ one LED pitch along each axis, and (2-D) the axes not
+      // parallel. Otherwise a straight strip "fits" any progressive W×H by collapsing it onto a line.
+      const cc = Math.floor((W - 1) / 2), rr = Math.floor((H - 1) / 2), o0 = r.T({ c: cc, r: rr });
+      const stepOk = (q: Pt) => { const d = Math.hypot(q.x - o0.x, q.y - o0.y); return d > 0.5 * pitch && d < 2 * pitch; };
+      const sc = W > 1 ? r.T({ c: cc + 1, r: rr }) : null, sr = H > 1 ? r.T({ c: cc, r: rr + 1 }) : null;
+      if ((sc && !stepOk(sc)) || (sr && !stepOk(sr))) continue;
+      if (sc && sr) {
+        const ax = sc.x - o0.x, ay = sc.y - o0.y, bx = sr.x - o0.x, by = sr.y - o0.y;
+        if (Math.abs(ax * by - ay * bx) < 0.3 * Math.hypot(ax, ay) * Math.hypot(bx, by)) continue;
+      }
+      const map = new Array(W * H).fill(-1);
+      for (let i = 0; i < numLeds; i++) { const q = wiringPos(i, W, H, serpentine, byColumn); map[q.r * W + q.c] = i; }
+      fits.push({ ledmap: { width: W, height: H, map }, cols: W, rows: H, serpentine, byColumn, residual: r.med / pitch, inliers: r.inliers / have.length, T: r.T });
+    }
+  }
+  if (!fits.length) return null;
+  fits.sort((a, b) => a.residual - b.residual);
+  const best = fits[0];
+  // Accept only a tight fit that is clearly better than the runner-up (distinct hypotheses).
+  if (best.residual > 0.35 || best.inliers < 0.85) return null;
+  const rival = fits.find((f) => !sameMap(f.ledmap, best.ledmap));
+  if (rival && rival.residual < 1.5 * best.residual + 0.02) return null;
+  // Present it as the camera sees it: columns run left→right, rows top→bottom (no rotate needed).
+  const { width: W, height: H } = best.ledmap, T = best.T!;
+  const o = T({ c: 0, r: 0 }), a = T({ c: 1, r: 0 }), b = T({ c: 0, r: 1 });
+  const ax = W > 1 ? a.x - o.x : 0, ay = W > 1 ? a.y - o.y : 0, bx = H > 1 ? b.x - o.x : 0, by = H > 1 ? b.y - o.y : 0;
+  const colsHoriz = W > 1 ? Math.abs(ax) >= Math.abs(ay) : Math.abs(by) < Math.abs(bx);
+  const nW = colsHoriz ? W : H, nH = colsHoriz ? H : W, out = new Array(nW * nH).fill(-1);
+  for (let r = 0; r < H; r++) for (let c = 0; c < W; c++) {
+    let x: number, y: number;
+    if (colsHoriz) { x = ax < 0 ? W - 1 - c : c; y = by < 0 ? H - 1 - r : r; }
+    else { x = bx < 0 ? H - 1 - r : r; y = ay < 0 ? W - 1 - c : c; }
+    out[y * nW + x] = best.ledmap.map[r * W + c];
+  }
+  return { ...best, cols: nW, rows: nH, ledmap: { width: nW, height: nH, map: out } };
+}
+
+// Same layout up to rotation/mirror (a homography can mirror, so row- vs column-major wiring of
+// one grid fit equally well — that's one layout seen two ways, not an ambiguity).
+function sameMap(a: Ledmap, b: Ledmap): boolean {
+  const eq = (x: Ledmap) => x.width === b.width && x.height === b.height && x.map.every((v, i) => v === b.map[i]);
+  const flip = (m: Ledmap): Ledmap => { const o = new Array(m.map.length).fill(-1); for (let y = 0; y < m.height; y++) for (let x = 0; x < m.width; x++) o[y * m.width + (m.width - 1 - x)] = m.map[y * m.width + x]; return { ...m, map: o }; };
+  for (let q = 0; q < 4; q++) { const r = rotateLedmap(a, q); if (eq(r) || eq(flip(r))) return true; }
+  return false;
+}
+
+// Trimmed fit of grid coords g → image points p: homography (2-D grid) or affine-on-a-line (1-D).
+// Returns the median residual (image units) and inlier count after two trimming rounds.
+function robustFit(g: { c: number; r: number }[], p: Pt[], line: boolean): { med: number; inliers: number; T: (q: { c: number; r: number }) => Pt } | null {
+  let use = g.map((_, k) => k);
+  let T: ((q: { c: number; r: number }) => Pt) | null = null;
+  for (let round = 0; round < 3; round++) {
+    T = line ? fitLine(use.map((k) => g[k]), use.map((k) => p[k])) : fitHomog(use.map((k) => g[k]), use.map((k) => p[k]));
+    if (!T) return null;
+    const res = g.map((q, k) => { const t = T!(q); return Math.hypot(t.x - p[k].x, t.y - p[k].y); });
+    const med = [...res].sort((a, b) => a - b)[res.length >> 1];
+    const keep = res.map((r, k) => (r <= Math.max(2.5 * med, 1e-9) ? k : -1)).filter((k) => k >= 0);
+    if (round === 2 || keep.length === use.length) return { med, inliers: keep.length, T: T! };
+    use = keep;
+  }
+  return null;
+}
+function fitLine(g: { c: number; r: number }[], p: Pt[]): ((q: { c: number; r: number }) => Pt) | null {
+  const t = g.map((q) => q.c + q.r);   // one of them is always 0
+  const n = t.length; if (n < 2) return null;
+  let St = 0, Stt = 0, Sx = 0, Sy = 0, Stx = 0, Sty = 0;
+  for (let k = 0; k < n; k++) { St += t[k]; Stt += t[k] * t[k]; Sx += p[k].x; Sy += p[k].y; Stx += t[k] * p[k].x; Sty += t[k] * p[k].y; }
+  const d = n * Stt - St * St; if (Math.abs(d) < 1e-12) return null;
+  const ax = (n * Stx - St * Sx) / d, bx = (Sx - ax * St) / n, ay = (n * Sty - St * Sy) / d, by = (Sy - ay * St) / n;
+  return (q) => { const tt = q.c + q.r; return { x: ax * tt + bx, y: ay * tt + by }; };
+}
+// Least-squares homography (DLT with h33 = 1, normal equations, 8×8) — exact grids and their
+// perspective views both fit; anything that isn't this wiring leaves big residuals.
+function fitHomog(g: { c: number; r: number }[], p: Pt[]): ((q: { c: number; r: number }) => Pt) | null {
+  if (g.length < 4) return null;
+  // normalise for conditioning
+  const mean = (v: number[]) => v.reduce((a, b) => a + b, 0) / v.length;
+  const gc = mean(g.map((q) => q.c)), gr = mean(g.map((q) => q.r)), px = mean(p.map((q) => q.x)), py = mean(p.map((q) => q.y));
+  const gs = Math.max(1e-9, mean(g.map((q) => Math.hypot(q.c - gc, q.r - gr)))), ps = Math.max(1e-9, mean(p.map((q) => Math.hypot(q.x - px, q.y - py))));
+  const N = Array.from({ length: 8 }, () => new Float64Array(9));
+  for (let k = 0; k < g.length; k++) {
+    const x = (g[k].c - gc) / gs, y = (g[k].r - gr) / gs, X = (p[k].x - px) / ps, Y = (p[k].y - py) / ps;
+    const rows = [[x, y, 1, 0, 0, 0, -X * x, -X * y, X], [0, 0, 0, x, y, 1, -Y * x, -Y * y, Y]];
+    for (const r of rows) for (let i = 0; i < 8; i++) { if (!r[i]) continue; for (let j = 0; j < 9; j++) N[i][j] += r[i] * r[j]; }
+  }
+  for (let c = 0; c < 8; c++) {
+    let pv = c; for (let r = c + 1; r < 8; r++) if (Math.abs(N[r][c]) > Math.abs(N[pv][c])) pv = r;
+    if (Math.abs(N[pv][c]) < 1e-12) return null;
+    [N[c], N[pv]] = [N[pv], N[c]];
+    for (let r = 0; r < 8; r++) { if (r === c) continue; const f = N[r][c] / N[c][c]; for (let j = c; j < 9; j++) N[r][j] -= f * N[c][j]; }
+  }
+  const h = Array.from({ length: 8 }, (_, i) => N[i][8] / N[i][i]);
+  return (q) => {
+    const x = (q.c - gc) / gs, y = (q.r - gr) / gs, w = h[6] * x + h[7] * y + 1;
+    return { x: ((h[0] * x + h[1] * y + h[2]) / w) * ps + px, y: ((h[3] * x + h[4] * y + h[5]) / w) * ps + py };
+  };
 }

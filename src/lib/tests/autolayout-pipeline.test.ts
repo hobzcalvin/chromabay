@@ -1,21 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import { simulateCapture, scorePoints, scoreLedmap, layoutPositions, type SimScenario } from '../autoLayoutSim';
-import { decodeStructuredLight, seqOn, seqLength } from '../structuredLight';
+import { decodeStructuredLight, seqOn, seqLength, parity } from '../structuredLight';
 import { runAutoScan } from '../autoScan';
-import { buildLedmap, rectifyPoints } from '../autoLayout';
+import { buildLedmap, fitWiring, rectifyPoints } from '../autoLayout';
 
 // End-to-end auto-layout on the synthetic camera (the full battery lives in
 // automation/autolayout-sim.ts; this is the fast regression subset).
 
 async function auto(sc: SimScenario) {
-  let kind: any = 'strobe', bri = 40, seed = 7, last: any;
+  let mask: number[] | undefined, kind: any = 'strobe', bri = 40, seed = 7, last: any, first: any;
   const io = {
-    flash: async (k: any, b: number) => { kind = k; bri = b; },
-    capture: async (ms: number) => { last = simulateCapture({ ...sc, seq: kind, ledLevel: (sc.ledLevel ?? 0.6) * bri / 40, durationMs: ms, seed: seed++ }); return last.frames; },
+    flash: async (k: any, b: number, only?: number[]) => { kind = k; bri = b; mask = only; },
+    capture: async (ms: number) => { last = simulateCapture({ ...sc, seq: kind, ledLevel: (sc.ledLevel ?? 0.6) * bri / 40, durationMs: ms, seed: seed++, onlyLeds: mask }); if (kind !== 'strobe') first ??= last; return last.frames; },
   };
   const ref = simulateCapture({ ...sc, cycles: 1 });
   const r = await runAutoScan(io, { numLeds: ref.numLeds, bits: ref.bits, kind: 'comp', frameMs: 220 });
-  return { r, ps: scorePoints(r.points, last.truth, ref.spacingPx, ref.frames[0].w), expected: ref.expected };
+  return { r, ps: scorePoints(r.points, first.truth, ref.spacingPx, ref.frames[0].w), expected: ref.expected };
 }
 
 describe('structured light sequences', () => {
@@ -24,9 +24,10 @@ describe('structured light sequences', () => {
     for (let i = 0; i < 64; i++) {
       expect(seqOn('comp', bits, 0, i)).toBe(true);
       expect(seqOn('comp', bits, 1, i)).toBe(false);
-      for (let b = 0; b < bits; b++) expect(seqOn('comp', bits, 2 + 2 * b, i)).toBe(!seqOn('comp', bits, 3 + 2 * b, i));
+      for (let b = 0; b <= bits; b++) expect(seqOn('comp', bits, 2 + 2 * b, i)).toBe(!seqOn('comp', bits, 3 + 2 * b, i));
+      expect(seqOn('comp', bits, 2 + 2 * bits, i)).toBe(parity(i) === 1);   // last pair = parity
     }
-    expect(L).toBe(14);
+    expect(L).toBe(16);
   });
 });
 
@@ -58,5 +59,32 @@ describe('auto-layout pipeline on the synthetic camera', () => {
       expect([lm.width, lm.height]).toEqual([n, n]);
       expect(scoreLedmap(lm, expected!).exact).toBe(true);
     }
+  });
+});
+
+describe('harsh conditions', () => {
+  it('a floor reflection never steals an LED', () => {
+    const sim = simulateCapture({ name: 't', layout: { kind: 'grid', cols: 10, rows: 6 }, coverage: 0.45, reflection: { strength: 0.5, mirrorY: 0.82 }, seq: 'comp', ledLevel: 0.12 });
+    const r = decodeStructuredLight(sim.frames, { kind: 'comp', bits: sim.bits, frameMs: 220, numLeds: sim.numLeds });
+    const ps = scorePoints(r.points, sim.truth, sim.spacingPx, sim.frames[0].w);
+    expect(ps.wrong).toBe(0); expect(ps.correct).toBe(60);
+  });
+
+  it('dim/occluded LEDs are recovered by the targeted pass', async () => {
+    const { r, ps } = await auto({ name: 't', layout: { kind: 'grid', cols: 10, rows: 10 }, occludeFrac: 0.2 });
+    expect(ps.wrong).toBe(0); expect(r.found).toBe(100);
+  });
+
+  it('wiring fit: exact from a jittered, perspective, 30%-missing serpentine', () => {
+    const sim = simulateCapture({ name: 't', layout: { kind: 'grid', cols: 32, rows: 8, serpentine: true }, posJitter: 0.15, tilt: 0.3, rotDeg: 20, cycles: 1 });
+    const pts = sim.truth.map((p, i) => (i % 10 < 3 ? null : { x: p.x / 320, y: p.y / 320 }));
+    const f = fitWiring(pts, sim.numLeds)!;
+    expect([f.cols, f.rows, f.serpentine]).toEqual([32, 8, true]);
+    expect(scoreLedmap(f.ledmap, sim.expected!).exact).toBe(true);
+  });
+
+  it('wiring fit declines free-form layouts instead of guessing', () => {
+    const pts = Array.from({ length: 100 }, (_, i) => ({ x: 0.5 + 0.3 * Math.cos(i * 2.4) * Math.sqrt(i / 100), y: 0.5 + 0.3 * Math.sin(i * 2.4) * Math.sqrt(i / 100) }));
+    expect(fitWiring(pts, 100)).toBeNull();
   });
 });

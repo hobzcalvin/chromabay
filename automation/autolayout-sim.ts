@@ -8,7 +8,7 @@
 //   node --import ./automation/ts-resolve.mjs automation/autolayout-sim.ts [nameFilter...] [--only=auto] [--seed=N] [--json]
 import { decodeFrames } from '../src/lib/cameraDecode.ts';
 import { decodeStructuredLight, type SeqKind } from '../src/lib/structuredLight.ts';
-import { buildLedmap, rectifyPoints, type Pt } from '../src/lib/autoLayout.ts';
+import { buildLedmap, fitWiring, rectifyPoints, type Pt } from '../src/lib/autoLayout.ts';
 import { simulateCapture, scorePoints, scoreLedmap, type SimScenario } from '../src/lib/autoLayoutSim.ts';
 import { SCENARIOS } from './autolayout-scenarios.ts';
 import { runAutoScan } from '../src/lib/autoScan.ts';
@@ -18,7 +18,7 @@ const json = args.includes('--json');
 const only = args.find((a) => a.startsWith('--only='))?.slice(7);
 const seedArg = +(args.find((a) => a.startsWith('--seed='))?.slice(7) ?? 0);   // re-roll every random draw
 const filt = args.filter((a) => !a.startsWith('--'));
-const list: SimScenario[] = SCENARIOS.filter((s) => !filt.length || filt.some((f) => s.name.includes(f))).map((s) => (seedArg ? { ...s, seed: (s.seed ?? 1) + 1000 * seedArg } : s));
+const list: SimScenario[] = SCENARIOS.filter((s) => !filt.length || filt.some((f) => s.name.includes(f))).map((s) => (seedArg ? { ...s, seed: (s.seed ?? 1) + 1000 * seedArg, installSeed: (s.installSeed ?? 1) + seedArg } : s));
 const PIPES: { name: string; seq: SeqKind; run: (sim: any, sc: SimScenario) => { points: (Pt | null)[]; reason: string } }[] = [
   { name: 'v1', seq: 'legacy', run: (sim, sc) => { const r = decodeFrames(sim.frames, { bits: sim.bits, frameMs: sc.frameMs ?? 220, numLeds: sim.numLeds }); return { points: r.points, reason: r.ok ? '' : r.reason }; } },
   { name: 'v2-legacy', seq: 'legacy', run: (sim, sc) => { const r = decodeStructuredLight(sim.frames, { kind: 'legacy', bits: sim.bits, frameMs: sc.frameMs ?? 220, numLeds: sim.numLeds }); return { points: r.points, reason: r.ok ? '' : r.reason }; } },
@@ -30,15 +30,15 @@ const PIPES: { name: string; seq: SeqKind; run: (sim: any, sc: SimScenario) => {
 // Bench IO for runAutoScan: each capture renders the scenario at the brightness the loop chose.
 // Firmware brightness b scales LED radiance linearly; the scenario's ledLevel is the level at 40.
 function autoRun(sim0: any, sc: SimScenario) {
-  let kind: any = 'strobe', bri = 40, seed = 100 + 1000 * seedArg, last: any = sim0;
+  let mask: number[] | undefined, kind: any = 'strobe', bri = 40, seed = 100 + 1000 * seedArg, last: any = sim0, firstDecode: any = null;
   const io = {
-    flash: async (k: any, b: number) => { kind = k; bri = b; },
-    capture: async (ms: number) => { last = simulateCapture({ ...sc, seq: kind, ledLevel: (sc.ledLevel ?? 0.6) * bri / 40, durationMs: ms, seed: seed++ }); return last.frames; },
+    flash: async (k: any, b: number, only?: number[]) => { kind = k; bri = b; mask = only; },
+    capture: async (ms: number) => { last = simulateCapture({ ...sc, seq: kind, ledLevel: (sc.ledLevel ?? 0.6) * bri / 40, pwmDuty: bri / 255, durationMs: ms, seed: seed++, onlyLeds: mask }); if (kind !== 'strobe') firstDecode ??= last; return last.frames; },
   };
   let out: any;
   // runAutoScan is async but every await above resolves immediately; drain it synchronously-ish.
   const p = runAutoScan(io, { numLeds: sim0.numLeds, bits: sim0.bits, kind: 'comp', frameMs: sc.frameMs ?? 220 }).then((r) => { out = r; });
-  return { p, get: () => ({ points: out.points, reason: out.ok ? `b=${out.brightness} ${(out.captureMs / 1000).toFixed(1)}s` : out.reason, truth: last.truth }) };
+  return { p, get: () => ({ points: out.points, reason: out.ok ? `b=${out.brightness} ${(out.captureMs / 1000).toFixed(1)}s` : out.reason, truth: (firstDecode ?? last).truth }) };   // merged passes live in the first decode's frame
 }
 
 const rows: any[] = [];
@@ -56,7 +56,7 @@ for (const sc of list) {
     if (sim.expected) {
       t.layouts++;
       if (res.points.some(Boolean)) {
-        const lm = buildLedmap(rectifyPoints(res.points), 1);
+        const lm = fitWiring(res.points, sim.numLeds)?.ledmap ?? buildLedmap(rectifyPoints(res.points), 1);   // what the app shows
         const s = scoreLedmap(lm, sim.expected);
         layout = s.exact ? 'EXACT' : `${(s.cellMatch * 100).toFixed(0)}%`;
         if (s.exact) t.exact++;

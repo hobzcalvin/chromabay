@@ -1901,7 +1901,7 @@ export async function uploadStripLayout(
  * structured-light sequence the camera decodes. `stripIndex` 0xFF flashes all strips.
  */
 export async function startCalibration(deviceId: string, stripIndex = 0xff, brightness = 40, mode: 'strobe' | 'full' | 'detect' | 'pairs' = 'full',
-  bits?: number, frameMs?: number): Promise<void> {
+  bits?: number, frameMs?: number, onlyLeds?: number[]): Promise<void> {
   // brightness: per-channel white level (1..255) the strips flash at. Keep low — full brightness
   // saturates the camera and blooms LEDs into one blob; ~40 keeps them as distinct dots. 0 => firmware default.
   // mode: 'detect' = steady ALL-ON (tune exposure + detect blobs), 'strobe' = ALL on/off,
@@ -1911,6 +1911,12 @@ export async function startCalibration(deviceId: string, stripIndex = 0xff, brig
   const m = mode === 'strobe' ? 0 : mode === 'detect' ? 2 : mode === 'pairs' ? 3 : 1;
   const bytes = [1, stripIndex & 0xff, Math.max(1, Math.min(255, Math.round(brightness))), m];
   if (bits) { bytes.push(bits & 0xff); if (frameMs) bytes.push(Math.max(4, Math.min(255, Math.round(frameMs / 10)))); }
+  // onlyLeds (feat>=9, needs bits + frameMs): flash just these LEDs, the rest stay dark.
+  if (bits && frameMs && onlyLeds?.length) {
+    const mask = new Uint8Array(Math.min(512, (Math.max(...onlyLeds) >> 3) + 1));
+    for (const i of onlyLeds) if (i >> 3 < mask.length) mask[i >> 3] |= 1 << (i & 7);
+    bytes.push(...mask);
+  }
   await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_CALIBRATION,
     new DataView(new Uint8Array(bytes).buffer));
 }

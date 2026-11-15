@@ -9,7 +9,7 @@
 // add 's' for serpentine wiring. Compared up to rotation/mirror.
 import { readFileSync } from 'node:fs';
 import { decodeStructuredLight } from '../src/lib/structuredLight.ts';
-import { buildLedmap, rectifyPoints } from '../src/lib/autoLayout.ts';
+import { buildLedmap, fitWiring, rectifyPoints } from '../src/lib/autoLayout.ts';
 import { layoutPositions, scoreLedmap } from '../src/lib/autoLayoutSim.ts';
 
 const path = process.argv[2];
@@ -26,8 +26,9 @@ console.log(`${kind} capture ${w}x${h}, ${n} frames, bits=${bits}, frameMs=${fra
 const r = decodeStructuredLight(frames, { kind, bits, frameMs, numLeds, onLog: (m) => console.log('  ' + m) });
 console.log(r.reason, r.diag);
 if (!r.ok) process.exit(1);
-const lm = buildLedmap(rectifyPoints(r.points), 1);
-console.log(`layout ${lm.width}x${lm.height}`);
+const wf = fitWiring(r.points, numLeds);
+const lm = wf?.ledmap ?? buildLedmap(rectifyPoints(r.points), 1);
+console.log(`layout ${lm.width}x${lm.height}${wf ? ` (recognised ${wf.cols}x${wf.rows}${wf.serpentine ? ' serpentine' : ''} wiring, residual ${wf.residual.toFixed(2)} pitch)` : ' (generic grid fit)'}`);
 for (let y = 0; y < lm.height; y++) console.log('  ' + Array.from({ length: lm.width }, (_, x) => { const v = lm.map[y * lm.width + x]; return v < 0 ? '  .' : String(v).padStart(3); }).join(' '));
 const ex = process.argv.find((a) => a.startsWith('--expect='))?.slice(9);
 if (ex) {

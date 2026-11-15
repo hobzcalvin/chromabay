@@ -22,7 +22,8 @@ export type SimLayout =
 
 export type SimScenario = {
   name: string;
-  seed?: number;
+  seed?: number;                  // per-capture randomness (noise, timing, shake)
+  installSeed?: number;           // the physical install (jitter, facing, brightness spread) — fixed across captures
   layout: SimLayout;
   imgW?: number; imgH?: number;   // processing-resolution frame size (default 320×180)
   coverage?: number;              // fraction of the image width the array spans (default 0.6)
@@ -54,6 +55,18 @@ export type SimScenario = {
   cycles?: number;                // flash cycles captured (default 5)
   seq?: SeqKind;                  // flash sequence the device runs (default 'legacy' = today's firmware)
   durationMs?: number;            // capture length override (default: `cycles` full cycles)
+  // --- harsh conditions ---
+  facingDeg?: number;             // each LED points up to this far off-axis: dimmer (cos³) + elongated spot
+  ledVarLog?: number;             // log-normal brightness spread σ (0.9 ⇒ some LEDs ~10× dimmer)
+  posJitter?: number;             // physical position noise, × pitch (wavy curtain, hand-placed lights)
+  occludeFrac?: number;           // fraction of LEDs mostly hidden (5–30% of their light gets through)
+  reflection?: { strength: number; mirrorY: number }; // mirrored, blurred copy about image row mirrorY (fraction of H)
+  flickerHz?: number;             // ambient light flicker (100/120 Hz for mains lighting)
+  flickerDepth?: number;          // 0..1
+  pwmHz?: number;                 // LED PWM rate (WS2812 ≈ 400 Hz, WS2812B ≈ 1.2 kHz); free-running per LED
+  pwmDuty?: number;               // PWM duty = flash brightness / 255 (default 40/255)
+  offsetX?: number;               // shift the array sideways by this fraction of the frame (partly out of view)
+  onlyLeds?: number[];            // targeted pass: only these LEDs flash (firmware calibration mask)
 };
 
 export type SimResult = {
@@ -97,6 +110,7 @@ export function layoutPositions(l: SimLayout): { pts: Pt[]; expected: Ledmap | n
 
 export function simulateCapture(sc: SimScenario): SimResult {
   const rnd = mulberry32(sc.seed ?? 1);
+  const irnd = mulberry32((sc.installSeed ?? 1) * 7919 + 13);   // same install every capture
   const W = sc.imgW ?? 320, H = sc.imgH ?? 180, N = W * H;
   const { pts: phys, expected } = layoutPositions(sc.layout);
   const n = phys.length, bits = Math.max(1, Math.ceil(Math.log2(Math.max(2, n))));
@@ -120,13 +134,32 @@ export function simulateCapture(sc: SimScenario): SimResult {
     const x = (pu * cr - pv * sr) * span * scale, y = (pu * sr + pv * cr) * span * scale; // span cancels the /span above
     return { x: W / 2 + x, y: H / 2 + y };
   };
-  const img0 = phys.map(project);
+  const pitch0 = medianNN(phys);
+  const physJ = sc.posJitter ? phys.map((p) => ({ x: p.x + gauss(irnd) * sc.posJitter! * pitch0, y: p.y + gauss(irnd) * sc.posJitter! * pitch0 })) : phys;
+  const img0 = physJ.map(project).map((p) => ({ x: p.x + (sc.offsetX ?? 0) * W, y: p.y }));
   const spacingPx = medianNN(img0);
   const sigma = Math.max(sc.minSpotPx ?? 0.7, (sc.spotFrac ?? 0.12) * spacingPx);
   const bloom = sc.bloom ?? 0.04, sigH = sigma * (sc.bloomRadius ?? 5);
   const level = sc.ledLevel ?? 0.6, ledVar = sc.ledVar ?? 0.15;
-  const gainLed = phys.map(() => level * (1 + ledVar * (2 * rnd() - 1)));
+  const gainLed = phys.map(() => level * (1 + ledVar * (2 * irnd() - 1)) * (sc.ledVarLog ? Math.exp(gauss(irnd) * sc.ledVarLog) : 1));
   for (const d of sc.deadLeds ?? []) if (d < n) gainLed[d] = 0;
+  const inMask = sc.onlyLeds ? new Set(sc.onlyLeds) : null;
+  // Off-axis LEDs: dimmer and their spot stretches along a random axis (projected emitter).
+  const spotA = new Float32Array(n).fill(sigma), spotB = new Float32Array(n).fill(sigma), spotPhi = new Float32Array(n);
+  if (sc.facingDeg) for (let i = 0; i < n; i++) {
+    const c = Math.max(0.3, Math.cos((irnd() * sc.facingDeg * Math.PI) / 180));
+    gainLed[i] *= c * c * c; spotA[i] = sigma / c; spotPhi[i] = irnd() * Math.PI;
+  }
+  if (sc.occludeFrac) for (let i = 0; i < n; i++) if (irnd() < sc.occludeFrac) gainLed[i] *= 0.05 + 0.25 * irnd();
+  const pwmPhase = Float32Array.from({ length: n }, () => rnd()), pwmF = Float32Array.from({ length: n }, () => (sc.pwmHz ?? 0) * (0.95 + 0.1 * irnd()));
+  const duty = Math.min(1, Math.max(1 / 255, sc.pwmDuty ?? 40 / 255));
+  // Fraction of [a, a+E] (ms) that a square wave (freq f Hz, phase ph, duty d) is high, ÷ d — so the
+  // long-exposure average is 1 and short exposures sample the flicker.
+  const pwmGain = (i: number, a: number, E: number) => {
+    const T = 1000 / pwmF[i], dT = duty * T, off = pwmPhase[i] * T;
+    const F = (x: number) => { const y = x + off; return Math.floor(y / T) * dT + Math.min(((y % T) + T) % T, dT); };
+    return (F(a + E) - F(a)) / (duty * E);
+  };
 
   // Device frame start times (drifting + jittered clock).
   const devStart = rnd() * frameMs * cycleLen;                // camera opens mid-sequence
@@ -153,21 +186,36 @@ export function simulateCapture(sc: SimScenario): SimResult {
   for (let fi = 0, t = 0; t < durMs; fi++, t = fi * (1000 / fps) + gauss(rnd) * fj) {
     if (shake) { sx += gauss(rnd) * shake; sy += gauss(rnd) * shake; }
     if (rnd() < drop) continue;
-    rad.set(amb);
+    if (sc.flickerHz && sc.flickerDepth) {
+      // Mains-lit ambient, integrated over each row's (rolling-shutter-shifted) exposure → bands.
+      const fd = sc.flickerDepth, w2 = (2 * Math.PI * sc.flickerHz) / 2000;   // |sin| has period 1/flickerHz
+      for (let y = 0; y < H; y++) {
+        const a = t + (y / H) * rs; let m = 0;
+        for (let q = 0; q < 8; q++) m += 1 - fd + fd * Math.abs(Math.sin(w2 * (a + ((q + 0.5) / 8) * expMs)));
+        m /= 8; for (let x = 0; x < W; x++) rad[y * W + x] = amb[y * W + x] * m;
+      }
+    } else rad.set(amb);
+    for (let pass = 0; pass < (sc.reflection ? 2 : 1); pass++)
     for (let i = 0; i < n; i++) {
-      if (!gainLed[i]) continue;
-      const px = img0[i].x + sx, py = img0[i].y + sy;
+      if (!gainLed[i] || (inMask && !inMask.has(i))) continue;
+      const refl = pass === 1, rf = sc.reflection;
+      const px = img0[i].x + sx, py = refl ? 2 * rf!.mirrorY * H - (img0[i].y + sy) : img0[i].y + sy;
+      if (py < -50 || py > H + 50) continue;
       // On-fraction over this LED's row exposure window (rolling shutter → row-dependent start).
       const tr = t + (py / H) * rs; let on = 0;
       for (let s = 0; s < SUB; s++) if (ledOn(i, devFrameAt(tr + ((s + 0.5) / SUB) * expMs))) on++;
       if (!on) continue;
-      const I = gainLed[i] * (on / SUB);
-      const x0 = Math.max(0, Math.floor(px - R)), x1 = Math.min(W - 1, Math.ceil(px + R));
-      const y0 = Math.max(0, Math.floor(py - R)), y1 = Math.min(H - 1, Math.ceil(py + R));
-      const ic = 1 / (2 * sigma * sigma), ih = 1 / (2 * sigH * sigH);
+      let I = gainLed[i] * (on / SUB) * (refl ? rf!.strength : 1);
+      if (sc.pwmHz) I *= pwmGain(i, tr, expMs);
+      if (I <= 0) continue;
+      const sa = spotA[i] * (refl ? 3 : 1), sb = spotB[i] * (refl ? 3 : 1), cph = Math.cos(spotPhi[i]), sph = Math.sin(spotPhi[i]);
+      const Ri = Math.max(R, Math.ceil(3 * sa));
+      const x0 = Math.max(0, Math.floor(px - Ri)), x1 = Math.min(W - 1, Math.ceil(px + Ri));
+      const y0 = Math.max(0, Math.floor(py - Ri)), y1 = Math.min(H - 1, Math.ceil(py + Ri));
+      const ia = 1 / (2 * sa * sa), ib = 1 / (2 * sb * sb), ih = 1 / (2 * sigH * sigH);
       for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
-        const d2 = (x - px) ** 2 + (y - py) ** 2;
-        rad[y * W + x] += I * (Math.exp(-d2 * ic) + (bloom > 0 ? bloom * Math.exp(-d2 * ih) : 0));
+        const dx = x - px, dy = y - py, u = dx * cph + dy * sph, v = -dx * sph + dy * cph;
+        rad[y * W + x] += I * (Math.exp(-u * u * ia - v * v * ib) + (bloom > 0 ? bloom * Math.exp(-(dx * dx + dy * dy) * ih) : 0));
       }
     }
     const gray = new Uint8Array(N); let mean = 0;
