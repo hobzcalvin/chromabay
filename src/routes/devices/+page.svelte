@@ -56,6 +56,7 @@
   import UsbFlash from '$lib/components/UsbFlash.svelte';
   import WledConvert from '$lib/components/WledConvert.svelte';
   import DeviceSettingsPanel from '$lib/components/DeviceSettingsPanel.svelte';
+  import { firmwareChannel, setFirmwareChannel, firmwareRegistryUrl, firmwareVersionChannel, fetchChannels, MAIN_CHANNEL, type Channel } from '$lib/channel';
   import WifiDevices from '$lib/components/WifiDevices.svelte';
 
   let bleSupported = $state(false);
@@ -139,7 +140,25 @@
   });
 
   let firmwareRegistry: FirmwareRegistryEntry[] = $state([]);
-  let espFirmwareRegistryUrl = "https://chromabay.app/firmware/esp32/esp32_firmware_registry.json";
+  // Which build line's firmware to offer: main, or an experimental branch (see $lib/channel.ts).
+  let fwChannels = $state<Channel[]>([MAIN_CHANNEL]);
+  let espFirmwareRegistryUrl = $derived(firmwareRegistryUrl($firmwareChannel));
+  const fwChannelTitle = (id: string) => fwChannels.find((c) => c.id === id)?.title ?? (id || 'Main');
+  async function loadFwChannels() {
+    const list = await fetchChannels();
+    if (!list) { // offline: keep the remembered choice
+      if ($firmwareChannel) fwChannels = [MAIN_CHANNEL, { id: $firmwareChannel, title: $firmwareChannel }];
+      return;
+    }
+    fwChannels = [MAIN_CHANNEL, ...list];
+    // A remembered channel whose branch is gone falls back to main (for this session only).
+    if ($firmwareChannel && !list.some((c) => c.id === $firmwareChannel)) firmwareChannel.set('');
+  }
+  async function changeFwChannel(id: string) {
+    setFirmwareChannel(id);
+    firmwareRegistry = [];
+    await initializeFirmwareRegistry();
+  }
 
   // Fetch firmware registry on app load
   async function initializeFirmwareRegistry() {
@@ -212,6 +231,7 @@
     }
 
     // Initialize firmware registry
+    await loadFwChannels();
     await initializeFirmwareRegistry();
     
     // CREATE FAKE DEVICE FOR TESTING (dev mode only, and only when explicitly opted
@@ -911,6 +931,17 @@
   <!-- Firmware Update -->
   <div class="settings-section">
     <h4>Firmware Update</h4>
+    {#if fwChannels.length > 1 || $firmwareChannel}
+      <label class="fw-channel">
+        <span>Build</span>
+        <select value={$firmwareChannel} disabled={settings.otaInProgress} onchange={(e) => changeFwChannel(e.currentTarget.value)}>
+          {#each fwChannels as c (c.id)}<option value={c.id}>{c.id ? `🧪 ${c.title}` : 'Main'}</option>{/each}
+        </select>
+      </label>
+      {#if firmwareVersionChannel(settings.deviceInfo?.fw_ver) !== $firmwareChannel}
+        <p class="fw-note">This device runs {firmwareVersionChannel(settings.deviceInfo?.fw_ver) ? `the experimental “${fwChannelTitle(firmwareVersionChannel(settings.deviceInfo?.fw_ver))}” build` : 'the main build'}; installing below switches it to {$firmwareChannel ? `“${fwChannelTitle($firmwareChannel)}”` : 'main'}.</p>
+      {/if}
+    {/if}
     {#if settings.otaInProgress}
       <div class="ota-progress">
         <p>{settings.otaStatus?.statusMessage || 'Updating...'}</p>
@@ -1618,6 +1649,8 @@
     margin: 0.1rem 0 0.4rem;
     word-break: break-all;
   }
+  .fw-channel { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; margin-bottom: 0.4rem; }
+  .fw-channel select { padding: 0.3rem 0.5rem; border-radius: 8px; border: 1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.06); color: inherit; }
   .fw-note {
     font-size: 0.82rem;
     line-height: 1.4;

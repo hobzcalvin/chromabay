@@ -23,7 +23,9 @@ const config = {
 		paths: {
 			// Served from the chromabay.app apex root (custom domain) — no base path anywhere.
 			// (Was '/chromabay' for the old github.io/<repo> project-pages URL before the domain.)
-			base: ''
+			// An experimental channel's web build is served from /x/<id> instead; CI sets
+			// CHROMABAY_BASE for it (.github/workflows/deploy.yml, src/lib/channel.ts).
+			base: process.env.CHROMABAY_BASE || ''
 		},
 		// Poll for new deployments every 60 s.  When a new build lands, SvelteKit detects the
 		// changed /_app/version.json and reloads before the user navigates to a stale route,

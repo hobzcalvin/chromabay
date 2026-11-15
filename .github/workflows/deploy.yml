@@ -12,21 +12,41 @@ on:
         description: 'Version for manual deployment'
         required: false
         default: ''
+  # An experimental channel (experimental.yml): the same build, published under x/<channel>/
+  # with that base path, plus an entry in x/channels.json. See src/lib/channel.ts.
+  workflow_call:
+    inputs:
+      channel:
+        type: string
+        required: true
+      channel_title:
+        type: string
+        required: true
+      channel_description:
+        type: string
+        required: false
+        default: ''
 
 permissions:
   contents: write
   pages: write
   id-token: write
 
-concurrency:
-  # Shared with esp32-release.yml so the two never push to gh-pages at the same
-  # time (e.g. a commit touching both src/ and esp32/ triggers both).
-  group: "gh-pages-publish"
-  cancel-in-progress: false
-
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    # Shared with esp32-release.yml so the two never push to gh-pages at the same
+    # time (e.g. a commit touching both src/ and esp32/ triggers both). On the job rather
+    # than the workflow so it also holds when experimental.yml calls this one.
+    concurrency:
+      group: "gh-pages-publish"
+      cancel-in-progress: false
+    env:
+      # '' on main. For a channel: its id, the URL prefix it is served under, and the
+      # directory of gh-pages it is published to.
+      CHANNEL: ${{ inputs.channel || '' }}
+      CHANNEL_TITLE: ${{ inputs.channel_title || '' }}
+      SITE_PREFIX: ${{ inputs.channel && format('/x/{0}', inputs.channel) || '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -57,7 +77,13 @@ jobs:
           
           # Check if current commit has a tag
           CURRENT_TAG=$(git tag --points-at HEAD | head -1)
-          if [ -n "$CURRENT_TAG" ]; then
+          if [ -n "$CHANNEL" ]; then
+            # Experimental channel: same MAJOR.MINOR line, its own build counter, and the
+            # channel id as a suffix so a bundle never collides with a main one.
+            BASE_VERSION=$(node -p "require('./package.json').version.split('.').slice(0,2).join('.')")
+            VERSION="${BASE_VERSION}.${{ github.run_number }}-${CHANNEL}"
+            echo "Using channel version: $VERSION"
+          elif [ -n "$CURRENT_TAG" ]; then
             VERSION="$CURRENT_TAG"
             echo "Using tag on current commit: $VERSION"
           elif [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.version }}" ]; then
@@ -102,6 +128,8 @@ jobs:
           export VITE_BUILD_DATE="${{ steps.version.outputs.BUILD_DATE }}"
           export VITE_COMMIT_HASH="${{ steps.version.outputs.COMMIT_HASH }}"
           export VITE_COMMIT_MESSAGE="${{ steps.version.outputs.COMMIT_MESSAGE }}"
+          export VITE_CHANNEL="$CHANNEL" VITE_CHANNEL_TITLE="$CHANNEL_TITLE"
+          export CHROMABAY_BASE="$SITE_PREFIX"   # '' on main; /x/<channel> for a channel
           # Supabase (public anon/publishable key — RLS protects data; safe to embed in the client bundle)
           # Where DEVICES report. Empty until the firmware project exists, in which case
           # sentryRelay.ts falls back to the app's own DSN, exactly as it does today.
@@ -113,17 +141,28 @@ jobs:
           sed -i "s/pages: 'build'/pages: 'docs'/" svelte.config.js
           sed -i "s/assets: 'build'/assets: 'docs'/" svelte.config.js
           npm run build
-          # Persist the custom domain on every deploy (keep_files also preserves GitHub's own
-          # CNAME, but write it explicitly so chromabay.app serving never regresses).
-          echo "chromabay.app" > docs/CNAME
-          # SPA fallback: serve the app shell for ANY unknown path so client-side routes
-          # (/patterns, /devices, …) render on GitHub Pages. Replaces the old spa-github-pages
-          # redirect 404.html, which looped/exploded at the apex root (no /chromabay segment).
-          #
-          # MUST come before the source-map inject below: 404.html is a copy of index.html,
-          # and a copy taken afterwards would carry index.html's debug ids into a file that
-          # is served for every deep link — two documents claiming the same identity.
-          cp docs/index.html docs/404.html
+          if [ -z "$CHANNEL" ]; then
+            # Persist the custom domain on every deploy (keep_files also preserves GitHub's own
+            # CNAME, but write it explicitly so chromabay.app serving never regresses).
+            echo "chromabay.app" > docs/CNAME
+            # SPA fallback: serve the app shell for ANY unknown path so client-side routes
+            # (/patterns, /devices, …) render on GitHub Pages. Replaces the old spa-github-pages
+            # redirect 404.html, which looped/exploded at the apex root (no /chromabay segment).
+            #
+            # MUST come before the source-map inject below: 404.html is a copy of index.html,
+            # and a copy taken afterwards would carry index.html's debug ids into a file that
+            # is served for every deep link — two documents claiming the same identity.
+            cp docs/index.html docs/404.html
+          else
+            # A channel can't use 404.html (GitHub Pages only serves the root one, which is
+            # main's). Give each top-level route its own copy of the app shell instead, so a
+            # reload or a shared link on /x/<channel>/devices still opens this build.
+            for r in src/routes/*/; do
+              r=$(basename "$r")
+              case "$r" in \(*|\[*) continue ;; esac
+              mkdir -p "docs/$r" && cp docs/index.html "docs/$r/index.html"
+            done
+          fi
 
           # Source maps → Sentry, then removed before anything is published. `inject` stamps
           # a debug id into each bundle and its map so they are matched by id rather than by
@@ -153,6 +192,10 @@ jobs:
           export VITE_SUPABASE_URL="https://cwyypvhyrkaalagvjebp.supabase.co"
           export VITE_SUPABASE_ANON_KEY="sb_publishable_c5CSmQ-d7sWcntjziCkMMw_ZFaIOwMW"
           export NODE_ENV=production
+          # The iOS bundle is served from the app itself, never under a path, but still knows
+          # its channel so it follows that channel's live updates.
+          export VITE_CHANNEL="$CHANNEL" VITE_CHANNEL_TITLE="$CHANNEL_TITLE"
+          unset CHROMABAY_BASE
           # Ensure GITHUB_PAGES is not set for mobile build
           unset GITHUB_PAGES
           # Reset svelte.config.js to original state
@@ -188,7 +231,7 @@ jobs:
           cat > docs/version.json << EOF
           {
             "version": "${{ steps.version.outputs.VERSION }}",
-            "downloadUrl": "https://chromabay.app/live-update-${{ steps.version.outputs.VERSION }}.zip",
+            "downloadUrl": "https://chromabay.app${SITE_PREFIX}/live-update-${{ steps.version.outputs.VERSION }}.zip",
             "buildDate": "${{ steps.version.outputs.BUILD_DATE }}",
             "commitHash": "${{ steps.version.outputs.COMMIT_HASH }}",
             "commitMessage": "${{ steps.version.outputs.COMMIT_MESSAGE }}"
@@ -201,11 +244,34 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./docs
           publish_branch: gh-pages
+          # '' (the root) on main; x/<channel> for an experimental channel.
+          destination_dir: ${{ inputs.channel && format('x/{0}', inputs.channel) || '' }}
           enable_jekyll: false
           # Don't delete files already on gh-pages that aren't in ./docs — the
           # ESP32 firmware registry (firmware/…) is published there by
           # esp32-release.yml and must survive a Pages deploy.
           keep_files: true
+
+      # The list the app's channel switcher reads (src/lib/channel.ts). Same lock as the
+      # deploy above (this job holds it), so two channels updating at once can't race.
+      - name: Update the channel index
+        if: env.CHANNEL != ''
+        env:
+          CHANNEL_DESCRIPTION: ${{ inputs.channel_description }}
+          BRANCH: ${{ github.ref_name }}
+          APP_VERSION: ${{ steps.version.outputs.VERSION }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git clone --depth=1 --branch=gh-pages "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" gh_pages_index
+          mkdir -p gh_pages_index/x
+          node scripts/channel-index.mjs upsert gh_pages_index/x/channels.json
+          cd gh_pages_index
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add x/channels.json
+          git diff --cached --quiet || git commit -m "Channel $CHANNEL: app $APP_VERSION"
+          git push origin gh-pages
 
       # Last, so a release only exists once the code it names is actually live — and rather
       # than letting the first arriving event auto-create a stub with no ship date and no
@@ -226,5 +292,5 @@ jobs:
           sentry-cli releases new "$RELEASE"
           sentry-cli releases set-commits --auto --ignore-missing "$RELEASE"
           sentry-cli releases finalize "$RELEASE"
-          sentry-cli releases deploys "$RELEASE" new -e web
+          sentry-cli releases deploys "$RELEASE" new -e "${CHANNEL:+experimental-}web"
           echo "registered $RELEASE"
