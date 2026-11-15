@@ -10,6 +10,9 @@ import { interactiveParameters } from '$lib/stores/interactiveStore';
 import { findColorGroups, hexToHueSat, hueSatToHex } from '$lib/color';
 import { modulators, getModulator, setModulator, SHAPES, type ModField } from '$lib/stores/modulatorStore';
 import { exitCycle } from '$lib/stores/cycleStore';
+import { connectedDevices } from '$lib/stores/deviceStore';
+import { deviceLayouts, syncDeviceLayout, shapeSize, type DeviceLayoutRecord } from '$lib/stores/deviceLayoutStore';
+import { previewChoice } from '$lib/stores/interactiveStore';
 import type { Node } from '@xyflow/svelte';
 import { get } from 'svelte/store';
 
@@ -67,7 +70,7 @@ import { get } from 'svelte/store';
   }
   // Re-measure when the band could have changed. tick() lets the DOM apply the new `bottom`
   // inset first so overlayEl.clientHeight (the band we distribute knobs within) is correct.
-  $: { knobCount; innerHeight; innerWidth; tick().then(measureBand); }
+  $: { knobCount; innerHeight; innerWidth; chooserH; tick().then(measureBand); }
 
   // Fit each knob inside its grid cell (band ÷ rows tall, width ÷ cols wide), leaving room
   // for the label, then clamp. Uses the measured band so knobs never hide behind the nav.
@@ -346,6 +349,48 @@ import { get } from 'svelte/store';
     }
   }
 
+  // Preview chooser (bottom): how the pattern is drawn behind the knobs. First the plain
+  // full-screen render, then each known device's layout, most recently connected first. With
+  // no explicit pick ($previewChoice null) it follows the most recently connected device.
+  $: devicesWithShape = $deviceLayouts.filter((r) => r.strips.some((st) => { const z = shapeSize(st); return z.width > 0 && z.height > 0; }));
+  $: previewOptions = [null, ...devicesWithShape] as (DeviceLayoutRecord | null)[];
+  $: previewIndex = (() => {
+    if ($previewChoice === 'screen') return 0;
+    const want = $previewChoice ?? devicesWithShape[0]?.deviceId;
+    const i = devicesWithShape.findIndex((r) => r.deviceId === want);
+    return i >= 0 ? i + 1 : (devicesWithShape.length ? 1 : 0);
+  })();
+  $: previewDevice = previewOptions[previewIndex] ?? null;
+  $: previewShapes = previewDevice ? previewDevice.strips : null;
+  function stepPreview(dir: number) {
+    const i = Math.max(0, Math.min(previewOptions.length - 1, previewIndex + dir));
+    previewChoice.set(i === 0 ? 'screen' : previewOptions[i]!.deviceId);
+  }
+  function describeShape(r: DeviceLayoutRecord): string {
+    return r.strips.map((st) => {
+      const z = shapeSize(st);
+      return st.kind === 'custom' ? `custom ${z.width}×${z.height}` : st.kind === 'strip' ? `${st.numLeds} LEDs` : `${z.width}×${z.height}`;
+    }).join(' + ');
+  }
+  let chooserH = 0;
+
+  // Tapping a chooser's name opens a list to jump straight to one by name.
+  let menu: 'pattern' | 'preview' | null = null;
+  async function pickPattern(p: any) {
+    menu = null;
+    if (p?.meta?.name && p.meta.name !== get(currentPattern)?.meta?.name) {
+      try { await selectPattern(p); } catch (e) { console.error('Interact: pick pattern failed', e); }
+    }
+  }
+  function pickPreview(i: number) {
+    menu = null;
+    previewChoice.set(i === 0 ? 'screen' : previewOptions[i]!.deviceId);
+  }
+
+  // Read the shape (config + custom layouts) of every connected device once per session, so
+  // its preview is current even if Devices' settings were never opened.
+  $: for (const id of $connectedDevices.keys()) syncDeviceLayout(id);
+
   onMount(async () => {
     // Initialize patterns on mount (same as editor page)
     try {
@@ -383,20 +428,58 @@ import { get } from 'svelte/store';
 <svelte:window bind:innerWidth bind:innerHeight on:resize={measureBand} />
 
 <!-- Full-screen pattern renderer -->
-<PatternRenderer fullscreen={true} />
+<PatternRenderer fullscreen={true} shapes={previewShapes}
+  insetTop={$patterns.length > 0 ? 88 : 0} insetBottom={navInset + (previewOptions.length > 1 ? chooserH + 12 : 0)} />
 
 <!-- Pattern switcher: prev / name / next -->
-{#if $patterns.length > 1}
+{#if $patterns.length > 0}
   <div class="pattern-switcher">
-    <button class="switch-btn" onclick={() => switchPattern(-1)} aria-label="Previous pattern">‹</button>
-    <span class="switch-name">{currentPatternName}</span>
-    <button class="switch-btn" onclick={() => switchPattern(1)} aria-label="Next pattern">›</button>
+    <button class="switch-btn" onclick={() => switchPattern(-1)} disabled={$patterns.length < 2} aria-label="Previous pattern">‹</button>
+    <button class="switch-name" onclick={() => (menu = 'pattern')} aria-label="Choose a pattern">🌈 {currentPatternName}</button>
+    <button class="switch-btn" onclick={() => switchPattern(1)} disabled={$patterns.length < 2} aria-label="Next pattern">›</button>
+  </div>
+{/if}
+
+<!-- Preview chooser: full screen / each device's layout -->
+{#if previewOptions.length > 1}
+  <div class="pattern-switcher preview-switcher" style="bottom: {navInset + 12}px;" bind:clientHeight={chooserH}>
+    <button class="switch-btn" onclick={() => stepPreview(-1)} disabled={previewIndex === 0} aria-label="Previous preview">‹</button>
+    <button class="switch-name" onclick={() => (menu = 'preview')} aria-label="Choose a preview">
+      {#if previewDevice}
+        💡 {previewDevice.name}<span class="switch-sub">{describeShape(previewDevice)}</span>
+      {:else}
+        🖼️ Full screen
+      {/if}
+    </button>
+    <button class="switch-btn" onclick={() => stepPreview(1)} disabled={previewIndex >= previewOptions.length - 1} aria-label="Next preview">›</button>
+  </div>
+{/if}
+
+{#if menu}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="pick-backdrop" onclick={() => (menu = null)}>
+    <div class="pick-menu" class:at-bottom={menu === 'preview'} style={menu === 'preview' ? `bottom: ${navInset + chooserH + 20}px;` : ''}
+      onclick={(e) => e.stopPropagation()} tabindex="-1" role="listbox" aria-label={menu === 'pattern' ? 'Patterns' : 'Previews'}>
+      {#if menu === 'pattern'}
+        {#each $patterns as p}
+          <button role="option" aria-selected={p.meta?.name === currentPatternName} class:current={p.meta?.name === currentPatternName}
+            onclick={() => pickPattern(p)}>🌈 {p.meta?.name}</button>
+        {/each}
+      {:else}
+        {#each previewOptions as opt, i}
+          <button role="option" aria-selected={i === previewIndex} class:current={i === previewIndex} onclick={() => pickPreview(i)}>
+            {#if opt}💡 {opt.name}<span class="switch-sub">{describeShape(opt)}</span>{:else}🖼️ Full screen{/if}
+          </button>
+        {/each}
+      {/if}
+    </div>
   </div>
 {/if}
 
 <!-- Dynamic rotary knobs overlay -->
 {#if dynamicKnobs.length > 0}
-  <div class="knobs-overlay" bind:this={overlayEl} style="bottom: {navInset}px;">
+  <div class="knobs-overlay" bind:this={overlayEl} style="bottom: {navInset + (previewOptions.length > 1 ? chooserH + 24 : 0)}px;">
     {#each dynamicKnobs.slice(0, 6) as knob, i (knob.nodeId + '-' + knob.paramName + '-' + knob.kind + '-' + (knob.modField ?? ''))}
       <div
         class="knob-container"
@@ -463,7 +546,52 @@ import { get } from 'svelte/store';
     cursor: pointer;
   }
   .switch-btn:active { background: rgba(255, 255, 255, 0.3); }
+  .switch-btn:disabled { opacity: 0.3; cursor: default; }
+  /* Same pill, pinned just above the bottom nav (bottom set inline). */
+  .preview-switcher { top: auto; }
+  .preview-switcher .switch-btn { width: 2.5rem; height: 2.5rem; font-size: 1.6rem; }
+  .preview-switcher .switch-name { font-size: 1rem; text-align: center; }
+  /* Pick-by-name list, under the top pill or above the bottom one. */
+  .pick-backdrop { position: fixed; inset: 0; z-index: 30; background: rgba(0, 0, 0, 0.35); }
+  .pick-menu {
+    position: fixed;
+    top: calc(max(1rem, env(safe-area-inset-top, 0px)) + 4.5rem);
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(22rem, calc(100vw - 32px));
+    max-height: 55vh;
+    overflow-y: auto;
+    padding: 0.35rem;
+    background: rgba(20, 20, 24, 0.96);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 14px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  }
+  .pick-menu.at-bottom { top: auto; }
+  .pick-menu button {
+    display: block;
+    width: 100%;
+    padding: 0.7rem 0.8rem;
+    border: none;
+    border-radius: 10px;
+    background: none;
+    color: #fff;
+    font: inherit;
+    font-size: 1rem;
+    text-align: left;
+    cursor: pointer;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .pick-menu button:active, .pick-menu button.current { background: rgba(255, 255, 255, 0.12); font-weight: 600; }
+  .switch-sub { display: block; font-size: 0.75rem; font-weight: 400; opacity: 0.7; overflow: hidden; text-overflow: ellipsis; }
   .switch-name {
+    border: none;
+    background: none;
+    padding: 0;
+    cursor: pointer;
+    font-family: inherit;
     color: #fff;
     font-weight: 600;
     font-size: 1.25rem;
