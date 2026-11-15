@@ -53,6 +53,7 @@
   import { connectedDevices, getConnectedDevicesList, type ConnectedDevice } from '$lib/stores/deviceStore';
   import { deviceSettings, liveBrightness, initializedDevices } from '$lib/stores/deviceUiStore.svelte';
   import LedConfigurationComponent from '$lib/components/LedConfiguration.svelte';
+  import { recordDeviceConfig } from '$lib/stores/deviceLayoutStore';
   import UsbFlash from '$lib/components/UsbFlash.svelte';
   import WledConvert from '$lib/components/WledConvert.svelte';
   import DeviceSettingsPanel from '$lib/components/DeviceSettingsPanel.svelte';
@@ -611,6 +612,7 @@
       if (settings.ledConfig) {
         console.log(`[devices] 💾 saveConfiguration → ${deviceId}: ${settings.ledConfig.strips.length} strip(s)`, JSON.parse(JSON.stringify(settings.ledConfig)));
         await setLedConfiguration(deviceId, settings.ledConfig);
+        recordDeviceConfig(deviceId, name || undefined, settings.ledConfig.strips);
       }
       statusMessage = 'Configuration saved';
     } catch (error: any) {
@@ -637,6 +639,7 @@
     try {
       settings.ledConfig = await getLedConfiguration(deviceId);
       liveBrightness[deviceId] = settings.ledConfig.globalBrightness;
+      recordDeviceConfig(deviceId, $connectedDevices.get(deviceId)?.name, settings.ledConfig.strips);
       console.log(`[devices] ✅ config loaded for ${deviceId}: ${settings.ledConfig.strips.length} strip(s), brightness ${settings.ledConfig.globalBrightness}`);
       return true;
     } catch (error: any) {

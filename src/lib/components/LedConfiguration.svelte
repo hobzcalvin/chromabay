@@ -4,6 +4,7 @@
   import { getRotation, getFlipH, getSerpentine, setRotation, setFlipH, setSerpentine } from '$lib/ble';
   import LayoutPreview from './LayoutPreview.svelte';
   import AutoLayoutModal from './AutoLayoutModal.svelte';
+  import { recordStripLayout, markDeviceLayoutSynced, type StripKind } from '$lib/stores/deviceLayoutStore';
   import { wledConfigToChromaBay, wledLedmapToLayout, describeWledImport, loadSavedWledImport, clearSavedWledImport, type WledImport, type WledLayout } from '$lib/wledImport';
 
   // Import LED settings from WLED: its cfg.json and/or ledmap.json (pick both at once), or the
@@ -27,6 +28,8 @@
       if (lay) {
         await uploadStripLayout(deviceId, 0, lay);
         layoutJson[0] = JSON.stringify(lay);
+        onDevice[0] = true; stripMode[0] = 'custom';
+        recordStripLayout(deviceId, 0, lay);
         layoutMsg[0] = `Applied ${lay.width}×${lay.height} from WLED`;
       }
       const what = [r ? describeWledImport(r) : '', !r && lay ? `layout ${lay.width}×${lay.height} on strip 1` : ''].filter(Boolean).join('');
@@ -92,6 +95,8 @@
       } else {
         layoutMsg[index] = 'No layout on device (grid mapping)';
       }
+      onDevice[index] = !!r;
+      recordStripLayout(deviceId, index, r);
     } catch (e: any) {
       layoutMsg[index] = 'Error: ' + (e?.message || e);
     }
@@ -117,6 +122,8 @@
       }
       await uploadStripLayout(deviceId, index, { width, height, map: parsed.map });
       layoutMsg[index] = `Applied ${width}×${height} (${parsed.map.length} cells)`;
+      onDevice[index] = true;
+      recordStripLayout(deviceId, index, { width, height, map: parsed.map });
     } catch (e: any) {
       layoutMsg[index] = 'Error: ' + (e?.message || e);
     }
@@ -125,9 +132,58 @@
     try {
       await uploadStripLayout(deviceId, index, null);
       layoutMsg[index] = 'Layout cleared (grid mapping)';
+      onDevice[index] = false;
+      recordStripLayout(deviceId, index, null);
     } catch (e: any) {
       layoutMsg[index] = 'Error: ' + (e?.message || e);
     }
+  }
+
+  // --- Strip shape: a strip (a row of numLeds), a matrix (W×H, wiring options), or a custom
+  // layout (a ledmap; the matrix options don't apply). Custom = the device holds a layout for
+  // the strip, so we read each strip's layout when the settings open to know which it is.
+  let stripMode: Record<number, StripKind> = $state({});
+  let onDevice: Record<number, boolean> = $state({}); // a custom layout is saved on the device
+  function modeOf(index: number, strip: any): StripKind {
+    return stripMode[index] ?? (onDevice[index] ? 'custom' : (strip.height == null || strip.height === 1) ? 'strip' : 'matrix');
+  }
+  function setMode(index: number, strip: any, mode: StripKind) {
+    stripMode[index] = mode;
+    const n = strip.numLeds;
+    if (mode === 'strip') {
+      if (n) { strip.width = n; strip.height = 1; }
+      strip.orientation = strip.orientation & 0x04; // rotation/serpentine mean nothing on one row; keep "reverse"
+    } else if (mode === 'matrix' && n && (strip.height == null || strip.height === 1)) {
+      strip.width = Math.ceil(Math.sqrt(n));
+      strip.height = Math.ceil(n / strip.width);
+    }
+  }
+  let layoutsReadFor = '';
+  $effect(() => {
+    const count = settings.ledConfig?.strips?.length ?? 0;
+    const key = `${deviceId}:${count}`;
+    if (!layoutSupported || !count || layoutsReadFor === key) return;
+    layoutsReadFor = key;
+    (async () => {
+      for (let i = 0; i < count; i++) {
+        try {
+          const r = await getStripLayout(deviceId, i);
+          onDevice[i] = !!r;
+          if (r && !layoutJson[i]) layoutJson[i] = JSON.stringify({ width: r.width, height: r.height, map: r.map });
+          recordStripLayout(deviceId, i, r);
+        } catch (e) { console.warn('layout read failed', e); }
+      }
+      markDeviceLayoutSynced(deviceId);
+    })();
+  });
+
+  // Save: a strip switched away from Custom layout drops the layout on the device too, or the
+  // device would keep using it over the strip/matrix settings.
+  async function save() {
+    for (const [i, strip] of (settings.ledConfig?.strips ?? []).entries()) {
+      if (onDevice[i] && modeOf(i, strip) !== 'custom') await clearLayout(i);
+    }
+    await onSaveConfig(deviceId);
   }
 
   // Props. `settings` is the parent's deeply-reactive $state, so binding the strip
@@ -171,10 +227,11 @@
     return (isNaN(n) || n < 1) ? null : n;
   }
 
-  function onNumLeds(strip: any, raw: string) {
+  function onNumLeds(strip: any, raw: string, mode: StripKind = 'matrix') {
     strip.numLeds = parseField(raw);
     const n = strip.numLeds;
     if (n == null) return;
+    if (mode === 'strip') { strip.width = n; strip.height = 1; return; }
     const haveWH = strip.width != null && strip.width >= 1 && strip.height != null && strip.height >= 1;
     if (!haveWH) {
       // Nothing set yet: square-ish matrix.
@@ -224,6 +281,7 @@
 
         {#each settings.ledConfig.strips as strip, index}
           {@const pl = parsedLayout(index)}
+          {@const mode = modeOf(index, strip)}
           <div class="strip-card">
             <div class="strip-header">
               <h6>Strip {index + 1}</h6>
@@ -281,22 +339,38 @@
                   </label>
                 {/if}
               </div>
+              <div class="shape-choice" role="radiogroup" aria-label="Strip shape">
+                {#each (layoutSupported ? ['strip', 'matrix', 'custom'] : ['strip', 'matrix']) as m}
+                  <button type="button" role="radio" aria-checked={mode === m} class:selected={mode === m}
+                    onclick={() => setMode(index, strip, m as StripKind)}>
+                    {m === 'strip' ? 'Strip' : m === 'matrix' ? 'Matrix' : 'Custom layout'}
+                  </button>
+                {/each}
+              </div>
               <div class="control-row">
                 <label>
                   LEDs:
                   <input id={buildId('numleds', index)} name="numleds" type="number" min="1" max="1000"
-                    placeholder="count" value={strip.numLeds ?? ''} oninput={(e) => onNumLeds(strip, e.currentTarget.value)} />
+                    placeholder="count" value={strip.numLeds ?? ''} oninput={(e) => onNumLeds(strip, e.currentTarget.value, mode)} />
                 </label>
-                <label>
-                  Rotation:
-                  <select id={buildId('rotation', index)} name="rotation" value={getRotation(strip.orientation).toString()} onchange={(e) => { strip.orientation = setRotation(strip.orientation, parseInt(e.currentTarget.value)); }}>
-                    <option value="0">0° (No rotation)</option>
-                    <option value="1">90° Clockwise</option>
-                    <option value="2">180°</option>
-                    <option value="3">270° Clockwise</option>
-                  </select>
-                </label>
+                {#if mode === 'matrix'}
+                  <label>
+                    Rotation:
+                    <select id={buildId('rotation', index)} name="rotation" value={getRotation(strip.orientation).toString()} onchange={(e) => { strip.orientation = setRotation(strip.orientation, parseInt(e.currentTarget.value)); }}>
+                      <option value="0">0° (No rotation)</option>
+                      <option value="1">90° Clockwise</option>
+                      <option value="2">180°</option>
+                      <option value="3">270° Clockwise</option>
+                    </select>
+                  </label>
+                {:else if mode === 'strip'}
+                  <label class="checkbox-label">
+                    <input id={buildId('flip', index)} name="flip" type="checkbox" checked={getFlipH(strip.orientation)} onchange={(e) => { strip.orientation = setFlipH(strip.orientation, e.currentTarget.checked); }} />
+                    Reverse direction
+                  </label>
+                {/if}
               </div>
+              {#if mode === 'matrix'}
               <div class="control-row">
                 <label>
                   Width:
@@ -319,6 +393,38 @@
                   Serpentine Layout
                 </label>
               </div>
+              {/if}
+              {#if mode === 'custom'}
+              <div class="custom-layout">
+                <p class="layout-hint">
+                  Paste a layout map: <code>{'{ "width": W, "height": H, "map": [ledIndex per cell, -1 = gap] }'}</code>,
+                  or map it with the camera. Applied immediately and saved to the device — no need to Save Configuration.
+                  {#if (settings.deviceInfo?.feat ?? 0) < 2}
+                    <strong>This device's firmware supports only ~250 cells; update it (Firmware Update above) for larger layouts.</strong>
+                  {/if}
+                  {#if !onDevice[index]}
+                    <strong>No layout on the device yet: until you apply one, it shows as a strip.</strong>
+                  {/if}
+                </p>
+                <textarea
+                  class="layout-json"
+                  rows="3"
+                  placeholder={'{ "width": 8, "height": 4, "map": [0,1,2,...] }'}
+                  bind:value={layoutJson[index]}></textarea>
+                <div class="layout-actions">
+                  <button class="btn primary small" onclick={() => applyLayout(index)}>Apply layout</button>
+                  <button class="btn secondary small" onclick={() => loadCurrentLayout(index)}>Load current</button>
+                  <button class="btn secondary small" onclick={() => clearLayout(index)}>Clear layout</button>
+                  <button class="btn secondary small" onclick={() => (autoLayoutStrip = index)}>📷 Auto-map (camera)</button>
+                  {#if layoutMsg[index]}<span class="layout-msg">{layoutMsg[index]}</span>{/if}
+                </div>
+                {#if pl}
+                  <LayoutPreview width={pl.width} height={pl.height} map={pl.map} />
+                {/if}
+              </div>
+              {:else if onDevice[index]}
+                <p class="layout-hint"><strong>This strip has a custom layout on the device; Save Configuration removes it.</strong></p>
+              {/if}
               <details class="sub-section">
                 <summary>Color correction</summary>
                 <div class="control-row">
@@ -344,33 +450,6 @@
                   </label>
                 </div>
               </details>
-              {#if layoutSupported}
-              <details class="sub-section">
-                <summary>Custom Layout</summary>
-                <p class="layout-hint">
-                  Paste a layout map: <code>{'{ "width": W, "height": H, "map": [ledIndex per cell, -1 = gap] }'}</code>.
-                  (width/height fall back to this strip's matrix size if omitted.) Applied immediately and saved to the device — no need to Save Configuration.
-                  {#if (settings.deviceInfo?.feat ?? 0) < 2}
-                    <strong>This device's firmware supports only ~250 cells; update it (Firmware Update above) for larger layouts.</strong>
-                  {/if}
-                </p>
-                <textarea
-                  class="layout-json"
-                  rows="3"
-                  placeholder={'{ "width": 8, "height": 4, "map": [0,1,2,...] }'}
-                  bind:value={layoutJson[index]}></textarea>
-                <div class="layout-actions">
-                  <button class="btn primary small" onclick={() => applyLayout(index)}>Apply layout</button>
-                  <button class="btn secondary small" onclick={() => loadCurrentLayout(index)}>Load current</button>
-                  <button class="btn secondary small" onclick={() => clearLayout(index)}>Clear layout</button>
-                  <button class="btn secondary small" onclick={() => (autoLayoutStrip = index)}>📷 Auto-map (camera)</button>
-                  {#if layoutMsg[index]}<span class="layout-msg">{layoutMsg[index]}</span>{/if}
-                </div>
-                {#if pl}
-                  <LayoutPreview width={pl.width} height={pl.height} map={pl.map} />
-                {/if}
-              </details>
-              {/if}
             </div>
           </div>
         {/each}
@@ -392,7 +471,7 @@
         {#each wledWarnings as w}<p class="wled-note warn">⚠ {w}</p>{/each}
       </details>
 
-      <button class="btn primary" onclick={() => onSaveConfig(deviceId)} disabled={settings.ledConfigLoading}>
+      <button class="btn primary" onclick={save} disabled={settings.ledConfigLoading}>
         Save Configuration
       </button>
     </div>
@@ -412,6 +491,26 @@
 
 <style>
   .wled-import { margin: 0.75rem 0; }
+  /* Strip / Matrix / Custom layout: a segmented choice. */
+  .shape-choice {
+    display: flex;
+    margin-bottom: 0.75rem;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .shape-choice button {
+    flex: 1;
+    padding: 0.5rem 0.25rem;
+    border: none;
+    background: transparent;
+    color: white;
+    font-size: 0.85rem;
+    cursor: pointer;
+  }
+  .shape-choice button + button { border-left: 1px solid rgba(255, 255, 255, 0.3); }
+  .shape-choice button.selected { background: rgba(59, 130, 246, 0.6); font-weight: 600; }
+  .custom-layout { margin-bottom: 0.75rem; }
   .wled-note { font-size: 0.85rem; margin: 0.4rem 0; opacity: 0.9; }
   .wled-note.msg { font-weight: 600; }
   .wled-note.warn { color: #fbbf24; }

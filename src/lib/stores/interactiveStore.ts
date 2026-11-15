@@ -116,3 +116,8 @@ export function clearNodeInteractiveParameters(nodeId: string): void {
     return params;
   });
 }
+
+// Interact's preview chooser: 'screen' (the plain full-screen render), a deviceId (draw that
+// device's layout), or null = follow the most recently connected device. Module scope, so the
+// pick survives leaving Interact and coming back.
+export const previewChoice = writable<'screen' | string | null>(null);

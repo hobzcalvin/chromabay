@@ -10,6 +10,9 @@ import { interactiveParameters } from '$lib/stores/interactiveStore';
 import { findColorGroups, hexToHueSat, hueSatToHex } from '$lib/color';
 import { modulators, getModulator, setModulator, SHAPES, type ModField } from '$lib/stores/modulatorStore';
 import { exitCycle } from '$lib/stores/cycleStore';
+import { connectedDevices } from '$lib/stores/deviceStore';
+import { deviceLayouts, syncDeviceLayout, shapeSize, type DeviceLayoutRecord } from '$lib/stores/deviceLayoutStore';
+import { previewChoice } from '$lib/stores/interactiveStore';
 import type { Node } from '@xyflow/svelte';
 import { get } from 'svelte/store';
 
@@ -67,7 +70,7 @@ import { get } from 'svelte/store';
   }
   // Re-measure when the band could have changed. tick() lets the DOM apply the new `bottom`
   // inset first so overlayEl.clientHeight (the band we distribute knobs within) is correct.
-  $: { knobCount; innerHeight; innerWidth; tick().then(measureBand); }
+  $: { knobCount; innerHeight; innerWidth; chooserH; tick().then(measureBand); }
 
   // Fit each knob inside its grid cell (band ÷ rows tall, width ÷ cols wide), leaving room
   // for the label, then clamp. Uses the measured band so knobs never hide behind the nav.
@@ -346,6 +349,35 @@ import { get } from 'svelte/store';
     }
   }
 
+  // Preview chooser (bottom): how the pattern is drawn behind the knobs. First the plain
+  // full-screen render, then each known device's layout, most recently connected first. With
+  // no explicit pick ($previewChoice null) it follows the most recently connected device.
+  $: devicesWithShape = $deviceLayouts.filter((r) => r.strips.some((st) => { const z = shapeSize(st); return z.width > 0 && z.height > 0; }));
+  $: previewOptions = [null, ...devicesWithShape] as (DeviceLayoutRecord | null)[];
+  $: previewIndex = (() => {
+    if ($previewChoice === 'screen') return 0;
+    const want = $previewChoice ?? devicesWithShape[0]?.deviceId;
+    const i = devicesWithShape.findIndex((r) => r.deviceId === want);
+    return i >= 0 ? i + 1 : (devicesWithShape.length ? 1 : 0);
+  })();
+  $: previewDevice = previewOptions[previewIndex] ?? null;
+  $: previewShapes = previewDevice ? previewDevice.strips : null;
+  function stepPreview(dir: number) {
+    const i = Math.max(0, Math.min(previewOptions.length - 1, previewIndex + dir));
+    previewChoice.set(i === 0 ? 'screen' : previewOptions[i]!.deviceId);
+  }
+  function describeShape(r: DeviceLayoutRecord): string {
+    return r.strips.map((st) => {
+      const z = shapeSize(st);
+      return st.kind === 'custom' ? `custom ${z.width}×${z.height}` : st.kind === 'strip' ? `${st.numLeds} LEDs` : `${z.width}×${z.height}`;
+    }).join(' + ');
+  }
+  let chooserH = 0;
+
+  // Read the shape (config + custom layouts) of every connected device once per session, so
+  // its preview is current even if Devices' settings were never opened.
+  $: for (const id of $connectedDevices.keys()) syncDeviceLayout(id);
+
   onMount(async () => {
     // Initialize patterns on mount (same as editor page)
     try {
@@ -383,20 +415,36 @@ import { get } from 'svelte/store';
 <svelte:window bind:innerWidth bind:innerHeight on:resize={measureBand} />
 
 <!-- Full-screen pattern renderer -->
-<PatternRenderer fullscreen={true} />
+<PatternRenderer fullscreen={true} shapes={previewShapes}
+  insetTop={$patterns.length > 1 ? 88 : 0} insetBottom={navInset + (previewOptions.length > 1 ? chooserH + 12 : 0)} />
 
 <!-- Pattern switcher: prev / name / next -->
 {#if $patterns.length > 1}
   <div class="pattern-switcher">
     <button class="switch-btn" onclick={() => switchPattern(-1)} aria-label="Previous pattern">‹</button>
-    <span class="switch-name">{currentPatternName}</span>
+    <span class="switch-name">🌈 {currentPatternName}</span>
     <button class="switch-btn" onclick={() => switchPattern(1)} aria-label="Next pattern">›</button>
+  </div>
+{/if}
+
+<!-- Preview chooser: full screen / each device's layout -->
+{#if previewOptions.length > 1}
+  <div class="pattern-switcher preview-switcher" style="bottom: {navInset + 12}px;" bind:clientHeight={chooserH}>
+    <button class="switch-btn" onclick={() => stepPreview(-1)} disabled={previewIndex === 0} aria-label="Previous preview">‹</button>
+    <span class="switch-name">
+      {#if previewDevice}
+        💡 {previewDevice.name}<span class="switch-sub">{describeShape(previewDevice)}</span>
+      {:else}
+        🖼️ Full screen
+      {/if}
+    </span>
+    <button class="switch-btn" onclick={() => stepPreview(1)} disabled={previewIndex >= previewOptions.length - 1} aria-label="Next preview">›</button>
   </div>
 {/if}
 
 <!-- Dynamic rotary knobs overlay -->
 {#if dynamicKnobs.length > 0}
-  <div class="knobs-overlay" bind:this={overlayEl} style="bottom: {navInset}px;">
+  <div class="knobs-overlay" bind:this={overlayEl} style="bottom: {navInset + (previewOptions.length > 1 ? chooserH + 24 : 0)}px;">
     {#each dynamicKnobs.slice(0, 6) as knob, i (knob.nodeId + '-' + knob.paramName + '-' + knob.kind + '-' + (knob.modField ?? ''))}
       <div
         class="knob-container"
@@ -463,6 +511,12 @@ import { get } from 'svelte/store';
     cursor: pointer;
   }
   .switch-btn:active { background: rgba(255, 255, 255, 0.3); }
+  .switch-btn:disabled { opacity: 0.3; cursor: default; }
+  /* Same pill, pinned just above the bottom nav (bottom set inline). */
+  .preview-switcher { top: auto; }
+  .preview-switcher .switch-btn { width: 2.5rem; height: 2.5rem; font-size: 1.6rem; }
+  .preview-switcher .switch-name { font-size: 1rem; text-align: center; }
+  .switch-sub { display: block; font-size: 0.75rem; font-weight: 400; opacity: 0.7; overflow: hidden; text-overflow: ellipsis; }
   .switch-name {
     color: #fff;
     font-weight: 600;
