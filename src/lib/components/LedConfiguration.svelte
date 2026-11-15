@@ -4,7 +4,7 @@
   import { getRotation, getFlipH, getSerpentine, setRotation, setFlipH, setSerpentine } from '$lib/ble';
   import LayoutPreview from './LayoutPreview.svelte';
   import AutoLayoutModal from './AutoLayoutModal.svelte';
-  import { recordStripLayout, markDeviceLayoutSynced, type StripKind } from '$lib/stores/deviceLayoutStore';
+  import { recordStripLayout, markDeviceLayoutSynced, shapeFromConfig, cellMap, stripRotation, applyStripRotation, type StripKind } from '$lib/stores/deviceLayoutStore';
   import { wledConfigToChromaBay, wledLedmapToLayout, describeWledImport, loadSavedWledImport, clearSavedWledImport, type WledImport, type WledLayout } from '$lib/wledImport';
 
   // Import LED settings from WLED: its cfg.json and/or ledmap.json (pick both at once), or the
@@ -128,6 +128,45 @@
       layoutMsg[index] = 'Error: ' + (e?.message || e);
     }
   }
+  // Save a strip's custom layout as a WLED-style ledmap JSON (the same format Apply takes), so
+  // it can be put back later. Uses what's in the editor, else reads it from the device.
+  async function downloadLayout(index: number) {
+    try {
+      let json = parsedLayout(index);
+      if (!json) {
+        const r = await getStripLayout(deviceId, index);
+        if (!r) { layoutMsg[index] = 'No layout on the device to download'; return; }
+        json = r;
+        layoutJson[index] = JSON.stringify(r);
+      }
+      const name = (settings.deviceInfo?.name || 'device').replace(/[^\w-]+/g, '-');
+      const filename = `ledmap-${name}-strip${index + 1}.json`;
+      const text = JSON.stringify({ width: json.width, height: json.height, map: json.map });
+      const file = new File([text], filename, { type: 'application/json' });
+      // The share sheet works inside the iOS/Android app, where a download link may not.
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title: filename });
+      } else {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(file);
+        a.download = filename;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      }
+      layoutMsg[index] = `Saved ${filename}`;
+    } catch (e: any) {
+      if (e?.name !== 'AbortError') layoutMsg[index] = 'Error: ' + (e?.message || e);
+    }
+  }
+
+  // The ledmap a strip/matrix strip produces from its settings, for the same preview a custom
+  // layout gets (null until the size is filled in).
+  function configPreview(strip: any): { width: number; height: number; map: number[] } | null {
+    if (!strip.numLeds || !strip.width || !strip.height) return null;
+    const shape = shapeFromConfig(strip);
+    return { width: shape.width, height: shape.height, map: cellMap(shape) };
+  }
+
   async function clearLayout(index: number) {
     try {
       await uploadStripLayout(deviceId, index, null);
@@ -145,15 +184,15 @@
   let stripMode: Record<number, StripKind> = $state({});
   let onDevice: Record<number, boolean> = $state({}); // a custom layout is saved on the device
   function modeOf(index: number, strip: any): StripKind {
-    return stripMode[index] ?? (onDevice[index] ? 'custom' : (strip.height == null || strip.height === 1) ? 'strip' : 'matrix');
+    return stripMode[index] ?? (onDevice[index] ? 'custom' : (strip.height == null || strip.height === 1 || strip.width === 1) ? 'strip' : 'matrix');
   }
   function setMode(index: number, strip: any, mode: StripKind) {
     stripMode[index] = mode;
     const n = strip.numLeds;
     if (mode === 'strip') {
-      if (n) { strip.width = n; strip.height = 1; }
-      strip.orientation = strip.orientation & 0x04; // rotation/serpentine mean nothing on one row; keep "reverse"
-    } else if (mode === 'matrix' && n && (strip.height == null || strip.height === 1)) {
+      const alreadyStrip = strip.height === 1 || strip.width === 1;
+      applyStripRotation(strip, alreadyStrip ? stripRotation(strip) : 0);
+    } else if (mode === 'matrix' && n && (strip.height == null || strip.height === 1 || strip.width === 1)) {
       strip.width = Math.ceil(Math.sqrt(n));
       strip.height = Math.ceil(n / strip.width);
     }
@@ -231,7 +270,7 @@
     strip.numLeds = parseField(raw);
     const n = strip.numLeds;
     if (n == null) return;
-    if (mode === 'strip') { strip.width = n; strip.height = 1; return; }
+    if (mode === 'strip') { applyStripRotation(strip, stripRotation(strip)); return; }
     const haveWH = strip.width != null && strip.width >= 1 && strip.height != null && strip.height >= 1;
     if (!haveWH) {
       // Nothing set yet: square-ish matrix.
@@ -364,9 +403,14 @@
                     </select>
                   </label>
                 {:else if mode === 'strip'}
-                  <label class="checkbox-label">
-                    <input id={buildId('flip', index)} name="flip" type="checkbox" checked={getFlipH(strip.orientation)} onchange={(e) => { strip.orientation = setFlipH(strip.orientation, e.currentTarget.checked); }} />
-                    Reverse direction
+                  <label>
+                    Rotation:
+                    <select id={buildId('rotation', index)} name="rotation" value={stripRotation(strip).toString()} onchange={(e) => applyStripRotation(strip, parseInt(e.currentTarget.value))}>
+                      <option value="0">0° (left → right)</option>
+                      <option value="1">90° (top → bottom)</option>
+                      <option value="2">180° (right → left)</option>
+                      <option value="3">270° (bottom → top)</option>
+                    </select>
                   </label>
                 {/if}
               </div>
@@ -414,6 +458,7 @@
                 <div class="layout-actions">
                   <button class="btn primary small" onclick={() => applyLayout(index)}>Apply layout</button>
                   <button class="btn secondary small" onclick={() => loadCurrentLayout(index)}>Load current</button>
+                  <button class="btn secondary small" onclick={() => downloadLayout(index)}>⬇ Download layout</button>
                   <button class="btn secondary small" onclick={() => clearLayout(index)}>Clear layout</button>
                   <button class="btn secondary small" onclick={() => (autoLayoutStrip = index)}>📷 Auto-map (camera)</button>
                   {#if layoutMsg[index]}<span class="layout-msg">{layoutMsg[index]}</span>{/if}
@@ -422,8 +467,19 @@
                   <LayoutPreview width={pl.width} height={pl.height} map={pl.map} />
                 {/if}
               </div>
-              {:else if onDevice[index]}
-                <p class="layout-hint"><strong>This strip has a custom layout on the device; Save Configuration removes it.</strong></p>
+              {:else}
+                {#if onDevice[index]}
+                  <p class="layout-hint">
+                    <strong>This strip has a custom layout on the device; Save Configuration removes it.</strong>
+                    Download it first to keep a copy you can apply again later.
+                  </p>
+                  <button class="btn secondary small" onclick={() => downloadLayout(index)}>⬇ Download current layout</button>
+                  {#if layoutMsg[index]}<span class="layout-msg">{layoutMsg[index]}</span>{/if}
+                {/if}
+                {@const cp = configPreview(strip)}
+                {#if cp}
+                  <div><LayoutPreview width={cp.width} height={cp.height} map={cp.map} /></div>
+                {/if}
               {/if}
               <details class="sub-section">
                 <summary>Color correction</summary>

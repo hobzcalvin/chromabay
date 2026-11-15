@@ -78,7 +78,33 @@ export function shapeFromConfig(s: LedStripConfig): StripShape {
   const numLeds = Math.max(0, s.numLeds ?? 0);
   const width = s.width && s.width >= 1 ? s.width : numLeds;
   const height = s.height && s.height >= 1 ? s.height : 1;
-  return { kind: height === 1 ? 'strip' : 'matrix', width, height, numLeds, orientation: s.orientation ?? 0 };
+  return { kind: height === 1 || width === 1 ? 'strip' : 'matrix', width, height, numLeds, orientation: s.orientation ?? 0 };
+}
+
+/** The LED index shown in each cell (row-major over shapeSize; -1 = no LED) — a ledmap, for
+ *  previewing any strip the way a custom layout is previewed. */
+export function cellMap(s: StripShape): number[] {
+  if (s.layout) return s.layout.map.slice(0, s.layout.width * s.layout.height);
+  const map: number[] = [];
+  for (let y = 0; y < s.height; y++) for (let x = 0; x < s.width; x++) {
+    const i = xyToIndex(x, y, s.width, s.height, s.orientation, s.numLeds);
+    map.push(i < s.numLeds ? i : -1);
+  }
+  return map;
+}
+
+// A strip (one LED wide) can run four ways; the firmware sees it as a 1-row or 1-column grid.
+//   0° → left to right (N×1) · 90° → top to bottom (1×N) · 180° → right to left · 270° → bottom to top
+export function stripRotation(s: { width: number | null; height: number | null; orientation: number }): number {
+  const vertical = s.width === 1 && (s.height ?? 0) > 1;
+  const reversed = (s.orientation & 0x03) === 2 || (!vertical && (s.orientation & 0x04) !== 0);
+  return (vertical ? 1 : 0) + (reversed ? 2 : 0);
+}
+export function applyStripRotation(s: { numLeds: number | null; width: number | null; height: number | null; orientation: number }, rotation: number) {
+  const n = s.numLeds;
+  const vertical = rotation % 2 === 1;
+  if (n) { s.width = vertical ? 1 : n; s.height = vertical ? n : 1; }
+  s.orientation = rotation >= 2 ? 2 : 0; // the firmware's 180° turn reverses a row or a column
 }
 
 /** Record a device's LED config. Custom layouts already known for a strip are kept (a config
@@ -105,7 +131,7 @@ export function recordStripLayout(deviceId: string, index: number, layout: { wid
       rec.strips[index] = { ...s, kind: 'custom', layout: { width: layout.width, height: layout.height, map: layout.map } };
     } else if (s.layout) {
       const { layout: _drop, ...rest } = s; // back to the config's grid
-      rec.strips[index] = { ...rest, kind: rest.height === 1 ? 'strip' : 'matrix' };
+      rec.strips[index] = { ...rest, kind: rest.height === 1 || rest.width === 1 ? 'strip' : 'matrix' };
     }
     return list;
   });
@@ -186,7 +212,7 @@ export function litCells(s: StripShape): Uint8Array {
   }
   const n = s.width * s.height;
   const lit = new Uint8Array(n);
-  if (s.height === 1) {
+  if (s.height === 1 || s.width === 1) {
     for (let c = 0; c < n; c++) lit[c] = c < s.numLeds ? 1 : 0;
   } else {
     for (let y = 0; y < s.height; y++) for (let x = 0; x < s.width; x++) {
