@@ -9,6 +9,7 @@
   import { loadSerializedPattern, initializeDefaultPattern } from '$lib/flowStore';
   import { SvelteFlowProvider } from '@xyflow/svelte';
   import '$lib/patternSync'; // activates cloud library sync (inert unless signed in)
+  import { BUILD_CHANNEL, BUILD_CHANNEL_TITLE } from '$lib/channel';
   import { initDeepLinks } from '$lib/deepLinks';
   import { prefetchLatestFirmwareSet } from '$lib/ble';
   import PreviewRenderHost from '$lib/components/PreviewRenderHost.svelte';
@@ -81,6 +82,10 @@
   <PreviewRenderHost />
   <div class="app-container">
     <div class="content-area">
+      {#if BUILD_CHANNEL}
+        <!-- An experimental build (see $lib/channel.ts): say so, and the way back is in Settings. -->
+        <a class="channel-banner" href="{base}/settings">🧪 Experimental: {BUILD_CHANNEL_TITLE} · switch builds in Settings</a>
+      {/if}
       <slot />
     </div>
     
@@ -178,6 +183,10 @@
   }
 
   /* Content area - this will naturally size to fill available space */
+  .channel-banner {
+    display: block; margin: 6px 8px 0; padding: 4px 10px; border-radius: 8px; text-align: center;
+    font-size: 0.75rem; color: #fbbf24; background: #f59e0b1f; border: 1px solid #f59e0b55; text-decoration: none;
+  }
   .content-area {
     grid-area: content;
     overflow-y: auto;

@@ -46,6 +46,13 @@ on:
     tags:
       - 'fwv*'
   workflow_dispatch:
+  # An experimental channel (experimental.yml): the same build, signed the same way, published
+  # under x/<channel>/firmware/esp32/ with its own registry. See src/lib/channel.ts.
+  workflow_call:
+    inputs:
+      channel:
+        type: string
+        required: true
 
 permissions:
   contents: read
@@ -95,7 +102,13 @@ jobs:
       - name: Determine firmware version
         id: version
         run: |
-          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+          CHANNEL="${{ inputs.channel || '' }}"
+          if [[ -n "$CHANNEL" ]]; then
+            # Experimental channel: fwvX.Y.<build>-<channel>. The app reads the suffix to say
+            # which build a device runs (firmwareVersionChannel in src/lib/channel.ts).
+            BASE=$(grep '#define FIRMWARE_VERSION' esp32/src/firmware_version.h | sed 's/.*"\(.*\)".*/\1/')
+            VERSION="${BASE}.${{ github.run_number }}-${CHANNEL}"
+          elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             # Tagged release: use the clean tag (e.g. fwv0.0.20)
             VERSION="${GITHUB_REF#refs/tags/}"
           else
@@ -455,6 +468,9 @@ jobs:
         prerelease: false
 
     - name: Update firmware registry on GitHub Pages
+      env:
+        # '' on main; "x/<channel>/" for an experimental channel.
+        PREFIX: ${{ inputs.channel && format('x/{0}/', inputs.channel) || '' }}
       run: |
         # Install jq for JSON manipulation (drop the flaky Microsoft repos first — see above)
         sudo grep -lr packages.microsoft.com /etc/apt/sources.list.d/ 2>/dev/null | xargs -r sudo rm -f
@@ -471,10 +487,11 @@ jobs:
         git clone --depth=1 --branch=gh-pages "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" gh_pages_temp
 
         # Create firmware directory structure
-        mkdir -p gh_pages_temp/firmware/esp32
+        FW_DIR="gh_pages_temp/${PREFIX}firmware/esp32"
+        mkdir -p "$FW_DIR"
 
         # Initialize registry if it doesn't exist
-        REGISTRY_FILE="gh_pages_temp/firmware/esp32/esp32_firmware_registry.json"
+        REGISTRY_FILE="$FW_DIR/esp32_firmware_registry.json"
         if [ ! -f "$REGISTRY_FILE" ]; then
           echo "[]" > "$REGISTRY_FILE"
         fi
@@ -492,7 +509,7 @@ jobs:
         BUILDS_JSON=""
         for row in "${VARIANTS[@]}"; do
           IFS='|' read -r ENV CHIP FAMILY <<< "$row"
-          DEST="gh_pages_temp/firmware/esp32/$VER/$CHIP"
+          DEST="$FW_DIR/$VER/$CHIP"
           mkdir -p "$DEST"
           cp "dist/firmware-$CHIP.bin"          "$DEST/firmware.bin"
           cp "dist/firmware-$CHIP.sig"          "$DEST/firmware.sig"
@@ -506,14 +523,14 @@ jobs:
           # 1.375MB slots). The app compares `size` to the device's OTA slot to pick one.
           WIFI_ENTRY=$(jq -n \
             --arg ver "$VER" --arg chip "$CHIP" --arg hwver "$HARDWARE_VERSION" \
-            --arg path "firmware/esp32/$VER/$CHIP/firmware.bin" \
-            --arg sigpath "firmware/esp32/$VER/$CHIP/firmware.sig" \
+            --arg path "${PREFIX}firmware/esp32/$VER/$CHIP/firmware.bin" \
+            --arg sigpath "${PREFIX}firmware/esp32/$VER/$CHIP/firmware.sig" \
             --arg date "$BUILD_DATE" --argjson size "$WIFI_SIZE" \
             '{version: $ver, chip: $chip, wifi: true, size: $size, hardwareVersion: $hwver, path: $path, signaturePath: $sigpath, date: $date}')
           NOWIFI_ENTRY=$(jq -n \
             --arg ver "$VER" --arg chip "$CHIP" --arg hwver "$HARDWARE_VERSION" \
-            --arg path "firmware/esp32/$VER/$CHIP/firmware-nowifi.bin" \
-            --arg sigpath "firmware/esp32/$VER/$CHIP/firmware-nowifi.sig" \
+            --arg path "${PREFIX}firmware/esp32/$VER/$CHIP/firmware-nowifi.bin" \
+            --arg sigpath "${PREFIX}firmware/esp32/$VER/$CHIP/firmware-nowifi.sig" \
             --arg date "$BUILD_DATE" --argjson size "$NOWIFI_SIZE" \
             '{version: $ver, chip: $chip, wifi: false, size: $size, hardwareVersion: $hwver, path: $path, signaturePath: $sigpath, date: $date}')
           echo "New entries: $WIFI_ENTRY / $NOWIFI_ENTRY"
@@ -521,15 +538,28 @@ jobs:
           UPDATED_REGISTRY=$(jq --argjson w "$WIFI_ENTRY" --argjson n "$NOWIFI_ENTRY" '[$w, $n] + .' "$REGISTRY_FILE")
           echo "$UPDATED_REGISTRY" > "$REGISTRY_FILE"
 
-          BUILDS_JSON="${BUILDS_JSON}{ \"chipFamily\": \"$FAMILY\", \"parts\": [ { \"path\": \"https://chromabay.app/firmware/esp32/$VER/$CHIP/chromabay-factory.bin\", \"offset\": 0 } ] },"
+          BUILDS_JSON="${BUILDS_JSON}{ \"chipFamily\": \"$FAMILY\", \"parts\": [ { \"path\": \"https://chromabay.app/${PREFIX}firmware/esp32/$VER/$CHIP/chromabay-factory.bin\", \"offset\": 0 } ] },"
         done
         jq '.' "$REGISTRY_FILE" > "$REGISTRY_FILE.tmp" && mv "$REGISTRY_FILE.tmp" "$REGISTRY_FILE"
         BUILDS_JSON="${BUILDS_JSON%,}"   # strip trailing comma
 
+        # A channel keeps only its newest few builds: it is a moving target, and every build
+        # is ~15 MB of images on gh-pages.
+        if [ -n "$PREFIX" ]; then
+          # Newest first (entries are prepended), so the first 3 distinct versions are the newest.
+          KEEP_JSON=$(jq -c 'map(.version) | reduce .[] as $v ([]; if any(.[]; . == $v) then . else . + [$v] end) | .[:3]' "$REGISTRY_FILE")
+          KEEP=$(jq -r '.[]' <<< "$KEEP_JSON")
+          jq --argjson keep "$KEEP_JSON" '[.[] | select(.version as $v | $keep | any(.[]; . == $v))]' "$REGISTRY_FILE" > "$REGISTRY_FILE.tmp" && mv "$REGISTRY_FILE.tmp" "$REGISTRY_FILE"
+          for d in "$FW_DIR"/*/; do
+            v=$(basename "$d")
+            printf '%s\n' $KEEP | grep -qx "$v" || { echo "pruning old channel build $v"; rm -rf "$d"; }
+          done
+        fi
+
         # esp-web-tools manifest — the SINGLE source the USB flasher reads (no committed .bin).
         # Absolute part URLs so the manifest location doesn't matter; the flasher matches the
         # connected chip against chipFamily and refuses a mismatch.
-        cat > "gh_pages_temp/firmware/esp32/chromabay-manifest.json" <<MANIFEST
+        cat > "$FW_DIR/chromabay-manifest.json" <<MANIFEST
         {
           "name": "ChromaBay",
           "version": "$VER",
@@ -543,7 +573,7 @@ jobs:
         git config user.name 'github-actions[bot]'
         git config user.email 'github-actions[bot]@users.noreply.github.com'
         git add .
-        git commit -m "Deploy ESP32 firmware ${{ needs.plan.outputs.version }} and update registry (PSA-signed)"
+        git commit -m "Deploy ESP32 firmware ${{ needs.plan.outputs.version }}${PREFIX:+ to $PREFIX} and update registry (PSA-signed)"
         git push origin gh-pages
 
         # Clean up
@@ -569,7 +599,7 @@ jobs:
         sentry-cli releases new "$RELEASE"
         sentry-cli releases set-commits --auto --ignore-missing "$RELEASE"
         sentry-cli releases finalize "$RELEASE"
-        sentry-cli releases deploys "$RELEASE" new -e production
+        sentry-cli releases deploys "$RELEASE" new -e "${{ inputs.channel && 'experimental' || 'production' }}"
         echo "registered $RELEASE"
 
     - name: Clean up private key files
