@@ -1,7 +1,7 @@
 {
-  "version": "1.2.376",
-  "downloadUrl": "https://chromabay.app/live-update-1.2.376.zip",
-  "buildDate": "2026-11-15T23:56:58Z",
-  "commitHash": "24af748b3ee0375eee5f1cb2ae44221aa87cfad1",
-  "commitMessage": "Merge remote-tracking branch 'origin/main' into claude/epic-einstein-s6kqbg"
+  "version": "1.2.377",
+  "downloadUrl": "https://chromabay.app/live-update-1.2.377.zip",
+  "buildDate": "2026-11-16T00:37:26Z",
+  "commitHash": "33c4b8d4c198a9034a9a65116a912307f874bd96",
+  "commitMessage": "Interact choosers: one fixed width, names only in the menus"
 }
