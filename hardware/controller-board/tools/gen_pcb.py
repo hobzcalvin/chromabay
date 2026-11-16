@@ -40,7 +40,8 @@ ANCHORS = {
     #     The button body overhangs the edge 0.35 mm and its plunger 0.95 mm; the switch handle 1.0 mm.
     #     The case face is flush with the board edge, so both stick out past the case by that much.
     "SW2": (8.67, 1.65, 180), "J1": (17.1, 4.85, 180), "SW1": (26.48, 2.35, 180),
-    "D1": (22.3, 9.6, 180),         # set back, aimed at the slot beside the USB-C opening
+    "D1": (22.3, 9.6, 180),
+    "U8": (25.6, 6.95, 90),          # USB ESD right beside the USB-C, between it and the switch         # set back, aimed at the slot beside the USB-C opening
     "MK1": (9.0, 6.0, 0),           # bottom-port mic; case channel exits the end face under the board
     # --- POWER (left half, between USB-C and the battery): charger right behind the USB-C,
     #     battery JST in the left-side notch with the reverse-polarity FET next to it, boost below.
@@ -272,32 +273,49 @@ def main():
         if not fp:
             return None
         for pad in fp.Pads():
-            if pad.GetNetname() == netname:
+            if pad.GetNetname().lstrip("/") == netname:
                 v = pad.GetPosition()
                 return pcbnew.ToMM(v.x) - OX, pcbnew.ToMM(v.y) - OY
         return None
 
-    def target(p):
+    RAILS = {"GND", "3V3", "VSYS", "5V_BOOST", "VBUS", "BAT", "BAT_IN", "VLED"}
+
+    def target_info(p):
+        """(tier, position): tier 0 = sits on a charger/boost control pin, 1 = charger/boost rail cap,
+        2 = other chip pin, 3 = other chip rail, 4 = anything else. Lower tiers are placed first."""
         best = None
+        is_cap = p["ref"].startswith("C")
         for netname in p["pins"].values():
-            if netname in ("GND", "3V3", "VSYS", "5V_BOOST") and best:
+            if netname == "GND" or netname.startswith("NC"):
                 continue
+            rail = netname in RAILS
             for ref in ANCHORS:
                 if ref == p["ref"]:
                     continue
                 pp = pad_pos(ref, netname)
-                if pp and netname not in ("GND",):
-                    score = 0 if by_ref[ref]["block"] == p["block"] else 1
-                    if netname in ("3V3", "VSYS", "5V_BOOST"):
-                        score += 2
-                    if best is None or score < best[0]:
-                        best = (score, pp)
-        return best[1] if best else (W / 2, H / 2)
+                if not pp:
+                    continue
+                chip = ref[0] in "UQD" or ref.startswith(("MK", "L", "J1"))
+                if ref in ("U2", "U3") and not rail:
+                    tier = 0
+                elif ref in ("U2", "U3") and is_cap:
+                    tier = 1
+                elif chip and not rail:
+                    tier = 2
+                elif chip:
+                    tier = 3
+                else:
+                    tier = 4
+                if best is None or tier < best[0]:
+                    best = (tier, pp)
+        return best or (5, (W / 2, H / 2))
 
-    # place the most constrained first: those whose target is a specific IC pin
-    prio = ["usb", "shifter", "charger", "boost", "loadsw", "battery", "gauge", "sensors",
-            "power", "leds", "mcu", "pads"]
-    rest.sort(key=lambda p: (prio.index(p["block"]), p["ref"]))
+    def target(p):
+        return target_info(p)[1]
+
+    # place the most constrained first: parts that sit on a specific charger/boost pin, then the
+    # caps on those chips' rails, then other chip pins, rails, and the rest
+    rest.sort(key=lambda p: (target_info(p)[0], p["ref"]))
     for p in rest:
         fp = load(p)
         tx, ty = target(p)
@@ -312,6 +330,8 @@ def main():
                     bb = bbox_mm(fp, 0.12)
                     if inside(bb) and not any(overlaps(bb, o) for o in placed + NO_PLACE):
                         placed.append(bb)
+                        if os.environ.get("PLACE_DEBUG"):
+                            print("place", p["ref"], target_info(p)[0], round(radius, 1))
                         done = True
                         break
                 if done:

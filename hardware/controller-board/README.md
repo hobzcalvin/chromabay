@@ -7,13 +7,14 @@ face (the button and switch stick out past it on their own).
 The design reasoning is in [DESIGN.md](DESIGN.md). **Interactive 3D mock:** [viewer/index.html](viewer/index.html)
 (needs the model files; see "Regenerate").
 
-**Status:** the schematic is complete and ERC-clean. All 104 parts are placed and the board passes DRC and schematic
-parity, apart from expected unrouted connections and silkscreen cosmetics. **The board is not routed yet**, so it
-isn't ready to order. Freerouting got it to ~40–90 unrouted but doesn't close. See DESIGN.md section 0.
+**Status:** the schematic is complete and ERC-clean. All 104 parts are placed. **First routing pass done:** DRC shows
+0 clearance errors and 6 short unrouted links at the charger/boost. It is **not ready to order**: the charger and
+boost power paths still need a hand layout with copper pours (see DESIGN.md section 0f). Edit the board in KiCad
+from now on; don't re-run `gen_pcb.py`.
 
 | | |
 |---|---|
-| ![labeled](renders/board-top-labeled.png) | ![iso](renders/board-iso-right.png) |
+| ![labeled](renders/board-top-labeled.png) | ![layers](renders/routing-layers.png) |
 | ![exploded](renders/case-slim-exploded.png) | ![closed](renders/case-slim-closed-business-end.png) |
 
 ## Files
@@ -31,7 +32,8 @@ isn't ready to order. Freerouting got it to ~40–90 unrouted but doesn't close.
 | `tools/jlc_files.py` → `fab/` | JLC BOM + CPL for each build: `complete`, `plug`, `core` |
 | `tools/cost_options.py` | What each optional feature costs per board |
 | `case/case.py` → `case/out/*.stl` | Parametric clamshell case: `external`, `slim` (603450 cell), `thick` (103450 cell), `brick` (2 × 18650) |
-| `tools/route.py` | Freerouting autoroute (DSN export → route → SES import → zone fill) |
+| `tools/route.py` | Autoroute: GND fan-out, DSN export (In1 kept as plane), Freerouting 1.9, SES import, zone fill |
+| `tools/fanout.py`, `tools/patch_route.py` | GND via fan-out; small maze router for leftover gaps |
 | `tools/label_render.py` | Labeled top-view render |
 | `renders/` | Board renders (KiCad), labeled interaction-point view, case/battery renders (three.js) |
 | `viewer/index.html` | Rotatable 3D mock: board + case variants + clickable connection markers |

@@ -1,7 +1,7 @@
 # ChromaBay battery LED controller: board + case design
 
 Status: **KiCad rev A: schematic done (ERC clean), parts placed on 36 × 66 mm with a tapered nose (DRC/parity clean),
-not yet routed.** One PCB, three builds (Core / Plug / Complete); see section 0. See [README.md](README.md) for the files, renders and how to regenerate them. Where rev A
+first-pass routed (draft), power stage still to hand-lay-out.** One PCB, three builds (Core / Plug / Complete); see section 0. See [README.md](README.md) for the files, renders and how to regenerate them. Where rev A
 differs from this spec, section 0 wins.
 
 In product terms, this is a battery-powered, ChromaBay-first take on the GLEDOPTO ESP32 mini
@@ -28,6 +28,44 @@ Revision history:
   - Lessons from GLEDOPTO.
 
 ---
+
+## 0f. First routing pass (draft: connectivity, not yet a power layout)
+
+**Placement bug fixed.** The auto-placer compared net names without KiCad's leading "/", so it never found
+a target and spiralled every passive out from the board centre. For example the charger's REGN cap ended up
+29 mm from its pin. It now places the parts on charger/boost control pins first, then those chips' rail caps,
+then other chip pins, rails, and the rest. The USB ESD part (U8) is now fixed beside the USB-C.
+
+**Routing pipeline** (`tools/route.py`, Freerouting **1.9.0** under `xvfb-run`; 2.x ignores its pass limit and
+only saves on exit):
+1. `tools/fanout.py` drops a via beside every GND SMD pad to the In1 plane (~105 vias).
+2. In1 is exported as a plane layer, so no signals cross the ground plane. A 0.35 mm ring along the edge is
+   no-track.
+3. Route (~10 min), import in a fresh process, restore the outer GND pours, fill.
+4. `tools/patch_route.py <drc.rpt>` is a small grid maze router that finishes leftover gaps where there's room.
+   `--rip` lets it rip up other traces, but in the charger corner that thrashes, so it's off by default.
+
+**Result:** 271 vias, about 3 m of track on F/In2/B. In1 is untouched solid GND. DRC shows **0 clearance
+errors and 6 unrouted** connections, all short hops at the charger and boost:
+
+| Net | Between |
+|---|---|
+| VSYS | stub near U2 to stub by the LED |
+| CHG_PMID | C2 to U2 pin 23 |
+| CHG_STAT | R34 to U2 pin 5 |
+| BST_VCC | C13 to U3 pin 1 |
+| BST_COMP | C17 / R19 to U3 pin 18 |
+
+**Not ready to order.** The power paths came out as 0.4 mm autorouted traces, often long. Examples: VSYS
+128 mm in total, BAT 70 mm, and the charger and boost switch nodes about 21 mm each. That carries current
+for testing connectivity, but a 2–3 A charger and boost need:
+- short, wide pours for VBUS/PMID, VSYS, BAT, 5V_BOOST and VLED;
+- tight switch-node loops (U2 to L1, U3 to L2) on the top layer;
+- input and output caps right at the pins.
+
+The next step is to hand-lay out those two corners in KiCad: delete their autorouted copper, draw the pours,
+then re-run `tools/route.py`'s import or `patch_route.py` for the rest. From here on, edit the board in KiCad.
+**Don't run `gen_pcb.py` again** (it re-places everything and throws routing away).
 
 ## 0e. 18650 cases with the same outline (supersedes the brick in 0b/0d)
 
