@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Parametric 3D-printable clamshell case for the ChromaBay controller (CadQuery).
 
-    python3 case/case.py [variant ...]        variants: external, slim, thick, brick (default: all)
+    python3 case/case.py [variant ...]   variants: external, slim, thick, 18650, brick (default: all)
 
 The shell follows the board outline (tools/outline.py): the rounded business-end nose and the
 battery notch. Variants differ in the battery bay under the board:
@@ -36,13 +36,16 @@ GAP = 0.3               # board-to-wall clearance
 LID_CLEAR = 0.4
 TOP = PCB_T
 
+CYL_D, CYL_L, PCM_T = 18.6, 65.0, 3.0   # 18650 cell, and the protection board at its nose end
 VARIANTS = {
     "external": dict(bay=1.0, cell=None),
     "slim": dict(bay=6.6, cell=(34.0, 46.0, 6.0)),     # 603450-class pouch, ~1.1 Ah
     "thick": dict(bay=10.6, cell=(34.0, 46.0, 10.0)),  # 103450-class pouch, ~2 Ah
-    # 1S2P 18650 pack (two cells side by side + PCM + JST lead), ~6-7 Ah: the 200-LED / 4-hour
-    # target. The bay is wider and longer than the board, so this one is a "brick".
-    "brick": dict(bay=1.0, cell=None, pack=(37.6, 68.0, 19.0, 2.0)),    # w, l, h, y0 of the pack
+    # 18650 cells lie lengthwise, centred, under the board, with the same outline as every other
+    # variant. Two side by side would need ~68 mm of full 37 mm width, but the tapered nose leaves
+    # only ~58 mm, so the 2-cell pack is stacked instead.
+    "18650": dict(bay=CYL_D + 2.2, cell=None, cyl=1),          # 1 cell, ~3.4 Ah
+    "brick": dict(bay=2 * CYL_D + 2.4, cell=None, cyl=2),      # 2 cells stacked (1S2P), ~6.8 Ah
 }
 CELL_Y0 = 11.0          # the strip under the nose stays solid (mic channel)
 
@@ -71,7 +74,7 @@ def prism(pts, z0, z1, offset=0.0):
     return wp.extrude(z1 - z0)
 
 
-def build(name, bay, cell, pack=None):
+def build(name, bay, cell, cyl=0):
     z0 = -(bay + FLOOR)
     z1 = TOP + COMP_H + LID_CLEAR + ROOF
     case_pts = outline.points(notch=False, far_extend=ANT_OVERHANG, tab=False)
@@ -86,7 +89,9 @@ def build(name, bay, cell, pack=None):
     body = body.union(ledge)
     # solid strip under the nose (keeps the cell out of it); the mic channel is cut through it
     nose = prism(board_pts, -bay, 0, GAP).intersect(
-        cq.Workplane("XY").box(60, CELL_Y0 + GAP - 0.5, bay, centered=False).translate((-10, -GAP, -bay)))
+        cq.Workplane("XY").box(60, CELL_Y0 + GAP - 0.5, bay, centered=False).translate((-10, -GAP, -bay))
+        if not cyl else   # cylinder builds: just a 1.6 mm shelf (the PCM sits under the nose)
+        cq.Workplane("XY").box(60, CELL_Y0 + GAP - 0.5, 1.6, centered=False).translate((-10, -GAP, -1.6)))
     body = body.union(nose)
     body = body.cut(cq.Workplane("XY").box(1.4, MIC_Y + 1.2, 1.0, centered=False)
                     .translate((MIC_X - 0.7, -0.5, -1.0)))
@@ -111,17 +116,6 @@ def build(name, bay, cell, pack=None):
         xw = -(GAP + WALL) - 0.5 if side == "left" else outline.W + GAP + WALL + 0.5
         n = cq.Workplane("YZ").center(y, TOP + 0.4).rect(w, 2.0).extrude(3 if side == "left" else -3)
         body = body.cut(n.edges("|X").fillet(0.9).translate((xw, 0, 0)))
-    # big-pack bay under the board (brick variant): a box wider and longer than the board
-    if pack:
-        pw, pl, ph, py0 = pack
-        iw, il = pw + 0.8, pl + 0.8
-        ix0 = (outline.W - iw) / 2
-        bz0 = -(ph + 1.5 + FLOOR)
-        box = (cq.Workplane("XY").box(iw + 2 * WALL, il + 2 * WALL, -bz0, centered=False)
-               .translate((ix0 - WALL, py0 - 0.4 - WALL, bz0)).edges("|Z").fillet(4.0))
-        body = body.union(box).cut(cq.Workplane("XY").box(iw, il, ph + 0.5, centered=False)
-                                   .translate((ix0, py0 - 0.4, bz0 + FLOOR)))
-        z0 = bz0
     # two M2 screw bosses past the antenna end
     for bx in (2.6, outline.W - 2.6):
         by = outline.H + ANT_OVERHANG - 2.4
@@ -141,16 +135,18 @@ def build(name, bay, cell, pack=None):
     os.makedirs(OUT, exist_ok=True)
     cq.exporters.export(bottom, os.path.join(OUT, f"{name}-bottom.stl"), tolerance=0.05)
     cq.exporters.export(lid, os.path.join(OUT, f"{name}-lid.stl"), tolerance=0.05)
-    if pack:
-        pw, pl, ph, py0 = pack
-        r = ph / 2
+    if cyl:
+        # cells end 0.4 mm short of the far wall; the PCM sits in front of them, under the nose
+        y1 = outline.H + ANT_OVERHANG - 0.1
+        y0 = y1 - CYL_L
+        r = CYL_D / 2
         cells = None
-        for cx in (outline.W / 2 - pw / 4, outline.W / 2 + pw / 4):
-            cyl = (cq.Workplane("XZ").center(cx, -1.2 - r).circle(r).extrude(-65.0)
-                   .translate((0, py0 + 3.0, 0)))
-            cells = cyl if cells is None else cells.union(cyl)
-        pcm = cq.Workplane("XY").box(pw - 2, 3.0, ph - 4, centered=False).translate(
-            ((outline.W - pw) / 2 + 1, py0, -1.2 - ph + 2))
+        for k in range(cyl):
+            zc = -1.8 - r - k * (CYL_D + 0.2)
+            c = cq.Workplane("XZ").center(outline.W / 2, zc).circle(r).extrude(-CYL_L).translate((0, y0, 0))
+            cells = c if cells is None else cells.union(c)
+        pcm = cq.Workplane("XY").box(CYL_D - 1, PCM_T, cyl * CYL_D - 2, centered=False).translate(
+            (outline.W / 2 - (CYL_D - 1) / 2, y0 - PCM_T - 0.2, -1.8 - cyl * CYL_D + 1))
         cq.exporters.export(cells.union(pcm).mirror("XZ"), os.path.join(OUT, f"{name}-cell.stl"), tolerance=0.05)
     if cell:
         cw, cl, ch = cell

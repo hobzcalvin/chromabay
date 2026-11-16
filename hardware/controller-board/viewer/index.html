@@ -82,7 +82,8 @@ h1 { font-size: 17px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
         <button id="case-external" data-v="external" aria-pressed="false">External battery</button>
         <button id="case-slim" data-v="slim" aria-pressed="true">Slim cell</button>
         <button id="case-thick" data-v="thick" aria-pressed="false">Thick cell</button>
-        <button id="case-brick" data-v="brick" aria-pressed="false">2 &times; 18650</button>
+        <button id="case-18650" data-v="18650" aria-pressed="false">1 &times; 18650</button>
+        <button id="case-brick" data-v="brick" aria-pressed="false">2 &times; 18650 (stacked)</button>
       </div>
       <div class="seg" id="lidSeg" role="group" aria-label="Lid">
         <button id="lid-solid" data-v="solid" aria-pressed="true">Lid on</button>
@@ -182,7 +183,7 @@ h1 { font-size: 17px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
     const v = state.caseV;
     const jobs = [];
     if (v !== 'none') { jobs.push(['bottom', v + '-bottom.stl']); jobs.push(['lid', v + '-lid.stl']);}
-    if (v === 'slim' || v === 'thick' || v === 'brick') jobs.push(['cell', v + '-cell.stl']);
+    if (v === 'slim' || v === 'thick' || v === '18650' || v === 'brick') jobs.push(['cell', v + '-cell.stl']);
     for (const [k, f] of jobs) {
       const g = await loadSTL(f); if (!g) continue;
       const m = new THREE.Mesh(g, k === 'lid' ? mats.lid : mats[k]);

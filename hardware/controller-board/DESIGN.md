@@ -29,6 +29,24 @@ Revision history:
 
 ---
 
+## 0e. 18650 cases with the same outline (supersedes the brick in 0b/0d)
+
+Every case variant now has exactly the same outline. Only the depth of the bottom half changes.
+- Two 18650 cells side by side are 37 mm wide, so they need about 68 mm of the case at full width (65 mm cells
+  plus the protection board). The tapered nose leaves only ~58 mm at full width. That is why the old brick was
+  wider, longer and overhanging.
+- **`18650`**: one cell, centred lengthwise, with its protection board under the nose. About 3.4 Ah / 12.5 Wh,
+  roughly 2 h at the 200-LED "low" load. The case is 30.8 mm tall.
+- **`brick`**: two cells **stacked** (1S2P), about 6.8 Ah / 25 Wh, roughly 4 h. The case is 49.6 mm tall.
+- The centred cells clear the M2 screw bosses at the antenna end, which sit 2.6 mm in from each side.
+
+**Removing the OUT1 push-ins later.** The 2060s are SMD parts on large pads tied to the 5 V and GND copper, so
+taking one off needs hot air with board preheat, or two irons plus lots of flux, and risks lifting pads. To build
+without them, order the `plug` or `core` BOM (`fab/`), which leaves J2/J6 off, and wire to the ten pads. On its
+own that does not make the board thinner: the JST-PH (5.5 mm) is the tallest part. A `core` build (no JST, no
+WAGO) is limited by the USB-C (3.3 mm) and the inductors (2 mm), so its case could be about 2.2 mm shallower
+than now.
+
 ## 0d. Fixes (supersedes 0c where they differ)
 
 - **Battery-lead notch: 4 × 3 mm** (was 8 × 5). JST-PH crimps take 24–28 AWG (24–32 with the smaller crimp), and
