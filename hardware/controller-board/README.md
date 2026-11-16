@@ -2,11 +2,11 @@
 
 A battery-powered ESP32-S3 LED controller: USB-C charging with a power path, a 5 V / 2 A LED rail, 4 clock+data
 outputs (or 8 single-wire), a PDM mic, a 6-axis IMU, a swappable JST-PH battery and solder-free push-in LED terminals, on
-36 × 68 mm (1.6 mm) with the button, USB-C and power switch all at one end.
+36 × 66 mm (1.6 mm, rounded nose) with the button, USB-C and power switch all at one end.
 The design reasoning is in [DESIGN.md](DESIGN.md). **Interactive 3D mock:** [viewer/index.html](viewer/index.html)
 (needs the model files; see "Regenerate").
 
-**Status:** the schematic is complete and ERC-clean. All 124 parts are placed and the board passes DRC and schematic
+**Status:** the schematic is complete and ERC-clean. All 104 parts are placed and the board passes DRC and schematic
 parity, apart from expected unrouted connections and silkscreen cosmetics. **The board is not routed yet**, so it
 isn't ready to order. Freerouting got it to ~40–90 unrouted but doesn't close. See DESIGN.md section 0.
 
@@ -24,6 +24,7 @@ isn't ready to order. Freerouting got it to ~40–90 unrouted but doesn't close.
 | `lib/lcsc.*` | Symbols, footprints and 3D models for the exact JLC/LCSC parts (via easyeda2kicad) |
 | `lib/cb.pretty` | Board-specific footprints: LED output pads, battery pads |
 | `tools/design.py` | **Single source of truth**: every part, LCSC code and net |
+| `tools/outline.py` | Board outline (rounded nose, battery notch), shared by the board and the case |
 | `tools/gen_sch.py`, `tools/gen_pcb.py` | Generate the schematic and the placed board from `design.py` |
 | `tools/jlc_cost.py`, `tools/jlc_lookup.py` | Live JLC prices / Basic-vs-Extended status, and the order cost estimate |
 | `tools/jlc_files.py` → `fab/` | JLC BOM + CPL for each build: `complete`, `plug`, `core` |

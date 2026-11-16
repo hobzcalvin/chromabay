@@ -7,16 +7,16 @@
    build options and a pin list. The rail drops below the stage on phones. */
 :root {
   --bg: #eef1ee; --panel: #f8faf8; --ink: #17201b; --muted: #5d6a62; --line: #d3dbd5;
-  --accent: #0b7a5f; --pad: #c0392b; --part: #0b7a5f; --config: #6b4fe0; --stage: #e3e8e4;
+  --accent: #0b7a5f; --pad: #c0392b; --part: #0b7a5f; --config: #6b4fe0; --chip: #7d8682; --stage: #e3e8e4;
   --font: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
 }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
   --bg: #111613; --panel: #171e1a; --ink: #e4ebe6; --muted: #93a39a; --line: #2a352f;
-  --accent: #3fc79c; --pad: #ff7a66; --part: #3fc79c; --config: #a996ff; --stage: #0c100e; color-scheme: dark } }
+  --accent: #3fc79c; --pad: #ff7a66; --part: #3fc79c; --config: #a996ff; --chip: #9aa49f; --stage: #0c100e; color-scheme: dark } }
 :root[data-theme="dark"] {
   --bg: #111613; --panel: #171e1a; --ink: #e4ebe6; --muted: #93a39a; --line: #2a352f;
-  --accent: #3fc79c; --pad: #ff7a66; --part: #3fc79c; --config: #a996ff; --stage: #0c100e; color-scheme: dark }
+  --accent: #3fc79c; --pad: #ff7a66; --part: #3fc79c; --config: #a996ff; --chip: #9aa49f; --stage: #0c100e; color-scheme: dark }
 html, body { height: 100%; }
 [hidden] { display: none !important; }
 body { background: var(--bg); color: var(--ink); font: 14px/1.45 var(--font); }
@@ -48,7 +48,7 @@ h1 { font-size: 17px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
   padding: 3px 6px; border-radius: 4px; cursor: pointer; font-size: 12.5px; }
 .pins button:hover, .pins button.on { background: color-mix(in srgb, var(--accent) 14%, transparent); }
 .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; transform: translateY(-1px); }
-.k-pad { background: var(--pad); } .k-part { background: var(--part); } .k-config { background: var(--config); }
+.k-pad { background: var(--pad); } .k-part { background: var(--part); } .k-config { background: var(--config); } .k-ic { background: var(--chip); }
 .tip { position: absolute; pointer-events: none; background: var(--panel); color: var(--ink);
   border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; font-size: 12.5px; white-space: nowrap;
   transform: translate(-50%, calc(-100% - 12px)); box-shadow: 0 2px 10px rgba(0,0,0,.12); }
@@ -73,7 +73,7 @@ h1 { font-size: 17px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
   <aside class="rail">
     <div>
       <h1>ChromaBay Controller</h1>
-      <p class="sub">rev A · 36 × 68 mm · 1.6 mm 4-layer · placed, not yet routed</p>
+      <p class="sub">rev A · 36 × 66 mm · 1.6 mm 4-layer · placed, not yet routed</p>
     </div>
     <div class="group">
       <span class="label">Case</span>
@@ -106,7 +106,7 @@ h1 { font-size: 17px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
     <div class="group">
       <span class="label">What you touch and connect</span>
       <div class="pins" id="pins"></div>
-      <p class="note">Red: wire pads and terminals. Green: controls and ports. Purple: solder jumpers (bridge or cut to configure).</p>
+      <p class="note">Red: wire pads and terminals. Green: controls and ports. Purple: solder jumpers (bridge or cut to configure). Grey: chips.</p>
     </div>
   </aside>
 </div>
@@ -132,8 +132,9 @@ h1 { font-size: 17px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
   const fill = new THREE.DirectionalLight(0xffffff, 0.35); fill.position.set(80, 40, 120); scene.add(fill);
 
   // Frames: board + case are in board mm, x across, z along (0 = business end), y up from the board's underside.
-  const BOARD_W = 36, BOARD_L = 68, PCB_T = 1.6;
+  const BOARD_W = 36, BOARD_L = 66, PCB_T = 1.6;
   const root = new THREE.Group(); scene.add(root);
+  root.position.set(-BOARD_W / 2, 0, -BOARD_L / 2);   // pivot = middle of the board
   const toWorld = new THREE.Matrix4().makeRotationX(-Math.PI / 2);   // model (x, -y_pcb, z_up) -> world (x, z_up, y_pcb)
 
   function resize() {
@@ -204,11 +205,11 @@ h1 { font-size: 17px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
   // Connection markers
   const points = await (await fetch('points.json')).json();
   const markerGroup = new THREE.Group(); root.add(markerGroup);
-  const kindColor = k => new THREE.Color(css(k === 'config' ? '--config' : k === 'part' ? '--part' : '--pad'));
+  const kindColor = k => new THREE.Color(css(k === 'config' ? '--config' : k === 'part' ? '--part' : k === 'ic' ? '--chip' : '--pad'));
   const markers = [];
   const sph = new THREE.SphereGeometry(0.55, 16, 12);
   points.forEach((p, i) => {
-    const h = p.kind === 'part' ? PCB_T + 4.2 : PCB_T + 0.6;
+    const h = p.kind === 'part' ? PCB_T + 4.2 : p.kind === 'ic' ? PCB_T + 3.2 : PCB_T + 0.6;
     const m = new THREE.Mesh(sph, new THREE.MeshBasicMaterial({ color: kindColor(p.kind), depthTest: true }));
     m.position.set(p.xy[0], h, p.xy[1]); m.userData = { i, p };
     markerGroup.add(m); markers.push(m);
@@ -218,8 +219,9 @@ h1 { font-size: 17px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
     ['Controls and ports', p => p.kind === 'part'],
     ['Battery', p => /Battery/.test(p.label)],
     ['LED outputs', p => /OUT1|LED pad/.test(p.label)],
-    ['User and spare pads', p => p.ref.startsWith('TP')],
+    ['User header (2 x 11, 2.54 mm)', p => p.ref === 'J7'],
     ['Solder jumpers', p => p.kind === 'config'],
+    ['Chips', p => p.kind === 'ic'],
   ];
   const pinsEl = document.getElementById('pins');
   const listButtons = [];
@@ -261,14 +263,14 @@ h1 { font-size: 17px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
   }
 
   // camera views + tweened focus
-  const center = new THREE.Vector3(BOARD_W / 2, 3, BOARD_L / 2 + 2);
+  const center = new THREE.Vector3(0, 3, 0);      // every view orbits the middle of the board
   const VIEWS = {
-    iso:   [new THREE.Vector3(-70, 85, -60), center],
-    end:   [new THREE.Vector3(BOARD_W / 2 - 10, 18, -70), new THREE.Vector3(BOARD_W / 2, 4, 6)],
-    top:   [new THREE.Vector3(BOARD_W / 2, 135, BOARD_L / 2 + 0.01), center],
-    right: [new THREE.Vector3(115, 30, 22), new THREE.Vector3(BOARD_W, 4, 26)],
-    left:  [new THREE.Vector3(-80, 30, 22), new THREE.Vector3(0, 4, 24)],
-    under: [new THREE.Vector3(-40, -90, -30), center],
+    iso:   [new THREE.Vector3(-85, 85, -90), center],
+    end:   [new THREE.Vector3(-12, 20, -120), center],
+    top:   [new THREE.Vector3(0, 140, 0.01), center],
+    right: [new THREE.Vector3(120, 30, -10), center],
+    left:  [new THREE.Vector3(-120, 30, -10), center],
+    under: [new THREE.Vector3(-50, -100, -60), center],
   };
   let tween = null;
   function flyTo(pos, target, ms = 650) {
@@ -282,9 +284,12 @@ h1 { font-size: 17px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
   }
   function focusPoint(i) {
     pinned = i; highlight(i);
+    // keep the pivot in the middle; swing the camera round so the marker faces it
     const v = new THREE.Vector3(); markers[i].getWorldPosition(v);
-    const dir = camera.position.clone().sub(controls.target).normalize();
-    flyTo(v.clone().add(dir.multiplyScalar(75)), v);
+    const out = v.clone().sub(center); out.y = 0;
+    if (out.length() < 1) out.set(0, 0, -1);
+    const dir = out.normalize().multiplyScalar(0.8).add(new THREE.Vector3(0, 0.75, 0)).normalize();
+    flyTo(center.clone().add(dir.multiplyScalar(110)), center);
     showTip(i);
   }
   document.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => {

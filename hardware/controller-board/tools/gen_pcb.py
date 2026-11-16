@@ -25,7 +25,7 @@ for _p in design.parts:
         for _pin in find(_u, "pin"):
             PIN_NAMES[(_p["symbol"], first(_pin, "number")[1])] = first(_pin, "name")[1]
 
-W, H = 36.0, 68.0          # board size, mm (business end at y = 0, antenna end at y = H)
+W, H = 36.0, 66.0          # board size, mm (business end at y = 0, antenna end at y = H)
 OX, OY = 100.0, 100.0      # board origin inside the KiCad page
 MM = pcbnew.FromMM
 
@@ -36,28 +36,32 @@ def P(x, y):
 
 # ref: (x, y, rotation_deg)   -- board coordinates
 ANCHORS = {
-    # business end (y = 0): user button, LED, USB-C, power switch -- all facing out the end
-    "SW2": (3.7, 2.7, 180), "D1": (9.5, 1.7, 180), "J1": (18.0, 4.85, 180), "SW1": (31.4, 3.4, 180),
-    "MK1": (9.5, 8.6, 0),           # port hole -> case channel -> end face, under the LED
-    # left side: swappable battery (JST-PH opening faces the left wall) + wire pads
-    "J4": (6.65, 17.5, 270), "J3": (1.6, 25.0, 270),
-    # right side: OUT1 on two WAGO 2060 push-in blocks (wire entry facing the right wall), then
-    # every output on 2.54 mm solder pads
-    "J2": (28.0, 13.6, 180), "J6": (28.0, 21.5, 180), "J5": (34.6, 28.0, 0),
-    # power stage
-    "U2": (16.0, 14.5, 0), "L1": (16.0, 21.5, 0), "Q1": (10.0, 25.5, 0),
-    "U3": (9.0, 34.0, 0), "L2": (3.0, 35.0, 90), "Q2": (16.0, 30.0, 0), "Q3": (19.5, 32.5, 0),
-    # logic
-    "U7": (13.5, 43.0, 90), "U6": (8.0, 46.5, 0), "U5": (23.0, 46.0, 0),
-    # ESP32-S3 module: the antenna overhangs the far edge (Espressif's preferred placement)
-    "U1": (18.0, 60.1, 180),
+    # --- business end: button, LED, USB-C, power switch packed edge to edge (pad extents 2.95..33.06)
+    "SW2": (6.3, 2.7, 180), "D1": (12.15, 1.7, 180), "J1": (19.48, 4.85, 180), "SW1": (28.86, 3.4, 180),
+    "MK1": (12.2, 7.9, 0),          # bottom-port mic; case channel exits the end face under the LED
+    # --- POWER (left half, between USB-C and the battery): charger right behind the USB-C,
+    #     battery JST in the left-side notch with the reverse-polarity FET next to it, boost below.
+    "U2": (19.0, 13.2, 0), "L1": (13.2, 13.4, 0),
+    "J4": (13.55, 20.5, 270), "Q1": (19.6, 25.2, 0), "J3": (1.6, 28.0, 270),
+    "U3": (9.0, 32.5, 0), "L2": (3.2, 38.5, 90),
+    "Q2": (15.5, 29.6, 0), "Q3": (18.6, 31.8, 0), "F1": (24.5, 29.2, 0),
+    # --- LED OUTPUTS (right side): WAGO push-ins + pad strip on the edge, level shifter and ESD
+    #     right next to them so the eight data lines are short.
+    "J2": (28.0, 14.2, 180), "J6": (28.0, 22.1, 180), "J5": (34.6, 27.5, 0),
+    "U7": (23.6, 36.8, 0), "U9": (29.4, 30.2, 90), "U10": (29.4, 37.6, 90),
+    # --- user header across the board above the module
+    "J7": (3.9, 46.6, 90),
+    # --- MCU end: ESP32 module (antenna overhangs the far edge), 3.3 V LDO and IMU beside it
+    "U1": (18.0, 58.1, 180), "U6": (5.0, 55.0, 0), "U5": (31.0, 55.5, 0),
 }
 # User pads: two columns in the strip right of the module.
 TP_ORDER = ["3V3", "GND", "SDA", "SCL", "T1", "T2", "T3", "T4", "BOOT", "MIC_BCLK", "MIC_WS",
             "MIC_SD", "EXTSW_A", "EXTSW_B", "TXD0", "RXD0"]
 
 KEEPOUT_ANTENNA = None   # antenna overhangs the board edge
-NO_PLACE = [(0, 0, W, 0.4)]
+import outline  # noqa: E402
+NO_PLACE = [(0, 0, W, 0.4), (0, 0, 3.0, 12.0), (W - 3.0, 0, W, 12.0),       # edge + nose corners
+            (outline.NOTCH[0], outline.NOTCH[1] - 0.3, outline.NOTCH[2] + 0.3, outline.NOTCH[3] + 0.3)]
 
 
 def fp_lib_path(nick):
@@ -85,7 +89,9 @@ def overlaps(a, b):
 
 
 def inside(b):
-    return b[0] >= 0.3 and b[1] >= 0.3 and b[2] <= W - 0.3 and b[3] <= H - 0.3
+    if not (b[0] >= 0.3 and b[1] >= 0.3 and b[2] <= W - 0.3 and b[3] <= H - 0.3):
+        return False
+    return all(outline.inside(x, y) for x in (b[0], b[2]) for y in (b[1], b[3]))
 
 
 def main():
@@ -131,19 +137,12 @@ def main():
             nets[name] = ni
         return nets[name]
 
-    # ---- outline with rounded corners
-    r = 1.5
-    def seg(a, b):
-        s = pcbnew.PCB_SHAPE(board, pcbnew.SHAPE_T_SEGMENT)
-        s.SetStart(P(*a)); s.SetEnd(P(*b)); s.SetLayer(pcbnew.Edge_Cuts); s.SetWidth(MM(0.1))
-        board.Add(s)
-    def arc(c, start, angle):
-        s = pcbnew.PCB_SHAPE(board, pcbnew.SHAPE_T_ARC)
-        s.SetCenter(P(*c)); s.SetStart(P(*start)); s.SetArcAngleAndEnd(pcbnew.EDA_ANGLE(angle, pcbnew.DEGREES_T))
-        s.SetLayer(pcbnew.Edge_Cuts); s.SetWidth(MM(0.1)); board.Add(s)
-    seg((r, 0), (W - r, 0)); seg((W, r), (W, H - r)); seg((W - r, H), (r, H)); seg((0, H - r), (0, r))
-    arc((W - r, r), (W - r, 0), 90); arc((W - r, H - r), (W, H - r), 90)
-    arc((r, H - r), (r, H), 90); arc((r, r), (0, r), 90)
+    # ---- outline: rounded nose at the business end, battery notch on the left (tools/outline.py)
+    pts = outline.points()
+    for (x1, y1), (x2, y2) in zip(pts, pts[1:] + pts[:1]):
+        e = pcbnew.PCB_SHAPE(board, pcbnew.SHAPE_T_SEGMENT)
+        e.SetStart(P(x1, y1)); e.SetEnd(P(x2, y2)); e.SetLayer(pcbnew.Edge_Cuts); e.SetWidth(MM(0.1))
+        board.Add(e)
 
     placed = []  # bboxes
     fps = {}
@@ -219,42 +218,22 @@ def main():
         fp = load(by_ref[ref])
         put(fp, x, y, rot)
         placed.append(bbox_mm(fp, 0.15))
-    # User pads: one column each side of the module, labels toward the module.
-    tps = [p for p in design.parts if p["ref"].startswith("TP") and p["value"] in TP_ORDER]
-    tps.sort(key=lambda p: TP_ORDER.index(p["value"]))
-    for i, p in enumerate(tps):
-        fp = load(p)
-        left = i < 7
-        row = i if left else i - 7
-        x, y = (1.3 if left else W - 1.3), H - 14.6 + row * 2.0
-        put(fp, x, y, 0)
-        txt = pcbnew.PCB_TEXT(board)
-        txt.SetText(p["value"].replace("MIC_", "M").replace("EXTSW_", "SW"))
-        txt.SetLayer(pcbnew.F_SilkS)
-        txt.SetTextSize(pcbnew.VECTOR2I(MM(0.6), MM(0.6)))
-        txt.SetTextThickness(MM(0.1))
-        txt.SetHorizJustify(pcbnew.GR_TEXT_H_ALIGN_LEFT if left else pcbnew.GR_TEXT_H_ALIGN_RIGHT)
-        txt.SetPosition(P(x + 1.0 if left else x - 1.0, y))
-        board.Add(txt)
-        placed.append(bbox_mm(fp, 0.1))
-
-    # Spare-GPIO pads: one column on the left edge above the user pads.
-    gpio_pads = [p for p in design.parts if p["ref"].startswith("TP") and p["value"].startswith("IO")]
-    for i, p in enumerate(gpio_pads):
-        fp = load(p)
-        x, y = 1.3, H - 28.75 + i * 2.0
-        put(fp, x, y, 0)
-        txt = pcbnew.PCB_TEXT(board)
-        txt.SetText(p["value"] + ("*" if p["value"] in ("IO3", "IO45", "IO46") else ""))
-        txt.SetLayer(pcbnew.F_SilkS)
-        txt.SetTextSize(pcbnew.VECTOR2I(MM(0.6), MM(0.6)))
-        txt.SetTextThickness(MM(0.1))
-        txt.SetHorizJustify(pcbnew.GR_TEXT_H_ALIGN_LEFT)
-        txt.SetPosition(P(x + 1.0, y))
-        board.Add(txt)
-        placed.append(bbox_mm(fp, 0.1))
-        placed.append((x + 0.7, y - 0.5, x + 4.6, y + 0.5))   # keep the label clear
-    tps = tps + gpio_pads
+    # User header labels: above the top row, below the bottom row, rotated to fit 2.54 mm
+    hdr = fps["J7"]
+    ys = sorted({pad.GetPosition().y for pad in hdr.Pads()})
+    for pad in hdr.Pads():
+        hnet = by_ref["J7"]["pins"][pad.GetNumber()]
+        x, y = pcbnew.ToMM(pad.GetPosition().x) - OX, pcbnew.ToMM(pad.GetPosition().y) - OY
+        top = pad.GetPosition().y == ys[0]
+        t = pcbnew.PCB_TEXT(board)
+        t.SetText(design.HEADER_LABELS[hnet]); t.SetLayer(pcbnew.F_SilkS)
+        t.SetTextSize(pcbnew.VECTOR2I(MM(0.75), MM(0.75))); t.SetTextThickness(MM(0.13))
+        t.SetTextAngleDegrees(90)
+        t.SetHorizJustify(pcbnew.GR_TEXT_H_ALIGN_LEFT if top else pcbnew.GR_TEXT_H_ALIGN_RIGHT)
+        t.SetPosition(P(x, y - 1.5 if top else y + 1.5))
+        board.Add(t)
+    placed.append((2.2, 39.2, 30.8, 50.6))   # header + its labels
+    tps = []
 
     # ---- passives + jumpers: auto-place near the IC pad they share a net with
     anchor_refs = set(ANCHORS) | {p["ref"] for p in tps}
@@ -344,8 +323,8 @@ def main():
         t.SetText(text); t.SetLayer(layer); t.SetMirrored(mirror)
         t.SetTextSize(pcbnew.VECTOR2I(MM(size), MM(size))); t.SetTextThickness(MM(size * 0.15))
         t.SetPosition(P(x, y)); board.Add(t)
-    silk("ChromaBay Controller rev A", 18, 34.0, 1.0, pcbnew.B_SilkS, True)
-    silk("battery side - keep separator between board and cell", 18, 36.0, 0.6, pcbnew.B_SilkS, True)
+    silk("ChromaBay Controller rev A", 18, 30.0, 1.0, pcbnew.B_SilkS, True)
+    silk("battery side - keep separator between board and cell", 18, 32.0, 0.6, pcbnew.B_SilkS, True)
 
     board.BuildConnectivity()
     out = os.path.join(BOARD_DIR, "chromabay-controller.kicad_pcb")

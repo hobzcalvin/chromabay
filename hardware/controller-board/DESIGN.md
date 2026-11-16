@@ -1,6 +1,6 @@
 # ChromaBay battery LED controller: board + case design
 
-Status: **KiCad rev A: schematic done (ERC clean), parts placed on 36 × 68 mm (DRC/parity clean), not yet
+Status: **KiCad rev A: schematic done (ERC clean), parts placed on 36 × 66 mm (DRC/parity clean), not yet
 routed.** One PCB, three builds (Core / Plug / Complete); see section 0. See [README.md](README.md) for the files, renders and how to regenerate them. Where rev A
 differs from this spec, section 0 wins.
 
@@ -28,6 +28,33 @@ Revision history:
   - Lessons from GLEDOPTO.
 
 ---
+
+## 0a. Latest layout pass (supersedes older notes in section 0 where they differ)
+
+- **Board 36 × 66 mm, 1.6 mm**, with a **rounded nose**: the business-end corners are quarter-ellipses (2.6 × 12 mm)
+  that start right where the controls end (`tools/outline.py`).
+- **Business end, packed edge to edge** (pad extents x 2.95–33.06): button · LED · USB-C · power switch, all
+  facing out. The mic port exits under the LED. That's the small hole under the LED hole in the case: a
+  channel in the case floor carries sound from the end face to the bottom-port mic.
+- **3D models fixed:** the USB-C, LED and slide-switch models were shifted 1.1–2 mm inward of their pads (an
+  easyeda2kicad offset bug on models it rotates 180°). The footprints now carry corrected offsets, so all three sit on
+  their pads and reach the board edge. The other rotated models are symmetric and unaffected.
+- **Floorplan by function:**
+  - POWER on the left, from the USB-C down to the battery: charger right behind the USB-C, JST-PH and reverse-polarity
+    FET beside it, 5 V boost below, then the load switch.
+  - LED OUTPUT on the right edge: WAGO push-ins, pad strip, and the level shifter, ESD and fuse next to them.
+  - USER HEADER across the board.
+  - MCU at the far end: module, 3.3 V regulator, IMU.
+  - Passives auto-place next to the pin they serve.
+- **Battery notch:** the JST-PH faces into a 6.6 × 9.8 mm notch in the left edge. The plug sits in the notch, and
+  the lead drops straight through it to a cell under the board, so there's room to wrap without fouling the case.
+  The case ledge is open under the notch.
+- **User header: 2 × 11 through-holes at 2.54 mm** (fits a pin header, or wires). It carries every free GPIO (IO3/11/26/
+  43/44/45/46), 3V3, GND ×2, I2C, T1–T4, BOOT, ext-mic BCLK/WS/SD and the ext power-switch pair. Each hole is labeled on
+  the silkscreen. The LED pads and battery pads were already through-holes.
+- **Removing connectors:** the JST-PH is two small SMD pins plus two tabs, easy to remove with an iron. The WAGO 2060s
+  are SMD with large reflowed pads, so removing them takes hot air and isn't something to do casually. For builds
+  without them, order the `core` or `plug` BOM instead (`fab/bom-jlc-*.csv`). Every LED signal is on the pad strip either way.
 
 ## 0. Rev A as built in KiCad (supersedes the spec below where they differ)
 

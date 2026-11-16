@@ -129,8 +129,7 @@ part("SW1", "lcsc:MSK12C02", "POWER", "lcsc:SW-TH_MSK12C02", "C431540",
      {1: "LDO_EN_SW", 2: "VSYS", 3: "NC_SW1_3", 4: "NC_SW1_MNT"}, "power")
 part("JP4", "Jumper:SolderJumper_2_Bridged", "SW", "Jumper:SolderJumper-2_P1.3mm_Bridged_RoundedPad1.0x1.5mm",
      None, {1: "LDO_EN_SW", 2: "LDO_EN"}, "power", note="cut to use an external switch on TP pads")
-TP("EXTSW_A", "VSYS", "power")
-TP("EXTSW_B", "LDO_EN", "power")
+# (External power switch: header pins SWA/SWB, in parallel with SW1; cut JP4 to make it the only switch.)
 R("100k", "LDO_EN", "GND", "power")
 part("U6", "lcsc:TLV75733PDBVR", "TLV75733", "lcsc:SOT-23-5_L2.9-W1.6-P0.95-LS2.8-BL", "C485517",
      {1: "VSYS", 2: "GND", 3: "LDO_EN", 4: "NC_U6_4", 5: "3V3"}, "power")
@@ -257,13 +256,20 @@ C("1uF", "MIC_VDD", "GND", "sensors")
 C("100nF", "MIC_VDD", "GND", "sensors")
 
 # ---------------------------------------------------------------- User pads
-# Every otherwise-unused GPIO gets a pad. IO3/IO45/IO46 are strapping pins: don't pull IO45 or
-# IO46 high at boot. IO43/IO44 are UART0 TX/RX (boot log).
-for name, net in [("IO3", "IO3"), ("IO11", "IO11"), ("IO26", "IO26"), ("IO43", "IO43"), ("IO44", "IO44"),
-                  ("IO45", "IO45"), ("IO46", "IO46"), ("3V3", "3V3"), ("GND", "GND"), ("SDA", "SDA"), ("SCL", "SCL"),
-                  ("T1", "T1"), ("T2", "T2"), ("T3", "T3"), ("T4", "T4"), ("BOOT", "BOOT"),
-                  ("MIC_BCLK", "EXT_BCLK"), ("MIC_WS", "EXT_WS"), ("MIC_SD", "EXT_SD")]:
-    TP(name, net, "pads")
+# User header: every free GPIO plus power, I2C, touch, BOOT, external mic and external switch, on a
+# 2 x 11 through-hole grid at 2.54 mm (takes a standard pin header, or wires). Pairs = (odd, even).
+# IO3/IO45/IO46 are strapping pins: keep IO45/IO46 low at boot. IO43/IO44 are UART0 TX/RX.
+HEADER = [("3V3", "GND"), ("SDA", "SCL"), ("T1", "T2"), ("T3", "T4"), ("BOOT", "GND"),
+          ("EXT_BCLK", "EXT_WS"), ("EXT_SD", "IO3"), ("VSYS", "LDO_EN"), ("IO11", "IO26"),
+          ("IO43", "IO44"), ("IO45", "IO46")]
+HEADER_LABELS = {"3V3": "3V3", "GND": "GND", "SDA": "SDA", "SCL": "SCL", "T1": "T1", "T2": "T2",
+                 "T3": "T3", "T4": "T4", "BOOT": "BOOT", "EXT_BCLK": "MBCK", "EXT_WS": "MWS",
+                 "EXT_SD": "MSD", "IO3": "IO3", "VSYS": "SWA", "LDO_EN": "SWB", "IO11": "IO11",
+                 "IO26": "IO26", "IO43": "IO43", "IO44": "IO44", "IO45": "IO45", "IO46": "IO46"}
+part("J7", "Connector_Generic:Conn_02x11_Odd_Even", "USER HEADER",
+     "Connector_PinHeader_2.54mm:PinHeader_2x11_P2.54mm_Vertical", None,
+     {2 * i + k + 1: net for i, pair in enumerate(HEADER) for k, net in enumerate(pair)}, "pads",
+     note="2x11 through-hole pads at 2.54 mm; fit a pin header or solder wires")
 
 # No mounting holes: the case clamps the board edges, and holes cost ~50 mm2 here.
 

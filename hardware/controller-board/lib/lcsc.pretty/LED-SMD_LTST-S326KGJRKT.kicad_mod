@@ -50,7 +50,7 @@
 	(fp_line (start 1.00 0.84) (end 1.51 0.84) (layer F.CrtYd) (width 0.05))
 	(fp_line (start 1.51 0.84) (end 1.51 -0.18) (layer F.CrtYd) (width 0.05))
 	(model "lcsc.3dshapes/LED-ARRAY-SMD_3P-L3.0-W2.0-H1.0.wrl"
-		(offset (xyz 0.000 0.000 0.000))
+		(offset (xyz 0.000 -1.550 0.000))
 		(scale (xyz 1 1 1))
 		(rotate (xyz 0 0 180))
 	)

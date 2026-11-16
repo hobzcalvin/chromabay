@@ -31,13 +31,17 @@ PAD_LABELS = {
     ("J6", "2"): "OUT1 push-in C (clock)", ("J6", "1"): "OUT1 push-in D (data)",
 }
 J5 = ["G", "V (5 V)", "C1", "D1", "C2", "D2", "C3", "D3", "C4", "D4"]
-TP_TEXT = {"3V3": "3.3 V out", "GND": "GND", "SDA": "I2C SDA", "SCL": "I2C SCL", "T1": "Touch/IO T1",
-           "T2": "Touch/IO T2", "T3": "Touch/IO T3", "T4": "Touch/IO T4",
-           "BOOT": "BOOT (GND at power-on = flash mode)", "MIC_BCLK": "Ext mic BCLK",
-           "MIC_WS": "Ext mic WS", "MIC_SD": "Ext mic SD", "EXTSW_A": "Ext power switch A",
-           "EXTSW_B": "Ext power switch B", "IO45": "IO45 (strap: keep low at boot)",
-           "IO46": "IO46 (strap: keep low at boot)", "IO3": "IO3 (strap)", "IO43": "IO43 (UART TX)",
-           "IO44": "IO44 (UART RX)"}
+HDR_TEXT = {"3V3": "3.3 V out", "GND": "GND", "SDA": "I2C SDA", "SCL": "I2C SCL", "T1": "Touch/IO T1",
+            "T2": "Touch/IO T2", "T3": "Touch/IO T3", "T4": "Touch/IO T4",
+            "BOOT": "BOOT (GND at power-on = flash mode)", "EXT_BCLK": "Ext mic BCLK",
+            "EXT_WS": "Ext mic WS", "EXT_SD": "Ext mic SD", "VSYS": "Ext power switch A",
+            "LDO_EN": "Ext power switch B", "IO45": "IO45 (strap: keep low at boot)",
+            "IO46": "IO46 (strap: keep low at boot)", "IO3": "IO3 (strap)", "IO43": "IO43 (UART TX)",
+            "IO44": "IO44 (UART RX)", "IO11": "IO11", "IO26": "IO26"}
+ICS = {"U1": "ESP32-S3 module", "U2": "Charger / power path", "U3": "5 V boost", "L1": "Charger inductor",
+       "L2": "Boost inductor", "U7": "Level shifter (5 V data)", "U5": "Motion sensor (IMU)",
+       "U6": "3.3 V regulator", "Q1": "Battery reverse-polarity FET", "Q2": "LED power switch",
+       "F1": "LED fuse (3 A)", "U8": "USB ESD", "U9": "Output ESD", "U10": "Output ESD"}
 JUMPERS = {"JP1": "Bridge: charge +0.45 A", "JP2": "Bridge: charge +1.0 A",
            "JP3": "NTC: onboard / pack", "JP4": "Cut: use ext power switch",
            "JP5": "Cut: ext LED supply", "JP7": "Cut: disable mic"}
@@ -49,14 +53,18 @@ def interaction_points(board, ox=100.0, oy=100.0):
     mm = lambda v: (pcbnew.ToMM(v.x) - ox, pcbnew.ToMM(v.y) - oy)
     for ref, _, label in PARTS:
         pts.append(dict(ref=ref, label=label, kind="part", xy=mm(fps[ref].GetPosition())))
+    for ref, label in ICS.items():
+        if ref in fps:
+            pts.append(dict(ref=ref, label=label, kind="ic", xy=mm(fps[ref].GetPosition())))
     for ref, fp in fps.items():
         for pad in fp.Pads():
             n = pad.GetNumber()
             label = PAD_LABELS.get((ref, n))
             if ref == "J5" and n.isdigit():
                 label = "LED pad " + J5[int(n) - 1]
-            if ref.startswith("TP"):
-                label = TP_TEXT.get(fp.GetValue(), fp.GetValue())
+            if ref == "J7":
+                hnet = design.parts[[q["ref"] for q in design.parts].index("J7")]["pins"][n]
+                label = "Header " + HDR_TEXT.get(hnet, hnet) + ("" if hnet != "GND" else f" (pin {n})")
             if ref in JUMPERS and n == "1":
                 label = JUMPERS[ref]
             if not label:
@@ -78,7 +86,7 @@ def main():
     pcb = os.path.join(BOARD, "chromabay-controller.kicad_pcb")
     board = pcbnew.LoadBoard(pcb)
     ox, oy = 100.0, 100.0
-    W, H = 36.0, 68.0
+    W, H = 36.0, 66.0
     pts = interaction_points(board, ox, oy)
     json.dump(pts, open(os.path.join(BOARD, "renders", "interaction-points.json"), "w"), indent=1)
     items = [dict(ref=p["ref"], x=p["xy"][0], y=p["xy"][1], name=p["label"], kind=p["kind"]) for p in pts]
@@ -90,13 +98,15 @@ def main():
     im = Image.open(png).convert("RGBA")
     px = im.load()
     alpha = lambda xx, yy: px[xx, yy][3] > 128
-    # board width (x) sets the scale; no part overhangs the long sides
-    xs = [xx for xx in range(im.width) if any(alpha(xx, yy) for yy in range(im.height // 3, im.height // 3 + 40))]
+    # scale from the board width, measured at mid-length (below the battery notch, above the module)
+    yy0 = int(im.height * 0.55)
+    xs = [xx for xx in range(im.width) if any(alpha(xx, yy) for yy in range(yy0, yy0 + 30))]
     x0, x1 = min(xs), max(xs)
     s = (x1 - x0) / W
-    # y origin: top board edge at x = 12.5 mm (between the LED and USB-C, nothing overhangs there)
-    cx = int(x0 + 12.5 * s)
-    y0 = next(yy for yy in range(im.height) if alpha(cx, yy))
+    # y origin from the far edge at x = 4 mm (left of the overhanging module, past the corner radius)
+    cx = int(x0 + 4.0 * s)
+    ybot = max(yy for yy in range(im.height) if alpha(cx, yy))
+    y0 = ybot - H * s
     data = dict(img=png, s=s, x0=x0, y0=y0, w=im.width, h=im.height, items=items)
     html = os.path.join(tmp, "label.html")
     open(html, "w").write(PAGE.replace("__DATA__", json.dumps(data)))
@@ -133,20 +143,20 @@ const sides = {L: named.filter(i => i.x < 18).sort((a, b) => a.y - b.y), R: name
 for (const side of ['L', 'R']) {
   const list = sides[side]; const n = list.length;
   // slots as close to each part's own height as possible, at least GAP apart
-  const GAP = 30, slots = []; let last = -1e9;
+  const GAP = 24, slots = []; let last = -1e9;
   list.forEach(it => { const y = Math.max(P(it.x, it.y)[1], last + GAP); slots.push(y); last = y; });
   const over = last - (PADT + D.h - 10); if (over > 0) { for (let k = slots.length - 1, lim = PADT + D.h - 10; k >= 0; k--, lim -= GAP) slots[k] = Math.min(slots[k], lim); }
   list.forEach((it, k) => {
     const [px, py] = P(it.x, it.y);
     const ly = slots[k];
     const lx = side === 'L' ? PADL - 20 : PADL + D.w + 20;
-    const col = it.kind === 'config' ? '#7a5af5' : it.kind === 'part' ? '#0b7a75' : '#c0392b';
+    const col = it.kind === 'config' ? '#7a5af5' : it.kind === 'part' ? '#0b7a75' : it.kind === 'ic' ? '#8a8f8c' : '#c0392b';
     el('polyline', {points: `${px},${py} ${side === 'L' ? PADL + D.x0 - 14 : PADL + D.x0 + 36 * D.s + 14},${ly} ${lx},${ly}`, fill: 'none', stroke: col, 'stroke-width': 1.3, opacity: 0.85});
     el('circle', {cx: px, cy: py, r: 5, fill: col, stroke: '#fff', 'stroke-width': 1.5});
-    el('text', {x: side === 'L' ? lx - 8 : lx + 8, y: ly + 6, 'font-size': 17, 'text-anchor': side === 'L' ? 'end' : 'start', fill: '#222'}, it.name);
+    el('text', {x: side === 'L' ? lx - 8 : lx + 8, y: ly + 6, 'font-size': 15, 'text-anchor': side === 'L' ? 'end' : 'start', fill: '#222'}, it.name);
   });
 }
-el('text', {x: W / 2, y: 36, 'font-size': 26, 'text-anchor': 'middle', 'font-weight': 700, fill: '#222'}, 'ChromaBay Controller rev A - what you touch and connect (business end up)');
+el('text', {x: W / 2, y: 36, 'font-size': 26, 'text-anchor': 'middle', 'font-weight': 700, fill: '#222'}, 'ChromaBay Controller rev A (business end up)  -  red: wire pads/terminals  green: controls  purple: solder jumpers  grey: chips');
 document.title = 'done';
 </script></body></html>"""
 
