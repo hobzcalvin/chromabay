@@ -2493,6 +2493,9 @@ void processLayoutGetRequest() {
             frame[0] = len & 0xFF; frame[1] = (len >> 8) & 0xFF;
             frame[2] = off & 0xFF; frame[3] = (off >> 8) & 0xFF;
             memcpy(frame + 4, data + off, n);
+            // Wait for BLE buffers before each chunk: a fixed gap alone outran slow links and
+            // the stack dropped the tail of big layouts (see Endpoints::bleTxHasRoom).
+            if (!gWifiMode) Endpoints::waitForBleTxRoom();
             Endpoints::notify(CHARACTERISTIC_UUID_LAYOUT_GET, frame, 4 + n);
             if (!gWifiMode) delay(8); // BLE stack can drop back-to-back notifications
         }
@@ -2562,6 +2565,8 @@ void processLibraryDumpRequest() {
     if (!libDump.active) return;
     uint32_t now = millis();
     if ((int32_t)(now - libDump.nextAtMs) < 0) return;
+    // No free BLE buffers: the chunk would be dropped in silence. Try again next pass.
+    if (!gWifiMode && !Endpoints::bleTxHasRoom()) return;
 
     // Find the next readable pattern. Bounds are re-checked every pass: the library can change
     // between chunks (a sync or delete), and the worst that does is a short or mixed listing.

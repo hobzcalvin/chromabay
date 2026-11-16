@@ -245,6 +245,7 @@ static const size_t RELAY_CHUNK_BYTES = 180;
 // is the interval the library dump already uses successfully.
 inline bool relayWriteFrame(void *, const uint8_t *frame, size_t len) {
     if (gRelayTx && gBleConnected) {
+        Endpoints::waitForBleTxRoom(); // don't hand NimBLE a frame it would drop
         gRelayTx->setValue(const_cast<uint8_t *>(frame), len);
         gRelayTx->notify();
         delay(8);

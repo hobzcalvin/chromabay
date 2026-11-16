@@ -155,6 +155,29 @@ inline void notify(const char *uuid, const char *s) {
     notify(uuid, (const uint8_t *)s, strlen(s));
 }
 
+// ---- BLE flow control for chunked notify streams --------------------------------------
+// NimBLE 1.4.x notify() returns nothing: when its buffer pool (msys mbufs, 20 × 292 B) is
+// empty it can't build the packet and the notification is DROPPED in silence. Streams that
+// send many chunks (layout read-back, library dump, crash relay) used to pace on a fixed
+// 8 ms, which outruns a slow connection interval or a busy link — Portal lost the last ~7 of
+// 32 layout chunks on every read. Checking for free buffers before each chunk turns that
+// into real flow control: wait for the link to drain instead of guessing how fast it is.
+// Call these on a BLE boot only (on a Wi-Fi boot NimBLE isn't running).
+static const int kBleTxReserve = 6; // leave room for incoming writes + other notifies
+
+/** True when a chunk can be notified now without risking a silent drop. */
+inline bool bleTxHasRoom() { return os_msys_num_free() >= kBleTxReserve; }
+
+/** Block (yielding) until bleTxHasRoom(), up to maxWaitMs. Returns whether there is room. */
+inline bool waitForBleTxRoom(uint32_t maxWaitMs = 500) {
+    uint32_t start = millis();
+    while (!bleTxHasRoom()) {
+        if (millis() - start >= maxWaitMs) return false;
+        delay(2);
+    }
+    return true;
+}
+
 /** The BLE characteristic for an endpoint, or nullptr on a Wi-Fi boot (there is no BLE). */
 inline NimBLECharacteristic *characteristicFor(const char *uuid) {
     int i = detail::indexOf(uuid);
