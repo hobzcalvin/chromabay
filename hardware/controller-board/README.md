@@ -2,7 +2,8 @@
 
 A battery-powered ESP32-S3 LED controller: USB-C charging with a power path, a 5 V / 2 A LED rail, 4 clock+data
 outputs (or 8 single-wire), a PDM mic, a 6-axis IMU, a swappable JST-PH battery and solder-free push-in LED terminals, on
-36 × 66 mm (1.6 mm, rounded nose) with the button, USB-C and power switch all at one end.
+36 × 66 mm (1.6 mm, rounded nose) with the button, USB-C and power switch all at one end, flush with the case
+face (the button and switch stick out past it on their own).
 The design reasoning is in [DESIGN.md](DESIGN.md). **Interactive 3D mock:** [viewer/index.html](viewer/index.html)
 (needs the model files; see "Regenerate").
 
@@ -29,7 +30,7 @@ isn't ready to order. Freerouting got it to ~40–90 unrouted but doesn't close.
 | `tools/jlc_cost.py`, `tools/jlc_lookup.py` | Live JLC prices / Basic-vs-Extended status, and the order cost estimate |
 | `tools/jlc_files.py` → `fab/` | JLC BOM + CPL for each build: `complete`, `plug`, `core` |
 | `tools/cost_options.py` | What each optional feature costs per board |
-| `case/case.py` → `case/out/*.stl` | Parametric clamshell case: `external`, `slim` (603450 cell), `thick` (103450 cell) |
+| `case/case.py` → `case/out/*.stl` | Parametric clamshell case: `external`, `slim` (603450 cell), `thick` (103450 cell), `brick` (2 × 18650) |
 | `tools/route.py` | Freerouting autoroute (DSN export → route → SES import → zone fill) |
 | `tools/label_render.py` | Labeled top-view render |
 | `renders/` | Board renders (KiCad), labeled interaction-point view, case/battery renders (three.js) |

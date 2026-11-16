@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Parametric 3D-printable clamshell case for the ChromaBay controller (CadQuery).
 
-    python3 case/case.py [variant ...]        variants: external, slim, thick (default: all)
+    python3 case/case.py [variant ...]        variants: external, slim, thick, brick (default: all)
 
 The shell follows the board outline (tools/outline.py): the rounded business-end nose and the
 battery notch. Variants differ in the battery bay under the board:
@@ -9,7 +9,8 @@ battery notch. Variants differ in the battery bay under the board:
   slim      603450 pouch (~1.1 Ah) under the board
   thick     103450 pouch (~2 Ah) under the board
 Every variant has the OUT1 push-in window (wires go in from outside) and the button/USB/switch/LED/
-mic openings on the business end.
+mic openings on the business end. The board's end tab is flush with the case face, so the button
+and switch stick out past it with no extra parts.
 
 Writes case/out/<variant>-bottom.stl, <variant>-lid.stl and <variant>-cell.stl (placeholder cell).
 Built in board coordinates (x across, y along with 0 = business end, z up from the board's
@@ -46,41 +47,21 @@ VARIANTS = {
 CELL_Y0 = 11.0          # the strip under the nose stays solid (mic channel)
 
 # ---------------------------------------------------------------- features (match gen_pcb.py)
-END = [  # business-end cutouts: (name, x_centre, z_centre, width, height, corner radius)
-    ("button", 6.3, TOP + 0.85, 2.8, 1.9, 0.4),   # plunger hole
-    ("led", 12.15, TOP + 0.55, 1.8, 1.6, 0.6),
-    ("usb", 19.48, TOP + 1.6, 9.6, 3.8, 1.2),
-    ("switch", 28.86, TOP + 0.85, 5.0, 2.0, 0.4), # slot for the slide cap (travel 1.5 mm)
+# The board's end tab runs through the end wall, so the board edge is flush with the case face.
+# The button and switch overhang the board edge and stick out past the case on their own.
+END = [  # business-end openings in the lid wall: (name, x_centre, z_centre, width, height, corner radius)
+    ("button", 8.67, TOP + 0.95, 5.2, 2.1, 0.4),   # button body + plunger
+    ("usb", 17.1, TOP + 1.6, 9.6, 3.8, 1.2),
+    ("led", 22.3, TOP + 0.6, 1.4, 1.2, 0.3),       # light slot beside the USB-C; the LED sits behind it
+    ("switch", 26.48, TOP + 0.85, 7.0, 1.9, 0.4),  # switch body + handle travel
 ]
-MIC_X, MIC_Y = 12.2, 7.9          # bottom-port mic -> channel under the board -> end face (under the LED)
+MIC_X, MIC_Y = 9.0, 6.7           # bottom-port mic -> channel under the board -> end face
 SIDE_NOTCHES = [  # (side, y_centre, width): U-notches at the seam for laid-in wires
     ("left", 20.8, 5.0),          # battery lead, external-battery builds (beside the JST notch)
 ]
 # One opening in the right wall covers the OUT1 push-in entries and all ten LED wire pads.
 WAGO_WINDOW = (11.6, 53.0, 4.8)   # y0, y1, height above the PCB top
 WAGO_SLOT = (30.6, 12.2, 34.6, 27.4)  # lid slot over the WAGO release buttons
-
-
-# Printed extenders: the button and switch sit 2.3 mm back from the board edge (so the nose can
-# taper), so each gets a small printed part that reaches out through the end wall.
-# Tune ACT_TIP_Y / handle pocket to the real parts on the first print.
-ACT_TIP_Y = 2.3        # board y of the button actuator tip and the switch handle tip
-WALL_FACE_Y = -(GAP + WALL)  # outer face of the end wall (nose is flat there to within 0.4 mm)
-PROTRUDE = 1.2
-
-
-def extenders():
-    """Button plunger and switch slide-cap, in board coordinates (assembled positions)."""
-    bx, bz = END[0][1], END[0][2]
-    y0, y1 = WALL_FACE_Y - PROTRUDE, ACT_TIP_Y - 0.1
-    plunger = (cq.Workplane("XY").box(2.4, y1 - y0, 1.5).translate((bx, (y0 + y1) / 2, bz))
-               .union(cq.Workplane("XY").box(4.4, 0.8, 1.5).translate((bx, 0.6, bz))))  # flange inside the wall
-    sx, sz = END[3][1], END[3][2]
-    c_y1 = ACT_TIP_Y + 1.0                       # overlaps the handle by 1 mm
-    cap = (cq.Workplane("XY").box(3.2, c_y1 - y0, 1.6).translate((sx, (y0 + c_y1) / 2, sz))
-           .union(cq.Workplane("XY").box(6.6, 0.8, 1.6).translate((sx, 0.6, sz)))       # retaining plate
-           .cut(cq.Workplane("XY").box(1.8, 1.3, 1.2).translate((sx, c_y1 - 0.6, sz))))  # handle pocket
-    return plunger, cap
 
 
 def prism(pts, z0, z1, offset=0.0):
@@ -93,11 +74,11 @@ def prism(pts, z0, z1, offset=0.0):
 def build(name, bay, cell, pack=None):
     z0 = -(bay + FLOOR)
     z1 = TOP + COMP_H + LID_CLEAR + ROOF
-    case_pts = outline.points(notch=False, far_extend=ANT_OVERHANG)
+    case_pts = outline.points(notch=False, far_extend=ANT_OVERHANG, tab=False)
     body = prism(case_pts, z0, z1, GAP + WALL)
     body = body.cut(prism(case_pts, z0 + FLOOR, z1 - ROOF, GAP))
     # 1.2 mm ledge the board rests on, open under the battery notch so the lead can drop through
-    board_pts = outline.points(notch=False)
+    board_pts = outline.points(notch=False, tab=False)
     ledge = prism(board_pts, -bay, 0, GAP).cut(prism(board_pts, -bay - 1, 1, -1.2))
     nx0, ny0, nx1, ny1 = outline.NOTCH
     ledge = ledge.cut(cq.Workplane("XY").box(nx1 + GAP + 1, ny1 - ny0, bay + 2, centered=False)
@@ -107,10 +88,14 @@ def build(name, bay, cell, pack=None):
     nose = prism(board_pts, -bay, 0, GAP).intersect(
         cq.Workplane("XY").box(60, CELL_Y0 + GAP - 0.5, bay, centered=False).translate((-10, -GAP, -bay)))
     body = body.union(nose)
-    body = body.cut(cq.Workplane("XY").box(1.4, MIC_Y + GAP + WALL + 0.7, 1.0, centered=False)
-                    .translate((MIC_X - 0.7, -(GAP + WALL) - 0.1, -1.0)))
+    body = body.cut(cq.Workplane("XY").box(1.4, MIC_Y + 1.2, 1.0, centered=False)
+                    .translate((MIC_X - 0.7, -0.5, -1.0)))
+    # slot for the board's end tab (the tab rests on the bottom half's end wall)
+    tx0, tx1 = outline.NOSE_RX - GAP, outline.W - outline.NOSE_RX + GAP
+    body = body.cut(cq.Workplane("XY").box(tx1 - tx0, outline.TAB + 1, TOP + 0.05, centered=False)
+                    .translate((tx0, -1, 0)))
     # business-end openings
-    ey = -(GAP + WALL) - 0.5
+    ey = -0.5
     for _, x, z, w, h, r in END:
         c = cq.Workplane("XZ").center(x, z).rect(w, h).extrude(-3).translate((0, ey, 0))
         body = body.cut(c.edges("|Y").fillet(r))
@@ -156,9 +141,6 @@ def build(name, bay, cell, pack=None):
     os.makedirs(OUT, exist_ok=True)
     cq.exporters.export(bottom, os.path.join(OUT, f"{name}-bottom.stl"), tolerance=0.05)
     cq.exporters.export(lid, os.path.join(OUT, f"{name}-lid.stl"), tolerance=0.05)
-    plunger, cap = extenders()
-    cq.exporters.export(plunger.mirror("XZ"), os.path.join(OUT, "button-plunger.stl"), tolerance=0.02)
-    cq.exporters.export(cap.mirror("XZ"), os.path.join(OUT, "switch-cap.stl"), tolerance=0.02)
     if pack:
         pw, pl, ph, py0 = pack
         r = ph / 2

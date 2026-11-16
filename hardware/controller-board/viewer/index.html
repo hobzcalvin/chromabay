@@ -107,7 +107,7 @@ h1 { font-size: 17px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
     <div class="group">
       <span class="label">What you touch and connect</span>
       <div class="pins" id="pins"></div>
-      <p class="note">Orange (with a case): the printed button plunger and switch cap. Red: wire pads and terminals. Green: controls and ports. Purple: solder jumpers (bridge or cut to configure). Grey: chips.</p>
+      <p class="note">The button and switch stick out past the case end on their own. Red: wire pads and terminals. Green: controls and ports. Purple: solder jumpers (bridge or cut to configure). Grey: chips.</p>
     </div>
   </aside>
 </div>
@@ -173,7 +173,6 @@ h1 { font-size: 17px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
     lid: new THREE.MeshStandardMaterial({ color: 0x2d3433, roughness: 0.65 }),
     glass: new THREE.MeshStandardMaterial({ color: 0xbfd2cc, roughness: 0.2, transparent: true, opacity: 0.25, depthWrite: false }),
     cell: new THREE.MeshStandardMaterial({ color: 0xa9b1b6, roughness: 0.35, metalness: 0.55 }),
-    extender: new THREE.MeshStandardMaterial({ color: 0xe0a83a, roughness: 0.6 }),
   };
   const caseGroup = new THREE.Group(); root.add(caseGroup);
   let parts = {};
@@ -182,12 +181,11 @@ h1 { font-size: 17px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
     caseGroup.clear(); parts = {};
     const v = state.caseV;
     const jobs = [];
-    if (v !== 'none') { jobs.push(['bottom', v + '-bottom.stl']); jobs.push(['lid', v + '-lid.stl']);
-      jobs.push(['plunger', 'button-plunger.stl']); jobs.push(['cap', 'switch-cap.stl']); }
+    if (v !== 'none') { jobs.push(['bottom', v + '-bottom.stl']); jobs.push(['lid', v + '-lid.stl']);}
     if (v === 'slim' || v === 'thick' || v === 'brick') jobs.push(['cell', v + '-cell.stl']);
     for (const [k, f] of jobs) {
       const g = await loadSTL(f); if (!g) continue;
-      const m = new THREE.Mesh(g, k === 'lid' ? mats.lid : (mats[k] || mats.extender));
+      const m = new THREE.Mesh(g, k === 'lid' ? mats.lid : mats[k]);
       m.applyMatrix4(toWorld); caseGroup.add(m); parts[k] = m;
     }
     applyState();
@@ -196,7 +194,6 @@ h1 { font-size: 17px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
     const e = state.explode;
     boardHolder.position.y = e * 10;
     if (parts.cell) parts.cell.position.y = e * 3;
-    for (const k of ['plunger', 'cap']) if (parts[k]) { parts[k].position.y = e * 10; parts[k].position.z = -e * 8; }
     if (parts.bottom) parts.bottom.position.y = -e * 6;
     if (parts.lid) {
       parts.lid.visible = state.lid !== 'off';

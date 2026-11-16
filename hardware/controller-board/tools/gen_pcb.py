@@ -36,9 +36,12 @@ def P(x, y):
 
 # ref: (x, y, rotation_deg)   -- board coordinates
 ANCHORS = {
-    # --- business end: button, LED, USB-C, power switch packed edge to edge (pad extents 2.95..33.06)
-    "SW2": (6.3, 5.4, 180), "D1": (12.15, 1.7, 180), "J1": (19.48, 4.85, 180), "SW1": (28.86, 6.1, 180),
-    "MK1": (12.2, 7.9, 0),          # bottom-port mic; case channel exits the end face under the LED
+    # --- business end: button, USB-C, power switch packed edge to edge on the end tab (x 5.2..30.8).
+    #     The button body overhangs the edge 0.35 mm and its plunger 0.95 mm; the switch handle 1.0 mm.
+    #     The case face is flush with the board edge, so both stick out past the case by that much.
+    "SW2": (8.67, 1.65, 180), "J1": (17.1, 4.85, 180), "SW1": (26.48, 2.35, 180),
+    "D1": (22.3, 9.6, 180),         # set back, aimed at the slot beside the USB-C opening
+    "MK1": (9.0, 6.0, 0),           # bottom-port mic; case channel exits the end face under the board
     # --- POWER (left half, between USB-C and the battery): charger right behind the USB-C,
     #     battery JST in the left-side notch with the reverse-polarity FET next to it, boost below.
     "U2": (18.75, 13.2, 0), "L1": (13.2, 13.4, 0),
@@ -53,6 +56,8 @@ ANCHORS = {
     "J7": (1.3, 46.6, 90),
     # --- charge-current jumpers side by side (bridge one or both), next to the charger side
     "JP1": (5.6, 11.2, 90), "JP2": (8.5, 11.2, 90),
+    # --- EXT5V cut-jumper (LED rail <- fuse) in the free corner by the switch, on the way to the OUT1 WAGO
+    "JP5": (30.8, 7.4, 0),
     # --- MCU end: ESP32 module (antenna overhangs the far edge), 3.3 V LDO and IMU beside it
     "U1": (18.0, 58.1, 180), "U6": (5.0, 55.0, 0), "U5": (31.0, 55.5, 0),
 }
@@ -62,7 +67,7 @@ TP_ORDER = ["3V3", "GND", "SDA", "SCL", "T1", "T2", "T3", "T4", "BOOT", "MIC_BCL
 
 KEEPOUT_ANTENNA = None   # antenna overhangs the board edge
 import outline  # noqa: E402
-NO_PLACE = [(0, 0, W, 0.4), (0, 0, 4.5, 9.0), (W - 4.5, 0, W, 9.0),       # edge + nose corners
+NO_PLACE = [(0, 0, W, 0.4), (0, 0, 3.0, 9.0), (W - 3.0, 0, W, 9.0),       # edge + nose corners
             (outline.NOTCH[0], outline.NOTCH[1] - 0.3, outline.NOTCH[2] + 0.3, outline.NOTCH[3] + 0.3)]
 
 
@@ -194,6 +199,10 @@ def main():
                               and q.HitTest(pad.GetPosition()))
                     pad.SetNumber(ep.GetNumber())
                     pad.SetNet(net(p["pins"][ep.GetNumber()]))
+        if p["ref"] == "J7":   # header outline would run through the pin labels: Fab only
+            for g in fp.GraphicalItems():
+                if g.GetClass() != "PCB_TEXT" and g.GetLayer() == pcbnew.F_SilkS:
+                    g.SetLayer(pcbnew.F_Fab)
         if p["ref"] == "J1":
             fp.SetLocalClearance(MM(0.1))   # USB-C VBUS/GND pads sit 0.1 mm apart by design
         # Reference text small, on silkscreen only where there's room: keep it on Fab.
@@ -234,6 +243,8 @@ def main():
         t.SetPosition(P(x, y - 1.55 if top else y + 1.55))
         board.Add(t)
     placed.append((0.3, 41.8, 31.0, 48.9))   # header + its labels
+    placed.append((3.8, 8.3, 9.9, 9.45))     # "+0.45A  +1A" labels above the charge jumpers
+    placed.append((6.0, 13.0, 8.1, 14.2))    # "CHG" below them
     tps = []
 
     # ---- passives + jumpers: auto-place near the IC pad they share a net with
@@ -296,19 +307,49 @@ def main():
 
     # ---- solder-jumper labels (what bridging / cutting does)
     JP_TEXT = {"JP1": "+0.45A", "JP2": "+1A", "JP3": "NTC", "JP4": "SW", "JP5": "EXT5V", "JP7": "MIC"}
+    # Put each label on the first side of its jumper that is clear of every part and earlier label.
+    def mm_box(b, pad):
+        return (pcbnew.ToMM(b.GetLeft()) - OX - pad, pcbnew.ToMM(b.GetTop()) - OY - pad,
+                pcbnew.ToMM(b.GetRight()) - OX + pad, pcbnew.ToMM(b.GetBottom()) - OY + pad)
+    taken = []   # every pad and silkscreen stroke, individually (tighter than part bounding boxes)
+    for f in fps.values():
+        taken += [mm_box(q.GetBoundingBox(), 0.1) for q in f.Pads()]
+        taken += [mm_box(g.GetBoundingBox(), 0.1) for g in f.GraphicalItems()
+                  if g.GetClass() != "PCB_TEXT" and g.GetLayer() == pcbnew.F_SilkS]
+    taken += [mm_box(d.GetBoundingBox(), 0.1) for d in board.GetDrawings() if d.GetLayer() == pcbnew.F_SilkS]
+
+    def label(text, cands):
+        tw, th = 0.5 * len(text) + 0.4, 1.0
+        for cx, cy, rot in cands:
+            w, h = (th, tw) if rot else (tw, th)
+            box = (cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2)
+            if inside(box) and not any(overlaps(box, o) for o in taken):
+                break
+        else:
+            print("label overlaps:", text)
+            cx, cy, rot = cands[0]
+            box = (cx - tw / 2, cy - th / 2, cx + tw / 2, cy + th / 2)
+        taken.append(box)
+        t = pcbnew.PCB_TEXT(board)
+        t.SetText(text); t.SetLayer(pcbnew.F_SilkS)
+        t.SetTextSize(pcbnew.VECTOR2I(MM(0.45), MM(0.55))); t.SetTextThickness(MM(0.1))
+        t.SetPosition(P(cx, cy)); t.SetTextAngleDegrees(rot); board.Add(t)
+
+    label("CHG", [(7.05, 13.6, 0), (3.8, 11.2, 90), (10.2, 11.2, 90), (7.05, 13.9, 0), (7.05, 8.6, 0)])
     for ref, text in JP_TEXT.items():
         fp = fps.get(ref)
         if not fp:
             continue
         bb = bbox_mm(fp, 0)
-        t = pcbnew.PCB_TEXT(board)
-        t.SetText(text); t.SetLayer(pcbnew.F_SilkS)
-        t.SetTextSize(pcbnew.VECTOR2I(MM(0.45), MM(0.55))); t.SetTextThickness(MM(0.1))
-        t.SetPosition(P((bb[0] + bb[2]) / 2, bb[1] - 0.55))
-        board.Add(t)
-    t = pcbnew.PCB_TEXT(board); t.SetText("CHG"); t.SetLayer(pcbnew.F_SilkS)
-    t.SetTextSize(pcbnew.VECTOR2I(MM(0.45), MM(0.55))); t.SetTextThickness(MM(0.1))
-    t.SetPosition(P(7.05, 13.6)); board.Add(t)
+        mx, my, hw = (bb[0] + bb[2]) / 2, (bb[1] + bb[3]) / 2, 0.25 * len(text) + 0.2
+        cands = [(mx, bb[1] - 0.6, 0), (mx, bb[3] + 0.6, 0), (bb[0] - hw - 0.1, my, 0),
+                 (bb[2] + hw + 0.1, my, 0), (bb[0] - 0.6, my, 90), (bb[2] + 0.6, my, 90)]
+        for r in (1.0, 1.5, 2.0, 2.5, 3.0):          # then a widening ring around the jumper
+            for k in range(16):
+                a = 2 * math.pi * k / 16
+                cands += [(mx + (r + hw) * math.cos(a), my + (r + 0.5) * math.sin(a), 0),
+                          (mx + (r + 0.5) * math.cos(a), my + (r + hw) * math.sin(a), 90)]
+        label(text, cands)
 
     # ---- zones: In1 = solid GND plane, B.Cu GND pour, antenna keepout
     def zone(layer, netname, rect, priority=0):

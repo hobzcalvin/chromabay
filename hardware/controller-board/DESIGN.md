@@ -29,9 +29,25 @@ Revision history:
 
 ---
 
+## 0c. Flush business end, no printed parts (supersedes 0b where they differ)
+
+- **Button and switch overhang the board.** The middle of the business end is now a 1.9 mm tab that runs through
+  the case end wall, so the board edge is **flush with the case face**. The button plunger sticks out ~0.95 mm past
+  it and the slide-switch handle ~1.0 mm. Both are usable with a fingertip, with no printed plunger or cap (those
+  parts are gone). Pads stay ≥ 0.3 mm from the edge, and the button's front locating peg was dropped so it doesn't
+  sit on the edge.
+- **LED set back.** Button, USB-C and switch are packed edge to edge (x 5.3–30.7 mm). The status LED sits behind
+  the USB-C, aimed at a small slot beside the USB-C opening. It will also glow through most printed plastics.
+- **Taper:** the rounding starts 5 mm in from each side (the button/USB/switch row needs 25.4 mm), so the case tip
+  is about 26 mm wide. That's ~2 mm wider than the printed-extender version, but the case is also 1.9 mm shorter
+  because the end wall no longer sits in front of the board.
+- Mic moved to x 9 (its channel still exits the end face under the board). The EXT5V cut-jumper moved to the free
+  corner by the switch. Jumper labels are placed automatically where they clear every pad and silkscreen line.
+  The header's silkscreen outline was removed so it no longer runs through the pin labels.
+
 ## 0b. Taper + usability pass (supersedes 0a where they differ)
 
-- **Nose taper:** the rounding now starts **8 mm in from each side** and runs 15 mm down (was 2.6 × 12). The board's
+- *(Replaced by 0c.)* **Nose taper:** the rounding now starts **8 mm in from each side** and runs 15 mm down (was 2.6 × 12). The board's
   straight tip is 20 mm wide (case tip ~24 mm). To allow that, the button and power switch sit ~2.7 mm back from the
   edge, and the case includes two small printed parts (`case/out/button-plunger.stl`, `switch-cap.stl`): a captive
   plunger for the button and a cap that slips over the slide-switch handle. Both reach ~1.2 mm past the end wall, so
