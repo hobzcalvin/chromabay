@@ -40,27 +40,37 @@ ANCHORS = {
     #     The button body overhangs the edge 0.35 mm and its plunger 0.95 mm; the switch handle 1.0 mm.
     #     The case face is flush with the board edge, so both stick out past the case by that much.
     "SW2": (8.67, 1.65, 180), "J1": (17.1, 4.85, 180), "SW1": (26.48, 2.35, 180),
-    "D1": (22.3, 9.6, 180),
+    "D1": (22.3, 9.35, 180),
     "U8": (25.6, 6.95, 90),          # USB ESD right beside the USB-C, between it and the switch         # set back, aimed at the slot beside the USB-C opening
     "MK1": (9.0, 6.0, 0),           # bottom-port mic; case channel exits the end face under the board
-    # --- POWER (left half, between USB-C and the battery): charger right behind the USB-C,
-    #     battery JST in the left-side notch with the reverse-polarity FET next to it, boost below.
-    "U2": (18.75, 13.2, 0), "L1": (13.2, 13.4, 0),
-    "J4": (11.95, 20.8, 270), "Q1": (19.6, 25.2, 0), "J3": (1.6, 28.0, 270),
-    "U3": (9.0, 32.5, 0), "L2": (3.2, 38.5, 90),
-    "Q2": (15.5, 29.6, 0), "Q3": (18.6, 31.8, 0), "F1": (24.5, 29.9, 0),
-    # --- LED OUTPUTS (right side): WAGO push-ins + pad strip on the edge, level shifter and ESD
-    #     right next to them so the eight data lines are short.
-    "J2": (27.85, 15.8, 180), "J6": (27.85, 23.7, 180), "J5": (34.8, 28.9, 0),
-    "U7": (23.6, 36.8, 0), "U9": (29.4, 30.2, 90), "U10": (29.4, 37.6, 90),
+    # --- CHARGER (hand layout, see DESIGN.md 0g). BQ25606 turned 270 deg so VBUS faces the USB-C,
+    #     PMID/REGN/BTST/SW run down its right side toward L1, SYS/BAT face down, and the control
+    #     pins face left. Chain: USB VBUS -> U2 -> SW -> L1 -> VSYS (C5/C6) ; BAT -> C7 -> Q1 -> BAT_IN.
+    "U2": (13.0, 11.6, 270), "C2": (18.3, 10.85, 0), "C4": (16.1, 12.25, 270), "L1": (19.0, 13.8, 180),
+    "C5": (22.9, 12.55, 90), "C6": (24.6, 12.55, 90), "C7": (9.5, 14.65, 90),
+    "Q1": (5.2, 15.6, 90), "J4": (11.95, 20.8, 270), "J3": (1.6, 28.0, 270),
+    # --- BOOST: SW pins straight down into L2, VOUT pins straight up into the output caps,
+    #     load switch Q2 -> fuse F1 -> EXT jumper JP5 below it.
+    "U3": (10.5, 32.5, 0), "L2": (11.3, 37.0, 0), "C11": (14.7, 33.2, 90),
+    "C18": (10.7, 28.3, 90), "C19": (12.3, 28.3, 90), "C20": (13.9, 28.3, 90), "C22": (15.85, 27.9, 90),
+    "Q2": (18.9, 28.9, 270), "F1": (17.6, 33.9, 270), "JP5": (17.6, 38.0, 0),
+    # boost control parts fanned out around their pins (ILIM/COMP/FB top-left, SS right, VCC left,
+    # FSW straddling its pin and the SW pour, BOOT cap left of L2 through a via pair)
+    "R20": (7.6, 30.2, 180), "R19": (8.3, 29.35, 180), "C17": (8.3, 28.45, 180), "C16": (6.6, 29.35, 180),
+    "R18": (9.3, 25.7, 180), "R17": (10.8, 25.7, 180), "C15": (13.5, 32.3, 90), "C13": (7.05, 33.25, 180),
+    "R16": (7.6, 34.95, 180), "C14": (7.5, 36.6, 0),
+    # charger set-up parts beside their jumpers / pins
+    "JP3": (7.4, 10.6, 90), "R7": (1.9, 13.3, 90), "R8": (1.9, 15.0, 90), "R13": (7.6, 13.6, 90),
+    "C3": (17.5, 9.25, 0), "C24": (16.2, 40.6, 180),
+    # --- LED OUTPUTS (right side), 2.5 mm lower than before to give the charger the band above them
+    "J2": (27.85, 18.3, 180), "J6": (27.85, 26.2, 180), "J5": (34.8, 31.4, 0),
+    "U7": (23.9, 38.4, 0), "U9": (29.4, 32.7, 90), "U10": (29.4, 40.1, 90),
     # --- user header across the board above the module
     "J7": (1.3, 46.6, 90),
-    # --- charge-current jumpers side by side (bridge one or both), next to the charger side
-    "JP1": (5.6, 11.2, 90), "JP2": (8.5, 11.2, 90),
-    # --- EXT5V cut-jumper (LED rail <- fuse) in the free corner by the switch, on the way to the OUT1 WAGO
-    "JP5": (30.8, 7.4, 0),
+    # --- charge-current jumpers side by side (bridge one or both), left of the charger's control pins
+    "JP1": (2.4, 10.3, 90), "JP2": (4.9, 10.3, 90),
     # --- MCU end: ESP32 module (antenna overhangs the far edge), 3.3 V LDO and IMU beside it
-    "U1": (18.0, 58.1, 180), "U6": (5.0, 55.0, 0), "U5": (31.0, 55.5, 0),
+    "U1": (18.0, 58.1, 180), "U6": (5.0, 55.0, 0), "U5": (30.0, 57.5, 0),
 }
 # User pads: two columns in the strip right of the module.
 TP_ORDER = ["3V3", "GND", "SDA", "SCL", "T1", "T2", "T3", "T4", "BOOT", "MIC_BCLK", "MIC_WS",
@@ -109,9 +119,9 @@ def main():
     ds.SetBoardThickness(MM(1.6))
     ds.m_TrackMinWidth = MM(0.127)
     ds.m_MinClearance = MM(0.1)
-    ds.m_ViasMinSize = MM(0.45)
+    ds.m_ViasMinSize = MM(0.35)          # 0.35/0.2 vias only where a 0.6 won't fit
     ds.m_MinThroughDrill = MM(0.2)
-    ds.m_ViasMinAnnularWidth = MM(0.1)
+    ds.m_ViasMinAnnularWidth = MM(0.075)
     ds.m_HoleClearance = MM(0.2)
     ds.m_CopperEdgeClearance = MM(0.3)
     ds.SetCustomViaSize(MM(0.45))
@@ -260,8 +270,10 @@ def main():
             t.SetTextSize(pcbnew.VECTOR2I(MM(0.5), MM(0.65))); t.SetTextThickness(MM(0.11))
             t.SetPosition(P(cx, py)); board.Add(t)
             placed.append((cx - tw / 2 - 0.1, py - 0.45, cx + tw / 2 + 0.1, py + 0.45))
-    placed.append((3.8, 8.3, 9.9, 9.45))     # "+0.45A  +1A" labels above the charge jumpers
-    placed.append((6.0, 13.0, 8.1, 14.2))    # "CHG" below them
+    import power_layout
+    placed.extend(power_layout.RESERVED)     # hand-laid power copper (tools/power_layout.py)
+    placed.append((0.9, 7.6, 6.4, 8.75))     # "+0.45A  +1A" labels above the charge jumpers
+    placed.append((2.6, 12.1, 4.6, 13.1))  # "CHG" below them
     tps = []
 
     # ---- passives + jumpers: auto-place near the IC pad they share a net with
@@ -371,7 +383,7 @@ def main():
         t.SetTextSize(pcbnew.VECTOR2I(MM(0.45), MM(0.55))); t.SetTextThickness(MM(0.1))
         t.SetPosition(P(cx, cy)); t.SetTextAngleDegrees(rot); board.Add(t)
 
-    label("CHG", [(7.05, 13.6, 0), (3.8, 11.2, 90), (10.2, 11.2, 90), (7.05, 13.9, 0), (7.05, 8.6, 0)])
+    label("CHG", [(3.6, 12.6, 0), (3.6, 8.2, 0)])
     for ref, text in JP_TEXT.items():
         fp = fps.get(ref)
         if not fp:

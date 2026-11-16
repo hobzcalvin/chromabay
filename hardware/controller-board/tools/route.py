@@ -45,22 +45,48 @@ def edge_keepout(board):
         layers.AddLayer(layer)
     z.SetLayerSet(layers)
     z.SetOutline(ring)
+    ring.thisown = False      # the zone owns it now
     board.Add(z)
     return z
 
 
+def power_keepouts(board):
+    """Router-only keep-outs over every non-GND pour (tools/power_layout.py), so signal traces go
+    around the power copper instead of cutting it into islands. Vias may pass through the In2
+    plane regions (that's how signals cross the power area) but not through outer-layer pours."""
+    shapes = []                       # read every outline first: pcbnew's SWIG wrappers go stale
+    for i in range(board.GetAreaCount()):   # once zones are added/removed (index access is safe)
+        z = board.GetArea(i)
+        if z.GetIsRuleArea() or z.GetNetname() == "/GND":
+            continue
+        ol = z.Outline()
+        shapes.append((z.GetLayer(), [(ol.CVertex(i).x, ol.CVertex(i).y) for i in range(ol.FullPointCount())]))
+    for layer, pts in shapes:
+        k = pcbnew.ZONE(board)
+        k.SetIsRuleArea(True)
+        k.SetDoNotAllowTracks(True)
+        k.SetDoNotAllowVias(layer != pcbnew.In2_Cu)
+        k.SetDoNotAllowPads(False)
+        k.SetDoNotAllowFootprints(False)
+        k.SetLayer(layer)
+        ol = k.Outline()          # build in place: a Python-owned SHAPE_POLY_SET handed to
+        ol.NewOutline()           # SetOutline() gets freed later and crashes the zone filler
+        for x, y in pts:
+            ol.Append(x, y)
+        board.Add(k)
+
+
 def main(jar, passes):
     subprocess.run(["/usr/bin/python3", os.path.join(HERE, "fanout.py"), PCB], check=True)
-    # 2. DSN from a throwaway copy (outer pours off, edge ring on)
-    tmp = pcbnew.LoadBoard(PCB)
-    for z in list(tmp.Zones()):
-        if not z.GetIsRuleArea() and z.GetLayer() in (pcbnew.F_Cu, pcbnew.B_Cu):
-            tmp.Remove(z)
-    edge_keepout(tmp)
+    # 2. DSN from a throwaway copy (outer GND pours off, router keep-outs on; power pours stay
+    #    as planes). Each step in a fresh process: pcbnew's SWIG wrappers go stale after Remove().
     work = os.path.dirname(os.path.abspath(jar))
     dsn, ses = os.path.join(work, "board.dsn"), os.path.join(work, "board.ses")
-    if not pcbnew.ExportSpecctraDSN(tmp, dsn):
-        raise SystemExit("DSN export failed")
+    tmp_pcb = os.path.join(work, "dsn-prep.kicad_pcb")
+    me = os.path.abspath(__file__)
+    shutil.copy(PCB.replace(".kicad_pcb", ".kicad_pro"), tmp_pcb.replace(".kicad_pcb", ".kicad_pro"))  # net classes
+    subprocess.run(["/usr/bin/python3", me, "--strip-gnd", PCB, tmp_pcb], check=True)
+    subprocess.run(["/usr/bin/python3", me, "--export", tmp_pcb, dsn], check=True)
     text = open(dsn).read()
     plane = "(layer In1.Cu\n      (type signal)"
     if plane not in text:
@@ -79,7 +105,8 @@ def main(jar, passes):
 def import_session(ses):
     """Import a Freerouting session into the board (outer pours lifted while importing)."""
     board = pcbnew.LoadBoard(PCB)
-    outer = [z for z in board.Zones() if not z.GetIsRuleArea() and z.GetLayer() in (pcbnew.F_Cu, pcbnew.B_Cu)]
+    outer = [z for z in board.Zones() if not z.GetIsRuleArea() and z.GetLayer() in (pcbnew.F_Cu, pcbnew.B_Cu)
+             and z.GetNetname() == "/GND"]
     saved = [(z.GetLayer(), z.GetNetname(), [(z.Outline().CVertex(i).x, z.Outline().CVertex(i).y)
               for i in range(z.Outline().FullPointCount())]) for z in outer]
     for z in outer:
@@ -103,8 +130,29 @@ def import_session(ses):
     print("routed + saved", PCB)
 
 
+def strip_gnd(src, dst):
+    board = pcbnew.LoadBoard(src)
+    for z in [board.GetArea(i) for i in range(board.GetAreaCount())]:
+        if not z.GetIsRuleArea() and z.GetLayer() in (pcbnew.F_Cu, pcbnew.B_Cu) and z.GetNetname() == "/GND":
+            board.Remove(z)
+    pcbnew.SaveBoard(dst, board)
+
+
+def export(src, dsn):
+    board = pcbnew.LoadBoard(src)
+    power_keepouts(board)
+    edge_keepout(board)
+    pcbnew.ZONE_FILLER(board).Fill(board.Zones())
+    if not pcbnew.ExportSpecctraDSN(board, dsn):
+        raise SystemExit("DSN export failed")
+
+
 if __name__ == "__main__":
-    if sys.argv[1] == "--import":          # re-import an existing session file
+    if sys.argv[1] == "--strip-gnd":
+        strip_gnd(sys.argv[2], sys.argv[3])
+    elif sys.argv[1] == "--export":
+        export(sys.argv[2], sys.argv[3])
+    elif sys.argv[1] == "--import":          # re-import an existing session file
         import_session(sys.argv[2])
     else:
         main(sys.argv[1], int(sys.argv[2]) if len(sys.argv) > 2 else 30)

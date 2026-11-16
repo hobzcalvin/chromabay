@@ -22,7 +22,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PCB = os.path.join(os.path.dirname(HERE), "chromabay-controller.kicad_pcb")
 MM, TO = pcbnew.FromMM, pcbnew.ToMM
 G = 0.05                     # grid, mm
-CLEAR = 0.16
+CLEAR = 0.21                # 0.13-0.15 rule + grid/raster margin
 VIA_D, VIA_DR = 0.45, 0.25
 LAYERS = [pcbnew.F_Cu, pcbnew.In2_Cu, pcbnew.B_Cu]
 RIPUP = "--rip" in sys.argv     # rip-up mode tends to thrash in the dense charger corner
@@ -40,6 +40,40 @@ def pairs_from_report(path):
             out.append((net.group(1) if net else None,
                         [(float(x), float(y), d) for x, y, d in pts]))
     return out
+
+
+def snap_zone_endpoints(board, netname, a, b):
+    """DRC reports a pour by its first outline corner. Replace that with the point of the pour's
+    filled copper nearest the other end, pulled 0.25 mm inside, so the patch joins real copper."""
+    def fix(p, other):
+        if not p[2].startswith("Zone"):
+            return p
+        best = None
+        for zi in range(board.GetAreaCount()):
+            z = board.GetArea(zi)
+            if z.GetIsRuleArea() or z.GetNetname() != netname:
+                continue
+            lay = z.GetLayer()
+            if layer_of(p[2]) not in (None, lay):
+                continue
+            fp = z.GetFilledPolysList(lay)
+            tgt = pcbnew.VECTOR2I(MM(other[0]), MM(other[1]))
+            for oi in range(fp.OutlineCount()):
+                ol = fp.Outline(oi)
+                q = ol.NearestPoint(tgt)
+                d = math.hypot(TO(q.x) - other[0], TO(q.y) - other[1])
+                if best is None or d < best[0]:
+                    # step inside: towards the outline's bounding-box centre
+                    bb = ol.BBox()
+                    cx, cy = TO(bb.Centre().x), TO(bb.Centre().y)
+                    qx, qy = TO(q.x), TO(q.y)
+                    L = math.hypot(cx - qx, cy - qy) or 1
+                    best = (d, qx + 0.25 * (cx - qx) / L, qy + 0.25 * (cy - qy) / L, lay)
+        if best is None:
+            return p
+        name = {pcbnew.F_Cu: "F.Cu", pcbnew.In2_Cu: "In2.Cu", pcbnew.B_Cu: "B.Cu"}.get(best[3], "")
+        return (best[1], best[2], "Zone on " + name)
+    return fix(a, b), fix(b, a)
 
 
 def layer_of(desc):
@@ -61,7 +95,7 @@ def route_pair(board, netname, a, b, width, allow_rip=False):
     vsoft = np.zeros((ny, nx), bool)
     edge = pcbnew.SHAPE_POLY_SET()
     board.GetBoardPolygonOutlines(edge)
-    edge.Deflate(MM(0.3), pcbnew.CORNER_STRATEGY_ROUND_ALL_CORNERS, MM(0.01))
+    edge.Deflate(MM(0.35 + width / 2), pcbnew.CORNER_STRATEGY_ROUND_ALL_CORNERS, MM(0.01))
 
     def px(v):
         return ((TO(v) - x0) / G)
@@ -109,6 +143,19 @@ def route_pair(board, netname, a, b, width, allow_rip=False):
                         pts = [(px(ol.CPoint(i).x), py(ol.CPoint(i).y)) for i in range(ol.PointCount())]
                         if len(pts) >= 3:
                             dd.polygon(pts, fill=1)
+        # other nets' power pours (not the GND pours: those just get carved around new copper)
+        for zi in range(board.GetAreaCount()):
+            z = board.GetArea(zi)
+            if z.GetIsRuleArea() or z.GetNetname() in (netname, "/GND") or z.GetLayer() != layer:
+                continue
+            fp = z.GetFilledPolysList(layer)
+            for oi in range(fp.OutlineCount()):
+                ol = fp.Outline(oi)
+                pts = [(px(ol.CPoint(i).x), py(ol.CPoint(i).y)) for i in range(ol.PointCount())]
+                if len(pts) >= 3:
+                    for dd, inf in ((d, infl), (vd, vinfl)):
+                        dd.polygon(pts, fill=1, outline=1)
+                        dd.line(pts + pts[:1], fill=1, width=max(1, int(2 * inf / G)))
         arr = np.array(img, bool)
         if layer in LAYERS:
             blocked[layer] = arr
@@ -235,7 +282,7 @@ def route_pair(board, netname, a, b, width, allow_rip=False):
             if n.GetClass() == "PCB_TRACK" and n.GetLayer() != t.GetLayer():
                 continue
             sh = n.GetEffectiveShape(t.GetLayer())
-            if t.GetEffectiveShape(t.GetLayer()).Collide(sh, MM(CLEAR - 0.01)):
+            if t.GetEffectiveShape(t.GetLayer()).Collide(sh, MM(0.15)):
                 ripped.add(t.GetNetname())
                 board.Remove(t)
                 break
@@ -251,7 +298,7 @@ def drc(path):
     return open(path).read()
 
 
-def main(report, rounds=6):
+def main(report, rounds=int(os.environ.get("ROUNDS", "6"))):
     import shutil
     best = None
     for rnd in range(rounds):
@@ -269,6 +316,7 @@ def main(report, rounds=6):
         for netname, (a, b) in pairs:          # 1) without disturbing anything
             if not netname or netname == "/GND" or netname in done:
                 continue
+            a, b = snap_zone_endpoints(board, netname, a, b)
             widths = [0.3, 0.2, 0.15] if netname in POWER else [0.15]
             if any(route_pair(board, netname, a, b, w) for w in widths):
                 done.add(netname)
@@ -289,11 +337,52 @@ def main(report, rounds=6):
         pcbnew.ZONE_FILLER(board).Fill(board.Zones())
         pcbnew.SaveBoard(PCB, board)
         del board
-    if best is not None:
+    if best is not None and not os.environ.get("KEEP_LAST"):
         shutil.copy(PCB + ".best", PCB)
         os.remove(PCB + ".best")
         print("kept the best clean result:", best, "unconnected")
 
 
+
+
+
+def merge_close_vias(path=PCB):
+    """Merge same-net vias whose holes are closer than 0.25 mm (the patcher can drop one next to
+    an existing via): keep the locked / larger one and move every track end onto it."""
+    board = pcbnew.LoadBoard(path)
+    vias = [t for t in board.GetTracks() if t.GetClass() == "PCB_VIA"]
+    gone = set()
+    merged = 0
+    for i, a in enumerate(vias):
+        if id(a) in gone:
+            continue
+        for b in vias[i + 1:]:
+            if id(b) in gone or b.GetNetname() != a.GetNetname():
+                continue
+            d = TO((a.GetPosition() - b.GetPosition()).EuclideanNorm())
+            if d >= (TO(a.GetDrill()) + TO(b.GetDrill())) / 2 + 0.25:
+                continue
+            keep, drop = (a, b) if (a.IsLocked() or a.GetDrill() >= b.GetDrill()) else (b, a)
+            for t in board.GetTracks():
+                if t.GetClass() != "PCB_TRACK" or t.GetNetname() != keep.GetNetname():
+                    continue
+                if TO((t.GetStart() - drop.GetPosition()).EuclideanNorm()) < 0.01:
+                    t.SetStart(keep.GetPosition())
+                if TO((t.GetEnd() - drop.GetPosition()).EuclideanNorm()) < 0.01:
+                    t.SetEnd(keep.GetPosition())
+            board.Remove(drop)
+            gone.add(id(drop))
+            merged += 1
+            if drop is a:
+                break
+    pcbnew.ZONE_FILLER(board).Fill(board.Zones())
+    pcbnew.SaveBoard(path, board)
+    print("merged", merged, "close vias")
+
+
 if __name__ == "__main__":
-    main(sys.argv[1])
+    if sys.argv[1] == "--merge-vias":
+        merge_close_vias()
+    else:
+        main(sys.argv[1])
+        merge_close_vias()

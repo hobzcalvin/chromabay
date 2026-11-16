@@ -1,7 +1,7 @@
 # ChromaBay battery LED controller: board + case design
 
 Status: **KiCad rev A: schematic done (ERC clean), parts placed on 36 × 66 mm with a tapered nose (DRC/parity clean),
-first-pass routed (draft), power stage still to hand-lay-out.** One PCB, three builds (Core / Plug / Complete); see section 0. See [README.md](README.md) for the files, renders and how to regenerate them. Where rev A
+fully routed (DRC: 0 errors, 0 unrouted), power stage hand-laid-out.** One PCB, three builds (Core / Plug / Complete); see section 0. See [README.md](README.md) for the files, renders and how to regenerate them. Where rev A
 differs from this spec, section 0 wins.
 
 In product terms, this is a battery-powered, ChromaBay-first take on the GLEDOPTO ESP32 mini
@@ -28,6 +28,52 @@ Revision history:
   - Lessons from GLEDOPTO.
 
 ---
+
+## 0g. Charger + boost hand layout, fully routed (supersedes 0f)
+
+**Status: routed. DRC shows 0 errors and 0 unrouted connections.** The remaining warnings are silkscreen
+cosmetics and a few single-spoke GND thermals. The power stage is laid out by hand in `tools/power_layout.py`.
+Everything else is autorouted around it.
+
+**Floorplan changes.** To give the charger room, the WAGO push-ins, LED pad strip, shifter and ESD parts moved
+down 2.5 mm, and the case window and slot moved with them. The IMU moved down to clear the pad strip.
+
+**Charger (BQ25606), turned 270° so each side faces where its current goes:**
+- **VBUS:** the top-right pins sit under the USB-C VBUS pad. A short pour connects them, and the second USB VBUS
+  pad joins through the back layer.
+- **PMID / REGN / BTST / SW:** these run down the right side. PMID → C2 is a 1.7 mm link. BTST → C4 sits right at
+  the pins, with C4's other pad in the switch-node pour. REGN escapes through a 0.35 mm via under the pins to C3.
+- **Switch node:** a 1.1 mm² pour from the SW pins to L1, which sits right beside the chip. The loop is about 2 mm.
+- **VSYS:** a pour from the SYS pins and L1's output to C5/C6, stitched to the In2 VSYS plane with six vias.
+- **BAT:** a pour from the BAT pins through C7 to the reverse-polarity FET Q1.
+- **BAT_IN:** a pour from Q1 down the left edge to the battery pads, and a bottom-layer band under the JST to its
+  pin.
+- **Control parts:** the jumpers and set resistors sit left of the chip, with a fan-out lane for its control pins.
+
+**Boost (TPS61088):**
+- **SW:** the switch pins drop straight into L2's switch pad (pour).
+- **VIN:** the VIN pin and L2's input pad share a pour with C11, stitched to In2 VSYS with four vias.
+- **VOUT:** the VOUT pins rise straight into a 5 V pour holding C18/C19/C20 (22 µF) and C22 (100 µF). That pour
+  continues to the load switch Q2.
+- **Control parts:** ILIM, COMP and FB parts fan out top-left, SS sits right, VCC left. The FSW resistor sits
+  beside its pin. The BOOT cap links through a via pair.
+- **LED rail:** Q2 → F1 → JP5 runs as pours. VLED reaches the push-ins and pad strip through an In2 plane.
+
+**Inner layer 2** carries only the VSYS plane (charger area, a 4 mm corridor, then the boost area) and the VLED
+plane (fuse to push-ins and pad strip). Signals use the rest of In2, F.Cu and B.Cu. **In1 is solid GND.**
+
+**Tooling.**
+- `tools/route.py` adds router-only keep-outs over every power pour, so signal traces can't cut them into islands.
+  Vias may cross the In2 plane areas.
+- `tools/patch_route.py` finishes leftover gaps. It treats pours as obstacles, joins pours at real copper rather
+  than at an outline corner, and merges overlapping vias.
+- Full regeneration: `gen_pcb.py` → `power_layout.py` → `route.py <freerouting-1.9.0.jar>` →
+  `patch_route.py <drc.rpt>`.
+
+**Still to check before ordering:**
+- Review the layout in KiCad, especially the charger corner.
+- Confirm the 0.35/0.2 mm REGN vias are inside JLC's free 4-layer via range.
+- Check part rotations in JLC's 3D preview.
 
 ## 0f. First routing pass (draft: connectivity, not yet a power layout)
 

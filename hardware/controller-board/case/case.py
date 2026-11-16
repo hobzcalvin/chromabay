@@ -63,8 +63,8 @@ SIDE_NOTCHES = [  # (side, y_centre, width): U-notches at the seam for laid-in w
     ("left", 20.8, 4.0),          # battery lead, external-battery builds (two <=1.5 mm OD wires side by side)
 ]
 # One opening in the right wall covers the OUT1 push-in entries and all ten LED wire pads.
-WAGO_WINDOW = (11.6, 53.0, 4.8)   # y0, y1, height above the PCB top
-WAGO_SLOT = (26.6, 12.0, 30.0, 27.5)  # lid slot over the WAGO release buttons (x 27.2..29.4 on the board)
+WAGO_WINDOW = (14.1, 55.5, 4.8)   # y0, y1, height above the PCB top
+WAGO_SLOT = (26.6, 14.5, 30.0, 30.0)  # lid slot over the WAGO release buttons (x 27.2..29.4 on the board)
 
 
 def prism(pts, z0, z1, offset=0.0):
