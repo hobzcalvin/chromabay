@@ -6,7 +6,8 @@
 //    "0 synced / No stored patterns" when a device drops and comes back;
 //  - counts only CONNECTED devices (stale snapshots for disconnected ones are ignored).
 import { writable, get } from 'svelte/store';
-import { pullDeviceLibrary, getDeviceInfo } from '$lib/ble';
+import { getDeviceInfo } from '$lib/ble';
+import { syncLibrary } from '$lib/deviceSync';
 import { connectedDevices, getConnectedDevicesList } from './deviceStore';
 import type { SerializedPattern } from '$lib/patternSerializer';
 
@@ -48,10 +49,12 @@ connectedDevices.subscribe((map) => {
   prevConnected = cur;
 });
 
-async function pullWithRetry(deviceId: string, fallback: SerializedPattern[]): Promise<SerializedPattern[]> {
+async function pullWithRetry(deviceId: string, fallback: SerializedPattern[], force = false): Promise<SerializedPattern[]> {
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const { patterns, complete } = await pullDeviceLibrary(deviceId);
+      // deviceSync answers from the saved copy when the device says its library hasn't changed
+      // (firmware feat >= 9), and otherwise dumps it, queued behind the device's other reads.
+      const { patterns, complete } = await syncLibrary(deviceId, { force: force || attempt > 0 });
       if (patterns.length > 0) return patterns; // got real data
       // The device finished its listing and it was empty: that IS the answer. Retrying it
       // only asked again — three dumps and ~3 s of waiting on every Patterns-page visit.
@@ -101,7 +104,7 @@ export async function refreshDeviceLibraries(opts: { force?: boolean; only?: str
       const known = (have && have.length > 0) || pulledEmpty.has(d.deviceId);
       if (!opts.force && known && !staleReconnect) continue;
       pulledEmpty.delete(d.deviceId);
-      next[d.deviceId] = await pullWithRetry(d.deviceId, have ?? []);
+      next[d.deviceId] = await pullWithRetry(d.deviceId, have ?? [], opts.force);
     }
     deviceLibraries.set(next);
     libraryHeldBack.set(heldBack);

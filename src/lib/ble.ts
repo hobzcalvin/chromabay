@@ -8,6 +8,7 @@ const msgpackDecode = msgpack.decode;
 import { serializeCurrentPattern } from './flowStore';
 import { bleEvent, noteBrightnessWrite, noteBrightnessFromDevice } from './telemetry';
 import { getFirmware, putFirmware } from './firmwareCache';
+import { noteDeviceInfo, invalidate as invalidateDeviceCache } from './deviceCache';
 import {
   getTransport, setBleTransportFactory, unregisterTransport, isWifiId, hostFromWifiId,
   type Transport,
@@ -130,6 +131,12 @@ export interface DeviceInfo {
   heap?: number;
   wled?: number;            // 1 = WLED's cfg.json is still on the device's filesystem (feat>=8; see wledMigration.ts)
   id?: string;              // factory eFuse MAC, 12 hex: the device_id its own Sentry events carry (feat>=7)
+  // Content generations (feat>=9): bumped on every change to the LED config, the custom
+  // layouts and the pattern library, so a cached copy can be reused (deviceCache.ts).
+  gcfg?: number;
+  glay?: number;
+  glib?: number;
+  bri?: number;             // live global brightness (feat>=9) — not part of "config changed"
 }
 
 // Realtime pixel-streaming protocols. A bitmask, so a device can listen for several at once:
@@ -845,6 +852,7 @@ export async function getDeviceInfo(deviceId: string): Promise<DeviceInfo> {
       
       // Update device store with the fetched info
       updateDeviceInfo(deviceId, info);
+      noteDeviceInfo(deviceId, info);
       
       return info;
     } catch (e) {
@@ -1460,6 +1468,7 @@ export async function sendSinglePatternToDevice(deviceId: string, pattern: any):
   // showing it (what's playing stays playing).
   const name: string = pattern?.meta?.name ?? '';
   const clean = { ...pattern, meta: { name, output: pattern?.meta?.output ?? 1 }, lib: true };
+  invalidateDeviceCache(deviceId, 'lib');
   const msgpackData = msgpackEncode(clean) as Uint8Array;
   bleEvent('pattern push (library)', { ble_id: deviceId, name, bytes: msgpackData.byteLength }, { log: false });
 
@@ -1545,12 +1554,14 @@ async function sendPatternChunked(deviceId: string, msgpackData: Uint8Array): Pr
 
 /** Wipe ALL stored patterns on one device (the live/displayed pattern keeps running). */
 export async function clearDeviceLibrary(deviceId: string): Promise<void> {
+  invalidateDeviceCache(deviceId, 'lib');
   const dv = new DataView(new Uint8Array([0x00]).buffer);
   await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_LIBRARY_CMD, dv);
 }
 
 /** Delete the pattern with this name from one device's library. */
 export async function deletePatternOnDevice(deviceId: string, name: string): Promise<void> {
+  invalidateDeviceCache(deviceId, 'lib');
   const nameBytes = new TextEncoder().encode(name);
   const out = new Uint8Array(1 + nameBytes.length);
   out[0] = 0x01;
@@ -1855,6 +1866,7 @@ export async function setLedConfiguration(deviceId: string, config: LedConfigura
     const msgpackData = encodeLedConfig(config);
     const dataView = new DataView(msgpackData.buffer, msgpackData.byteOffset, msgpackData.byteLength);
     console.log(`[LED Config] Sending MessagePack data: ${msgpackData.byteLength} bytes`);
+    invalidateDeviceCache(deviceId, 'cfg');
     await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_LED_CONFIG_SET, dataView);
     console.log('[LED Config] Configuration sent successfully');
   } catch (error) {
@@ -1882,6 +1894,7 @@ export async function uploadStripLayout(
   const map = layout?.map ?? [];
   const clearing = !layout || W <= 0 || H <= 0 || map.length === 0;
   const count = clearing ? 0 : Math.min(map.length, W * H);
+  invalidateDeviceCache(deviceId, 'lay');
   const total = 1 + 6 + count * 2;
   if (total > 16384) {
     const maxCells = Math.floor((16384 - 7) / 2);
@@ -2062,9 +2075,10 @@ function readLayoutChannelResult(deviceId: string, code: number, idleMs: number)
 // notifications ~8 ms apart, so a whole layout takes about a second): whatever hasn't arrived
 // was dropped, and the request is sent again.
 const LAYOUT_STALL_MS = 800;
-// Keep asking while rounds still fill holes; stop after this many in a row that add nothing
+// Keep asking while rounds still fill holes; stop after this many in a row that add nothing (on a
+// busy link at connect, Portal went 2 empty rounds and then still progressed)
 // (or the hard cap), so a link that's really gone still fails in reasonable time.
-const LAYOUT_FRUITLESS_ROUNDS = 3;
+const LAYOUT_FRUITLESS_ROUNDS = 5;
 const LAYOUT_MAX_ROUNDS = 30;
 
 async function readLayoutChannelOnce(deviceId: string, code: number, idleMs: number): Promise<{ bytes: Uint8Array | null; answered: boolean }> {

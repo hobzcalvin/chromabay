@@ -84,5 +84,5 @@ test('a chunk that never arrives still fails the read (never a layout with holes
   const caught = p.catch((e) => e);
   await vi.advanceTimersByTimeAsync(30_000);
   expect(await caught).toBeInstanceOf(Error);
-  expect(dev.rounds()).toBe(4); // 1 + 3 rounds that add nothing
+  expect(dev.rounds()).toBe(6); // 1 + 5 rounds that add nothing
 });

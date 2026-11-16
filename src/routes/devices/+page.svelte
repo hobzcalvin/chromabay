@@ -32,7 +32,6 @@
     type FirmwareRegistryEntry,
     type OTAUpdateStatus,
     // LED Configuration Imports
-    getLedConfiguration,
     setLedConfiguration,
     sendBrightnessToDevice,
     setDeviceName,
@@ -55,6 +54,7 @@
   import { deviceSettings, liveBrightness, initializedDevices } from '$lib/stores/deviceUiStore.svelte';
   import LedConfigurationComponent from '$lib/components/LedConfiguration.svelte';
   import { recordDeviceConfig } from '$lib/stores/deviceLayoutStore';
+  import { syncCore } from '$lib/deviceSync';
   import UsbFlash from '$lib/components/UsbFlash.svelte';
   import WledConvert from '$lib/components/WledConvert.svelte';
   import DeviceSettingsPanel from '$lib/components/DeviceSettingsPanel.svelte';
@@ -505,8 +505,7 @@
     let ok = false;
     for (let attempt = 0; attempt < 3 && !ok; attempt++) {
       try {
-        ok = await loadLedConfig(deviceId);
-        await loadDeviceInfo(deviceId);
+        ok = await loadCore(deviceId);
       } catch (e) {
         console.error(`[devices] init read failed for ${deviceId} (attempt ${attempt + 1}):`, e);
       }
@@ -526,7 +525,7 @@
     const wled = await migrateFromWledIfNeeded(deviceId, settings.deviceInfo);
     if (wled) {
       statusMessage = `Kept your WLED settings: ${wled.summary}.${wled.warnings.length ? ' ' + wled.warnings.join(' ') : ''}`;
-      try { await loadLedConfig(deviceId); await loadDeviceInfo(deviceId); } catch (e) { console.error('reload after WLED import failed', e); }
+      try { await loadCore(deviceId, true); } catch (e) { console.error('reload after WLED import failed', e); }
     }
 
     // Core loaded → reveal the full card. Remaining loads refine it in place (best-effort).
@@ -579,7 +578,7 @@
     
     // Auto-load LED config when settings are shown
     if (settings.showSettings && !settings.ledConfig && !settings.ledConfigLoading) {
-      await loadLedConfig(deviceId);
+      await loadCore(deviceId);
     }
     
   }
@@ -655,25 +654,18 @@
       settings.ledConfigLoading = false;
     }
   }
-
-  async function loadDeviceInfo(deviceId: string) {
-    const settings = getDeviceSettings(deviceId);
-    try {
-      settings.deviceInfo = await getDeviceInfo(deviceId);
-    } catch (error: any) {
-      console.error('Get device info error:', error);
-    }
-  }
-
-  async function loadLedConfig(deviceId: string): Promise<boolean> {
+  // Device info + LED config, through deviceSync: read once per connection, and on firmware
+  // that reports content generations the config isn't re-read at all when it hasn't changed.
+  // `force` re-reads both (after a WLED import rewrote them).
+  async function loadCore(deviceId: string, force = false): Promise<boolean> {
     const settings = getDeviceSettings(deviceId);
     settings.ledConfigLoading = true;
-    console.log(`[devices] loadLedConfig → ${deviceId}`);
     try {
-      settings.ledConfig = await getLedConfiguration(deviceId);
-      liveBrightness[deviceId] = settings.ledConfig.globalBrightness;
-      recordDeviceConfig(deviceId, $connectedDevices.get(deviceId)?.name, settings.ledConfig.strips);
-      console.log(`[devices] ✅ config loaded for ${deviceId}: ${settings.ledConfig.strips.length} strip(s), brightness ${settings.ledConfig.globalBrightness}`);
+      const core = await syncCore(deviceId, { force });
+      if (core.info) settings.deviceInfo = core.info;
+      settings.ledConfig = core.config;
+      liveBrightness[deviceId] = core.config.globalBrightness;
+      console.log(`[devices] ✅ config ${core.fromCache ? 'unchanged (saved copy)' : 'loaded'} for ${deviceId}: ${core.config.strips.length} strip(s), brightness ${core.config.globalBrightness}`);
       return true;
     } catch (error: any) {
       console.error(`[devices] ❌ config load FAILED for ${deviceId}:`, error);
@@ -683,6 +675,7 @@
       settings.ledConfigLoading = false;
     }
   }
+
 
   // Live brightness: applies immediately as the slider moves (no Save button). We
   // throttle the BLE writes so a fast drag doesn't flood the connection, but always

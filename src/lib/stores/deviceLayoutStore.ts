@@ -137,36 +137,12 @@ export function recordStripLayout(deviceId: string, index: number, layout: { wid
   });
 }
 
-// Devices read in full (config + layouts) this session, so Interact only asks each once.
-const synced = new Set<string>();
-const syncing = new Map<string, Promise<void>>();
-
-/** Read a connected device's config and custom layouts into the record (once per session). */
-export function syncDeviceLayout(deviceId: string): Promise<void> {
-  if (synced.has(deviceId)) return Promise.resolve();
-  const pending = syncing.get(deviceId);
-  if (pending) return pending;
-  const p = (async () => {
-    const { getLedConfiguration, getStripLayout } = await import('$lib/ble');
-    const name = get(connectedDevices).get(deviceId)?.name;
-    const cfg = await getLedConfiguration(deviceId);
-    recordDeviceConfig(deviceId, name, cfg.strips);
-    // A layout that couldn't be read keeps what we already knew (a failed read is not "no
-    // layout"); the device then isn't marked synced, so the next visit tries again.
-    let allRead = true;
-    for (let i = 0; i < cfg.strips.length; i++) {
-      try { recordStripLayout(deviceId, i, await getStripLayout(deviceId, i)); }
-      catch (e) { allRead = false; console.warn('[deviceLayouts] layout read failed', deviceId, i, e); }
-    }
-    if (allRead) synced.add(deviceId);
-  })().catch((e) => console.warn('[deviceLayouts] sync failed for', deviceId, e))
-    .finally(() => syncing.delete(deviceId));
-  syncing.set(deviceId, p);
-  return p;
+/** Make sure a connected device's config and custom layouts are in the record. The reads
+ *  themselves (once per connection, skipped when the saved copy is current) are deviceSync's. */
+export async function syncDeviceLayout(deviceId: string): Promise<void> {
+  const { syncLayouts } = await import('$lib/deviceSync');
+  await syncLayouts(deviceId).catch((e) => console.warn('[deviceLayouts] sync failed for', deviceId, e));
 }
-
-/** Mark a device's layouts as already read this session (the settings UI just read them). */
-export function markDeviceLayoutSynced(deviceId: string) { synced.add(deviceId); }
 
 // A (re)connect makes a known device the most recent one.
 if (typeof window !== 'undefined') {
@@ -174,7 +150,6 @@ if (typeof window !== 'undefined') {
   connectedDevices.subscribe((devices) => {
     const fresh = [...devices.keys()].filter((id) => !seen.has(id));
     seen = new Set(devices.keys());
-    for (const id of [...synced]) if (!devices.has(id)) synced.delete(id); // reread after reconnect
     if (!fresh.length) return;
     const known = get(deviceLayouts);
     if (!fresh.some((id) => known.some((r) => r.deviceId === id))) return;

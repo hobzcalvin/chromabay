@@ -4,7 +4,8 @@
   import { getRotation, getFlipH, getSerpentine, setRotation, setFlipH, setSerpentine } from '$lib/ble';
   import LayoutPreview from './LayoutPreview.svelte';
   import AutoLayoutModal from './AutoLayoutModal.svelte';
-  import { recordStripLayout, markDeviceLayoutSynced, shapeFromConfig, cellMap, stripRotation, applyStripRotation, type StripKind } from '$lib/stores/deviceLayoutStore';
+  import { recordStripLayout, shapeFromConfig, cellMap, stripRotation, applyStripRotation, type StripKind } from '$lib/stores/deviceLayoutStore';
+  import { syncLayouts } from '$lib/deviceSync';
   import { wledConfigToChromaBay, wledLedmapToLayout, describeWledImport, loadSavedWledImport, clearSavedWledImport, type WledImport, type WledLayout } from '$lib/wledImport';
 
   // Import LED settings from WLED: its cfg.json and/or ledmap.json (pick both at once), or the
@@ -204,21 +205,21 @@
     if (!layoutSupported || !count || layoutsReadFor === key) return;
     layoutsReadFor = key;
     (async () => {
-      let allRead = true;
-      for (let i = 0; i < count; i++) {
-        try {
-          const r = await getStripLayout(deviceId, i);
-          onDevice[i] = !!r;
-          if (r && !layoutJson[i]) layoutJson[i] = JSON.stringify({ width: r.width, height: r.height, map: r.map });
-          recordStripLayout(deviceId, i, r);
-        } catch (e) {
+      // deviceSync reads each strip once per connection (or not at all when the saved copy is
+      // current) and records it for previews — the same read Interact uses.
+      let r;
+      try { r = await syncLayouts(deviceId); }
+      catch (e) { console.warn('layout sync failed', e); return; }
+      for (let i = 0; i < Math.min(count, r.layouts.length); i++) {
+        const l = r.layouts[i];
+        if (l === undefined) {
           // Unknown, not "none": leave the remembered layout alone and say so.
-          allRead = false;
           layoutMsg[i] = "Couldn't read this strip's layout from the device. Tap Load current to try again.";
-          console.warn('layout read failed', e);
+          continue;
         }
+        onDevice[i] = !!l;
+        if (l && !layoutJson[i]) layoutJson[i] = JSON.stringify({ width: l.width, height: l.height, map: l.map });
       }
-      if (allRead) markDeviceLayoutSynced(deviceId);
     })();
   });
 
