@@ -598,6 +598,32 @@ export const scenarios = [
   },
 
   {
+    name: 'content-gen',
+    what: 'device info reports content generations (feat 9): storing a custom layout bumps only "glay", a library pattern only "glib", and the live brightness is reported as "bri" — so the app can reuse its cached config/layouts/library when nothing changed',
+    async run() {
+      const h = await handles(S3);
+      const I = need(h, 'DEVICE_INFO').handle, B = need(h, 'BRIGHTNESS').handle, L = need(h, 'LAYOUT_SET').handle;
+      // Strip 0: a 2x2 layout, LEDs 0..3. Body = [u8 strip][u16 W][u16 H][u16 count][count x i16].
+      const body = [0, 2, 0, 2, 0, 4, 0, 0, 0, 1, 0, 2, 0, 3, 0];
+      const frame = [body.length & 0xff, body.length >> 8, 0, 0, ...body];
+      const sc = new Script().connect(CONNECT).mtu(3.05, 517).write(3.1, B, [77]);
+      sc.readLong(3.4, I).write(3.6, L, frame).readLong(4.2, I);
+      pushPattern(sc, 4.4, h, solid('EmuGen', 40), true);
+      sc.readLong(5.2, I);
+      const run = await runEmu({ name: this.name, images: build(S3), ble: true, board: 'atech14', script: sc, seconds: 5.6 });
+      checkHealthy(run);
+      const a = json(run, oneRead(run, I, 3.4), 'device info (before)');
+      const b = json(run, oneRead(run, I, 4.2), 'device info (after layout)');
+      const c = json(run, oneRead(run, I, 5.2), 'device info (after library)');
+      const gens = (x) => `cfg ${x.gcfg} lay ${x.glay} lib ${x.glib}`;
+      check(a.feat >= 9 && [a.gcfg, a.glay, a.glib].every(Number.isInteger), () => `device info lacks generations: ${JSON.stringify(a)}`, run);
+      check(a.bri === 77, () => `device info bri ${a.bri}, want 77`, run);
+      check(b.glay === a.glay + 1 && b.gcfg === a.gcfg && b.glib === a.glib, () => `after a layout: ${gens(a)} -> ${gens(b)} (want only lay +1)`, run);
+      check(c.glib > b.glib && c.gcfg === b.gcfg && c.glay === b.glay, () => `after a library pattern: ${gens(b)} -> ${gens(c)} (want only lib up)`, run);
+    },
+  },
+
+  {
     name: 'blink-calibration',
     what: 'Blink Pins toggles the LED data pin for 10 s and restores the strip; calibration flashes steady and structured-light frames and stops',
     async run() {

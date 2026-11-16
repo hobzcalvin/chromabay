@@ -34,7 +34,9 @@
 //   8  WLED migration: device info "wled":1 while WLED's cfg.json is on the filesystem, and
 //      LAYOUT_GET serves WLED's files (0xF0 cfg.json, 0xF1 ledmap.json, 0xF2.. ledmap1..9.json;
 //      0xFF retires them so the import runs once)
-#define FIRMWARE_FEATURES 8
+//   9  device info reports content generations "gcfg"/"glay"/"glib" (config / layouts / library,
+//      bumped on every change, persisted) and live "bri", so the app can reuse what it cached
+#define FIRMWARE_FEATURES 9
 
 // --- Firmware Signature Verification ---
 // ECDSA P-256 Public Key (Raw 64-byte format: 32-byte X + 32-byte Y coordinates)

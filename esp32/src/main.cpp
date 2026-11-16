@@ -37,6 +37,7 @@
 #include "led_manager.h" // Include the new LED Manager
 #include "config_manager.h"   // Restore MessagePack config handling
 #include "firmware_version.h" // Include firmware version header
+#include "content_gen.h"    // config/layout/library change counters reported in device info
 #include "sentry_reporting.h" // Crash/reset-reason reporting (no-op unless a DSN is baked in)
 #include "pattern_renderer_base.h" // Include pattern renderer
 
@@ -3523,6 +3524,7 @@ void setup() {
     // that destroys persisted patterns). With the platform/core pinned in
     // platformio.ini, a firmware update keeps the same LittleFS format, so a healthy
     // device mounts cleanly here and its saved pattern survives the update.
+    bool fsFormatted = false;
     if (LittleFS.begin(false)) {
         gHasWledFiles = LittleFS.exists("/cfg.json");
         if (gHasWledFiles) Serial.println("[WLED] Found WLED's cfg.json: settings available to import");
@@ -3534,7 +3536,16 @@ void setup() {
             criticalSystemsOK = false;
         } else {
             Serial.println("LittleFS formatted and mounted");
+            fsFormatted = true;
         }
+    }
+    ContentGen::begin();
+    // A reformat wiped the config, layouts and library without touching NVS: whatever an app
+    // cached for this device no longer describes it.
+    if (fsFormatted) {
+        ContentGen::bump(ContentGen::CFG);
+        ContentGen::bump(ContentGen::LAY);
+        ContentGen::bump(ContentGen::LIB);
     }
 
     // Crash reporting. Started here rather than earlier because its offline buffer lives on
