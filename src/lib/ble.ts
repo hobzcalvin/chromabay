@@ -2058,29 +2058,72 @@ function readLayoutChannelResult(deviceId: string, code: number, idleMs: number)
   return run;
 }
 
+// After the first frame, a gap this long means the device has finished sending (it paces BLE
+// notifications ~8 ms apart, so a whole layout takes about a second): whatever hasn't arrived
+// was dropped, and the request is sent again.
+const LAYOUT_STALL_MS = 800;
+// Keep asking while rounds still fill holes; stop after this many in a row that add nothing
+// (or the hard cap), so a link that's really gone still fails in reasonable time.
+const LAYOUT_FRUITLESS_ROUNDS = 3;
+const LAYOUT_MAX_ROUNDS = 30;
+
 async function readLayoutChannelOnce(deviceId: string, code: number, idleMs: number): Promise<{ bytes: Uint8Array | null; answered: boolean }> {
+  // BLE notifications get DROPPED: the firmware sends chunks 8 ms apart without checking that
+  // the BLE stack accepted them, so on a busy classic ESP32 (Portal: a 5.6 KB, 32-chunk layout)
+  // the transmit buffer overflows and the tail of every read is lost. The device has no way to
+  // resend one chunk, but it always chunks the same file at the same offsets, so asking again
+  // and keeping what we already have fills the holes. Rounds often add only a chunk or two, so
+  // keep going for as long as they make progress.
   let total = -1, received = 0;
   let buf: Uint8Array | null = null;
   const seenOffsets = new Set<number>();
   type R = { bytes: Uint8Array | null; answered: boolean };
   let settle: ((v: R) => void) | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let rounds = 0, fruitless = 0, receivedAtLastRound = 0;
+  const finish = (v: R) => { if (settle) { const s = settle; settle = null; s(v); } };
+
+  const request = async () => {
+    rounds++;
+    await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_LAYOUT_GET,
+      new DataView(new Uint8Array([code & 0xff]).buffer));
+  };
+  // Before the first frame: wait the caller's idle time for the device to start answering.
+  // Mid-transfer: a short stall means chunks were dropped — ask again, up to a few rounds.
   const armTimer = () => {
     if (timer) clearTimeout(timer);
-    timer = setTimeout(() => { if (settle) { const s = settle; settle = null; s({ bytes: null, answered: false }); } }, idleMs);
+    const partial = total > 0;
+    timer = setTimeout(() => {
+      if (!settle) return;
+      if (partial) {
+        fruitless = received > receivedAtLastRound ? 0 : fruitless + 1;
+        receivedAtLastRound = received;
+      }
+      if (partial && rounds < LAYOUT_MAX_ROUNDS && fruitless < LAYOUT_FRUITLESS_ROUNDS) {
+        console.warn(`[Layout channel] ${received}/${total} B after round ${rounds}; asking again for the dropped chunks`);
+        armTimer();
+        request().catch((err) => { console.error('[Layout channel] re-request failed:', err); finish({ bytes: null, answered: false }); });
+      } else {
+        finish({ bytes: null, answered: false });
+      }
+    }, partial ? LAYOUT_STALL_MS : idleMs);
   };
 
   const onFrame = (dv: DataView) => {
     if (!settle || dv.byteLength < 4) return;
-    armTimer();
     const totalLen = dv.getUint16(0, true);
     const offset = dv.getUint16(2, true);
-    if (totalLen === 0) { const s = settle; settle = null; s({ bytes: null, answered: true }); return; }
-    if (total < 0) { total = totalLen; buf = new Uint8Array(total); received = 0; }
+    if (totalLen === 0) { finish({ bytes: null, answered: true }); return; }
+    // A different length means the file changed between rounds: start over on the new one.
+    if (total !== totalLen) { total = totalLen; buf = new Uint8Array(total); received = 0; seenOffsets.clear(); }
+    armTimer();
     const dataLen = dv.byteLength - 4;
     for (let i = 0; i < dataLen && offset + i < total; i++) buf![offset + i] = dv.getUint8(4 + i);
     if (!seenOffsets.has(offset)) { seenOffsets.add(offset); received += Math.min(dataLen, total - offset); }
-    if (received >= total && buf) { const s = settle; settle = null; s({ bytes: buf, answered: true }); }
+    if (received >= total && buf) {
+      if (rounds > 1) console.log(`[Layout channel] complete after ${rounds} rounds (${total} B)`);
+      finish({ bytes: buf, answered: true });
+    }
   };
 
   const result = await new Promise<R>(async (resolve) => {
@@ -2088,13 +2131,13 @@ async function readLayoutChannelOnce(deviceId: string, code: number, idleMs: num
     armTimer();
     try {
       await startBinaryNotifications(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_LAYOUT_GET, onFrame);
-      await writeCharacteristicBinary(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_LAYOUT_GET,
-        new DataView(new Uint8Array([code & 0xff]).buffer));
+      await request();
     } catch (err) {
-      if (settle) { const s = settle; settle = null; s({ bytes: null, answered: false }); }
+      finish({ bytes: null, answered: false });
       console.error('[Layout channel] read failed:', err);
     }
   });
+  if (timer) clearTimeout(timer);
   await stopNotifications(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_LAYOUT_GET).catch(() => {});
   return result;
 }
