@@ -17,7 +17,7 @@ NOSE_RX = 5.0          # rounding starts 5 mm in from each side (button..switch 
 NOSE_RY = 15.0
 TAB = 1.9              # = case GAP + WALL: the end tab passes through the case end wall
 FAR_R = 1.5
-NOTCH = (0.0, 16.8, 5.0, 24.8)   # x0, y0, x1, y1: JST-PH plug + battery lead pocket (8 x 5 mm)
+NOTCH = (0.0, 18.8, 3.0, 22.8)   # x0, y0, x1, y1: battery-lead drop, 4 x 3 mm (2 x 1.5 mm OD PH wires + slack)
 
 
 def _ellipse(cx, cy, rx, ry, a0, a1, n=24):

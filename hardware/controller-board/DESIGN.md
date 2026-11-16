@@ -29,6 +29,21 @@ Revision history:
 
 ---
 
+## 0d. Fixes (supersedes 0c where they differ)
+
+- **Battery-lead notch: 4 × 3 mm** (was 8 × 5). JST-PH crimps take 24–28 AWG (24–32 with the smaller crimp), and
+  their insulation is at most ~1.5 mm OD. The two leads leave the plug on a 2 mm pitch, so they span ≤ 3.5 mm. The
+  mated plug's back ends ~3.5 mm from the board edge, so the leads bend straight down into the 3 mm-deep notch.
+  The case's side U-notch for external-battery leads is now 4 × 2 mm.
+  Even the 2 × 18650 brick should stay on 24 AWG: PH contacts are rated 2 A, so for sustained LED loads above
+  that, solder the pack to the BAT+/BAT− pads instead.
+- **WAGO lid slot** moved over the release buttons (board x 27.2–29.4). It had stayed over the wire-entry end when
+  the push-ins were turned around.
+- **Brick case:** the 18650 bay now starts at the business end and matches the length of the rest of the case
+  (73 mm, was 86).
+- **Silkscreen labels** on every wire pad: BAT+ / BAT− / NTC on the battery pads, and GND 5V C1 D1 … C4 D4 beside
+  the LED pads.
+
 ## 0c. Flush business end, no printed parts (supersedes 0b where they differ)
 
 - **Button and switch overhang the board.** The middle of the business end is now a 1.9 mm tab that runs through

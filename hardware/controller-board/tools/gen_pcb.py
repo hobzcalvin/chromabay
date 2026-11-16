@@ -243,6 +243,22 @@ def main():
         t.SetPosition(P(x, y - 1.55 if top else y + 1.55))
         board.Add(t)
     placed.append((0.3, 41.8, 31.0, 48.9))   # header + its labels
+    # Wire-pad labels: battery pads (label to the right of each pad), LED pads (label to the left)
+    PAD_TEXT = {"J3": ({"1": "BAT+", "2": "BAT-", "3": "NTC"}, +1),
+                "J5": ({"1": "GND", "2": "5V", **{str(3 + i): n for i, n in enumerate(
+                    ["C1", "D1", "C2", "D2", "C3", "D3", "C4", "D4"])}}, -1)}
+    for ref, (names, side) in PAD_TEXT.items():
+        for pad in fps[ref].Pads():
+            text = names[pad.GetNumber()]
+            px, py = pcbnew.ToMM(pad.GetPosition().x) - OX, pcbnew.ToMM(pad.GetPosition().y) - OY
+            hw = pcbnew.ToMM(pad.GetSize(pcbnew.F_Cu).x) / 2
+            tw = 0.5 * len(text)
+            cx = px + side * (hw + 0.25 + tw / 2)
+            t = pcbnew.PCB_TEXT(board)
+            t.SetText(text); t.SetLayer(pcbnew.F_SilkS)
+            t.SetTextSize(pcbnew.VECTOR2I(MM(0.5), MM(0.65))); t.SetTextThickness(MM(0.11))
+            t.SetPosition(P(cx, py)); board.Add(t)
+            placed.append((cx - tw / 2 - 0.1, py - 0.45, cx + tw / 2 + 0.1, py + 0.45))
     placed.append((3.8, 8.3, 9.9, 9.45))     # "+0.45A  +1A" labels above the charge jumpers
     placed.append((6.0, 13.0, 8.1, 14.2))    # "CHG" below them
     tps = []

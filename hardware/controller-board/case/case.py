@@ -42,7 +42,7 @@ VARIANTS = {
     "thick": dict(bay=10.6, cell=(34.0, 46.0, 10.0)),  # 103450-class pouch, ~2 Ah
     # 1S2P 18650 pack (two cells side by side + PCM + JST lead), ~6-7 Ah: the 200-LED / 4-hour
     # target. The bay is wider and longer than the board, so this one is a "brick".
-    "brick": dict(bay=1.0, cell=None, pack=(37.6, 70.0, 19.0, 12.0)),   # w, l, h, y0 of the pack
+    "brick": dict(bay=1.0, cell=None, pack=(37.6, 68.0, 19.0, 2.0)),    # w, l, h, y0 of the pack
 }
 CELL_Y0 = 11.0          # the strip under the nose stays solid (mic channel)
 
@@ -57,11 +57,11 @@ END = [  # business-end openings in the lid wall: (name, x_centre, z_centre, wid
 ]
 MIC_X, MIC_Y = 9.0, 6.7           # bottom-port mic -> channel under the board -> end face
 SIDE_NOTCHES = [  # (side, y_centre, width): U-notches at the seam for laid-in wires
-    ("left", 20.8, 5.0),          # battery lead, external-battery builds (beside the JST notch)
+    ("left", 20.8, 4.0),          # battery lead, external-battery builds (two <=1.5 mm OD wires side by side)
 ]
 # One opening in the right wall covers the OUT1 push-in entries and all ten LED wire pads.
 WAGO_WINDOW = (11.6, 53.0, 4.8)   # y0, y1, height above the PCB top
-WAGO_SLOT = (30.6, 12.2, 34.6, 27.4)  # lid slot over the WAGO release buttons
+WAGO_SLOT = (26.6, 12.0, 30.0, 27.5)  # lid slot over the WAGO release buttons (x 27.2..29.4 on the board)
 
 
 def prism(pts, z0, z1, offset=0.0):
@@ -109,8 +109,8 @@ def build(name, bay, cell, pack=None):
     # side U-notches at the seam
     for side, y, w in SIDE_NOTCHES:
         xw = -(GAP + WALL) - 0.5 if side == "left" else outline.W + GAP + WALL + 0.5
-        n = cq.Workplane("YZ").center(y, TOP + 0.6).rect(w, 4.4).extrude(3 if side == "left" else -3)
-        body = body.cut(n.edges("|X").fillet(min(w, 4.4) / 2 - 0.01).translate((xw, 0, 0)))
+        n = cq.Workplane("YZ").center(y, TOP + 0.4).rect(w, 2.0).extrude(3 if side == "left" else -3)
+        body = body.cut(n.edges("|X").fillet(0.9).translate((xw, 0, 0)))
     # big-pack bay under the board (brick variant): a box wider and longer than the board
     if pack:
         pw, pl, ph, py0 = pack
@@ -118,7 +118,7 @@ def build(name, bay, cell, pack=None):
         ix0 = (outline.W - iw) / 2
         bz0 = -(ph + 1.5 + FLOOR)
         box = (cq.Workplane("XY").box(iw + 2 * WALL, il + 2 * WALL, -bz0, centered=False)
-               .translate((ix0 - WALL, py0 - 0.4 - WALL, bz0)).edges("|Z").fillet(2.0))
+               .translate((ix0 - WALL, py0 - 0.4 - WALL, bz0)).edges("|Z").fillet(4.0))
         body = body.union(box).cut(cq.Workplane("XY").box(iw, il, ph + 0.5, centered=False)
                                    .translate((ix0, py0 - 0.4, bz0 + FLOOR)))
         z0 = bz0
