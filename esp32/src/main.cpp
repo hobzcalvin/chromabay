@@ -787,6 +787,12 @@ String buildDeviceInfoJson() {
 #endif
     j += "\"sleep\":" + String(gSettings.sleepMinutes) + ",";
     j += "\"rgbtest\":" + String(gSettings.rgbTest ? 1 : 0) + ",";
+    // Content generations (content_gen.h) and the live brightness — brightness changes all the
+    // time and isn't part of "config changed", so an app reusing a cached config takes it from here.
+    j += "\"gcfg\":" + String(ContentGen::get(ContentGen::CFG)) + ",";
+    j += "\"glay\":" + String(ContentGen::get(ContentGen::LAY)) + ",";
+    j += "\"glib\":" + String(ContentGen::get(ContentGen::LIB)) + ",";
+    j += "\"bri\":" + String(ledMgr.getGlobalBrightness()) + ",";
     j += "\"heap\":" + String(ESP.getFreeHeap());
     j += "}";
     return j;
@@ -1853,6 +1859,7 @@ static bool libUpsert(const String& name, const uint8_t* msgpack, size_t size) {
     f.close();
     if (w != size) { Serial.println("Library: short write"); return false; }
     if (isNew) { libNames.push_back(name); libRebuildOrder(); }
+    ContentGen::bump(ContentGen::LIB);
     Serial.printf("Library upsert [%d] '%s' (%u bytes) — %u total\n",
                   idx, name.c_str(), (unsigned)size, (unsigned)libNames.size());
     return true;
@@ -1872,6 +1879,7 @@ static bool libDelete(const String& name) {
     }
     libNames.erase(libNames.begin() + idx);
     libRebuildOrder();
+    ContentGen::bump(ContentGen::LIB);
     Serial.printf("Library delete '%s' — %u remaining\n", name.c_str(), (unsigned)libNames.size());
     return true;
 }
@@ -1886,6 +1894,7 @@ static void libClear() {
     LittleFS.remove(LIB_CURRENT_FILE);
     libNames.clear();
     libRebuildOrder();
+    ContentGen::bump(ContentGen::LIB);
     Serial.println("Library cleared");
 }
 
@@ -2351,6 +2360,7 @@ void processReceivedLedConfig() {
 
             // Save configuration to file
             configMgr.saveConfiguration();
+            ContentGen::bump(ContentGen::CFG);
 
             Serial.println("LED Configuration updated successfully");
             // Recorded inside the transaction above, so the SDK attaches this line to the same
@@ -2412,6 +2422,7 @@ void processReceivedLayout() {
         }
     }
     if (committed) {
+        ContentGen::bump(ContentGen::LAY);
         configMgr.loadStripLayouts(); // apply live across all strips
         // A layout sets the canvas size (its W×H replaces the strip's own dimensions), so the
         // render buffers must be re-sized to match — otherwise the next frame renders W×H
