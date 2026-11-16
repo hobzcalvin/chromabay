@@ -37,7 +37,8 @@ HDR_TEXT = {"3V3": "3.3 V out", "GND": "GND", "SDA": "I2C SDA", "SCL": "I2C SCL"
             "EXT_WS": "Ext mic WS", "EXT_SD": "Ext mic SD", "VSYS": "Ext power switch A",
             "LDO_EN": "Ext power switch B", "IO45": "IO45 (strap: keep low at boot)",
             "IO46": "IO46 (strap: keep low at boot)", "IO3": "IO3 (strap)", "IO43": "IO43 (UART TX)",
-            "IO44": "IO44 (UART RX)", "IO11": "IO11", "IO26": "IO26"}
+            "IO44": "IO44 (UART RX)", "IO11": "IO11", "IO26": "IO26",
+            "VBUS": "USB 5 V (only while plugged in)", "VLED": "5 V out (LED rail: fused, firmware-switched)"}
 ICS = {"U1": "ESP32-S3 module", "U2": "Charger / power path", "U3": "5 V boost", "L1": "Charger inductor",
        "L2": "Boost inductor", "U7": "Level shifter (5 V data)", "U5": "Motion sensor (IMU)",
        "U6": "3.3 V regulator", "Q1": "Battery reverse-polarity FET", "Q2": "LED power switch",

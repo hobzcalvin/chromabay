@@ -37,20 +37,22 @@ def P(x, y):
 # ref: (x, y, rotation_deg)   -- board coordinates
 ANCHORS = {
     # --- business end: button, LED, USB-C, power switch packed edge to edge (pad extents 2.95..33.06)
-    "SW2": (6.3, 2.7, 180), "D1": (12.15, 1.7, 180), "J1": (19.48, 4.85, 180), "SW1": (28.86, 3.4, 180),
+    "SW2": (6.3, 5.4, 180), "D1": (12.15, 1.7, 180), "J1": (19.48, 4.85, 180), "SW1": (28.86, 6.1, 180),
     "MK1": (12.2, 7.9, 0),          # bottom-port mic; case channel exits the end face under the LED
     # --- POWER (left half, between USB-C and the battery): charger right behind the USB-C,
     #     battery JST in the left-side notch with the reverse-polarity FET next to it, boost below.
-    "U2": (19.0, 13.2, 0), "L1": (13.2, 13.4, 0),
-    "J4": (13.55, 20.5, 270), "Q1": (19.6, 25.2, 0), "J3": (1.6, 28.0, 270),
+    "U2": (18.75, 13.2, 0), "L1": (13.2, 13.4, 0),
+    "J4": (11.95, 20.8, 270), "Q1": (19.6, 25.2, 0), "J3": (1.6, 28.0, 270),
     "U3": (9.0, 32.5, 0), "L2": (3.2, 38.5, 90),
-    "Q2": (15.5, 29.6, 0), "Q3": (18.6, 31.8, 0), "F1": (24.5, 29.2, 0),
+    "Q2": (15.5, 29.6, 0), "Q3": (18.6, 31.8, 0), "F1": (24.5, 29.9, 0),
     # --- LED OUTPUTS (right side): WAGO push-ins + pad strip on the edge, level shifter and ESD
     #     right next to them so the eight data lines are short.
-    "J2": (28.0, 14.2, 180), "J6": (28.0, 22.1, 180), "J5": (34.6, 27.5, 0),
+    "J2": (27.85, 15.8, 180), "J6": (27.85, 23.7, 180), "J5": (34.8, 28.9, 0),
     "U7": (23.6, 36.8, 0), "U9": (29.4, 30.2, 90), "U10": (29.4, 37.6, 90),
     # --- user header across the board above the module
-    "J7": (3.9, 46.6, 90),
+    "J7": (1.3, 46.6, 90),
+    # --- charge-current jumpers side by side (bridge one or both), next to the charger side
+    "JP1": (5.6, 11.2, 90), "JP2": (8.5, 11.2, 90),
     # --- MCU end: ESP32 module (antenna overhangs the far edge), 3.3 V LDO and IMU beside it
     "U1": (18.0, 58.1, 180), "U6": (5.0, 55.0, 0), "U5": (31.0, 55.5, 0),
 }
@@ -60,7 +62,7 @@ TP_ORDER = ["3V3", "GND", "SDA", "SCL", "T1", "T2", "T3", "T4", "BOOT", "MIC_BCL
 
 KEEPOUT_ANTENNA = None   # antenna overhangs the board edge
 import outline  # noqa: E402
-NO_PLACE = [(0, 0, W, 0.4), (0, 0, 3.0, 12.0), (W - 3.0, 0, W, 12.0),       # edge + nose corners
+NO_PLACE = [(0, 0, W, 0.4), (0, 0, 4.5, 9.0), (W - 4.5, 0, W, 9.0),       # edge + nose corners
             (outline.NOTCH[0], outline.NOTCH[1] - 0.3, outline.NOTCH[2] + 0.3, outline.NOTCH[3] + 0.3)]
 
 
@@ -227,12 +229,11 @@ def main():
         top = pad.GetPosition().y == ys[0]
         t = pcbnew.PCB_TEXT(board)
         t.SetText(design.HEADER_LABELS[hnet]); t.SetLayer(pcbnew.F_SilkS)
-        t.SetTextSize(pcbnew.VECTOR2I(MM(0.75), MM(0.75))); t.SetTextThickness(MM(0.13))
-        t.SetTextAngleDegrees(90)
-        t.SetHorizJustify(pcbnew.GR_TEXT_H_ALIGN_LEFT if top else pcbnew.GR_TEXT_H_ALIGN_RIGHT)
-        t.SetPosition(P(x, y - 1.5 if top else y + 1.5))
+        t.SetTextSize(pcbnew.VECTOR2I(MM(0.42), MM(0.6))); t.SetTextThickness(MM(0.1))
+        t.SetHorizJustify(pcbnew.GR_TEXT_H_ALIGN_CENTER)
+        t.SetPosition(P(x, y - 1.55 if top else y + 1.55))
         board.Add(t)
-    placed.append((2.2, 39.2, 30.8, 50.6))   # header + its labels
+    placed.append((0.3, 41.8, 31.0, 48.9))   # header + its labels
     tps = []
 
     # ---- passives + jumpers: auto-place near the IC pad they share a net with
@@ -292,6 +293,22 @@ def main():
                 break
         if not done:
             print("could not place", p["ref"])
+
+    # ---- solder-jumper labels (what bridging / cutting does)
+    JP_TEXT = {"JP1": "+0.45A", "JP2": "+1A", "JP3": "NTC", "JP4": "SW", "JP5": "EXT5V", "JP7": "MIC"}
+    for ref, text in JP_TEXT.items():
+        fp = fps.get(ref)
+        if not fp:
+            continue
+        bb = bbox_mm(fp, 0)
+        t = pcbnew.PCB_TEXT(board)
+        t.SetText(text); t.SetLayer(pcbnew.F_SilkS)
+        t.SetTextSize(pcbnew.VECTOR2I(MM(0.45), MM(0.55))); t.SetTextThickness(MM(0.1))
+        t.SetPosition(P((bb[0] + bb[2]) / 2, bb[1] - 0.55))
+        board.Add(t)
+    t = pcbnew.PCB_TEXT(board); t.SetText("CHG"); t.SetLayer(pcbnew.F_SilkS)
+    t.SetTextSize(pcbnew.VECTOR2I(MM(0.45), MM(0.55))); t.SetTextThickness(MM(0.1))
+    t.SetPosition(P(7.05, 13.6)); board.Add(t)
 
     # ---- zones: In1 = solid GND plane, B.Cu GND pour, antenna keepout
     def zone(layer, netname, rect, priority=0):

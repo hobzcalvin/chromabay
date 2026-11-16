@@ -11,10 +11,10 @@ Board frame: x across (0..W), y along the board (0 = business end, H = antenna e
 import math
 
 W, H = 36.0, 66.0
-NOSE_RX = 2.6          # = where the business-end controls start/stop, minus edge clearance
-NOSE_RY = 12.0
+NOSE_RX = 8.0          # rounding starts 8 mm in from each side (button/switch sit back, with printed extenders)
+NOSE_RY = 15.0
 FAR_R = 1.5
-NOTCH = (0.0, 15.6, 6.6, 25.4)   # x0, y0, x1, y1: JST-PH plug + battery lead pocket
+NOTCH = (0.0, 16.8, 5.0, 24.8)   # x0, y0, x1, y1: JST-PH plug + battery lead pocket (8 x 5 mm)
 
 
 def _ellipse(cx, cy, rx, ry, a0, a1, n=24):

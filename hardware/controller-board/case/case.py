@@ -39,23 +39,48 @@ VARIANTS = {
     "external": dict(bay=1.0, cell=None),
     "slim": dict(bay=6.6, cell=(34.0, 46.0, 6.0)),     # 603450-class pouch, ~1.1 Ah
     "thick": dict(bay=10.6, cell=(34.0, 46.0, 10.0)),  # 103450-class pouch, ~2 Ah
+    # 1S2P 18650 pack (two cells side by side + PCM + JST lead), ~6-7 Ah: the 200-LED / 4-hour
+    # target. The bay is wider and longer than the board, so this one is a "brick".
+    "brick": dict(bay=1.0, cell=None, pack=(37.6, 70.0, 19.0, 12.0)),   # w, l, h, y0 of the pack
 }
 CELL_Y0 = 11.0          # the strip under the nose stays solid (mic channel)
 
 # ---------------------------------------------------------------- features (match gen_pcb.py)
 END = [  # business-end cutouts: (name, x_centre, z_centre, width, height, corner radius)
-    ("button", 6.3, TOP + 0.9, 3.6, 2.2, 0.6),
+    ("button", 6.3, TOP + 0.85, 2.8, 1.9, 0.4),   # plunger hole
     ("led", 12.15, TOP + 0.55, 1.8, 1.6, 0.6),
     ("usb", 19.48, TOP + 1.6, 9.6, 3.8, 1.2),
-    ("switch", 28.86, TOP + 0.75, 5.2, 1.9, 0.4),
+    ("switch", 28.86, TOP + 0.85, 5.0, 2.0, 0.4), # slot for the slide cap (travel 1.5 mm)
 ]
 MIC_X, MIC_Y = 12.2, 7.9          # bottom-port mic -> channel under the board -> end face (under the LED)
 SIDE_NOTCHES = [  # (side, y_centre, width): U-notches at the seam for laid-in wires
-    ("left", 20.5, 5.0),          # battery lead, external-battery builds (beside the JST notch)
-    ("right", 36.4, 6.0),         # wires soldered to the LED output pads
+    ("left", 20.8, 5.0),          # battery lead, external-battery builds (beside the JST notch)
 ]
-WAGO_WINDOW = (10.0, 26.3, 4.8)   # y0, y1, height above the PCB top: OUT1 push-in wire entries
-WAGO_SLOT = (30.6, 10.6, 34.6, 25.8)  # lid slot over the WAGO release buttons
+# One opening in the right wall covers the OUT1 push-in entries and all ten LED wire pads.
+WAGO_WINDOW = (11.6, 53.0, 4.8)   # y0, y1, height above the PCB top
+WAGO_SLOT = (30.6, 12.2, 34.6, 27.4)  # lid slot over the WAGO release buttons
+
+
+# Printed extenders: the button and switch sit 2.3 mm back from the board edge (so the nose can
+# taper), so each gets a small printed part that reaches out through the end wall.
+# Tune ACT_TIP_Y / handle pocket to the real parts on the first print.
+ACT_TIP_Y = 2.3        # board y of the button actuator tip and the switch handle tip
+WALL_FACE_Y = -(GAP + WALL)  # outer face of the end wall (nose is flat there to within 0.4 mm)
+PROTRUDE = 1.2
+
+
+def extenders():
+    """Button plunger and switch slide-cap, in board coordinates (assembled positions)."""
+    bx, bz = END[0][1], END[0][2]
+    y0, y1 = WALL_FACE_Y - PROTRUDE, ACT_TIP_Y - 0.1
+    plunger = (cq.Workplane("XY").box(2.4, y1 - y0, 1.5).translate((bx, (y0 + y1) / 2, bz))
+               .union(cq.Workplane("XY").box(4.4, 0.8, 1.5).translate((bx, 0.6, bz))))  # flange inside the wall
+    sx, sz = END[3][1], END[3][2]
+    c_y1 = ACT_TIP_Y + 1.0                       # overlaps the handle by 1 mm
+    cap = (cq.Workplane("XY").box(3.2, c_y1 - y0, 1.6).translate((sx, (y0 + c_y1) / 2, sz))
+           .union(cq.Workplane("XY").box(6.6, 0.8, 1.6).translate((sx, 0.6, sz)))       # retaining plate
+           .cut(cq.Workplane("XY").box(1.8, 1.3, 1.2).translate((sx, c_y1 - 0.6, sz))))  # handle pocket
+    return plunger, cap
 
 
 def prism(pts, z0, z1, offset=0.0):
@@ -65,7 +90,7 @@ def prism(pts, z0, z1, offset=0.0):
     return wp.extrude(z1 - z0)
 
 
-def build(name, bay, cell):
+def build(name, bay, cell, pack=None):
     z0 = -(bay + FLOOR)
     z1 = TOP + COMP_H + LID_CLEAR + ROOF
     case_pts = outline.points(notch=False, far_extend=ANT_OVERHANG)
@@ -101,6 +126,17 @@ def build(name, bay, cell):
         xw = -(GAP + WALL) - 0.5 if side == "left" else outline.W + GAP + WALL + 0.5
         n = cq.Workplane("YZ").center(y, TOP + 0.6).rect(w, 4.4).extrude(3 if side == "left" else -3)
         body = body.cut(n.edges("|X").fillet(min(w, 4.4) / 2 - 0.01).translate((xw, 0, 0)))
+    # big-pack bay under the board (brick variant): a box wider and longer than the board
+    if pack:
+        pw, pl, ph, py0 = pack
+        iw, il = pw + 0.8, pl + 0.8
+        ix0 = (outline.W - iw) / 2
+        bz0 = -(ph + 1.5 + FLOOR)
+        box = (cq.Workplane("XY").box(iw + 2 * WALL, il + 2 * WALL, -bz0, centered=False)
+               .translate((ix0 - WALL, py0 - 0.4 - WALL, bz0)).edges("|Z").fillet(2.0))
+        body = body.union(box).cut(cq.Workplane("XY").box(iw, il, ph + 0.5, centered=False)
+                                   .translate((ix0, py0 - 0.4, bz0 + FLOOR)))
+        z0 = bz0
     # two M2 screw bosses past the antenna end
     for bx in (2.6, outline.W - 2.6):
         by = outline.H + ANT_OVERHANG - 2.4
@@ -120,6 +156,20 @@ def build(name, bay, cell):
     os.makedirs(OUT, exist_ok=True)
     cq.exporters.export(bottom, os.path.join(OUT, f"{name}-bottom.stl"), tolerance=0.05)
     cq.exporters.export(lid, os.path.join(OUT, f"{name}-lid.stl"), tolerance=0.05)
+    plunger, cap = extenders()
+    cq.exporters.export(plunger.mirror("XZ"), os.path.join(OUT, "button-plunger.stl"), tolerance=0.02)
+    cq.exporters.export(cap.mirror("XZ"), os.path.join(OUT, "switch-cap.stl"), tolerance=0.02)
+    if pack:
+        pw, pl, ph, py0 = pack
+        r = ph / 2
+        cells = None
+        for cx in (outline.W / 2 - pw / 4, outline.W / 2 + pw / 4):
+            cyl = (cq.Workplane("XZ").center(cx, -1.2 - r).circle(r).extrude(-65.0)
+                   .translate((0, py0 + 3.0, 0)))
+            cells = cyl if cells is None else cells.union(cyl)
+        pcm = cq.Workplane("XY").box(pw - 2, 3.0, ph - 4, centered=False).translate(
+            ((outline.W - pw) / 2 + 1, py0, -1.2 - ph + 2))
+        cq.exporters.export(cells.union(pcm).mirror("XZ"), os.path.join(OUT, f"{name}-cell.stl"), tolerance=0.05)
     if cell:
         cw, cl, ch = cell
         c = (cq.Workplane("XY").box(cw, cl, ch, centered=False)

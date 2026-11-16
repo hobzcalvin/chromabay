@@ -698,7 +698,7 @@
 			)
 			(embedded_fonts no)
 		)
-		(symbol "Connector_Generic:Conn_02x11_Odd_Even"
+		(symbol "Connector_Generic:Conn_02x12_Odd_Even"
 			(pin_names
 				(offset 1.016)
 				(hide yes)
@@ -714,8 +714,8 @@
 					)
 				)
 			)
-			(property "Value" "Conn_02x11_Odd_Even"
-				(at 1.27 -15.24 0)
+			(property "Value" "Conn_02x12_Odd_Even"
+				(at 1.27 -17.78 0)
 				(effects
 					(font
 						(size 1.27 1.27)
@@ -740,7 +740,7 @@
 					(hide yes)
 				)
 			)
-			(property "Description" "Generic connector, double row, 02x11, odd/even pin numbering scheme (row 1 odd numbers, row 2 even numbers), script generated (kicad-library-utils/schlib/autogen/connector/)"
+			(property "Description" "Generic connector, double row, 02x12, odd/even pin numbering scheme (row 1 odd numbers, row 2 even numbers), script generated (kicad-library-utils/schlib/autogen/connector/)"
 				(at 0 0 0)
 				(effects
 					(font
@@ -767,10 +767,10 @@
 					(hide yes)
 				)
 			)
-			(symbol "Conn_02x11_Odd_Even_1_1"
+			(symbol "Conn_02x12_Odd_Even_1_1"
 				(rectangle
 					(start -1.27 13.97)
-					(end 3.81 -13.97)
+					(end 3.81 -16.51)
 					(stroke
 						(width 0.254)
 						(type default)
@@ -901,6 +901,17 @@
 					)
 				)
 				(rectangle
+					(start -1.27 -15.113)
+					(end 0 -15.367)
+					(stroke
+						(width 0.1524)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(rectangle
 					(start 3.81 12.827)
 					(end 2.54 12.573)
 					(stroke
@@ -1013,6 +1024,17 @@
 				(rectangle
 					(start 3.81 -12.573)
 					(end 2.54 -12.827)
+					(stroke
+						(width 0.1524)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(rectangle
+					(start 3.81 -15.113)
+					(end 2.54 -15.367)
 					(stroke
 						(width 0.1524)
 						(type default)
@@ -1220,6 +1242,24 @@
 					)
 				)
 				(pin passive line
+					(at -5.08 -15.24 0)
+					(length 3.81)
+					(name "Pin_23"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(number "23"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+				)
+				(pin passive line
 					(at 7.62 12.7 180)
 					(length 3.81)
 					(name "Pin_2"
@@ -1410,6 +1450,24 @@
 						)
 					)
 					(number "22"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+				)
+				(pin passive line
+					(at 7.62 -15.24 180)
+					(length 3.81)
+					(name "Pin_24"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(number "24"
 						(effects
 							(font
 								(size 1.27 1.27)
@@ -25684,7 +25742,7 @@
 		(uuid "64de1d99-3946-5f08-a313-6885d5b9cf2d")
 	)
 	(symbol
-		(lib_id "Connector_Generic:Conn_02x11_Odd_Even")
+		(lib_id "Connector_Generic:Conn_02x12_Odd_Even")
 		(at 652.78 439.42 0)
 		(unit 1)
 		(exclude_from_sim no)
@@ -25701,14 +25759,14 @@
 			)
 		)
 		(property "Value" "USER HEADER"
-			(at 652.78 455.89 0)
+			(at 652.78 458.43 0)
 			(effects
 				(font
 					(size 1.27 1.27)
 				)
 			)
 		)
-		(property "Footprint" "Connector_PinHeader_2.54mm:PinHeader_2x11_P2.54mm_Vertical"
+		(property "Footprint" "Connector_PinHeader_2.54mm:PinHeader_2x12_P2.54mm_Vertical"
 			(at 652.78 439.42 0)
 			(effects
 				(font
@@ -25735,7 +25793,7 @@
 				(hide yes)
 			)
 		)
-		(property "Note" "2x11 through-hole pads at 2.54 mm; fit a pin header or solder wires"
+		(property "Note" "2x12 through-hole pads at 2.54 mm; fit a pin header or solder wires"
 			(at 652.78 439.42 0)
 			(effects
 				(font
@@ -25777,6 +25835,9 @@
 		(pin "21"
 			(uuid "13d7da43-1182-537d-be79-5573ad463b10")
 		)
+		(pin "23"
+			(uuid "80b028f9-d3a2-5784-9a3c-423daa53fc73")
+		)
 		(pin "2"
 			(uuid "d041b32a-0373-5b13-a5dc-c2818dad80c8")
 		)
@@ -25809,6 +25870,9 @@
 		)
 		(pin "22"
 			(uuid "87ea5b36-3173-50f3-b556-ce0c690d20db")
+		)
+		(pin "24"
+			(uuid "15a6bb08-7287-5d4a-a3f9-10b3f9cc3fb9")
 		)
 		(instances
 			(project "chromabay-controller"
@@ -26052,6 +26116,27 @@
 	)
 	(wire
 		(pts
+			(xy 647.7 454.66)
+			(xy 645.16 454.66)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "50c3792d-8112-555c-8d0e-36b39f5c4277")
+	)
+	(label "VBUS"
+		(at 645.16 454.66 180)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right bottom)
+		)
+		(uuid "5ed775c6-6721-5c92-aff4-6ac7e5ed1a56")
+	)
+	(wire
+		(pts
 			(xy 660.4 426.72)
 			(xy 662.94 426.72)
 		)
@@ -26280,6 +26365,27 @@
 			(justify left bottom)
 		)
 		(uuid "63c78f65-732f-587a-9935-a24b8c439516")
+	)
+	(wire
+		(pts
+			(xy 660.4 454.66)
+			(xy 662.94 454.66)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "8f397430-0495-5f1a-b060-51bee71441b5")
+	)
+	(label "VLED"
+		(at 662.94 454.66 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "05f6337f-3d41-52a8-b3df-4470797afd17")
 	)
 	(text "Mechanical"
 		(exclude_from_sim no)

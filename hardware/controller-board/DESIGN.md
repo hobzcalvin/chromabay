@@ -1,7 +1,7 @@
 # ChromaBay battery LED controller: board + case design
 
-Status: **KiCad rev A: schematic done (ERC clean), parts placed on 36 × 66 mm (DRC/parity clean), not yet
-routed.** One PCB, three builds (Core / Plug / Complete); see section 0. See [README.md](README.md) for the files, renders and how to regenerate them. Where rev A
+Status: **KiCad rev A: schematic done (ERC clean), parts placed on 36 × 66 mm with a tapered nose (DRC/parity clean),
+not yet routed.** One PCB, three builds (Core / Plug / Complete); see section 0. See [README.md](README.md) for the files, renders and how to regenerate them. Where rev A
 differs from this spec, section 0 wins.
 
 In product terms, this is a battery-powered, ChromaBay-first take on the GLEDOPTO ESP32 mini
@@ -28,6 +28,40 @@ Revision history:
   - Lessons from GLEDOPTO.
 
 ---
+
+## 0b. Taper + usability pass (supersedes 0a where they differ)
+
+- **Nose taper:** the rounding now starts **8 mm in from each side** and runs 15 mm down (was 2.6 × 12). The board's
+  straight tip is 20 mm wide (case tip ~24 mm). To allow that, the button and power switch sit ~2.7 mm back from the
+  edge, and the case includes two small printed parts (`case/out/button-plunger.stl`, `switch-cap.stl`): a captive
+  plunger for the button and a cap that slips over the slide-switch handle. Both reach ~1.2 mm past the end wall, so
+  no paper clip is needed. Tune the handle pocket on the first print.
+- **5 V for accessories:** the header is now **2 × 12** and adds **VUSB** (USB 5 V, present only while plugged in) and
+  **5V** (the LED rail: fused at 3 A, on only while firmware enables the LEDs). The LED pad strip's V pad is the same rail.
+- **Battery notch:** 8 mm along the edge × 5 mm deep (was 9.8 × 6.6). A PHR-2 plug is 6 mm wide, and its 24–28 AWG
+  leads (≤ 1.3 mm OD each) drop straight through to the cell.
+- **Charge jumpers** JP1 (+0.45 A) and JP2 (+1 A) sit side by side under a CHG label. Every solder jumper now has a
+  silkscreen label.
+- **Case:** one opening in the right wall covers the WAGO entries and all ten LED pads.
+- **Battery sizes** (energy ≈ Ah × 3.7 V; run time at the 200-LED "low" load of ~6 W):
+
+  | Case | Cell | Capacity | Run time at 200 LEDs, low | Outer size |
+  |---|---|---|---|---|
+  | external | your pack, outside | any | — | 39.8 × 75 × 11 mm |
+  | slim | 603450-class pouch | ~1.1 Ah (4 Wh) | ~40 min | 39.8 × 75 × 16.6 mm |
+  | thick | 103450-class pouch | ~2 Ah (7.4 Wh) | ~1.2 h | 39.8 × 75 × 20.6 mm |
+  | **brick** (new) | 1S2P 18650 pack | **~6–7 Ah (24 Wh)** | **~4 h** | 41.6 × 86 × 30.5 mm |
+
+- **Power behaviour:**
+  - With no USB, the red (charge) LED is dark. The charger only drives it while charging, and green is firmware-only.
+  - On USB with no battery, the board runs from USB (the charger's power path powers the system directly), limited to
+    about 2.4 A of input.
+  - Programming over USB-C works whenever the **power switch is on**: the switch gates the 3.3 V regulator. Charging
+    works with the switch off.
+  - Check on the first boards: with no battery fitted, BQ2560x chargers can blink STAT while they probe for a cell.
+- **Mic port:** the mic listens through a hole in its *underside* and a matching hole drilled through the board. The
+  board's underside there sits on the case's solid nose block, so the channel in the case floor is what gets outside
+  sound to it. Without the channel the port would face sealed plastic.
 
 ## 0a. Latest layout pass (supersedes older notes in section 0 where they differ)
 

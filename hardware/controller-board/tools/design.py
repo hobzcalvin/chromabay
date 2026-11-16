@@ -256,20 +256,21 @@ C("1uF", "MIC_VDD", "GND", "sensors")
 C("100nF", "MIC_VDD", "GND", "sensors")
 
 # ---------------------------------------------------------------- User pads
-# User header: every free GPIO plus power, I2C, touch, BOOT, external mic and external switch, on a
-# 2 x 11 through-hole grid at 2.54 mm (takes a standard pin header, or wires). Pairs = (odd, even).
+# User header: every free GPIO plus power (3V3, USB 5 V, switched/fused 5 V), I2C, touch, BOOT, external
+# mic and external switch, on a 2 x 12 through-hole grid at 2.54 mm (takes a standard pin header, or wires). Pairs = (odd, even).
 # IO3/IO45/IO46 are strapping pins: keep IO45/IO46 low at boot. IO43/IO44 are UART0 TX/RX.
 HEADER = [("3V3", "GND"), ("SDA", "SCL"), ("T1", "T2"), ("T3", "T4"), ("BOOT", "GND"),
           ("EXT_BCLK", "EXT_WS"), ("EXT_SD", "IO3"), ("VSYS", "LDO_EN"), ("IO11", "IO26"),
-          ("IO43", "IO44"), ("IO45", "IO46")]
+          ("IO43", "IO44"), ("IO45", "IO46"), ("VBUS", "VLED")]
 HEADER_LABELS = {"3V3": "3V3", "GND": "GND", "SDA": "SDA", "SCL": "SCL", "T1": "T1", "T2": "T2",
                  "T3": "T3", "T4": "T4", "BOOT": "BOOT", "EXT_BCLK": "MBCK", "EXT_WS": "MWS",
                  "EXT_SD": "MSD", "IO3": "IO3", "VSYS": "SWA", "LDO_EN": "SWB", "IO11": "IO11",
-                 "IO26": "IO26", "IO43": "IO43", "IO44": "IO44", "IO45": "IO45", "IO46": "IO46"}
-part("J7", "Connector_Generic:Conn_02x11_Odd_Even", "USER HEADER",
-     "Connector_PinHeader_2.54mm:PinHeader_2x11_P2.54mm_Vertical", None,
+                 "IO26": "IO26", "IO43": "IO43", "IO44": "IO44", "IO45": "IO45", "IO46": "IO46",
+                 "VBUS": "VUSB", "VLED": "5V"}
+part("J7", "Connector_Generic:Conn_02x12_Odd_Even", "USER HEADER",
+     "Connector_PinHeader_2.54mm:PinHeader_2x12_P2.54mm_Vertical", None,
      {2 * i + k + 1: net for i, pair in enumerate(HEADER) for k, net in enumerate(pair)}, "pads",
-     note="2x11 through-hole pads at 2.54 mm; fit a pin header or solder wires")
+     note="2x12 through-hole pads at 2.54 mm; fit a pin header or solder wires")
 
 # No mounting holes: the case clamps the board edges, and holes cost ~50 mm2 here.
 
