@@ -1,7 +1,7 @@
 {
-  "version": "1.2.377",
-  "downloadUrl": "https://chromabay.app/live-update-1.2.377.zip",
-  "buildDate": "2026-11-16T00:37:26Z",
-  "commitHash": "33c4b8d4c198a9034a9a65116a912307f874bd96",
-  "commitMessage": "Interact choosers: one fixed width, names only in the menus"
+  "version": "1.2.378",
+  "downloadUrl": "https://chromabay.app/live-update-1.2.378.zip",
+  "buildDate": "2026-11-16T22:34:56Z",
+  "commitHash": "e043dfa26fd17a4ae889035b68bffa5c915575c6",
+  "commitMessage": "After an OTA, reconnect and re-read the device instead of going quiet"
 }
