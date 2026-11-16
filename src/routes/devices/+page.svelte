@@ -23,6 +23,7 @@
     resolveFirmware,
     performOTAUpdate,
     performManualOTAUpdate,
+    dropLinkForReboot,
     prefetchFirmware,
     startOTAStatusNotifications,
     stopOTAStatusNotifications,
@@ -59,6 +60,8 @@
   import DeviceSettingsPanel from '$lib/components/DeviceSettingsPanel.svelte';
   import { firmwareChannel, setFirmwareChannel, firmwareRegistryUrl, firmwareVersionChannel, fetchChannels, MAIN_CHANNEL, type Channel } from '$lib/channel';
   import WifiDevices from '$lib/components/WifiDevices.svelte';
+  import { connectWifi } from '$lib/stores/wifiDeviceStore';
+  import { isWifiId, hostFromWifiId } from '$lib/transport';
 
   let bleSupported = $state(false);
   let bleEnabled = $state(false);
@@ -105,6 +108,9 @@
   let dropTimers: Record<string, any> = {};
   let intentionalDisconnect = new Set<string>(); // user tapped Disconnect → drop now, no grace
   const CONNECT_GRACE_MS = 8000;
+  // A device restarting onto new firmware is gone for longer than a blip: ~2 s of shutdown,
+  // the boot itself, then the reconnect backoff. Keep its card (showing "restarting…") meanwhile.
+  const REBOOT_GRACE_MS = 45000;
   const shownList = $derived(Object.values(shown));
 
   function removeShown(id: string) {
@@ -127,11 +133,18 @@
     }
     // Shown but no longer in the store → grace timer, unless the user explicitly disconnected.
     for (const id of Object.keys(shown)) {
-      if (storeIds.has(id) || intentionalDisconnect.has(id) || dropTimers[id]) continue;
+      if (storeIds.has(id)) continue;
+      // The link is gone, so whatever we read over it may be stale (a reboot onto new firmware
+      // changes the version) and its notification subscriptions died with it. Drop the init
+      // marker now so a return within the grace period re-runs the handshake — previously the
+      // card survived the blip and its data was never re-read: a successful OTA kept showing
+      // the old version until a manual disconnect/reconnect.
+      initializedDevices.delete(id);
+      if (intentionalDisconnect.has(id) || dropTimers[id]) continue;
       dropTimers[id] = setTimeout(() => {
         delete dropTimers[id];
         if (!get(connectedDevices).has(id)) removeShown(id); // still gone after grace → drop
-      }, CONNECT_GRACE_MS);
+      }, deviceSettings[id]?.otaSuccess ? REBOOT_GRACE_MS : CONNECT_GRACE_MS);
     }
   }
 
@@ -722,6 +735,29 @@
     }
   }
 
+  // The device has installed the update and is restarting. Drop our (about to be dead) link
+  // so the reconnect starts now rather than whenever the phone notices; when the device comes
+  // back, reconcileShown re-runs initConnectedDevice, which re-reads the version, re-checks
+  // for updates and clears the "restarting…" state.
+  async function afterOtaInstalled(deviceId: string) {
+    const settings = getDeviceSettings(deviceId);
+    const name = settings.deviceInfo?.name || ($connectedDevices.get(deviceId)?.name) || shown[deviceId]?.name || 'device';
+    await dropLinkForReboot(deviceId);
+    if (isWifiId(deviceId)) void reconnectWifiAfterReboot(deviceId, name);
+  }
+
+  // BLE devices auto-reconnect (ble.ts scheduleReconnect); Wi-Fi ones don't, so retry here.
+  async function reconnectWifiAfterReboot(deviceId: string, name: string) {
+    const host = hostFromWifiId(deviceId);
+    const deadline = Date.now() + REBOOT_GRACE_MS;
+    await new Promise((r) => setTimeout(r, 3000)); // it's still shutting down
+    while (Date.now() < deadline && !intentionalDisconnect.has(deviceId)) {
+      if (get(connectedDevices).has(deviceId)) return;
+      try { await connectWifi(name, host); return; }
+      catch { await new Promise((r) => setTimeout(r, 2000)); }
+    }
+  }
+
   async function handleManualOTAUpdate(deviceId: string) {
     const settings = getDeviceSettings(deviceId);
     const mf = manualFw[deviceId];
@@ -749,14 +785,9 @@
           if (status.isComplete && !status.isError) settings.otaSuccess = true;
         }
       );
-      statusMessage = 'Manual firmware update completed.';
-      // Clear the picked files, then return to a fresh-load state.
+      statusMessage = 'Firmware installed — device restarting…';
       manualFw[deviceId] = {};
-      setTimeout(async () => {
-        settings.otaSuccess = false;
-        try { await loadDeviceInfo(deviceId); } catch (e) { /* device may still be rebooting */ }
-        await checkForUpdateSilently(deviceId);
-      }, 4000);
+      await afterOtaInstalled(deviceId);
     } catch (error: any) {
       statusMessage = 'Manual firmware update failed';
       console.error('Manual OTA update error:', error);
@@ -871,14 +902,8 @@
         settings.latestFirmware.version,
         settings.latestFirmware.date
       );
-      statusMessage = 'OTA update completed successfully!';
-      // Briefly show success, then return to a fresh-load state: re-read device
-      // info (now reporting the new version) and re-check for updates.
-      setTimeout(async () => {
-        settings.otaSuccess = false;
-        try { await loadDeviceInfo(deviceId); } catch (e) { /* device may still be rebooting */ }
-        await checkForUpdateSilently(deviceId);
-      }, 4000);
+      statusMessage = 'Firmware installed — device restarting…';
+      await afterOtaInstalled(deviceId);
     } catch (error: any) {
       statusMessage = 'OTA update failed';
       console.error('OTA update error:', error);
@@ -953,7 +978,7 @@
         </div>
       </div>
     {:else if settings.otaSuccess}
-      <p style="color: #4caf50; font-weight: 600;">✓ Update complete — device restarting…</p>
+      <p style="color: #4caf50; font-weight: 600;">✓ Update installed — device restarting, reconnecting…</p>
     {:else}
       {#if settings.latestFirmware && settings.deviceInfo?.fw_ver === settings.latestFirmware.version}
         <p>Firmware is up to date - Current: {settings.deviceInfo.fw_ver}

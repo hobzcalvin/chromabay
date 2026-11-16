@@ -550,6 +550,33 @@ export async function disconnectFromDevice(deviceId: string): Promise<void> {
   console.log('Disconnected from device');
 }
 
+/**
+ * After a successful update the device restarts, but the phone can take many seconds (up to
+ * the BLE supervision timeout) to notice — meanwhile the app sits on a dead link showing the
+ * old version. Drop the link now, as an UNEXPECTED drop rather than a user disconnect, so the
+ * normal auto-reconnect brings the device back and the page re-reads it (new version and all).
+ *
+ * Wi-Fi links have no auto-reconnect of their own; the caller reconnects those.
+ */
+export async function dropLinkForReboot(deviceId: string): Promise<void> {
+  if (!get(connectedDeviceStore).has(deviceId)) return; // already gone
+  try {
+    if (isWifiId(deviceId)) {
+      await getTransport(deviceId).disconnect(); // its onClose runs the shared cleanup
+      return;
+    }
+    if (isWeb()) {
+      bleConnections.get(deviceId)?.gattServer?.disconnect();
+    } else {
+      await BleClient.disconnect(deviceId);
+    }
+  } catch (e) {
+    console.warn('[OTA] dropping the link for the reboot failed (device may already be gone):', e);
+  }
+  // Idempotent; not intentional → schedules the auto-reconnect.
+  handleDeviceDisconnected(deviceId, false);
+}
+
 export function isDeviceConnected(deviceId: string): boolean {
   return get(connectedDeviceStore).has(deviceId);
 }
@@ -1007,11 +1034,18 @@ const OTA_APP_SLOT_BYTES = 0x1c0000; // 1,835,008 (1.75 MB)
  * this is what the user saw. The device says why; read it.
  */
 let otaDeviceFault: string | null = null;
+/**
+ * Set when the device reports OTA_SUCCESS_REBOOTING: the signature checked out, the new image
+ * is the boot partition, and the device restarts ~2 s later. Only this means success — the
+ * END_OTA write landing only means the device RECEIVED the command; verification runs after.
+ */
+let otaDeviceRebooting = false;
 
 export async function startOTAStatusNotifications(deviceId: string, callback: (status: OTAUpdateStatus) => void): Promise<void> {
   console.log(`[OTA] Starting status notifications for ${deviceId}`);
   await startNotifications(deviceId, LED_SERVICE_UUID, CHARACTERISTIC_UUID_OTA_STATUS, (stringValue) => {
     if (stringValue.startsWith('OTA_ERR')) otaDeviceFault = stringValue;
+    if (stringValue === 'OTA_SUCCESS_REBOOTING') otaDeviceRebooting = true;
     callback({ statusMessage: stringValue });
   });
 }
@@ -1277,19 +1311,36 @@ async function streamFirmwareOverBle(
     // 6. Finalize: END_OTA verifies the signature then reboots; END_OTA_UNSIGNED skips
     //    verification (unsigned manual upload) and reboots directly.
     const endCommand = signatureBuffer ? 'END_OTA' : 'END_OTA_UNSIGNED';
-    progressCallback({ statusMessage: 'Finalizing update...' });
+    progressCallback({ statusMessage: signatureBuffer ? 'Verifying update on the device…' : 'Finalizing update…', progress: 100 });
+    otaDeviceRebooting = false;
+    let linkDropped = false;
     try {
       await sendOTAControlCommand(deviceId, endCommand);
-      progressCallback({ statusMessage: 'Update finalized. Device should be rebooting...', isComplete: true });
     } catch (error: any) {
-      // If the finalize write fails, it's likely because ESP32 rebooted during finalize
-      if (error.message.includes('GATT') || error.message.includes('disconnected') || error.message.includes('timeout')) {
-        console.log('[OTA] END_OTA failed due to disconnection/timeout - ESP32 likely rebooted during signature verification');
-        progressCallback({ statusMessage: 'Update completed successfully. Device rebooted with new firmware.', isComplete: true });
-      } else {
-        throw error; // Re-throw if it's a different error
-      }
+      // The device can drop the link mid-write if it finished quickly and rebooted.
+      const msg = String(error?.message ?? error);
+      if (!/GATT|disconnect|timeout|closed/i.test(msg)) throw error;
+      console.log('[OTA] END_OTA write failed with the link going away — device likely rebooting:', msg);
+      linkDropped = true;
     }
+
+    // 7. Wait for the device's verdict. It verifies the signature (seconds; the firmware gives
+    //    up at 30 s), then notifies OTA_SUCCESS_REBOOTING or an OTA_ERR_*. The link dropping
+    //    also counts as "rebooting" — the device only restarts on success.
+    const outcome = linkDropped ? 'gone' : await waitForOtaOutcome(deviceId, 40000);
+    if (outcome === 'fault') throw new Error(`Device rejected the update: ${otaDeviceFault}`);
+    if (outcome === 'timeout') {
+      // No word either way. Restarting the link and reading the version back is the only
+      // honest check left, so do that rather than claim success or failure.
+      console.warn('[OTA] No confirmation from the device after finalize; reconnecting to check.');
+    }
+    progressCallback({
+      statusMessage: outcome === 'timeout'
+        ? 'Device didn’t confirm the update — reconnecting to check its version…'
+        : 'Update installed. Device is restarting…',
+      progress: 100,
+      isComplete: true,
+    });
 
   } catch (error: any) {
     console.error('[OTA] OTA Update Failed:', error);
@@ -1307,6 +1358,21 @@ async function streamFirmwareOverBle(
         }
     }
   }
+}
+
+/** Resolves once the device has said how the finalize went, or the link has gone away. */
+function waitForOtaOutcome(deviceId: string, timeoutMs: number): Promise<'rebooting' | 'fault' | 'gone' | 'timeout'> {
+  return new Promise((resolve) => {
+    const start = Date.now();
+    const poll = setInterval(() => {
+      let r: 'rebooting' | 'fault' | 'gone' | 'timeout' | null = null;
+      if (otaDeviceFault) r = 'fault';
+      else if (otaDeviceRebooting) r = 'rebooting';
+      else if (!get(connectedDeviceStore).has(deviceId)) r = 'gone';
+      else if (Date.now() - start >= timeoutMs) r = 'timeout';
+      if (r) { clearInterval(poll); resolve(r); }
+    }, 100);
+  });
 }
 
 // === PATTERN SYNCHRONIZATION ===
