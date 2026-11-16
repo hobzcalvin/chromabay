@@ -1,7 +1,7 @@
 {
-  "version": "1.2.379",
-  "downloadUrl": "https://chromabay.app/live-update-1.2.379.zip",
-  "buildDate": "2026-11-16T22:59:06Z",
-  "commitHash": "b4b1c474e71397077ed07b0f73363e5a674b9068",
-  "commitMessage": "Firmware: wait for BLE buffers before each chunk of a notify stream"
+  "version": "1.2.380",
+  "downloadUrl": "https://chromabay.app/live-update-1.2.380.zip",
+  "buildDate": "2026-11-16T23:22:47Z",
+  "commitHash": "3a4b28d7a2cdb8533c531cf0ca9c40fe76da995e",
+  "commitMessage": "One loader per device, and reuse what's unchanged across connects"
 }
