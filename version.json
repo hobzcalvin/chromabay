@@ -1,7 +1,7 @@
 {
-  "version": "1.2.378",
-  "downloadUrl": "https://chromabay.app/live-update-1.2.378.zip",
-  "buildDate": "2026-11-16T22:34:56Z",
-  "commitHash": "e043dfa26fd17a4ae889035b68bffa5c915575c6",
-  "commitMessage": "After an OTA, reconnect and re-read the device instead of going quiet"
+  "version": "1.2.379",
+  "downloadUrl": "https://chromabay.app/live-update-1.2.379.zip",
+  "buildDate": "2026-11-16T22:59:06Z",
+  "commitHash": "b4b1c474e71397077ed07b0f73363e5a674b9068",
+  "commitMessage": "Firmware: wait for BLE buffers before each chunk of a notify stream"
 }
