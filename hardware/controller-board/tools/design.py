@@ -264,8 +264,8 @@ HEADER = [("3V3", "GND"), ("SDA", "SCL"), ("T1", "T2"), ("T3", "T4"), ("BOOT", "
           ("IO43", "IO44"), ("IO45", "IO46"), ("VBUS", "VLED")]
 HEADER_LABELS = {"3V3": "3V3", "GND": "GND", "SDA": "SDA", "SCL": "SCL", "T1": "T1", "T2": "T2",
                  "T3": "T3", "T4": "T4", "BOOT": "BOOT", "EXT_BCLK": "MBCK", "EXT_WS": "MWS",
-                 "EXT_SD": "MSD", "IO3": "IO3", "VSYS": "SWA", "LDO_EN": "SWB", "IO11": "IO11",
-                 "IO26": "IO26", "IO43": "IO43", "IO44": "IO44", "IO45": "IO45", "IO46": "IO46",
+                 "EXT_SD": "MSD", "IO3": "3", "VSYS": "SWA", "LDO_EN": "SWB", "IO11": "11",
+                 "IO26": "26", "IO43": "43", "IO44": "44", "IO45": "45", "IO46": "46",
                  "VBUS": "VUSB", "VLED": "5V"}
 part("J7", "Connector_Generic:Conn_02x12_Odd_Even", "USER HEADER",
      "Connector_PinHeader_2.54mm:PinHeader_2x12_P2.54mm_Vertical", None,

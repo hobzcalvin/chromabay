@@ -33,6 +33,7 @@ DESIGN.md section 0g. Before ordering: review it in KiCad and check part rotatio
 | `case/case.py` → `case/out/*.stl` | Parametric clamshell case: `external`, `slim` (603450 cell), `thick` (103450 cell), `brick` (2 × 18650) |
 | `tools/route.py` | Autoroute: GND fan-out, DSN export (In1 kept as plane), Freerouting 1.9, SES import, zone fill |
 | `tools/power_layout.py` | Hand layout of the charger/boost power copper: pours, In2 plane regions, via arrays, short links |
+| `tools/fix_silk.py` | Nudges user-header labels off vias, pads and part outlines on the routed board (re-run after regenerating) |
 | `tools/fanout.py`, `tools/patch_route.py` | GND via fan-out; small maze router for leftover gaps (+ via merge) |
 | `tools/label_render.py` | Labeled top-view render |
 | `renders/` | Board renders (KiCad), labeled interaction-point view, case/battery renders (three.js) |
