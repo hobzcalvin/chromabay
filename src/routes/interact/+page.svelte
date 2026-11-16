@@ -464,12 +464,12 @@ import { get } from 'svelte/store';
       {#if menu === 'pattern'}
         {#each $patterns as p}
           <button role="option" aria-selected={p.meta?.name === currentPatternName} class:current={p.meta?.name === currentPatternName}
-            onclick={() => pickPattern(p)}>🌈 {p.meta?.name}</button>
+            onclick={() => pickPattern(p)}>{p.meta?.name}</button>
         {/each}
       {:else}
         {#each previewOptions as opt, i}
           <button role="option" aria-selected={i === previewIndex} class:current={i === previewIndex} onclick={() => pickPreview(i)}>
-            {#if opt}💡 {opt.name}<span class="switch-sub">{describeShape(opt)}</span>{:else}🖼️ Full screen{/if}
+            {#if opt}{opt.name}<span class="switch-sub">{describeShape(opt)}</span>{:else}Full screen{/if}
           </button>
         {/each}
       {/if}
@@ -526,7 +526,10 @@ import { get } from 'svelte/store';
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    max-width: 94vw;
+    /* Both pills one fixed width, so the arrows never move as names change length; a name
+       that doesn't fit is cut off with an ellipsis. */
+    box-sizing: border-box;
+    width: min(26rem, calc(100vw - 32px));
     padding: 0.5rem 0.75rem;
     background: rgba(0, 0, 0, 0.5);
     border: 1px solid rgba(255, 255, 255, 0.18);
@@ -595,7 +598,9 @@ import { get } from 'svelte/store';
     color: #fff;
     font-weight: 600;
     font-size: 1.25rem;
-    max-width: 60vw;
+    flex: 1;
+    min-width: 0;
+    text-align: center;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
