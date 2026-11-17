@@ -5,6 +5,7 @@
   import { patterns, loadPatterns, switchToPattern, currentPatternName, createEmptyPattern, saveAsPattern, patternNameExists, suggestPatternName, importLibraryPattern, forkToLibrary } from '$lib/stores/patternsStore';
   import PatternPreview from '$lib/components/PatternPreview.svelte';
   import type { SerializedPattern } from '$lib/patternSerializer';
+  import { uniqueKeys } from '$lib/patternKey';
   import { deletePatternOnAllDevices, sendSinglePatternToDevice, deletePatternOnDevice, clearDeviceLibrary } from '$lib/ble';
   import { deviceLibraries, libraryHeldBack, refreshDeviceLibraries, syncedCountFor, markSyncedLocally, markUnsyncedLocallyOn, clearDeviceLibraryLocally } from '$lib/stores/deviceLibraryStore';
   import { currentPattern } from '$lib/stores/patternsStore';
@@ -19,6 +20,7 @@
   let patternsList: SerializedPattern[] = [];
   let currentName = '';
   $: patternsList = $patterns;
+  $: patternKeys = uniqueKeys(patternsList, (p) => p.meta?.id || p.meta?.name);
   $: currentName = $currentPatternName;
 
   // --- Pattern cycling: ONE control for all connected devices. Each device steps
@@ -139,6 +141,7 @@
   $: connectedIds = connectedList.map((d) => d.deviceId);
 
   // Patterns present on a CONNECTED device but NOT in My Patterns (deduped by name).
+  $: newFromDeviceKeys = uniqueKeys(newFromDevices, (p) => p.meta?.name);
   $: newFromDevices = (() => {
     const seen = new Set<string>(); const out: SerializedPattern[] = [];
     for (const id of connectedIds) {
@@ -472,7 +475,7 @@
       <p class="section-empty">No patterns yet — create one below, or import from your devices or online.</p>
     {/if}
     <div class="patterns-grid" class:dimmed={$cycleEnabled} data-tour-target="pattern-list">
-      {#each patternsList as pattern (pattern.meta?.id ?? pattern.meta?.name)}
+      {#each patternsList as pattern, i (patternKeys[i])}
         {@const patternName = pattern.meta?.name || 'Unnamed'}
         {@const isCurrentPattern = patternName === currentName}
         {@const swipeState = swipeStates[patternName]}
@@ -576,7 +579,7 @@
   {#if newFromDevices.length > 0}
     <section class="pattern-section">
       <h2 class="section-title">New From Devices</h2>
-      {#each newFromDevices as p (p.meta?.name)}
+      {#each newFromDevices as p, i (newFromDeviceKeys[i])}
         <div class="simple-row">
           <PatternPreview pattern={p} size={44} />
           <span class="simple-name">{p.meta?.name || 'Unnamed'}</span>
@@ -603,7 +606,9 @@
               <p class="section-empty">This device's firmware freezes its lights (and ignores brightness) while it lists its patterns, so the list isn't loaded automatically. Update its firmware on the Devices tab, or
                 <button class="link-btn" onclick={() => refreshDeviceLibraries({ force: true, only: [device.deviceId] })}>load the list now</button>.</p>
             {:else}
-            {#each ($deviceLibraries[device.deviceId] ?? []) as p (p.meta?.name)}
+            {@const lib = $deviceLibraries[device.deviceId] ?? []}
+            {@const libKeys = uniqueKeys(lib, (q) => q.meta?.name)}
+            {#each lib as p, i (libKeys[i])}
               {@const nm = p.meta?.name ?? ''}
               <div class="simple-row">
                 <PatternPreview pattern={myByName.get(nm) ?? p} size={44} />
@@ -611,7 +616,9 @@
                 {#if nm && !myNames.has(nm)}
                   <button class="import-btn" onclick={() => handleImportDevicePattern(p)}>Import</button>
                 {/if}
-                <button class="mini-btn" title="Remove from {device.name}" onclick={() => handleRemoveFromDevice(device.deviceId, nm)}>🗑️</button>
+                {#if nm}<!-- removal is by name on the device -->
+                  <button class="mini-btn" title="Remove from {device.name}" onclick={() => handleRemoveFromDevice(device.deviceId, nm)}>🗑️</button>
+                {/if}
               </div>
             {:else}
               <p class="section-empty">No stored patterns.</p>

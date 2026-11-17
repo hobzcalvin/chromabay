@@ -45,6 +45,36 @@ function newId(): string {
   try { return crypto.randomUUID(); }
   catch { return 'p_' + Math.random().toString(36).slice(2) + Date.now().toString(36); }
 }
+/**
+ * Where a pattern lives in the stored list: by id first, then (for a pattern that has no id
+ * yet) by name. Matching by name alone was the bug: two patterns may share a name (cloud sync
+ * brings in one made elsewhere), and saving the selected one overwrote the OTHER entry with
+ * the selected one's id — two entries with one id, which the Patterns page keys on, and Svelte
+ * threw each_key_duplicate (Sentry CHROMABAY-APP-X).
+ */
+function indexOfPattern(list: SerializedPattern[], p: { meta?: { id?: string; name?: string } } | null | undefined, name?: string): number {
+  const id = p?.meta?.id;
+  if (id) {
+    const i = list.findIndex((q) => q.meta?.id === id);
+    if (i >= 0) return i;
+  }
+  const n = name ?? p?.meta?.name;
+  return n ? list.findIndex((q) => q.meta?.name === n && !(id && q.meta?.id && q.meta.id !== id)) : -1;
+}
+
+/** Give every repeated id after the first a fresh one (repairs libraries the bug above left
+ *  with duplicates). Returns true if it changed anything. */
+function dedupeIds(list: SerializedPattern[]): boolean {
+  const seen = new Set<string>();
+  let changed = false;
+  for (const p of list) {
+    const id = p.meta?.id;
+    if (id && seen.has(id)) { p.meta.id = newId(); p.meta.updatedAt = nowMs(); changed = true; }
+    if (p.meta?.id) seen.add(p.meta.id);
+  }
+  return changed;
+}
+
 /** Ensure a pattern has an id + updatedAt. Returns true if it mutated. */
 function ensureMeta(p: SerializedPattern): boolean {
   if (!p.meta) { (p as any).meta = { output: 1 }; }
@@ -152,6 +182,7 @@ export async function loadPatterns() {
       // Backfill sync identity on any pre-existing patterns, and persist if we minted anything.
       let migrated = false;
       for (const p of patternsData) if (ensureMeta(p)) migrated = true;
+      if (dedupeIds(patternsData)) migrated = true;
       if (migrated) await writeStored(patternsData);
       patterns.set(patternsData);
       
@@ -212,14 +243,17 @@ export async function loadPatterns() {
 // Save a single pattern to the stored patterns
 export async function savePattern(pattern: SerializedPattern) {
   try {
+    // Look it up by the id it ARRIVED with: ensureMeta mints one for an id-less pattern
+    // (save-as), which should still replace a stored pattern of the same name, as before.
+    const arrivedWithId = !!pattern.meta?.id;
     ensureMeta(pattern);
     pattern.meta.updatedAt = nowMs(); // a save is a change → bump the LWW clock
     // Get current patterns
     const existingPatterns = await readStored();
 
-    // Update or add the pattern (match by name for now)
+    // Update or add the pattern: by id, else by name (see indexOfPattern).
     const patternName = pattern.meta?.name || 'Unnamed Pattern';
-    const existingIndex = existingPatterns.findIndex(p => p.meta?.name === patternName);
+    const existingIndex = indexOfPattern(existingPatterns, arrivedWithId ? pattern : null, patternName);
     if (existingIndex >= 0) {
       existingPatterns[existingIndex] = pattern;
     } else {
@@ -342,8 +376,8 @@ export async function renameCurrentPattern(newName: string) {
     const { value } = await storage.get({ key: PATTERNS_KEY });
     const existingPatterns: SerializedPattern[] = value ? JSON.parse(value) : [];
     
-    // Find and update the pattern by old name
-    const existingIndex = existingPatterns.findIndex(p => p.meta?.name === oldName);
+    // Find and update the pattern: by id, else by its old name (see indexOfPattern).
+    const existingIndex = indexOfPattern(existingPatterns, current, oldName);
     if (existingIndex >= 0) {
       const updatedPattern: SerializedPattern = {
         nodes: current.nodes,

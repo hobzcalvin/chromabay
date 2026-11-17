@@ -2199,7 +2199,14 @@ export async function pullDeviceLibrary(
     if (!e.seen.has(offset)) { e.seen.add(offset); e.covered += Math.min(dataLen, e.total - offset); } // dedupe; count real bytes
     if (!e.done && e.covered >= e.total) {
       e.done = true;
-      try { const p = msgpackDecode(e.buf) as any; if (p && Array.isArray(p.nodes)) results.push(p); }
+      try {
+        const p = msgpackDecode(e.buf) as any;
+        // The device stores a pattern only under a name, once. The same name twice in one dump
+        // means the library changed underneath it (a delete shifts every later file down by one
+        // index, so a pattern can be sent again at its new index): keep the first copy.
+        const name = p?.meta?.name;
+        if (p && Array.isArray(p.nodes) && !(name && results.some((r) => r.meta?.name === name))) results.push(p);
+      }
       catch (err) { console.warn('[LibDump] decode failed for pattern', idx, err); }
     }
   };
