@@ -1,7 +1,7 @@
 {
-  "version": "1.2.381",
-  "downloadUrl": "https://chromabay.app/live-update-1.2.381.zip",
-  "buildDate": "2026-11-16T23:50:44Z",
-  "commitHash": "c3f6e07544efc8da5b7ebddd01af32547de92cc3",
-  "commitMessage": "Firmware: actually report and bump the content generations"
+  "version": "1.2.382",
+  "downloadUrl": "https://chromabay.app/live-update-1.2.382.zip",
+  "buildDate": "2026-11-17T22:25:41Z",
+  "commitHash": "acd2bdfb7994d0ba26b06823a668ee3eeb5954c2",
+  "commitMessage": "Patterns page: fix the duplicate ids behind each_key_duplicate"
 }
