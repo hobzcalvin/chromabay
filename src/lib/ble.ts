@@ -2199,7 +2199,14 @@ export async function pullDeviceLibrary(
     if (!e.seen.has(offset)) { e.seen.add(offset); e.covered += Math.min(dataLen, e.total - offset); } // dedupe; count real bytes
     if (!e.done && e.covered >= e.total) {
       e.done = true;
-      try { const p = msgpackDecode(e.buf) as any; if (p && Array.isArray(p.nodes)) results.push(p); }
+      try {
+        const p = msgpackDecode(e.buf) as any;
+        if (p && Array.isArray(p.nodes)) {
+          // Kept (it's really on the device), but the app keys device patterns by name.
+          if (!p.meta?.name) console.warn('[LibDump] pattern has no meta.name', idx, p.meta);
+          results.push(p);
+        }
+      }
       catch (err) { console.warn('[LibDump] decode failed for pattern', idx, err); }
     }
   };
