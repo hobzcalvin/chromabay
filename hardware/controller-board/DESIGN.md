@@ -70,6 +70,15 @@ plane (fuse to push-ins and pad strip). Signals use the rest of In2, F.Cu and B.
 - Full regeneration: `gen_pcb.py` → `power_layout.py` → `route.py <freerouting-1.9.0.jar>` →
   `patch_route.py <drc.rpt>`.
 
+**Header labels (later pass).**
+- `route.py` now also keeps vias out from under every user-header label (router-only keep-outs), and
+  `patch_route.py` takes the same areas through `NO_VIA_RECTS`. That fixed the drilled holes through "46" and
+  others.
+- GPIO pins are labelled by number ("26", not "IO26").
+- `tools/fix_silk.py` nudges labels off pads and part outlines (text no smaller than 0.5 mm).
+- The onboard thermistor TH1 moved beside its jumper JP3.
+- The default net-class clearance is now 0.125 mm (JLC 4-layer minimum is 0.09 mm).
+
 **Still to check before ordering:**
 - Review the layout in KiCad, especially the charger corner.
 - Confirm the 0.35/0.2 mm REGN vias are inside JLC's free 4-layer via range.

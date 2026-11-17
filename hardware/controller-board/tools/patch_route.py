@@ -171,6 +171,13 @@ def route_pair(board, netname, a, b, width, allow_rip=False):
     for layer in LAYERS:
         blocked[layer] |= out
     vblocked |= out
+    # optional no-via rectangles (e.g. keep vias out from under a silkscreen label):
+    # NO_VIA_RECTS="x0,y0,x1,y1;..." in absolute mm
+    for r in filter(None, os.environ.get("NO_VIA_RECTS", "").split(";")):
+        rx0, ry0, rx1, ry1 = map(float, r.split(","))
+        i0, i1 = max(0, int((rx0 - VIA_D / 2 - x0) / G)), min(nx, int((rx1 + VIA_D / 2 - x0) / G) + 1)
+        j0, j1 = max(0, int((ry0 - VIA_D / 2 - y0) / G)), min(ny, int((ry1 + VIA_D / 2 - y0) / G) + 1)
+        vblocked[j0:j1, i0:i1] = True
 
     def cell(pt):
         return int(round((pt[0] - x0) / G)), int(round((pt[1] - y0) / G))

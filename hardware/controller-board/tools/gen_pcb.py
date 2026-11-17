@@ -135,7 +135,7 @@ def main():
     nc_power.SetViaDrill(MM(0.3))
     nc_def = ds.m_NetSettings.GetDefaultNetclass()
     nc_def.SetTrackWidth(MM(0.15))
-    nc_def.SetClearance(MM(0.13))
+    nc_def.SetClearance(MM(0.125))     # JLC 4-layer minimum is 0.09; keep some margin
     nc_def.SetViaDiameter(MM(0.45))
     nc_def.SetViaDrill(MM(0.25))
     ds.m_NetSettings.SetNetclass("Power", nc_power)

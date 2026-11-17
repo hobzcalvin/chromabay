@@ -138,8 +138,38 @@ def strip_gnd(src, dst):
     pcbnew.SaveBoard(dst, board)
 
 
+def label_keepouts(board):
+    """Router-only via keep-outs under the user-header pin labels, so no drilled hole lands in
+    the middle of a label (tracks may still pass under them: they're under solder mask)."""
+    sys.path.insert(0, HERE)
+    import design
+    names = set(design.HEADER_LABELS.values())
+    boxes = []
+    for t in board.GetDrawings():
+        if t.GetClass() == "PCB_TEXT" and t.GetLayer() == pcbnew.F_SilkS and t.GetText() in names:
+            bb = t.GetBoundingBox()
+            boxes.append((bb.GetLeft() - MM(0.1), bb.GetTop() - MM(0.1), bb.GetRight() + MM(0.1), bb.GetBottom() + MM(0.1)))
+    for x0, y0, x1, y1 in boxes:
+        k = pcbnew.ZONE(board)
+        k.SetIsRuleArea(True)
+        k.SetDoNotAllowTracks(False)
+        k.SetDoNotAllowVias(True)
+        k.SetDoNotAllowPads(False)
+        k.SetDoNotAllowFootprints(False)
+        ls = pcbnew.LSET()
+        for layer in (pcbnew.F_Cu, pcbnew.In1_Cu, pcbnew.In2_Cu, pcbnew.B_Cu):
+            ls.AddLayer(layer)
+        k.SetLayerSet(ls)
+        ol = k.Outline()
+        ol.NewOutline()
+        for x, y in ((x0, y0), (x1, y0), (x1, y1), (x0, y1)):
+            ol.Append(x, y)
+        board.Add(k)
+
+
 def export(src, dsn):
     board = pcbnew.LoadBoard(src)
+    label_keepouts(board)
     power_keepouts(board)
     edge_keepout(board)
     pcbnew.ZONE_FILLER(board).Fill(board.Zones())
