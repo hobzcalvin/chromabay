@@ -55,9 +55,16 @@ schematic in KiCad and use *Update PCB from Schematic*. The symbol/footprint UUI
 
 ## Before ordering
 
-1. Route it. Hand-route the charger (BQ25606) and boost (TPS61088) power loops and the battery/5 V paths first, then
-   `tools/route.py` for the signals.
-2. Optional: confirm the computed boost compensation (10k / 10 nF / 47 pF) in TI WEBENCH.
-3. Upload Gerbers + `fab/` to JLC and check every part's rotation in their 3D preview.
-4. Order 2–5 to validate. Tests: charge current per jumper setting, boost ripple and efficiency at 2 A, run while
+Ready to upload: `fab/gerbers-jlc.zip` (Gerbers + drill), `fab/bom-jlc-<build>.csv` and
+`fab/cpl-jlc-<build>.csv` for the build you want (`complete`, `plug` or `core`). Regenerate the Gerbers after any
+board edit (see DESIGN.md).
+
+1. Look over the board in KiCad, especially the charger corner by the USB-C.
+2. At JLC: 4 layers, 1.6 mm, tented vias, "Economic" PCBA on the top side. In the parts-placement preview, check
+   **every** part's rotation and position. The easyeda2kicad parts are usually right, but the USB-C, slide
+   switch, button, LED, WAGOs, JST, mic and the QFN/DFN power chips are the ones to look at.
+3. Expect JLC to ask about the button and switch overhanging the board edge (on purpose) and the 0.35/0.2 mm
+   REGN vias.
+4. Optional: confirm the boost compensation (10k / 10 nF / 47 pF) in TI WEBENCH.
+5. Order 2–5 to validate. Tests: charge current per jumper setting, boost ripple and efficiency at 2 A, run while
    charging from a weak port, reverse-battery protection, 8 outputs, mic, IMU, deep-sleep current with the switch off.
