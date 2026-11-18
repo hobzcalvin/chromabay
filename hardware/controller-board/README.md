@@ -65,6 +65,6 @@ board edit (see DESIGN.md).
    switch, button, LED, WAGOs, JST, mic and the QFN/DFN power chips are the ones to look at.
 3. Expect JLC to ask about the button and switch overhanging the board edge (on purpose) and the 0.35/0.2 mm
    REGN vias.
-4. Optional: confirm the boost compensation (10k / 10 nF / 47 pF) in TI WEBENCH.
+4. Boost compensation (15k / 4.7 nF / 47 pF) and current limit (200k) are checked by `tools/boost_loop.py` (the WEBENCH-equivalent loop analysis); no WEBENCH run needed.
 5. Order 2–5 to validate. Tests: charge current per jumper setting, boost ripple and efficiency at 2 A, run while
    charging from a weak port, reverse-battery protection, 8 outputs, mic, IMU, deep-sleep current with the switch off.

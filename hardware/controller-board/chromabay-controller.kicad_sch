@@ -12916,7 +12916,7 @@
 				)
 			)
 		)
-		(property "Value" "24k"
+		(property "Value" "33k"
 			(at 373.38 120.61 0)
 			(effects
 				(font
@@ -12942,7 +12942,7 @@
 				(hide yes)
 			)
 		)
-		(property "LCSC" "C25769"
+		(property "LCSC" "C25779"
 			(at 373.38 114.3 0)
 			(effects
 				(font
@@ -12951,7 +12951,7 @@
 				(hide yes)
 			)
 		)
-		(property "Note" "TS divider: with 5.1k + NCP15XH103 -> charge window ~0.7..61 C"
+		(property "Note" "TS divider: 5.1k/33k + NCP15XH103 (B 3380) -> charging allowed 3.4..61.8 C (no charging below 0 C)"
 			(at 373.38 114.3 0)
 			(effects
 				(font
@@ -16747,7 +16747,7 @@
 				)
 			)
 		)
-		(property "Value" "10k"
+		(property "Value" "15k"
 			(at 599.44 110.45 0)
 			(effects
 				(font
@@ -16773,7 +16773,7 @@
 				(hide yes)
 			)
 		)
-		(property "LCSC" "C25744"
+		(property "LCSC" "C25756"
 			(at 599.44 104.14 0)
 			(effects
 				(font
@@ -16782,7 +16782,7 @@
 				(hide yes)
 			)
 		)
-		(property "Note" "R5 = pi*Vout*Rsense*fc*Co/((1-D)*Vref*Gea), fc=15kHz, Co~75uF eff -> 10.7k"
+		(property "Note" "loop checked in tools/boost_loop.py: fc 4.5-21 kHz, PM >= 63 deg, GM >= 12.8 dB"
 			(at 599.44 104.14 0)
 			(effects
 				(font
@@ -16865,7 +16865,7 @@
 				)
 			)
 		)
-		(property "Value" "10nF"
+		(property "Value" "4.7nF"
 			(at 447.04 133.31 0)
 			(effects
 				(font
@@ -16891,7 +16891,7 @@
 				(hide yes)
 			)
 		)
-		(property "LCSC" "C15195"
+		(property "LCSC" "C1538"
 			(at 447.04 127 0)
 			(effects
 				(font
@@ -16900,7 +16900,7 @@
 				(hide yes)
 			)
 		)
-		(property "Note" "C5 = Ro*Co/(2*R5) -> 6.4..9.6 nF"
+		(property "Note" "compensation zero with R19 (tools/boost_loop.py)"
 			(at 447.04 127 0)
 			(effects
 				(font
@@ -17101,7 +17101,7 @@
 				)
 			)
 		)
-		(property "Value" "150k"
+		(property "Value" "200k"
 			(at 518.16 133.31 0)
 			(effects
 				(font
@@ -17127,7 +17127,7 @@
 				(hide yes)
 			)
 		)
-		(property "LCSC" "C25755"
+		(property "LCSC" "C25764"
 			(at 518.16 127 0)
 			(effects
 				(font
@@ -17136,7 +17136,7 @@
 				(hide yes)
 			)
 		)
-		(property "Note" "peak switch limit 1.19e6/150k = 7.9 A"
+		(property "Note" "peak switch limit 1.19e6/200k = 5.95 A typ (6.5 A max) < inductor Isat 7 A"
 			(at 518.16 127 0)
 			(effects
 				(font

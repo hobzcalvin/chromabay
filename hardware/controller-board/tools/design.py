@@ -15,8 +15,8 @@ C1206 = "lcsc:C1206"
 # LCSC codes for passives (all JLC Basic or Preferred-Extended = no extended-part fee).
 RES = {  # value -> LCSC
     "0R": "C17168", "33R": "C25105", "200R": "C25087", "680R": "C25130", "1k": "C11702", "1M": "C26083",
-    "1.5k": "C25867", "4.7k": "C25900", "5.1k": "C25905", "10k": "C25744", "33k": "C25779",
-    "68k": "C36871", "24k": "C25769", "100k": "C25741", "150k": "C25755", "220k": "C25767", "22k": "C25768",
+    "1.5k": "C25867", "4.7k": "C25900", "5.1k": "C25905", "10k": "C25744", "15k": "C25756", "33k": "C25779",
+    "68k": "C36871", "24k": "C25769", "100k": "C25741", "150k": "C25755", "220k": "C25767", "200k": "C25764", "22k": "C25768",
 }
 CAP = {  # (value, size) -> LCSC
     ("100nF", "0402"): "C1525", ("1uF", "0402"): "C52923", ("2.2uF", "0402"): "C12530",
@@ -96,7 +96,7 @@ part("JP2", "Jumper:SolderJumper_2_Open", "CHG+1.0A", "Jumper:SolderJumper-2_P1.
      None, {1: "CHG_ICHG", 2: "ICHG_J2"}, "charger")
 # Thermistor: REGN - 5.1k - TS - 33k - GND, NTC from TS to GND (onboard or pack's own via JP3).
 R("5.1k", "CHG_REGN", "CHG_TS", "charger", "TS divider (103AT-class NTC)")
-R("24k", "CHG_TS", "GND", "charger", "TS divider: with 5.1k + NCP15XH103 -> charge window ~0.7..61 C")
+R("33k", "CHG_TS", "GND", "charger", "TS divider: 5.1k/33k + NCP15XH103 (B 3380) -> charging allowed 3.4..61.8 C (no charging below 0 C)")
 part("JP3", "Jumper:SolderJumper_3_Bridged12", "NTC SEL", "Jumper:SolderJumper-3_P1.3mm_Bridged12_RoundedPad1.0x1.5mm",
      None, {1: "NTC_ONBOARD", 2: "CHG_TS", 3: "NTC_EXT"}, "charger")
 part("TH1", "Device:Thermistor_NTC", "10k NTC", "lcsc:R0402", "C77131",
@@ -153,10 +153,10 @@ R("150k", "BST_FSW", "BST_SW", "boost", "RFREQ: ~1 MHz")
 C("22nF", "BST_SS", "GND", "boost", note="soft start ~5 ms")
 R("220k", "5V_BOOST", "BST_FB", "boost", "Vout = 1.204*(1+220/68) = 5.10 V")
 R("68k", "BST_FB", "GND", "boost")
-R("10k", "BST_COMP", "BST_COMP_RC", "boost", "R5 = pi*Vout*Rsense*fc*Co/((1-D)*Vref*Gea), fc=15kHz, Co~75uF eff -> 10.7k")
-C("10nF", "BST_COMP_RC", "GND", "boost", note="C5 = Ro*Co/(2*R5) -> 6.4..9.6 nF")
+R("15k", "BST_COMP", "BST_COMP_RC", "boost", "loop checked in tools/boost_loop.py: fc 4.5-21 kHz, PM >= 63 deg, GM >= 12.8 dB")
+C("4.7nF", "BST_COMP_RC", "GND", "boost", note="compensation zero with R19 (tools/boost_loop.py)")
 C("47pF", "BST_COMP", "GND", "boost", note="C8 = Resr*Co/R5 ~ 40 pF")
-R("150k", "BST_ILIM", "GND", "boost", "peak switch limit 1.19e6/150k = 7.9 A")
+R("200k", "BST_ILIM", "GND", "boost", "peak switch limit 1.19e6/200k = 5.95 A typ (6.5 A max) < inductor Isat 7 A")
 for _ in range(3):
     C("22uF", "5V_BOOST", "GND", "boost", "0805")
 C("1uF", "5V_BOOST", "GND", "boost")

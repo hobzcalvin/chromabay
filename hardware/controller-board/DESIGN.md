@@ -318,10 +318,12 @@ N4R2:** octal-PSRAM variants (N8R8 etc.) take IO33–37.
 - **BQ25606** `IBATFET_OCP` ≥ 6.0 A, so the boost stays on SYS. Floating D+/D- means "unknown adapter", so the ILIM pin sets the input limit (200 Ω → 2.4 A).
   Charge current 0.45 / 0.9 / 1.45 / 1.9 A via JP1/JP2.
 - **Battery temperature window** with the NCP15XH103 (B = 3380) NTC: rev 1's 5.1k/33k divider cut off charging at ~7 °C. It's now
-  **5.1k/24k → charging allowed ~0.7 °C to ~61 °C**, close to the 103AT design window.
+  **5.1k/33k → charging allowed 3.4 °C to 61.8 °C** (no charging below 0 °C; 5.1k/24k would have allowed −3.7 °C).
 - **TPS61088 compensation:** computed from the datasheet equations (Rsense 0.08 Ω, gm 190 µA/V, fc 15 kHz at 3 A from a 3.0 V cell,
-  ~75 µF effective output C after DC bias): **R5 = 10k, C5 = 10 nF, C8 = 47 pF**. RFREQ 150k ≈ 1 MHz, ILIM 150k ≈ 7.9 A peak,
-  inductor peak 6.3 A at 3 A out from 3.0 V (< 7 A sat). Still worth one WEBENCH run or a load-step test on the first boards.
+  ~75 µF effective output C after DC bias): **R5 = 15k, C5 = 4.7 nF, C8 = 47 pF** (tools/boost_loop.py, the WEBENCH-equivalent check: crossover 4.5-21 kHz,
+  phase margin >= 63 deg, gain margin >= 12.8 dB over VIN 3-4.2 V, 0.2-3 A, all output-C derating cases). RFREQ 150k ≈ 1 MHz.
+  ILIM 200k ≈ 5.95 A typ / 6.5 A max peak, under the inductor's 7 A saturation (150k gave 7.9 A, above it);
+  inductor peak ~6.3 A at 3 A out from 3.0 V, so full 3 A output needs the cell above ~3.2 V. A load-step test on the first boards is still worthwhile.
 - **Reverse-polarity FET** AONR21321: < 29.5 mΩ at −4.5 V. At 3.5 A from a low cell that's about 0.5 W, warm but fine. At the
   typical ~2 A it's ~0.15 W.
 - **LED:** LTST-S326KGJRKT C1 = red = charge (driven by the charger, works with the switch off), C2 = green = status (firmware).
