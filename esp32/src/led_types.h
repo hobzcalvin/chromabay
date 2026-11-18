@@ -25,7 +25,8 @@ enum class LedChipset : uint8_t {
 
     // 4-wire SPI (clock + data). These need a SECOND pin (clockPin) alongside the data pin.
     APA102_SPI = 25,    // For APA102 / DotStar (DotStarBgrFeature, two-wire bit-bang)
-    SK9822_SPI = 26,    // For SK9822 (APA102-compatible protocol; same DotStar driver)
+    SK9822_SPI = 26,    // For SK9822 (APA102 protocol). Driven with its 5-bit current level per
+                        // pixel ("HD", see sk9822_hd.h) over hardware SPI when available.
     // WS2801_SPI = 23, // (future) WS2801 (NeoRbgFeature with Ws2801 SPI method)
 };
 
@@ -114,8 +115,14 @@ enum InternalLedType : uint8_t {
     ITYPE_ESP32_RMT_SM16825_RGBCW = 12,// NeoRgbwcSm16825eFeature + NeoEsp32RmtNWs2812xMethod (5ch: RGBCW, 16-bit)
 
     // 4-wire SPI (clock + data). Bit-bang two-wire so it runs on ANY two GPIOs across
-    // esp32 / s3 / c3 (hardware SPI would pin us to specific pads).
-    ITYPE_ESP32_APA102_BGR = 100,      // DotStarBgrFeature + DotStarMethod (APA102 / SK9822)
+    // esp32 / s3 / c3.
+    ITYPE_ESP32_APA102_BGR = 100,      // DotStarBgrFeature + DotStarMethod (APA102)
+    // SK9822 with its per-pixel 5-bit current level (DotStarLbgrFeature, level in W).
+    // Hardware SPI at 10 MHz: the ESP32 GPIO matrix routes the SPI peripheral to any two
+    // output pins, so pin choice is as free as bit-bang. Only one strip can own the SPI
+    // peripheral; any further SK9822 strip falls back to the bit-bang variant.
+    ITYPE_ESP32_SK9822_HD_SPI = 101,   // DotStarLbgrFeature + DotStarSpi10MhzMethod
+    ITYPE_ESP32_SK9822_HD_BITBANG = 102, // DotStarLbgrFeature + DotStarMethod
 };
 
 } // namespace LedConfig

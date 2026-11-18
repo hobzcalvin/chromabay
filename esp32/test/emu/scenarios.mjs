@@ -811,6 +811,20 @@ export const scenarios = [
       check(r.status === 0, `lane_repack_test failed (${fails.length} checks):\n${fails.join('\n') || r.stdout.slice(-2000)}`);
     },
   },
+  {
+    name: 'sk9822-hd',
+    what: 'host unit test of the SK9822 per-pixel 5-bit current level split (esp32/test/sk9822_hd_test.cpp)',
+    async run() {
+      fs.mkdirSync(OUT_DIR, { recursive: true });
+      const exe = path.join(OUT_DIR, 'sk9822_hd_test');
+      const cc = spawnSync(process.env.CXX || 'c++', ['-std=c++17', '-O1', '-Wall', path.join(ROOT, 'esp32/test/sk9822_hd_test.cpp'), '-o', exe], { encoding: 'utf8' });
+      check(cc.status === 0, `sk9822_hd_test.cpp did not compile:\n${cc.stderr}`);
+      const r = spawnSync(exe, { encoding: 'utf8' });
+      fs.writeFileSync(path.join(OUT_DIR, 'sk9822-hd.log'), r.stdout + r.stderr);
+      const fails = r.stdout.split('\n').filter((l) => l.startsWith('FAIL'));
+      check(r.status === 0, `sk9822_hd_test failed (${fails.length} checks):\n${fails.join('\n') || r.stdout.slice(-2000)}`);
+    },
+  },
 ];
 
 // ---- OTA ------------------------------------------------------------------------------------

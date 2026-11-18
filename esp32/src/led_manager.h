@@ -6,6 +6,7 @@
 #include <memory> // Required for std::unique_ptr
 #include "led_types.h"
 #include "led_wrapper.h" // For LedWrapper and NeoPixelBus types if needed directly
+#include "sk9822_hd.h"   // SK9822 per-pixel 5-bit current level ("HD") math
 
 // Forward declaration for FastLED types if used for color math
 class CRGB;
@@ -109,6 +110,13 @@ public:
         buildLut();
         _internalType = mapChipsetToInternalType(_config.chipset);
         if (_internalType != ITYPE_NONE && _config.numLeds > 0) {
+            // SK9822 prefers hardware SPI, but only one strip can own the SPI peripheral; a
+            // second SK9822 strip gets the same HD output over bit-bang instead.
+            // Unset pins (255) also stay on bit-bang: SPI.begin() would read 255 as -1 and pick
+            // the board's default SPI pins, driving a pin nobody configured.
+            if (_internalType == ITYPE_ESP32_SK9822_HD_SPI &&
+                (_config.clockPin == 255 || _config.pin == 255 || !LedWrapper::claimSpi()))
+                _internalType = ITYPE_ESP32_SK9822_HD_BITBANG;
             // Note: RMT channel is passed to LedWrapper::create; clockPin is used only by
             // 4-wire SPI buses (APA102/SK9822) and ignored by the RMT ones.
             _busPtr = LedWrapper::create(_internalType, _config.pin, _config.numLeds, _config.rmtChannel, _config.clockPin);
@@ -153,7 +161,7 @@ public:
 
     void begin() {
         if (_busPtr && _internalType != ITYPE_NONE) {
-            LedWrapper::begin(_busPtr, _internalType);
+            LedWrapper::begin(_busPtr, _internalType, _config.pin, _config.clockPin);
             // Apply initial brightness
             LedWrapper::setBrightness(_busPtr, _internalType, _brightness);
         }
@@ -161,6 +169,9 @@ public:
 
     void show(bool consistent = false) {
         if (_busPtr && _internalType != ITYPE_NONE) {
+            // SK9822 HD keeps its frame in the target buffer (level + PWM are derived from it),
+            // so a plain show emits that, exactly like one dither sub-frame with 0 extra bits.
+            if (_hd && !_ditherOn) { ditherShow(); return; }
             LedWrapper::show(_busPtr, _internalType, consistent);
         }
     }
@@ -176,7 +187,7 @@ public:
     // brightness and put in the strip's color order.
     void setPixelColor(uint16_t pixelIndex, uint32_t color) {
         if (_busPtr && _internalType != ITYPE_NONE && pixelIndex < _config.numLeds) {
-            if (_ditherOn) {
+            if (_ditherOn || _hd) {
                 // A dithering strip transmits its dither TARGET on every show(), so a write
                 // straight to NeoPixelBus would be overwritten before it went out. The dither
                 // pipeline carries RGB only (see chooseDitherBits), so W is dropped here exactly
@@ -232,7 +243,9 @@ public:
         _brightness = brightness;
         // While dithering we own brightness (baked into the target at full precision), so
         // leave NeoPixelBus luminance at 255 — otherwise its 8-bit dim re-quantizes the gain.
-        if (_busPtr && _internalType != ITYPE_NONE && !_ditherOn) {
+        // SK9822 HD likewise folds brightness into the per-pixel level + PWM (it has no
+        // luminance stage at all).
+        if (_busPtr && _internalType != ITYPE_NONE && !_ditherOn && !_hd) {
             LedWrapper::setBrightness(_busPtr, _internalType, _brightness);
         }
     }
@@ -286,6 +299,7 @@ public:
             _lutW[i] = (uint8_t)(o8 < 0 ? 0 : (o8 > 255 ? 255 : o8));
         }
         _hasWhite = hasWhiteChannel(_config.chipset);
+        _hd = (_config.chipset == LedChipset::SK9822_SPI);
     }
     uint8_t lutR(uint8_t c) const { return _lut[0][c]; }
     uint8_t lutG(uint8_t c) const { return _lut[1][c]; }
@@ -372,14 +386,31 @@ public:
     // Decide N (0=off, else 1..3) from chipset speed + pixel count, (re)alloc buffers, and
     // route brightness: dithering owns brightness (NeoPixelBus luminance forced to 255 so
     // its 8-bit dim can't re-quantize away the gain); non-dithering keeps SetLuminance.
+    //
+    // SK9822 HD strips always use the target buffers (even with 0 dither bits): that is where
+    // the per-pixel 5-bit level and rescaled PWM live. Their show rate is measured, not
+    // guessed: one real (blank) Show() is timed here, so hardware SPI and the bit-bang
+    // fallback each get the dither depth they can actually sustain.
     void configureDither() {
+        if (_hd && _busPtr && _internalType != ITYPE_NONE && _measuredShowUs == 0) {
+            // NeoPixelBus skips Show() on a clean buffer, so mark it dirty with a black write.
+            LedWrapper::setPixelColorLevel(_busPtr, _internalType, 0, 0u, 1, _config.colorOrder);
+            const uint32_t t0 = micros();
+            LedWrapper::show(_busPtr, _internalType, false);   // buffer is still all-black
+            const uint32_t dt = micros() - t0;
+            // Distrust anything faster than the wire allows even at 15 MHz (the SK9822's max):
+            // that means the Show did not really transmit, so fall back to the computed estimate.
+            const uint32_t floorUs = (uint32_t)(((uint64_t)_config.numLeds * 32u) * 1000000u / 15000000u);
+            _measuredShowUs = (dt >= floorUs && dt > 0) ? dt : 0;
+        }
         uint8_t bits = chooseDitherBits();
         _ditherBits = bits;
         _ditherOn = (bits > 0);
-        if (_ditherOn) {
+        if (_ditherOn || _hd) {
             size_t n = (size_t)_config.numLeds * 3;
             _ditherTarget.assign(n, 0);
             _ditherResid.assign(n, 0);
+            if (_hd) _hdLevel.assign(_config.numLeds, 1);
             if (_busPtr && _internalType != ITYPE_NONE)
                 LedWrapper::setBrightness(_busPtr, _internalType, 255); // own brightness ourselves
         } else {
@@ -393,8 +424,10 @@ public:
     // Emit ONE dither sub-frame: per channel, sigma-delta the fixed-point target down to
     // 8 bits (carry biases the LSB so the time-average equals the high-precision target),
     // write it raw (luminance=255 + null gamma => identity passthrough), and Show.
+    // SK9822 HD also sends each pixel's 5-bit current level with it.
     void ditherShow() {
-        if (!_ditherOn || !_busPtr || _internalType == ITYPE_NONE) return;
+        if (!(_ditherOn || _hd) || !_busPtr || _internalType == ITYPE_NONE) return;
+        if (_ditherTarget.size() < (size_t)_config.numLeds * 3) return; // not configured yet
         const uint16_t L = (uint16_t)1 << _ditherBits;
         const uint16_t mask = L - 1;
         const uint16_t n = _config.numLeds;
@@ -412,7 +445,10 @@ public:
                 out[ch] = (uint8_t)(v > 255 ? 255 : v);
             }
             uint32_t wrgb = ((uint32_t)out[0] << 16) | ((uint32_t)out[1] << 8) | out[2];
-            LedWrapper::setPixelColor(_busPtr, _internalType, i, wrgb, _config.colorOrder);
+            if (_hd)
+                LedWrapper::setPixelColorLevel(_busPtr, _internalType, i, wrgb, _hdLevel[i], _config.colorOrder);
+            else
+                LedWrapper::setPixelColor(_busPtr, _internalType, i, wrgb, _config.colorOrder);
         }
         LedWrapper::show(_busPtr, _internalType, false);
     }
@@ -423,9 +459,10 @@ public:
     // buffers too, then write black and push it out. Used for sleep / scheduled-off.
     void blank() {
         if (_busPtr == nullptr || _internalType == ITYPE_NONE) return;
-        if (_ditherOn) {
+        if (_ditherOn || _hd) {
             for (auto& v : _ditherTarget) v = 0;
             for (auto& v : _ditherResid) v = 0;
+            for (auto& v : _hdLevel) v = 1;
         }
         for (uint16_t i = 0; i < _config.numLeds; i++)
             LedWrapper::setPixelColor(_busPtr, _internalType, i, 0u, _config.colorOrder);
@@ -460,12 +497,30 @@ private:
     uint8_t _ditherBits = 0;
     std::vector<uint16_t> _ditherTarget; // per channel, fixed-point (ditherBits frac bits)
     std::vector<uint8_t> _ditherResid;   // per channel sigma-delta residual (0..2^bits-1)
+    bool _hd = false;                    // SK9822: per-pixel 5-bit current level (sk9822_hd.h)
+    std::vector<uint8_t> _hdLevel;       // per pixel 5-bit level (1..31), SK9822 HD only
+    uint32_t _measuredShowUs = 0;        // SK9822 HD: timed Show() duration, 0 = not measured
 
     // target_fixed = (c16/65535) * (brightness/255) * 255 * L = c16 * brightness * L / 65535,
     // for a pixel already in 16-bit output space (corrected or not).
     void storeDitherTarget(uint16_t pixelIndex, const uint16_t c16[3]) {
         const uint16_t L = (uint16_t)1 << _ditherBits;
         size_t base = (size_t)pixelIndex * 3;
+        if (base + 3 > _ditherTarget.size()) return; // not configured yet
+        if (_hd) {
+            // Full-precision linear target per channel (c16 * brightness), then the lowest
+            // current level that covers the brightest channel, and the PWM rescaled to it.
+            uint32_t T[3], maxT = 0;
+            for (int ch = 0; ch < 3; ch++) {
+                T[ch] = (uint32_t)c16[ch] * _brightness;
+                if (T[ch] > maxT) maxT = T[ch];
+            }
+            const uint8_t level = Sk9822Hd::chooseLevel(maxT);
+            if (pixelIndex < _hdLevel.size()) _hdLevel[pixelIndex] = level;
+            for (int ch = 0; ch < 3; ch++)
+                _ditherTarget[base + ch] = Sk9822Hd::scaleChannel(T[ch], level, _ditherBits);
+            return;
+        }
         for (int ch = 0; ch < 3; ch++) {
             uint32_t t = ((uint32_t)c16[ch] * _brightness * L + 32767) / 65535;
             _ditherTarget[base + ch] = (uint16_t)t;
@@ -476,6 +531,19 @@ private:
     // cap by the main-loop sub-frame rate (it drives sub-frames once per ~1ms iteration).
     uint32_t estShowRateHz() const {
         if (_config.numLeds == 0) return 0;
+        const uint32_t loopCap = 900; // in-loop sub-frame cadence (delay(1)-limited)
+        if (_hd) {
+            // Measured in configureDither(); if that could not run, assume the 10 MHz SPI
+            // frame (start + 32 bits/LED + reset + end frames) or a slow ~1 Mbit/s bit-bang.
+            float tUs = (float)_measuredShowUs;
+            if (tUs <= 0.0f) {
+                const float bits = (float)_config.numLeds * 32.0f + 64.0f + ((_config.numLeds + 15) / 16) * 8.0f;
+                const float bps = (_internalType == ITYPE_ESP32_SK9822_HD_SPI) ? (float)kSk9822SpiHz : 1000000.0f;
+                tUs = bits * 1000000.0f / bps;
+            }
+            uint32_t hw = (uint32_t)(1000000.0f / (tUs < 1.0f ? 1.0f : tUs));
+            return hw < loopCap ? hw : loopCap;
+        }
         int bpp = 24; int kbps = 800;
         switch (_config.chipset) {
             case LedChipset::WS2811_400KHZ: kbps = 400; bpp = 24; break;
@@ -490,7 +558,6 @@ private:
         float tShowUs = (float)_config.numLeds * bpp * 1000.0f / (float)kbps + 300.0f; // +reset
         if (tShowUs < 1.0f) tShowUs = 1.0f;
         uint32_t hw = (uint32_t)(1000000.0f / tShowUs);
-        const uint32_t loopCap = 900; // in-loop sub-frame cadence (delay(1)-limited)
         return hw < loopCap ? hw : loopCap;
     }
 
@@ -500,6 +567,13 @@ private:
         // The dither pipeline carries only 3 (RGB) channels; auto-white sets a 4th. Rather
         // than clobber W, don't dither RGBW strips (they're slower anyway, so headroom is low).
         if (_hasWhite && _config.autoWhiteMode != static_cast<uint8_t>(AutoWhiteMode::Off)) return 0;
+#if defined(CONFIG_FREERTOS_UNICORE)
+        // Single-core boards don't run the between-frame dither sub-frames (main.cpp), so a
+        // dithered strip would only step its sigma-delta once per animation frame, which is
+        // slow enough to see. SK9822 HD gets its low-brightness depth from the current level
+        // instead, so leave it undithered there.
+        if (_hd) return 0;
+#endif
         uint32_t rate = estShowRateHz();
         for (int n = 3; n >= 1; n--) {
             if ((rate >> n) > 70u) return (uint8_t)n;
@@ -522,7 +596,7 @@ private:
             case LedChipset::TM1914_RGB:     return ITYPE_ESP32_RMT_TM1914_RGB;
             case LedChipset::SM16825_RGBCW:  return ITYPE_ESP32_RMT_SM16825_RGBCW;
             case LedChipset::APA102_SPI:     return ITYPE_ESP32_APA102_BGR;
-            case LedChipset::SK9822_SPI:     return ITYPE_ESP32_APA102_BGR; // APA102-compatible
+            case LedChipset::SK9822_SPI:     return ITYPE_ESP32_SK9822_HD_SPI; // HD; falls back to bit-bang
             case LedChipset::NONE:
             default:                    return ITYPE_NONE;
         }
@@ -706,8 +780,8 @@ private:
 
 inline void LedConfig::LedBus::setPixelColor(uint16_t pixelIndex, const CRGB& color) {
     if (_busPtr && _internalType != ITYPE_NONE && pixelIndex < _config.numLeds) {
-        if (_ditherOn) {
-            // Dithering: stash a high-precision target; ditherShow() emits the sub-frames.
+        if (_ditherOn || _hd) {
+            // Dithering (or SK9822 HD): stash a high-precision target; ditherShow() emits it.
             setDitherTarget(pixelIndex, color);
             return;
         }
@@ -736,7 +810,7 @@ inline void LedConfig::LedBus::setDitherTarget(uint16_t pixelIndex, const CRGB& 
 
 inline void LedConfig::LedBus::setPixelColorRaw(uint16_t pixelIndex, const CRGB& color) {
     if (_busPtr && _internalType != ITYPE_NONE && pixelIndex < _config.numLeds) {
-        if (_ditherOn) {
+        if (_ditherOn || _hd) {
             setDitherTargetRaw(pixelIndex, color.r, color.g, color.b);
             return;
         }

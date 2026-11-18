@@ -53,6 +53,15 @@ using Esp32RmtSm16825RgbcwBus = NeoPixelBusLg<NeoRgbwcSm16825eFeature, NeoEsp32R
 // GPIOs on esp32/s3/c3. Constructed with (count, clockPin, dataPin), not (count, pin, channel).
 using Esp32Apa102Bus = NeoPixelBusLg<DotStarBgrFeature, DotStarMethod, NeoGammaNullMethod>;
 
+// SK9822 with its per-pixel 5-bit current level (W of RgbwColor carries the level, 0..31; see
+// sk9822_hd.h). Plain NeoPixelBus, not Lg: brightness is folded into the level + PWM values by
+// LedBus, so there is no luminance stage here. Hardware SPI at 10 MHz (the SK9822 is rated to
+// 15 MHz), routed by the GPIO matrix to whatever pins the strip uses; Begin() takes the pins.
+// The bit-bang variant is the fallback for a second SK9822 strip (one SPI owner at a time).
+using Esp32Sk9822HdSpiBus = NeoPixelBus<DotStarLbgrFeature, DotStarSpi10MhzMethod>;
+using Esp32Sk9822HdBitBangBus = NeoPixelBus<DotStarLbgrFeature, DotStarMethod>;
+constexpr uint32_t kSk9822SpiHz = 10000000;
+
 
 // Helper for 16-bit color conversion
 inline uint16_t scale8to16(uint8_t val8) {
@@ -63,6 +72,15 @@ namespace LedConfig {
 
 class LedWrapper {
 public:
+    // The Arduino SPI peripheral is a single global: two strips sharing it would fight over
+    // its pins, and destroying one (SPI.end()) would stop the other. So at most one strip owns
+    // it; LedBus asks before choosing ITYPE_ESP32_SK9822_HD_SPI and cleanup() hands it back.
+    static bool claimSpi() {
+        if (spiOwned()) return false;
+        spiOwned() = true;
+        return true;
+    }
+
     // clockPin is only used by 4-wire SPI buses (APA102/SK9822); RMT buses ignore it.
     static void* create(InternalLedType busType, uint8_t pin, uint16_t len, uint8_t rmtChannel, uint8_t clockPin = 255) {
         void* busPtr = nullptr;
@@ -70,6 +88,8 @@ public:
 
         switch (busType) {
             case ITYPE_ESP32_APA102_BGR:        busPtr = new Esp32Apa102Bus(len, clockPin, pin); break; // (count, clock, data)
+            case ITYPE_ESP32_SK9822_HD_SPI:     busPtr = new Esp32Sk9822HdSpiBus(len, clockPin, pin); break; // pins ignored; given to Begin()
+            case ITYPE_ESP32_SK9822_HD_BITBANG: busPtr = new Esp32Sk9822HdBitBangBus(len, clockPin, pin); break;
             case ITYPE_ESP32_RMT_WS2812_RGB:    busPtr = new Esp32RmtWs2812RgbBus(len, pin, busChannel); break;
             case ITYPE_ESP32_RMT_SK6812_RGBW:   busPtr = new Esp32RmtSk6812RgbwBus(len, pin, busChannel); break;
             case ITYPE_ESP32_RMT_TM1814_RGBW:   busPtr = new Esp32RmtTm1814RgbwBus(len, pin, busChannel); break;
@@ -89,10 +109,13 @@ public:
         return busPtr;
     }
 
-    static void begin(void* busPtr, InternalLedType busType) {
+    // pin / clockPin are only used by the hardware-SPI bus, which takes its pins at Begin().
+    static void begin(void* busPtr, InternalLedType busType, uint8_t pin = 255, uint8_t clockPin = 255) {
         if (!busPtr) return;
         switch (busType) {
             case ITYPE_ESP32_APA102_BGR:        static_cast<Esp32Apa102Bus*>(busPtr)->Begin(); break;
+            case ITYPE_ESP32_SK9822_HD_SPI:     static_cast<Esp32Sk9822HdSpiBus*>(busPtr)->Begin(clockPin, -1, pin, -1); break; // (sck, miso, mosi, ss)
+            case ITYPE_ESP32_SK9822_HD_BITBANG: static_cast<Esp32Sk9822HdBitBangBus*>(busPtr)->Begin(); break;
             case ITYPE_ESP32_RMT_WS2812_RGB:    static_cast<Esp32RmtWs2812RgbBus*>(busPtr)->Begin(); break;
             case ITYPE_ESP32_RMT_SK6812_RGBW:   static_cast<Esp32RmtSk6812RgbwBus*>(busPtr)->Begin(); break;
             case ITYPE_ESP32_RMT_TM1814_RGBW:
@@ -123,6 +146,8 @@ public:
         if (!busPtr) return;
         switch (busType) {
             case ITYPE_ESP32_APA102_BGR:        static_cast<Esp32Apa102Bus*>(busPtr)->Show(consistent); break;
+            case ITYPE_ESP32_SK9822_HD_SPI:     static_cast<Esp32Sk9822HdSpiBus*>(busPtr)->Show(consistent); break;
+            case ITYPE_ESP32_SK9822_HD_BITBANG: static_cast<Esp32Sk9822HdBitBangBus*>(busPtr)->Show(consistent); break;
             case ITYPE_ESP32_RMT_WS2812_RGB:    static_cast<Esp32RmtWs2812RgbBus*>(busPtr)->Show(consistent); break;
             case ITYPE_ESP32_RMT_SK6812_RGBW:   static_cast<Esp32RmtSk6812RgbwBus*>(busPtr)->Show(consistent); break;
             case ITYPE_ESP32_RMT_TM1814_RGBW:   static_cast<Esp32RmtTm1814RgbwBus*>(busPtr)->Show(consistent); break;
@@ -145,6 +170,8 @@ public:
         if (!busPtr) return true; // No bus, so it "can show" (do nothing)
         switch (busType) {
             case ITYPE_ESP32_APA102_BGR:        return static_cast<Esp32Apa102Bus*>(busPtr)->CanShow();
+            case ITYPE_ESP32_SK9822_HD_SPI:     return static_cast<Esp32Sk9822HdSpiBus*>(busPtr)->CanShow();
+            case ITYPE_ESP32_SK9822_HD_BITBANG: return static_cast<Esp32Sk9822HdBitBangBus*>(busPtr)->CanShow();
             case ITYPE_ESP32_RMT_WS2812_RGB:    return static_cast<Esp32RmtWs2812RgbBus*>(busPtr)->CanShow();
             case ITYPE_ESP32_RMT_SK6812_RGBW:   return static_cast<Esp32RmtSk6812RgbwBus*>(busPtr)->CanShow();
             case ITYPE_ESP32_RMT_TM1814_RGBW:   return static_cast<Esp32RmtTm1814RgbwBus*>(busPtr)->CanShow();
@@ -167,6 +194,9 @@ public:
         if (!busPtr) return;
         switch (busType) {
             case ITYPE_ESP32_APA102_BGR:        static_cast<Esp32Apa102Bus*>(busPtr)->SetLuminance(b); break;
+            // SK9822 HD buses have no luminance stage: LedBus folds brightness into the level.
+            case ITYPE_ESP32_SK9822_HD_SPI:
+            case ITYPE_ESP32_SK9822_HD_BITBANG: break;
             case ITYPE_ESP32_RMT_WS2812_RGB:    static_cast<Esp32RmtWs2812RgbBus*>(busPtr)->SetLuminance(b); break;
             case ITYPE_ESP32_RMT_SK6812_RGBW:   static_cast<Esp32RmtSk6812RgbwBus*>(busPtr)->SetLuminance(b); break;
             case ITYPE_ESP32_RMT_TM1814_RGBW:   static_cast<Esp32RmtTm1814RgbwBus*>(busPtr)->SetLuminance(b); break;
@@ -226,6 +256,10 @@ public:
             case ITYPE_ESP32_APA102_BGR:
                 static_cast<Esp32Apa102Bus*>(busPtr)->SetPixelColor(pix, RgbColor(ordered_r, ordered_g, ordered_b));
                 break;
+            case ITYPE_ESP32_SK9822_HD_SPI:     // no level given: full current, like a plain APA102 write
+            case ITYPE_ESP32_SK9822_HD_BITBANG:
+                setPixelColorLevel(busPtr, busType, pix, c, 31, co);
+                break;
             case ITYPE_ESP32_RMT_WS2812_RGB:
                 static_cast<Esp32RmtWs2812RgbBus*>(busPtr)->SetPixelColor(pix, RgbColor(ordered_r, ordered_g, ordered_b));
                 break;
@@ -268,12 +302,38 @@ public:
         }
     }
 
+    // SK9822 HD: RGB (WRGB, W ignored) plus the 5-bit current level (1..31), in the strip's
+    // color order. A no-op for every other bus type.
+    static void setPixelColorLevel(void* busPtr, InternalLedType busType, uint16_t pix, uint32_t c,
+                                   uint8_t level, ColorOrderValue co) {
+        if (!busPtr) return;
+        if (busType != ITYPE_ESP32_SK9822_HD_SPI && busType != ITYPE_ESP32_SK9822_HD_BITBANG) return;
+        const uint8_t r_in = (c >> 16) & 0xFF, g_in = (c >> 8) & 0xFF, b_in = c & 0xFF;
+        uint8_t r = r_in, g = g_in, b = b_in;
+        switch (static_cast<ColorOrderValue>(static_cast<uint8_t>(co) & 0x0F)) {
+            case ColorOrderValue::RGB: break;
+            case ColorOrderValue::RBG: g = b_in; b = g_in; break;
+            case ColorOrderValue::GRB: r = g_in; g = r_in; break;
+            case ColorOrderValue::GBR: r = g_in; g = b_in; b = r_in; break;
+            case ColorOrderValue::BRG: r = b_in; g = r_in; b = g_in; break;
+            case ColorOrderValue::BGR: r = b_in; g = g_in; b = r_in; break;
+            default: break;
+        }
+        const RgbwColor px(r, g, b, level > 31 ? 31 : level);
+        if (busType == ITYPE_ESP32_SK9822_HD_SPI)
+            static_cast<Esp32Sk9822HdSpiBus*>(busPtr)->SetPixelColor(pix, px);
+        else
+            static_cast<Esp32Sk9822HdBitBangBus*>(busPtr)->SetPixelColor(pix, px);
+    }
+
     static uint32_t getPixelColor(void* busPtr, InternalLedType busType, uint16_t pix, ColorOrderValue co) {
         if (!busPtr) return 0;
         RgbwColor rawColor(0); 
 
         switch (busType) {
             case ITYPE_ESP32_APA102_BGR:        rawColor = static_cast<Esp32Apa102Bus*>(busPtr)->GetPixelColor(pix); break;
+            case ITYPE_ESP32_SK9822_HD_SPI:     rawColor = static_cast<Esp32Sk9822HdSpiBus*>(busPtr)->GetPixelColor(pix); rawColor.W = 0; break; // W is the level
+            case ITYPE_ESP32_SK9822_HD_BITBANG: rawColor = static_cast<Esp32Sk9822HdBitBangBus*>(busPtr)->GetPixelColor(pix); rawColor.W = 0; break;
             case ITYPE_ESP32_RMT_WS2812_RGB:    rawColor = static_cast<Esp32RmtWs2812RgbBus*>(busPtr)->GetPixelColor(pix); break;
             case ITYPE_ESP32_RMT_SK6812_RGBW:   rawColor = static_cast<Esp32RmtSk6812RgbwBus*>(busPtr)->GetPixelColor(pix); break;
             case ITYPE_ESP32_RMT_TM1814_RGBW:   rawColor = static_cast<Esp32RmtTm1814RgbwBus*>(busPtr)->GetPixelColor(pix); break; 
@@ -322,6 +382,8 @@ public:
         if (!busPtr) return;
         switch (busType) {
             case ITYPE_ESP32_APA102_BGR:        delete static_cast<Esp32Apa102Bus*>(busPtr); break;
+            case ITYPE_ESP32_SK9822_HD_SPI:     delete static_cast<Esp32Sk9822HdSpiBus*>(busPtr); spiOwned() = false; break; // ~bus calls SPI.end()
+            case ITYPE_ESP32_SK9822_HD_BITBANG: delete static_cast<Esp32Sk9822HdBitBangBus*>(busPtr); break;
             case ITYPE_ESP32_RMT_WS2812_RGB:    delete static_cast<Esp32RmtWs2812RgbBus*>(busPtr); break;
             case ITYPE_ESP32_RMT_SK6812_RGBW:   delete static_cast<Esp32RmtSk6812RgbwBus*>(busPtr); break;
             case ITYPE_ESP32_RMT_TM1814_RGBW:   delete static_cast<Esp32RmtTm1814RgbwBus*>(busPtr); break;
@@ -344,6 +406,8 @@ public:
         if (!busPtr) return 0;
         switch (busType) {
             case ITYPE_ESP32_APA102_BGR:        return static_cast<Esp32Apa102Bus*>(busPtr)->PixelsSize();
+            case ITYPE_ESP32_SK9822_HD_SPI:     return static_cast<Esp32Sk9822HdSpiBus*>(busPtr)->PixelsSize();
+            case ITYPE_ESP32_SK9822_HD_BITBANG: return static_cast<Esp32Sk9822HdBitBangBus*>(busPtr)->PixelsSize();
             case ITYPE_ESP32_RMT_WS2812_RGB:    return static_cast<Esp32RmtWs2812RgbBus*>(busPtr)->PixelsSize();
             case ITYPE_ESP32_RMT_SK6812_RGBW:   return static_cast<Esp32RmtSk6812RgbwBus*>(busPtr)->PixelsSize();
             case ITYPE_ESP32_RMT_TM1814_RGBW:   return static_cast<Esp32RmtTm1814RgbwBus*>(busPtr)->PixelsSize();
@@ -361,6 +425,9 @@ public:
                 return 0;
         }
     }
+
+private:
+    static bool& spiOwned() { static bool owned = false; return owned; }
 };
 
 } // namespace LedConfig
