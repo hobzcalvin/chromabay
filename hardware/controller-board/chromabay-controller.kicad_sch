@@ -19041,7 +19041,7 @@
 				(hide yes)
 			)
 		)
-		(property "Note" "DIR high = A->B. /OE pulled up: outputs off until firmware enables them."
+		(property "Note" "Powered from the LED rail itself (VLED: after the load switch, fuse and EXT jumper): with the LEDs off it is unpowered, so its outputs can't back-feed a strip through its data input; with an external LED supply its outputs swing to that supply. DIR high = A->B."
 			(at 655.32 248.92 0)
 			(effects
 				(font
@@ -19130,7 +19130,7 @@
 		)
 		(uuid "a951d082-8259-5ab0-ba45-1feba8713412")
 	)
-	(label "5V_BOOST"
+	(label "VLED"
 		(at 643.89 237.49 180)
 		(effects
 			(font
@@ -19340,7 +19340,7 @@
 		)
 		(uuid "453d3b16-1555-54d8-bf92-b3e3cc772022")
 	)
-	(label "5V_BOOST"
+	(label "VLED"
 		(at 666.75 237.49 0)
 		(effects
 			(font
@@ -19541,7 +19541,7 @@
 	)
 	(symbol
 		(lib_id "Device:C")
-		(at 695.96 238.76 0)
+		(at 693.42 238.76 0)
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
@@ -19549,7 +19549,7 @@
 		(dnp no)
 		(uuid "5d1b27dd-03e4-5e2c-801f-2aec3ead802f")
 		(property "Reference" "C25"
-			(at 695.96 232.45 0)
+			(at 693.42 232.45 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -19557,7 +19557,7 @@
 			)
 		)
 		(property "Value" "100nF"
-			(at 695.96 245.07 0)
+			(at 693.42 245.07 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -19565,7 +19565,7 @@
 			)
 		)
 		(property "Footprint" "lcsc:C0402"
-			(at 695.96 238.76 0)
+			(at 693.42 238.76 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -19574,7 +19574,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 695.96 238.76 0)
+			(at 693.42 238.76 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -19583,7 +19583,7 @@
 			)
 		)
 		(property "LCSC" "C1525"
-			(at 695.96 238.76 0)
+			(at 693.42 238.76 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -19608,8 +19608,8 @@
 	)
 	(wire
 		(pts
-			(xy 695.96 234.95)
-			(xy 695.96 232.41)
+			(xy 693.42 234.95)
+			(xy 693.42 232.41)
 		)
 		(stroke
 			(width 0)
@@ -19617,8 +19617,8 @@
 		)
 		(uuid "a1f478ff-54ad-54a3-a318-2a6bb941124e")
 	)
-	(label "5V_BOOST"
-		(at 695.96 232.41 90)
+	(label "VLED"
+		(at 693.42 232.41 90)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -19629,8 +19629,8 @@
 	)
 	(wire
 		(pts
-			(xy 695.96 242.57)
-			(xy 695.96 245.11)
+			(xy 693.42 242.57)
+			(xy 693.42 245.11)
 		)
 		(stroke
 			(width 0)
@@ -19639,7 +19639,7 @@
 		(uuid "d05a3094-2339-5b46-a27e-98bc46fe3667")
 	)
 	(label "GND"
-		(at 695.96 245.11 270)
+		(at 693.42 245.11 270)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -19650,7 +19650,7 @@
 	)
 	(symbol
 		(lib_id "Device:R")
-		(at 728.98 238.76 0)
+		(at 721.36 238.76 0)
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
@@ -19658,7 +19658,7 @@
 		(dnp no)
 		(uuid "d4ac0897-2328-5e82-8ada-76656a76861f")
 		(property "Reference" "R24"
-			(at 728.98 232.45 0)
+			(at 721.36 232.45 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -19666,7 +19666,7 @@
 			)
 		)
 		(property "Value" "10k"
-			(at 728.98 245.07 0)
+			(at 721.36 245.07 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -19674,7 +19674,7 @@
 			)
 		)
 		(property "Footprint" "lcsc:R0402"
-			(at 728.98 238.76 0)
+			(at 721.36 238.76 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -19683,7 +19683,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 728.98 238.76 0)
+			(at 721.36 238.76 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -19692,7 +19692,7 @@
 			)
 		)
 		(property "LCSC" "C25744"
-			(at 728.98 238.76 0)
+			(at 721.36 238.76 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -19717,8 +19717,8 @@
 	)
 	(wire
 		(pts
-			(xy 728.98 234.95)
-			(xy 728.98 232.41)
+			(xy 721.36 234.95)
+			(xy 721.36 232.41)
 		)
 		(stroke
 			(width 0)
@@ -19727,7 +19727,7 @@
 		(uuid "79cc855b-7756-550c-b107-753d969ee6c7")
 	)
 	(label "SHIFT_OE"
-		(at 728.98 232.41 90)
+		(at 721.36 232.41 90)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -19738,8 +19738,8 @@
 	)
 	(wire
 		(pts
-			(xy 728.98 242.57)
-			(xy 728.98 245.11)
+			(xy 721.36 242.57)
+			(xy 721.36 245.11)
 		)
 		(stroke
 			(width 0)
@@ -19748,7 +19748,7 @@
 		(uuid "1b9f3455-790a-5091-8599-e9ad2e86f30e")
 	)
 	(label "3V3"
-		(at 728.98 245.11 270)
+		(at 721.36 245.11 270)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -19759,7 +19759,7 @@
 	)
 	(symbol
 		(lib_id "Device:R")
-		(at 759.46 238.76 0)
+		(at 751.84 238.76 0)
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
@@ -19767,7 +19767,7 @@
 		(dnp no)
 		(uuid "ed7a2128-19ee-58bd-8fa4-8332381ca4f9")
 		(property "Reference" "R25"
-			(at 759.46 232.45 0)
+			(at 751.84 232.45 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -19775,7 +19775,7 @@
 			)
 		)
 		(property "Value" "33R"
-			(at 759.46 245.07 0)
+			(at 751.84 245.07 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -19783,7 +19783,7 @@
 			)
 		)
 		(property "Footprint" "lcsc:R0402"
-			(at 759.46 238.76 0)
+			(at 751.84 238.76 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -19792,7 +19792,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 759.46 238.76 0)
+			(at 751.84 238.76 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -19801,7 +19801,7 @@
 			)
 		)
 		(property "LCSC" "C25105"
-			(at 759.46 238.76 0)
+			(at 751.84 238.76 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -19826,8 +19826,8 @@
 	)
 	(wire
 		(pts
-			(xy 759.46 234.95)
-			(xy 759.46 232.41)
+			(xy 751.84 234.95)
+			(xy 751.84 232.41)
 		)
 		(stroke
 			(width 0)
@@ -19836,7 +19836,7 @@
 		(uuid "0ede315c-ca33-5bf1-971e-cf9c20a831f9")
 	)
 	(label "BUF_C1"
-		(at 759.46 232.41 90)
+		(at 751.84 232.41 90)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -19847,8 +19847,8 @@
 	)
 	(wire
 		(pts
-			(xy 759.46 242.57)
-			(xy 759.46 245.11)
+			(xy 751.84 242.57)
+			(xy 751.84 245.11)
 		)
 		(stroke
 			(width 0)
@@ -19857,7 +19857,7 @@
 		(uuid "a475baa8-6b7a-5389-8b5e-634195e83889")
 	)
 	(label "OUT_C1"
-		(at 759.46 245.11 270)
+		(at 751.84 245.11 270)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -19868,7 +19868,7 @@
 	)
 	(symbol
 		(lib_id "Device:R")
-		(at 787.4 238.76 0)
+		(at 779.78 238.76 0)
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
@@ -19876,7 +19876,7 @@
 		(dnp no)
 		(uuid "e2d08e1c-0344-583c-a0da-0535b5259e88")
 		(property "Reference" "R26"
-			(at 787.4 232.45 0)
+			(at 779.78 232.45 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -19884,7 +19884,7 @@
 			)
 		)
 		(property "Value" "33R"
-			(at 787.4 245.07 0)
+			(at 779.78 245.07 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -19892,7 +19892,7 @@
 			)
 		)
 		(property "Footprint" "lcsc:R0402"
-			(at 787.4 238.76 0)
+			(at 779.78 238.76 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -19901,7 +19901,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 787.4 238.76 0)
+			(at 779.78 238.76 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -19910,7 +19910,7 @@
 			)
 		)
 		(property "LCSC" "C25105"
-			(at 787.4 238.76 0)
+			(at 779.78 238.76 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -19935,8 +19935,8 @@
 	)
 	(wire
 		(pts
-			(xy 787.4 234.95)
-			(xy 787.4 232.41)
+			(xy 779.78 234.95)
+			(xy 779.78 232.41)
 		)
 		(stroke
 			(width 0)
@@ -19945,7 +19945,7 @@
 		(uuid "58731d1a-24ca-5a99-9eb9-46631248c69e")
 	)
 	(label "BUF_D1"
-		(at 787.4 232.41 90)
+		(at 779.78 232.41 90)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -19956,8 +19956,8 @@
 	)
 	(wire
 		(pts
-			(xy 787.4 242.57)
-			(xy 787.4 245.11)
+			(xy 779.78 242.57)
+			(xy 779.78 245.11)
 		)
 		(stroke
 			(width 0)
@@ -19966,7 +19966,7 @@
 		(uuid "53a4a95a-208a-5959-9232-04aa11834a92")
 	)
 	(label "OUT_D1"
-		(at 787.4 245.11 270)
+		(at 779.78 245.11 270)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -19977,7 +19977,7 @@
 	)
 	(symbol
 		(lib_id "Device:R")
-		(at 815.34 238.76 0)
+		(at 805.18 238.76 0)
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
@@ -19985,7 +19985,7 @@
 		(dnp no)
 		(uuid "7d73c1f2-8ea6-50bf-a9cf-4b7c23c601f0")
 		(property "Reference" "R27"
-			(at 815.34 232.45 0)
+			(at 805.18 232.45 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -19993,7 +19993,7 @@
 			)
 		)
 		(property "Value" "33R"
-			(at 815.34 245.07 0)
+			(at 805.18 245.07 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -20001,7 +20001,7 @@
 			)
 		)
 		(property "Footprint" "lcsc:R0402"
-			(at 815.34 238.76 0)
+			(at 805.18 238.76 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -20010,7 +20010,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 815.34 238.76 0)
+			(at 805.18 238.76 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -20019,7 +20019,7 @@
 			)
 		)
 		(property "LCSC" "C25105"
-			(at 815.34 238.76 0)
+			(at 805.18 238.76 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -20044,8 +20044,8 @@
 	)
 	(wire
 		(pts
-			(xy 815.34 234.95)
-			(xy 815.34 232.41)
+			(xy 805.18 234.95)
+			(xy 805.18 232.41)
 		)
 		(stroke
 			(width 0)
@@ -20054,7 +20054,7 @@
 		(uuid "53e3e988-f630-5ddb-a0f4-e122f8e91338")
 	)
 	(label "BUF_C2"
-		(at 815.34 232.41 90)
+		(at 805.18 232.41 90)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -20065,8 +20065,8 @@
 	)
 	(wire
 		(pts
-			(xy 815.34 242.57)
-			(xy 815.34 245.11)
+			(xy 805.18 242.57)
+			(xy 805.18 245.11)
 		)
 		(stroke
 			(width 0)
@@ -20075,7 +20075,7 @@
 		(uuid "b36c0095-a36c-56c2-b486-10fd072b0592")
 	)
 	(label "OUT_C2"
-		(at 815.34 245.11 270)
+		(at 805.18 245.11 270)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -20631,7 +20631,7 @@
 	)
 	(symbol
 		(lib_id "lcsc:SRV05-4-P-T7")
-		(at 802.64 299.72 0)
+		(at 800.1 299.72 0)
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
@@ -20639,7 +20639,7 @@
 		(dnp no)
 		(uuid "6b7426e7-5d04-5183-ab2a-bc0646a26aed")
 		(property "Reference" "U9"
-			(at 802.64 278.17 0)
+			(at 800.1 278.17 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -20647,7 +20647,7 @@
 			)
 		)
 		(property "Value" "SRV05-4"
-			(at 802.64 320 0)
+			(at 800.1 320 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -20655,7 +20655,7 @@
 			)
 		)
 		(property "Footprint" "lcsc:SOT-23-6_L2.9-W1.6-P0.95-LS2.8-BR"
-			(at 802.64 299.72 0)
+			(at 800.1 299.72 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -20664,7 +20664,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 802.64 299.72 0)
+			(at 800.1 299.72 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -20673,7 +20673,7 @@
 			)
 		)
 		(property "LCSC" "C85364"
-			(at 802.64 299.72 0)
+			(at 800.1 299.72 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -20682,7 +20682,7 @@
 			)
 		)
 		(property "Note" "output ESD"
-			(at 802.64 299.72 0)
+			(at 800.1 299.72 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -20719,8 +20719,8 @@
 	)
 	(wire
 		(pts
-			(xy 786.13 289.56)
 			(xy 783.59 289.56)
+			(xy 781.05 289.56)
 		)
 		(stroke
 			(width 0)
@@ -20729,7 +20729,7 @@
 		(uuid "d7657637-6ab6-5230-bdd9-59f7343c5ed3")
 	)
 	(label "OUT_C2"
-		(at 783.59 289.56 180)
+		(at 781.05 289.56 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -20740,8 +20740,8 @@
 	)
 	(wire
 		(pts
-			(xy 786.13 299.72)
 			(xy 783.59 299.72)
+			(xy 781.05 299.72)
 		)
 		(stroke
 			(width 0)
@@ -20749,8 +20749,8 @@
 		)
 		(uuid "8d95b764-f64d-5b5e-94be-69027f92fcf6")
 	)
-	(label "5V_BOOST"
-		(at 783.59 299.72 180)
+	(label "VLED"
+		(at 781.05 299.72 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -20761,8 +20761,8 @@
 	)
 	(wire
 		(pts
-			(xy 786.13 309.88)
 			(xy 783.59 309.88)
+			(xy 781.05 309.88)
 		)
 		(stroke
 			(width 0)
@@ -20771,7 +20771,7 @@
 		(uuid "16dc7762-e1b3-5653-8b93-3206c583c948")
 	)
 	(label "OUT_D2"
-		(at 783.59 309.88 180)
+		(at 781.05 309.88 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -20782,8 +20782,8 @@
 	)
 	(wire
 		(pts
+			(xy 816.61 289.56)
 			(xy 819.15 289.56)
-			(xy 821.69 289.56)
 		)
 		(stroke
 			(width 0)
@@ -20792,7 +20792,7 @@
 		(uuid "dbecbbf2-8cec-52d7-8f5d-59c2a33ea35b")
 	)
 	(label "OUT_D1"
-		(at 821.69 289.56 0)
+		(at 819.15 289.56 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -20803,8 +20803,8 @@
 	)
 	(wire
 		(pts
+			(xy 816.61 299.72)
 			(xy 819.15 299.72)
-			(xy 821.69 299.72)
 		)
 		(stroke
 			(width 0)
@@ -20813,7 +20813,7 @@
 		(uuid "1bb61084-6dc6-5206-ac7b-29d3c325db5c")
 	)
 	(label "GND"
-		(at 821.69 299.72 0)
+		(at 819.15 299.72 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -20824,8 +20824,8 @@
 	)
 	(wire
 		(pts
+			(xy 816.61 309.88)
 			(xy 819.15 309.88)
-			(xy 821.69 309.88)
 		)
 		(stroke
 			(width 0)
@@ -20834,7 +20834,7 @@
 		(uuid "6a21e506-bbd1-5adb-bd2f-57fe79185f46")
 	)
 	(label "OUT_C1"
-		(at 821.69 309.88 0)
+		(at 819.15 309.88 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -20845,7 +20845,7 @@
 	)
 	(symbol
 		(lib_id "lcsc:SRV05-4-P-T7")
-		(at 662.94 353.06 0)
+		(at 660.4 353.06 0)
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
@@ -20853,7 +20853,7 @@
 		(dnp no)
 		(uuid "43bc987a-27a2-5a85-9635-72ddd7f72f21")
 		(property "Reference" "U10"
-			(at 662.94 331.51 0)
+			(at 660.4 331.51 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -20861,7 +20861,7 @@
 			)
 		)
 		(property "Value" "SRV05-4"
-			(at 662.94 373.34 0)
+			(at 660.4 373.34 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -20869,7 +20869,7 @@
 			)
 		)
 		(property "Footprint" "lcsc:SOT-23-6_L2.9-W1.6-P0.95-LS2.8-BR"
-			(at 662.94 353.06 0)
+			(at 660.4 353.06 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -20878,7 +20878,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 662.94 353.06 0)
+			(at 660.4 353.06 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -20887,7 +20887,7 @@
 			)
 		)
 		(property "LCSC" "C85364"
-			(at 662.94 353.06 0)
+			(at 660.4 353.06 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -20896,7 +20896,7 @@
 			)
 		)
 		(property "Note" "output ESD"
-			(at 662.94 353.06 0)
+			(at 660.4 353.06 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -20933,8 +20933,8 @@
 	)
 	(wire
 		(pts
-			(xy 646.43 342.9)
 			(xy 643.89 342.9)
+			(xy 641.35 342.9)
 		)
 		(stroke
 			(width 0)
@@ -20943,7 +20943,7 @@
 		(uuid "38333804-56a3-5ada-8a39-6bd6474a226d")
 	)
 	(label "OUT_C4"
-		(at 643.89 342.9 180)
+		(at 641.35 342.9 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -20954,8 +20954,8 @@
 	)
 	(wire
 		(pts
-			(xy 646.43 353.06)
 			(xy 643.89 353.06)
+			(xy 641.35 353.06)
 		)
 		(stroke
 			(width 0)
@@ -20963,8 +20963,8 @@
 		)
 		(uuid "576f5a0d-b60f-5121-9af3-4ffc528e6007")
 	)
-	(label "5V_BOOST"
-		(at 643.89 353.06 180)
+	(label "VLED"
+		(at 641.35 353.06 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -20975,8 +20975,8 @@
 	)
 	(wire
 		(pts
-			(xy 646.43 363.22)
 			(xy 643.89 363.22)
+			(xy 641.35 363.22)
 		)
 		(stroke
 			(width 0)
@@ -20985,7 +20985,7 @@
 		(uuid "8fc6be2b-7265-538f-b845-418c9794467d")
 	)
 	(label "OUT_D4"
-		(at 643.89 363.22 180)
+		(at 641.35 363.22 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -20996,8 +20996,8 @@
 	)
 	(wire
 		(pts
+			(xy 676.91 342.9)
 			(xy 679.45 342.9)
-			(xy 681.99 342.9)
 		)
 		(stroke
 			(width 0)
@@ -21006,7 +21006,7 @@
 		(uuid "f74680e1-6bb3-50ec-aff1-beb2a4aee7d5")
 	)
 	(label "OUT_D3"
-		(at 681.99 342.9 0)
+		(at 679.45 342.9 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -21017,8 +21017,8 @@
 	)
 	(wire
 		(pts
+			(xy 676.91 353.06)
 			(xy 679.45 353.06)
-			(xy 681.99 353.06)
 		)
 		(stroke
 			(width 0)
@@ -21027,7 +21027,7 @@
 		(uuid "67ceb243-abed-56f1-a4fe-cdb6817e71bb")
 	)
 	(label "GND"
-		(at 681.99 353.06 0)
+		(at 679.45 353.06 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -21038,8 +21038,8 @@
 	)
 	(wire
 		(pts
+			(xy 676.91 363.22)
 			(xy 679.45 363.22)
-			(xy 681.99 363.22)
 		)
 		(stroke
 			(width 0)
@@ -21048,7 +21048,7 @@
 		(uuid "b72c1207-411a-5185-b012-c47dd3316617")
 	)
 	(label "OUT_C3"
-		(at 681.99 363.22 0)
+		(at 679.45 363.22 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -21059,7 +21059,7 @@
 	)
 	(symbol
 		(lib_id "Connector_Generic:Conn_01x02")
-		(at 711.2 335.28 0)
+		(at 706.12 335.28 0)
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
@@ -21067,7 +21067,7 @@
 		(dnp no)
 		(uuid "01666eb3-6328-5624-9ebc-7a680f6776b6")
 		(property "Reference" "J2"
-			(at 711.2 331.51 0)
+			(at 706.12 331.51 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -21075,7 +21075,7 @@
 			)
 		)
 		(property "Value" "OUT1 power (G V)"
-			(at 711.2 341.59 0)
+			(at 706.12 341.59 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -21083,7 +21083,7 @@
 			)
 		)
 		(property "Footprint" "lcsc:CONN-SMD_2060-452"
-			(at 711.2 335.28 0)
+			(at 706.12 335.28 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -21092,7 +21092,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 711.2 335.28 0)
+			(at 706.12 335.28 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -21101,7 +21101,7 @@
 			)
 		)
 		(property "LCSC" "C2765055"
-			(at 711.2 335.28 0)
+			(at 706.12 335.28 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -21110,7 +21110,7 @@
 			)
 		)
 		(property "Note" "WAGO 2060-452/998-404 push-in"
-			(at 711.2 335.28 0)
+			(at 706.12 335.28 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -21135,8 +21135,8 @@
 	)
 	(wire
 		(pts
-			(xy 706.12 335.28)
-			(xy 703.58 335.28)
+			(xy 701.04 335.28)
+			(xy 698.5 335.28)
 		)
 		(stroke
 			(width 0)
@@ -21145,7 +21145,7 @@
 		(uuid "b4051cae-3e0c-5f56-ba38-0314ba1cada3")
 	)
 	(label "VLED"
-		(at 703.58 335.28 180)
+		(at 698.5 335.28 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -21156,8 +21156,8 @@
 	)
 	(wire
 		(pts
-			(xy 706.12 337.82)
-			(xy 703.58 337.82)
+			(xy 701.04 337.82)
+			(xy 698.5 337.82)
 		)
 		(stroke
 			(width 0)
@@ -21166,7 +21166,7 @@
 		(uuid "6b4610a9-5969-55e7-9a2f-9365b45c91ad")
 	)
 	(label "GND"
-		(at 703.58 337.82 180)
+		(at 698.5 337.82 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -21177,7 +21177,7 @@
 	)
 	(symbol
 		(lib_id "Connector_Generic:Conn_01x02")
-		(at 741.68 335.28 0)
+		(at 736.6 335.28 0)
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
@@ -21185,7 +21185,7 @@
 		(dnp no)
 		(uuid "7b4077ce-6f6d-5a32-880a-a4b8e32aeb80")
 		(property "Reference" "J6"
-			(at 741.68 331.51 0)
+			(at 736.6 331.51 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -21193,7 +21193,7 @@
 			)
 		)
 		(property "Value" "OUT1 data (C1 D1)"
-			(at 741.68 341.59 0)
+			(at 736.6 341.59 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -21201,7 +21201,7 @@
 			)
 		)
 		(property "Footprint" "lcsc:CONN-SMD_2060-452"
-			(at 741.68 335.28 0)
+			(at 736.6 335.28 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -21210,7 +21210,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 741.68 335.28 0)
+			(at 736.6 335.28 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -21219,7 +21219,7 @@
 			)
 		)
 		(property "LCSC" "C2765055"
-			(at 741.68 335.28 0)
+			(at 736.6 335.28 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -21228,7 +21228,7 @@
 			)
 		)
 		(property "Note" "WAGO 2060-452/998-404 push-in"
-			(at 741.68 335.28 0)
+			(at 736.6 335.28 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -21253,8 +21253,8 @@
 	)
 	(wire
 		(pts
-			(xy 736.6 335.28)
-			(xy 734.06 335.28)
+			(xy 731.52 335.28)
+			(xy 728.98 335.28)
 		)
 		(stroke
 			(width 0)
@@ -21263,7 +21263,7 @@
 		(uuid "6a1b0ffc-51cc-5b35-8d3f-e768a12894fb")
 	)
 	(label "OUT_D1"
-		(at 734.06 335.28 180)
+		(at 728.98 335.28 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -21274,8 +21274,8 @@
 	)
 	(wire
 		(pts
-			(xy 736.6 337.82)
-			(xy 734.06 337.82)
+			(xy 731.52 337.82)
+			(xy 728.98 337.82)
 		)
 		(stroke
 			(width 0)
@@ -21284,7 +21284,7 @@
 		(uuid "e62d476e-79bf-57c3-b93e-3109cd4587ef")
 	)
 	(label "OUT_C1"
-		(at 734.06 337.82 180)
+		(at 728.98 337.82 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -21295,7 +21295,7 @@
 	)
 	(symbol
 		(lib_id "Connector_Generic:Conn_01x10")
-		(at 772.16 345.44 0)
+		(at 769.62 345.44 0)
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom no)
@@ -21303,7 +21303,7 @@
 		(dnp no)
 		(uuid "d2d160aa-dcf6-5104-b1d2-803024d6500d")
 		(property "Reference" "J5"
-			(at 772.16 331.51 0)
+			(at 769.62 331.51 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -21311,7 +21311,7 @@
 			)
 		)
 		(property "Value" "LED OUT pads"
-			(at 772.16 361.91 0)
+			(at 769.62 361.91 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -21319,7 +21319,7 @@
 			)
 		)
 		(property "Footprint" "cb:OutputPads"
-			(at 772.16 345.44 0)
+			(at 769.62 345.44 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -21328,7 +21328,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 772.16 345.44 0)
+			(at 769.62 345.44 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -21337,7 +21337,7 @@
 			)
 		)
 		(property "LCSC" ""
-			(at 772.16 345.44 0)
+			(at 769.62 345.44 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -21346,7 +21346,7 @@
 			)
 		)
 		(property "Note" "all 8 LED lines + G/V as 2.54 mm wire pads"
-			(at 772.16 345.44 0)
+			(at 769.62 345.44 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -21395,8 +21395,8 @@
 	)
 	(wire
 		(pts
-			(xy 767.08 335.28)
 			(xy 764.54 335.28)
+			(xy 762 335.28)
 		)
 		(stroke
 			(width 0)
@@ -21405,7 +21405,7 @@
 		(uuid "79650b0e-a1f8-51a9-80dc-4a5f95e1a1d5")
 	)
 	(label "GND"
-		(at 764.54 335.28 180)
+		(at 762 335.28 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -21416,8 +21416,8 @@
 	)
 	(wire
 		(pts
-			(xy 767.08 337.82)
 			(xy 764.54 337.82)
+			(xy 762 337.82)
 		)
 		(stroke
 			(width 0)
@@ -21426,7 +21426,7 @@
 		(uuid "89632763-60a5-5f44-a011-af10990ee3cd")
 	)
 	(label "VLED"
-		(at 764.54 337.82 180)
+		(at 762 337.82 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -21437,8 +21437,8 @@
 	)
 	(wire
 		(pts
-			(xy 767.08 340.36)
 			(xy 764.54 340.36)
+			(xy 762 340.36)
 		)
 		(stroke
 			(width 0)
@@ -21447,7 +21447,7 @@
 		(uuid "0b802944-67e3-57e0-97f3-eccf927e31e4")
 	)
 	(label "OUT_C1"
-		(at 764.54 340.36 180)
+		(at 762 340.36 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -21458,8 +21458,8 @@
 	)
 	(wire
 		(pts
-			(xy 767.08 342.9)
 			(xy 764.54 342.9)
+			(xy 762 342.9)
 		)
 		(stroke
 			(width 0)
@@ -21468,7 +21468,7 @@
 		(uuid "474a5a60-8097-54c0-b6f8-9b37fd7a6cdb")
 	)
 	(label "OUT_D1"
-		(at 764.54 342.9 180)
+		(at 762 342.9 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -21479,8 +21479,8 @@
 	)
 	(wire
 		(pts
-			(xy 767.08 345.44)
 			(xy 764.54 345.44)
+			(xy 762 345.44)
 		)
 		(stroke
 			(width 0)
@@ -21489,7 +21489,7 @@
 		(uuid "4fae1a84-e7fe-55bd-a915-be85457f1fec")
 	)
 	(label "OUT_C2"
-		(at 764.54 345.44 180)
+		(at 762 345.44 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -21500,8 +21500,8 @@
 	)
 	(wire
 		(pts
-			(xy 767.08 347.98)
 			(xy 764.54 347.98)
+			(xy 762 347.98)
 		)
 		(stroke
 			(width 0)
@@ -21510,7 +21510,7 @@
 		(uuid "1d968c46-0758-51ce-a9a6-4d54ac1d73f2")
 	)
 	(label "OUT_D2"
-		(at 764.54 347.98 180)
+		(at 762 347.98 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -21521,8 +21521,8 @@
 	)
 	(wire
 		(pts
-			(xy 767.08 350.52)
 			(xy 764.54 350.52)
+			(xy 762 350.52)
 		)
 		(stroke
 			(width 0)
@@ -21531,7 +21531,7 @@
 		(uuid "36fa5638-7250-56dd-b0d9-064265aec3e4")
 	)
 	(label "OUT_C3"
-		(at 764.54 350.52 180)
+		(at 762 350.52 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -21542,8 +21542,8 @@
 	)
 	(wire
 		(pts
-			(xy 767.08 353.06)
 			(xy 764.54 353.06)
+			(xy 762 353.06)
 		)
 		(stroke
 			(width 0)
@@ -21552,7 +21552,7 @@
 		(uuid "d630b115-0814-51a4-8068-bc2f437c4069")
 	)
 	(label "OUT_D3"
-		(at 764.54 353.06 180)
+		(at 762 353.06 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -21563,8 +21563,8 @@
 	)
 	(wire
 		(pts
-			(xy 767.08 355.6)
 			(xy 764.54 355.6)
+			(xy 762 355.6)
 		)
 		(stroke
 			(width 0)
@@ -21573,7 +21573,7 @@
 		(uuid "19a28a15-64e7-5285-bba2-ebfa014d49ef")
 	)
 	(label "OUT_C4"
-		(at 764.54 355.6 180)
+		(at 762 355.6 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -21584,8 +21584,8 @@
 	)
 	(wire
 		(pts
-			(xy 767.08 358.14)
 			(xy 764.54 358.14)
+			(xy 762 358.14)
 		)
 		(stroke
 			(width 0)
@@ -21594,7 +21594,7 @@
 		(uuid "851a7c84-5fee-5657-aeb5-9e08eab00b8f")
 	)
 	(label "OUT_D4"
-		(at 764.54 358.14 180)
+		(at 762 358.14 180)
 		(effects
 			(font
 				(size 1.27 1.27)

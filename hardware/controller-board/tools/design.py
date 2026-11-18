@@ -181,16 +181,18 @@ C("10uF", "VLED", "GND", "loadsw", "0805")
 # ---------------------------------------------------------------- Level shifter + outputs
 OUT = ["C1", "D1", "C2", "D2", "C3", "D3", "C4", "D4"]
 part("U7", "lcsc:74AHCT245PW", "74AHCT245", "lcsc:TSSOP-20_L6.5-W4.4-P0.65-LS6.4-BL", "C54815895", {
-    1: "5V_BOOST", **{2 + i: f"LS_{n}" for i, n in enumerate(OUT)}, 10: "GND",
-    **{18 - i: f"BUF_{n}" for i, n in enumerate(OUT)}, 19: "SHIFT_OE", 20: "5V_BOOST"}, "shifter",
-    note="DIR high = A->B. /OE pulled up: outputs off until firmware enables them.")
-C("100nF", "5V_BOOST", "GND", "shifter")
+    1: "VLED", **{2 + i: f"LS_{n}" for i, n in enumerate(OUT)}, 10: "GND",
+    **{18 - i: f"BUF_{n}" for i, n in enumerate(OUT)}, 19: "SHIFT_OE", 20: "VLED"}, "shifter",
+    note="Powered from the LED rail itself (VLED: after the load switch, fuse and EXT jumper): with the "
+         "LEDs off it is unpowered, so its outputs can't back-feed a strip through its data input; with "
+         "an external LED supply its outputs swing to that supply. DIR high = A->B.")
+C("100nF", "VLED", "GND", "shifter")
 R("10k", "SHIFT_OE", "3V3", "shifter")
 for n in OUT:
     R("33R", f"BUF_{n}", f"OUT_{n}", "shifter")
-part("U9", *SRV, {1: "OUT_C1", 3: "OUT_D1", 4: "OUT_C2", 6: "OUT_D2", 2: "GND", 5: "5V_BOOST"},
+part("U9", *SRV, {1: "OUT_C1", 3: "OUT_D1", 4: "OUT_C2", 6: "OUT_D2", 2: "GND", 5: "VLED"},
      "shifter", note="output ESD")
-part("U10", *SRV, {1: "OUT_C3", 3: "OUT_D3", 4: "OUT_C4", 6: "OUT_D4", 2: "GND", 5: "5V_BOOST"},
+part("U10", *SRV, {1: "OUT_C3", 3: "OUT_D3", 4: "OUT_C4", 6: "OUT_D4", 2: "GND", 5: "VLED"},
      "shifter", note="output ESD")
 # OUT1 solder-free: two WAGO 2060 push-in blocks (SMD, reflowed by JLC, 4.5 mm tall, 18-24 AWG,
 # wire entry facing the right wall). Pins are assigned so the four entries read G V C D from the

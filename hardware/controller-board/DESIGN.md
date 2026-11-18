@@ -88,6 +88,19 @@ plane (fuse to push-ins and pad strip). Signals use the rest of In2, F.Cu and B.
 - `tools/relocate.py` moves a few parts on the routed board and rips only their traces, for re-routing with
   `patch_route.py`.
 
+**Power-off behaviour.**
+- With the power switch off, the 3.3 V regulator, ESP32, mic and IMU are off.
+- The LED-enable line is held low by a pull-down, which disables the boost and keeps the load switch Q2 off.
+  Every LED output (push-in V, pad-strip V, header 5V) therefore reads 0 V.
+- The TPS61088 has no output disconnect, so with the boost off its output node sits near battery voltage. That
+  stops at Q2.
+- The level shifter (U7, with its decoupling cap C25) and the output ESD arrays (U9/U10) are powered from **VLED**:
+  the rail after Q2, the fuse and the EXT5V jumper. With the LEDs off they are unpowered, so no data line can
+  back-feed an unpowered strip. With EXT5V cut and an external LED supply, the shifter runs from that supply, so
+  data swings to the strip's own voltage.
+- The charger and battery path stay alive so the board can charge with the switch off. Expect standby drain on
+  the order of tens of µA, mostly the charger.
+
 **Still to check before ordering:**
 - Review the layout in KiCad, especially the charger corner.
 - Confirm the 0.35/0.2 mm REGN vias are inside JLC's free 4-layer via range.
