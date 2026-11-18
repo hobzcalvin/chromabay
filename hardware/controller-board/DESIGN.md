@@ -79,6 +79,15 @@ plane (fuse to push-ins and pad strip). Signals use the rest of In2, F.Cu and B.
 - The onboard thermistor TH1 moved beside its jumper JP3.
 - The default net-class clearance is now 0.125 mm (JLC 4-layer minimum is 0.09 mm).
 
+**Jumpers (later pass).**
+- JP7 (cut to disable the mic) and the mic's two decoupling caps moved next to the mic: C32 is 1.6 mm from the
+  mic's power pin, C31 3.0 mm, JP7 4.3 mm. R10/R11/R34 shuffled to make room.
+- Every jumper label now sits beside its own jumper (`tools/fix_silk.py --jumpers`).
+- JP4 "SW" belongs to the power switch: cut it so an external switch wired to the header's SWA/SWB pins is the
+  only power switch.
+- `tools/relocate.py` moves a few parts on the routed board and rips only their traces, for re-routing with
+  `patch_route.py`.
+
 **Still to check before ordering:**
 - Review the layout in KiCad, especially the charger corner.
 - Confirm the 0.35/0.2 mm REGN vias are inside JLC's free 4-layer via range.

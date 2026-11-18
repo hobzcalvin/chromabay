@@ -90,7 +90,7 @@ def main():
     print("still blocked:", left or "none")
 
 
-if __name__ == "__main__" and "--vias" not in sys.argv:
+if __name__ == "__main__" and "--vias" not in sys.argv and "--jumpers" not in sys.argv:
     main()
 
 
@@ -152,3 +152,96 @@ def move_vias(names=("MBCK", "IO46"), max_mm=0.9):
 
 if __name__ == "__main__" and "--vias" in sys.argv:
     move_vias(max_mm=float(os.environ.get("VIA_MAX", "0.9")))
+
+
+JUMPER_LABELS = {"+0.45A": ["JP1"], "+1A": ["JP2"], "CHG": ["JP1", "JP2"], "NTC": ["JP3"], "SW": ["JP4"],
+                 "EXT5V": ["JP5"], "MIC": ["JP7"]}
+
+
+def fix_jumper_labels():
+    """Put each solder-jumper label right beside its jumper(s), clear of vias, pads, part
+    outlines and other text (searching outward from the jumper)."""
+    import math
+    b = pcbnew.LoadBoard(PCB)
+    obstacles = []
+    for t in b.GetTracks():
+        if t.GetClass() == "PCB_VIA":
+            bb = t.GetBoundingBox()
+            bb.Inflate(MM(0.04))
+            obstacles.append(bb)
+    for f in b.GetFootprints():
+        for p in f.Pads():
+            if p.IsOnLayer(pcbnew.F_Cu) or p.GetAttribute() == pcbnew.PAD_ATTRIB_PTH:
+                bb = p.GetBoundingBox()
+                bb.Inflate(MM(0.06))
+                obstacles.append(bb)
+        for g in f.GraphicalItems():
+            if g.GetClass() != "PCB_TEXT" and g.GetLayer() == pcbnew.F_SilkS:
+                bb = g.GetBoundingBox()
+                bb.Inflate(MM(0.04))
+                obstacles.append(bb)
+    texts = [t for t in b.GetDrawings() if t.GetClass() == "PCB_TEXT" and t.GetLayer() == pcbnew.F_SilkS]
+    edge = pcbnew.SHAPE_POLY_SET()
+    b.GetBoardPolygonOutlines(edge)
+    edge.Deflate(MM(0.2), pcbnew.CORNER_STRATEGY_ROUND_ALL_CORNERS, MM(0.01))
+    done = []
+    for text, refs in JUMPER_LABELS.items():
+        fps = [b.FindFootprintByReference(r) for r in refs]
+        bb = fps[0].GetBoundingBox(False, False)
+        for f in fps[1:]:
+            bb.Merge(f.GetBoundingBox(False, False))
+        cx, cy = bb.Centre().x, bb.Centre().y
+        cands = [t for t in texts if t.GetText() == text]
+        if not cands:
+            continue
+        t = min(cands, key=lambda t: (t.GetPosition() - bb.Centre()).EuclideanNorm())
+
+        def clear():
+            tb = t.GetBoundingBox()
+            if any(tb.Intersects(o) for o in obstacles):
+                return False
+            if any(o is not t and o not in done and tb.Intersects(o.GetBoundingBox()) for o in texts):
+                return False
+            if any(tb.Intersects(o.GetBoundingBox()) for o in done):
+                return False
+            return all(edge.Contains(pcbnew.VECTOR2I(x, y)) for x in (tb.GetLeft(), tb.GetRight())
+                       for y in (tb.GetTop(), tb.GetBottom()))
+
+        near = TO((t.GetPosition() - bb.Centre()).EuclideanNorm()) < 0.6 * TO(max(bb.GetWidth(), bb.GetHeight())) + 1.5
+        if near and clear():
+            done.append(t)
+            continue
+        best = None
+        for h in (0.55, 0.5):
+            t.SetTextSize(pcbnew.VECTOR2I(MM(h * 0.82), MM(h)))
+            t.SetTextThickness(MM(0.1))
+            for ang in (0, 90):
+                t.SetTextAngleDegrees(ang)
+                for r10 in range(0, 45):
+                    r = r10 * 0.1
+                    if best and r >= best[0]:
+                        break
+                    n = max(8, int(2 * math.pi * r / 0.2))
+                    for k in range(n):
+                        a = 2 * math.pi * k / n
+                        # walk out from the jumper's edge, not its centre
+                        ex = TO(bb.GetWidth()) / 2 + r
+                        ey = TO(bb.GetHeight()) / 2 + r
+                        t.SetPosition(pcbnew.VECTOR2I(cx + MM(ex * math.cos(a)), cy + MM(ey * math.sin(a))))
+                        if clear():
+                            best = (r + (0.55 - h), t.GetPosition(), h, ang)
+                            break
+        if best:
+            _, pos, h, ang = best
+            t.SetTextSize(pcbnew.VECTOR2I(MM(h * 0.82), MM(h)))
+            t.SetTextAngleDegrees(ang)
+            t.SetPosition(pos)
+            done.append(t)
+            print(f"jumper label {text:6} placed by {'/'.join(refs)}")
+        else:
+            print(f"jumper label {text:6} NO SPOT")
+    pcbnew.SaveBoard(PCB, b)
+
+
+if __name__ == "__main__" and "--jumpers" in sys.argv:
+    fix_jumper_labels()
