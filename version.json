@@ -1,7 +1,7 @@
 {
-  "version": "1.2.382",
-  "downloadUrl": "https://chromabay.app/live-update-1.2.382.zip",
-  "buildDate": "2026-11-17T22:25:41Z",
-  "commitHash": "acd2bdfb7994d0ba26b06823a668ee3eeb5954c2",
-  "commitMessage": "Patterns page: fix the duplicate ids behind each_key_duplicate"
+  "version": "1.2.383",
+  "downloadUrl": "https://chromabay.app/live-update-1.2.383.zip",
+  "buildDate": "2026-11-18T21:38:30Z",
+  "commitHash": "ab0ab3e337de8cb90c9c55f4400348789a888012",
+  "commitMessage": "SK9822: per-pixel 5-bit current level, hardware SPI, measured dither rate"
 }
