@@ -67,14 +67,14 @@ VIAS = (
     + [("VLED", 27.3, y) for y in (19.95, 20.65)]
 )
 
-# 0.35 / 0.2 mm vias where a 0.6 won't fit (JLC multilayer minimum is 0.25 / 0.15)
-SMALL_VIAS = [("CHG_REGN", 15.5, 11.38), ("CHG_REGN", 15.9, 9.25)]
+# 0.45 / 0.2 mm vias where a 0.6 won't fit (JLC charges a 4-wire Kelvin test for anything under 0.45 mm pad)
+SMALL_VIAS = [("CHG_REGN", 15.575, 11.365), ("CHG_REGN", 15.9, 9.25)]
 
 # (net, layer, width, [(x, y), ...]): short locked links at fine-pitch pins
 TRACKS = [
     ("CHG_PMID", F, 0.2, [(15.3, 10.85), (17.0, 10.85)]),           # U2 PMID -> C2
-    ("CHG_REGN", F, 0.15, [(15.25, 11.35), (15.5, 11.38)]),        # U2 REGN -> small via (boxed in by PMID/BTST)
-    ("CHG_REGN", B, 0.2, [(15.5, 11.38), (15.9, 9.25)]),           # -> under the pins -> via by C3
+    ("CHG_REGN", F, 0.15, [(15.25, 11.35), (15.575, 11.365)]),        # U2 REGN -> small via (boxed in by PMID/BTST)
+    ("CHG_REGN", B, 0.2, [(15.575, 11.365), (15.9, 9.25)]),           # -> under the pins -> via by C3
     ("CHG_REGN", F, 0.2, [(15.9, 9.25), (16.75, 9.25)]),            # -> C3 REGN pad
     ("CHG_BTST", F, 0.15, [(15.3, 11.85), (15.95, 11.85)]),          # U2 BTST -> C4 (C4 SW pad sits in the SW pour)
     ("VSYS", F, 0.25, [(12.25, 34.5), (12.25, 34.85), (12.7, 35.2)]),  # boost VIN pin -> VSYS pour
@@ -127,7 +127,7 @@ def main():
         small = (name, x, y) in SMALL_VIAS
         v = pcbnew.PCB_VIA(b)
         v.SetPosition(pcbnew.VECTOR2I(MM(OX + x), MM(OY + y)))
-        v.SetWidth(MM(0.35 if small else 0.6))
+        v.SetWidth(MM(0.45 if small else 0.6))
         v.SetDrill(MM(0.2 if small else 0.3))
         v.SetNet(net(name))
         v.SetLocked(True)

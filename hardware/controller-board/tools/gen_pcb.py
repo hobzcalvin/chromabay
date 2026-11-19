@@ -119,7 +119,7 @@ def main():
     ds.SetBoardThickness(MM(1.6))
     ds.m_TrackMinWidth = MM(0.127)
     ds.m_MinClearance = MM(0.1)
-    ds.m_ViasMinSize = MM(0.35)          # 0.35/0.2 vias only where a 0.6 won't fit
+    ds.m_ViasMinSize = MM(0.45)          # 0.45/0.2 vias only where a 0.6 won't fit (smaller costs a Kelvin test)
     ds.m_MinThroughDrill = MM(0.2)
     ds.m_ViasMinAnnularWidth = MM(0.075)
     ds.m_HoleClearance = MM(0.2)
