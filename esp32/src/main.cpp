@@ -808,7 +808,6 @@ static void onDeviceInfoRead(Endpoints::Link& link) {
 static void onDiagnosticsRead(Endpoints::Link& link) {
     const uint32_t now = millis();
     uint32_t notes = 0;
-    String ev = DiagLog::json(&notes);
     String j = "{";
     j += "\"id\":\"" + deviceIdHex() + "\",";
     j += "\"fw\":\"" + String(FIRMWARE_VERSION) + "\",";
@@ -831,9 +830,15 @@ static void onDiagnosticsRead(Endpoints::Link& link) {
     j += "\"calibrating\":" + String(calibrating ? 1 : 0) + ",";
     j += "\"ota\":" + String(ota_in_progress ? 1 : 0) + ",";
     j += "\"mode\":\"" + String(gWifiMode ? "wifi" : "ble") + "\",";
-    j += "\"notes\":" + String(notes) + ",";
-    j += "\"events\":" + ev;
-    j += "}";
+    // The mic, if one is set up: what it is doing, and whether it is delivering.
+    if (AudioInput::g_settings.enabled)
+        j += "\"audio\":\"" + String(AudioInput::g_status) + " / blocks " + String((unsigned)AudioInput::g_blocks) + "\",";
+    // Events last, newest first to go if the link can't carry them all (BLE: 512 bytes).
+    String head = j + "\"notes\":";
+    size_t limit = link.maxLen();
+    const size_t tail = 16; // the notes count, the key and the closing brace
+    String ev = DiagLog::json(&notes, limit ? (limit > head.length() + tail ? limit - head.length() - tail : 2) : 0);
+    j = head + String(notes) + ",\"events\":" + ev + "}";
     link.send(j);
 }
 
@@ -2991,11 +2996,25 @@ static void startAudio(const AudioInput::Settings& a) {
         char msg[48]; snprintf(msg, sizeof(msg), "GPIO %d is used by LEDs/button", clash);
         AudioInput::setStatus(msg);
         Serial.printf("[Audio] %s\n", msg);
+        SentryReporting::logWarn("audio: %s", msg);
         return;
     }
     bool ok = AudioInput::start(a);
     Serial.printf("[Audio] %s (type %u, sd %d ws %d sck %d)\n", AudioInput::g_status, a.type, a.sd, a.ws, a.sck);
     DiagLog::note("audio %s", ok ? "on" : AudioInput::g_status);
+    // Reaches Sentry too, so a problem report can tell "mic not configured" from "mic silent".
+    if (a.enabled) SentryReporting::logInfo("audio: %s (type %u, sd %d ws %d sck %d)", AudioInput::g_status, a.type, a.sd, a.ws, a.sck);
+}
+
+// The mic's status also changes on its own (it locks onto a slot, or finds no signal): note
+// each change on the loop task, for problem reports and Sentry.
+static void watchAudioStatus() {
+    static char last[48] = "";
+    if (!AudioInput::g_settings.enabled || strncmp(last, AudioInput::g_status, sizeof(last)) == 0) return;
+    strncpy(last, AudioInput::g_status, sizeof(last) - 1);
+    Serial.printf("[Audio] %s\n", last);
+    DiagLog::note("audio %s", last);
+    SentryReporting::logInfo("audio: %s", last);
 }
 
 static String audioJson() {
@@ -4101,6 +4120,7 @@ void loop() {
     processButtonPinUpdate();
     TIMED("commcfg", processCommConfig());
     processAudioConfig();
+    watchAudioStatus();
 
     // Take the render buffers back once an update is no longer in flight. Done here rather
     // than on each abort path because there are many ways for an update to end and only one

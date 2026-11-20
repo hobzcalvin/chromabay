@@ -625,7 +625,9 @@ export const scenarios = [
       checkHealthy(run);
       const info = json(run, oneRead(run, I, 4.0), 'device info');
       check(/^[0-9a-f]{12}$/.test(info.id ?? '') && info.feat >= 7, () => `device info id/feat: ${JSON.stringify(info)}`, run);
-      const diag = json(run, oneRead(run, D, 4.1), 'diagnostics');
+      const diagRaw = oneRead(run, D, 4.1);
+      check(diagRaw.length <= 512, `diagnostics is ${diagRaw.length} bytes; a BLE read carries at most 512, so the app would get it cut off`, run);
+      const diag = json(run, diagRaw, 'diagnostics');
       check(diag.id === info.id, `diagnostics id ${diag.id} != device info id ${info.id}`, run);
       check(diag.bri === 80 && diag.bri_pending === 0 && diag.pattern === 'EmuDiag' && diag.mode === 'ble',
         () => `diagnostics state: ${JSON.stringify({ ...diag, events: undefined })}`, run);
@@ -640,6 +642,28 @@ export const scenarios = [
       }
       check(diag.events.every(([ms], i) => i === 0 || ms >= diag.events[i - 1][0]), () => `event times go backwards\n${story()}`, run);
       check(diag.notes >= diag.events.length, 'notes counter below the events returned', run);
+    },
+  },
+
+  {
+    name: 'diagnostics-full',
+    what: 'with the event ring full (well over 512 bytes of JSON), DIAGNOSTICS over BLE still fits one read: the newest events, still valid JSON',
+    async run() {
+      const h = await handles(S3);
+      const D = need(h, 'DIAGNOSTICS').handle, B = need(h, 'BRIGHTNESS').handle;
+      const sc = new Script().connect(CONNECT).mtu(3.05, 517);
+      // Each write leaves two notes (bri rx / bri set): 30 writes overfill the 40-entry ring.
+      for (let i = 0; i < 30; i++) sc.write(3.1 + i * 0.04, B, [100 + i]);
+      sc.readLong(4.6, D);
+      const run = await runEmu({ name: this.name, images: build(S3), ble: true, board: 'atech14', script: sc, seconds: 5.0 });
+      checkHealthy(run);
+      const raw = oneRead(run, D, 4.6);
+      check(raw.length <= 512, `diagnostics is ${raw.length} bytes; a BLE read carries at most 512`, run);
+      const diag = json(run, raw, 'diagnostics with a full ring');
+      check(diag.notes >= 60, `notes counter ${diag.notes}, expected at least 60`, run);
+      check(diag.events.length >= 8 && diag.events.length < 40, `kept ${diag.events.length} events; expected the newest that fit`, run);
+      const last = diag.events[diag.events.length - 1][1];
+      check(/^bri (rx|set) 129$/.test(last), `the newest event should be the last brightness (129), got "${last}"`, run);
     },
   },
 

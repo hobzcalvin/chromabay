@@ -53,6 +53,9 @@ inline uint8_t channelForUuid(const char *uuid) {
 struct Link {
     virtual ~Link() {}
     virtual void send(const uint8_t *data, size_t len) = 0;
+    /** Largest value this link delivers in one piece, or 0 for no limit. A BLE attribute
+     *  value is at most 512 bytes (ATT); a read reply longer than that is cut off. */
+    virtual size_t maxLen() const { return 0; }
     void send(const String &s) { send((const uint8_t *)s.c_str(), s.length()); }
     void sendEmpty() { send((const uint8_t *)nullptr, 0); }
 };
@@ -115,6 +118,7 @@ struct BleLink : Link {
     NimBLECharacteristic *ch;
     bool inRead;
     BleLink(NimBLECharacteristic *c, bool r) : ch(c), inRead(r) {}
+    size_t maxLen() const override { return 512; }
     void send(const uint8_t *data, size_t len) override {
         if (!ch) return;
         ch->setValue((uint8_t *)data, len);

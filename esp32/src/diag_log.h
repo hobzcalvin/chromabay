@@ -44,8 +44,12 @@ inline void note(const char* fmt, ...) {
     portEXIT_CRITICAL(&detail::mux);
 }
 
-/** The ring as a JSON array of [ms, "text"], oldest first, plus how many notes were ever made. */
-inline String json(uint32_t* totalOut = nullptr) {
+/**
+ * The ring as a JSON array of [ms, "text"], oldest first, plus how many notes were ever made.
+ * With `maxBytes`, only the NEWEST entries that fit are included: a BLE read carries at most
+ * 512 bytes, and a full ring is ~1 KB of JSON, which arrived cut off and unparseable.
+ */
+inline String json(uint32_t* totalOut = nullptr, size_t maxBytes = 0) {
     Entry copy[ENTRIES];
     size_t next; uint32_t total;
     portENTER_CRITICAL(&detail::mux);
@@ -53,18 +57,33 @@ inline String json(uint32_t* totalOut = nullptr) {
     next = detail::next; total = detail::total;
     portEXIT_CRITICAL(&detail::mux);
     if (totalOut) *totalOut = total;
-    const size_t n = total < ENTRIES ? total : ENTRIES;
+    size_t n = total < ENTRIES ? total : ENTRIES;
+    auto entryJson = [](const Entry& e) {
+        String s = "[";
+        s += String(e.ms); s += ",\"";
+        for (const char* c = e.text; *c; c++) {
+            if (*c == '"' || *c == '\\') s += '\\';
+            s += (*c >= 0x20) ? *c : '?';
+        }
+        s += "\"]";
+        return s;
+    };
+    if (maxBytes) {
+        // Count back from the newest while the entries (plus brackets and commas) still fit.
+        size_t keep = 0, bytes = 2;
+        for (size_t k = 0; k < n; k++) {
+            const Entry& e = copy[(next + ENTRIES - 1 - k) % ENTRIES];
+            size_t add = entryJson(e).length() + (keep ? 1 : 0);
+            if (bytes + add > maxBytes) break;
+            bytes += add; keep++;
+        }
+        n = keep;
+    }
     String j = "[";
     j.reserve(n * 24 + 2);
     for (size_t i = 0; i < n; i++) {
-        const Entry& e = copy[(next + ENTRIES - n + i) % ENTRIES];
         if (i) j += ',';
-        j += '['; j += String(e.ms); j += ",\"";
-        for (const char* c = e.text; *c; c++) {
-            if (*c == '"' || *c == '\\') j += '\\';
-            j += (*c >= 0x20) ? *c : '?';
-        }
-        j += "\"]";
+        j += entryJson(copy[(next + ENTRIES - n + i) % ENTRIES]);
     }
     j += ']';
     return j;

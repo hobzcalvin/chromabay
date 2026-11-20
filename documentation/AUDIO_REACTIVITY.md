@@ -8,7 +8,7 @@ too, but only so you can see what a pattern does while you edit it.
 
 | Mic | Setting | Notes |
 |---|---|---|
-| INMP441, ICS-43434 and other I2S MEMS mics | **Generic I2S** | Tie L/R to GND (left channel). Needs SD, WS and SCK. |
+| INMP441, ICS-43434 and other I2S MEMS mics | **Generic I2S** | Needs SD, WS and SCK. Either L/R wiring works: both slots are captured and the one with sound is used (this also works around ESP-IDF 4.4 reading the wrong slot on the classic ESP32). The status shows which slot it locked onto. |
 | SPH0645 | **SPH0654** (WLED's spelling) | I2S with a late-MSB quirk; the register fix is applied on classic ESP32. |
 | I2S codec needing a master clock | **Generic I2S with Mclk** | Also set MCLK (classic ESP32: GPIO 0, 1 or 3). |
 | PDM mics (SPM1423, MP34DT01, …) | **Generic I2S PDM** | Only clock (WS) and data (SD). ESP32 and ESP32-S3 only; the C3 can't record PDM. |
@@ -21,7 +21,8 @@ AudioReactive usermod (Squelch, Gain, AGC, Limiter rise/fall, Frequency scale) w
 ranges, and converting a WLED device brings its mic settings over automatically.
 
 A mic pin that is already an LED data/clock pin or the button pin is refused, and the status
-line says which pin clashes.
+line says which pin clashes. If the mic delivers nothing but zeros for a couple of seconds, the
+status says "no signal", which usually means the SD (data) pin or the mic's power is wrong.
 
 ## In patterns
 
@@ -64,7 +65,7 @@ render loop copies the latest result into `Audio::g_features`, which operators a
 read.
 
 Cost: a few percent of one core on ESP32 and S3, more on the C3 (no FPU, single core). About
-20 KB of RAM (the analyzer, DMA buffers and the task stack), allocated only while a mic is on.
+30 KB of RAM (the analyzer, DMA buffers and the task stack), allocated only while a mic is on.
 About 32 KB of flash.
 
 Wire protocol:

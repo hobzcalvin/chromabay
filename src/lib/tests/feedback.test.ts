@@ -14,7 +14,11 @@ vi.mock('@sentry/sveltekit', () => ({
   getFeedback: () => ({ createForm: async (o: any) => { formOptions = o; return form; } }),
 }));
 const diag = { id: 'a1b2c3d4e5f6', bri: 80, events: [[100, 'bri rx 80'], [101, 'bri set 80']] };
-vi.mock('../ble', () => ({ readDeviceDiagnostics: vi.fn(async () => diag) }));
+vi.mock('../ble', () => ({
+  readDeviceDiagnostics: vi.fn(async () => diag),
+  // Only the audio firmware answers AUDIO_CONFIG; the others read as null.
+  readAudioStatus: vi.fn(async (id: string) => (id === 'ble-1' ? { en: 1, type: 1, status: 'no signal: check SD/data pin, power', blocks: 0 } : null)),
+}));
 
 import { connectedDevices } from '../stores/deviceStore';
 import { startDeviceTelemetry, noteBrightnessWrite, flushGestures } from '../telemetry';
@@ -69,7 +73,9 @@ describe('problem report', () => {
     expect(names).toEqual(['app-state.json', 'device-a1b2c3d4e5f6.json', 'device-ble-2.json']);
     const lamp = JSON.parse(attachments[1].data);
     expect(lamp.diagnostics.events[0]).toEqual([100, 'bri rx 80']);
+    expect(lamp.audio.status).toMatch(/no signal/); // the mic's state rides along
     expect(JSON.parse(attachments[2].data).diagnostics).toBeNull();
+    expect(JSON.parse(attachments[2].data).audio).toBeUndefined();
     expect(JSON.parse(attachments[0].data).devices).toHaveLength(2);
     expect(formOptions.tags).toMatchObject({ device_id: 'a1b2c3d4e5f6', report_devices: '2' });
     formOptions.onFormClose();

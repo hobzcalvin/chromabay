@@ -119,7 +119,7 @@
           <label class="field"><span>I2S MCLK <i>master clock</i></span><input type="number" min="-1" max="48" bind:value={mclk} /></label>
         {/if}
       </div>
-      <p class="hint">GPIO numbers; -1 = not connected. {isPdm ? 'A PDM mic has only clock (WS) and data (SD).' : 'Tie the mic’s L/R pin to GND (left channel).'}</p>
+      <p class="hint">GPIO numbers; -1 = not connected. {isPdm ? 'A PDM mic has only clock (WS) and data (SD).' : 'The mic’s L/R pin can go either way; the device uses whichever slot has sound.'}</p>
     {/if}
 
     <div class="sub">Sound</div>

@@ -9,7 +9,7 @@
  * carry too, so scripts/sentry-triage.mjs can pull both sides of the same minutes together.
  */
 import * as Sentry from '@sentry/sveltekit';
-import { readDeviceDiagnostics } from './ble';
+import { readDeviceDiagnostics, readAudioStatus } from './ble';
 import { deviceSummary, flushGestures, bleEvent } from './telemetry';
 
 const DIAG_TIMEOUT_MS = 4000;
@@ -45,16 +45,18 @@ export async function openProblemReport(): Promise<void> {
     diagnostics: (d.feat ?? 0) >= 7
       ? await withTimeout(readDeviceDiagnostics(d.ble_id), DIAG_TIMEOUT_MS).catch(() => null)
       : null,
+    // The mic's settings, status and live levels (audio firmware; null elsewhere).
+    audio: await withTimeout(readAudioStatus(d.ble_id), DIAG_TIMEOUT_MS).catch(() => null),
   })));
   bleEvent('problem report opened', { devices: devices.length, with_diagnostics: diags.filter((x) => x.diagnostics).length });
 
   const scope = Sentry.getCurrentScope();
   scope.clearAttachments();
   scope.addAttachment({ filename: 'app-state.json', data: JSON.stringify(appState(), null, 2), contentType: 'application/json' });
-  for (const { device, diagnostics } of diags) {
+  for (const { device, diagnostics, audio } of diags) {
     scope.addAttachment({
       filename: `device-${device.device_id ?? device.ble_id}.json`,
-      data: JSON.stringify({ device, diagnostics, note: diagnostics ? undefined : 'no diagnostics (firmware before feat 7, or the read failed)' }, null, 2),
+      data: JSON.stringify({ device, diagnostics, audio: audio ?? undefined, note: diagnostics ? undefined : 'no diagnostics (firmware before feat 7, or the read failed)' }, null, 2),
       contentType: 'application/json',
     });
   }
