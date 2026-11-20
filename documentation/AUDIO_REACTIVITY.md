@@ -13,7 +13,7 @@ too, but only so you can see what a pattern does while you edit it.
 | I2S codec needing a master clock | **Generic I2S with Mclk** | Also set MCLK (classic ESP32: GPIO 0, 1 or 3). |
 | PDM mics (SPM1423, MP34DT01, …) | **Generic I2S PDM** | Only clock (WS) and data (SD). ESP32 and ESP32-S3 only; the C3 can't record PDM. |
 | Analog, ES7243, ES8388 | | Not supported yet. Imported WLED settings for them are kept, with the mic off. |
-| No mic | **Simulated** | A synthetic 120 bpm groove, for trying audio patterns on real LEDs without a mic. |
+| No mic | **Simulated** | The same synthesized track the app's preview plays (below), for trying audio patterns on real LEDs without a mic. |
 
 Set it up under **Devices → (device) → Audio**. Everything applies as you change it; there is
 no Save button (the device writes to flash once the changes stop, so dragging a slider doesn't
@@ -61,7 +61,14 @@ status says "no signal", which usually means the SD (data) pin or the mic's powe
   - Radial analyzer: Audio (Bars) → Polar Warp.
 
 In the editor, a pattern that uses audio shows a 🎵 button. Click it to switch the preview from
-the simulated beat to this phone's or computer's microphone (🎤).
+the simulated track to this phone's or computer's microphone (🎤).
+
+The simulated track is synthesized music, not drawn curves: kick, snare, hats, a syncopated
+bassline, chords and an arpeggio at 122 bpm in A minor, 16 bars that loop (8 bars full, a
+4-bar breakdown with no kick ending in a snare build, 4 bars full with a fill). It is played
+through the same analyzer a microphone goes through, with Auto level on, so the preview shows
+what the analysis really does with music: real transients, notes moving across the bands, a
+tracked tempo, beats that pause in the breakdown. It is deterministic for a given timestamp.
 
 ## How it works
 
@@ -70,8 +77,13 @@ the simulated beat to this phone's or computer's microphone (🎤).
 - 22.05 kHz mono, 512-point FFT with a Hann window, 50% overlap (~86 analyses a second).
 - Loudness and AGC run in WLED's units, with a noise gate.
 - 16 log-spaced bands, from ~43 Hz to ~9 kHz.
-- Beats come from spectral-flux onsets against an adaptive threshold.
-- Tempo comes from autocorrelating the onset history over ~6 s, with a phase-locked beat clock.
+- Onsets come from spectral flux against an adaptive threshold, weighted toward the low end
+  (kick and snare) so arpeggios and hats don't count as hits.
+- Tempo comes from autocorrelating the onset history over ~6 s. Once it is known, beats come
+  from a beat clock that onsets keep aligned (and that stops when the rhythm drops out), rather
+  than from every onset, which in most music is several per beat.
+- With Auto level on, each band is scaled between its own recent floor and peak, so busy bands
+  don't sit pinned at the top. Bands fall back within ~0.12 s.
 
 On the device, `esp32/src/audio_input.h` captures on a task pinned to core 0. Each frame, the
 render loop copies the latest result into `Audio::g_features`, which operators and automation

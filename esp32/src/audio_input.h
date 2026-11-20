@@ -213,6 +213,7 @@ inline void stop() {
     delete g_analyzer; g_analyzer = nullptr;
     g_running = false;
     Audio::g_source = Audio::SOURCE_NONE;
+    Audio::releaseSimulator();
     Audio::set(Audio::Features{});
     setStatus("off");
 }

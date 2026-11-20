@@ -138,12 +138,72 @@ int main() {
         check(fabsf(ramp4 - 0.75f) < 1e-4f, "a 4-beat ramp is 3/4 through on beat 3");
     }
 
-    // --- Simulation is deterministic and alive ---
+    // --- Simulation: the synthesized groove through the analyzer behaves like music ---
     {
-        Audio::Features a = Audio::simulate(12345), b = Audio::simulate(12345);
-        check(memcmp(a.bands, b.bands, sizeof(a.bands)) == 0 && a.volume == b.volume, "simulation is deterministic");
-        float onBeat = Audio::simulate(1000).beat, offBeat = Audio::simulate(1250).beat;
-        check(onBeat > 0.9f && offBeat < 0.3f, "simulated beat pulses at 120 bpm");
+        Audio::Groove g;
+        std::vector<float> track(SR * 16);
+        float peak = 0.0f;
+        for (auto& x : track) { x = g.next(); peak = fmaxf(peak, fabsf(x)); }
+        check(peak > 0.2f && peak < 1.0f, "the groove is loud but unclipped");
+
+        Audio::Analyzer a(SR);
+        a.cfg.agc = Audio::AGC_NORMAL;
+        uint32_t beatsAt4 = 0;
+        float lowMax = 0, highMax = 0, volMin = 1, volMax = 0;
+        for (size_t i = 0; i + 256 <= track.size(); i += 256) {
+            a.push(track.data() + i, 256);
+            const auto& f = a.features();
+            if (i < (size_t)(SR * 4)) { beatsAt4 = f.beats; continue; }
+            if (i > (size_t)(SR * 15.7)) break;           // bars 0-7 are the full groove
+            lowMax = fmaxf(lowMax, f.bass); highMax = fmaxf(highMax, f.treble);
+            volMin = fminf(volMin, f.volume); volMax = fmaxf(volMax, f.volume);
+        }
+        uint32_t beats = a.features().beats - beatsAt4; // ~11.7 s of 122 bpm ≈ 24 beats
+        printf("      groove: %u beats in 11.7 s, bpm %.1f, bass max %.2f, treble max %.2f, volume %.2f..%.2f\n",
+               beats, a.features().bpm, lowMax, highMax, volMin, volMax);
+        check(beats >= 18 && beats <= 34, "the groove's kick and snare are detected as beats");
+        check(fabsf(a.features().bpm - 122.0f) < 5.0f || fabsf(a.features().bpm - 61.0f) < 3.0f, "its tempo is tracked (122 bpm)");
+        check(lowMax > 0.3f && highMax > 0.1f, "it lights both the low and the high bands");
+        check(volMax - volMin > 0.1f, "its volume moves");
+
+        // Beats land on the kick (the grid is every 60/122 s from the start), and thin out in the
+        // breakdown (bars 8-11, no kick) compared with the groove around it.
+        {
+            Audio::Groove g2;
+            Audio::Analyzer b(SR);
+            b.cfg.agc = Audio::AGC_NORMAL;
+            const float period = 60.0f / Audio::Groove::BPM, bar = 4.0f * period;
+            uint32_t prev = 0;
+            int onGrid = 0, total = 0, inDrop = 0, inBreak = 0;
+            std::vector<float> buf(256);
+            for (size_t i = 0; i < (size_t)(SR * bar * 12); i += 256) {
+                for (auto& x : buf) x = g2.next();
+                b.push(buf.data(), 256);
+                if (b.features().beats == prev) continue;
+                prev = b.features().beats;
+                float t = (float)(i + 256) / SR;
+                if (t < 6.0f) continue; // tempo lock-in
+                float barPos = t / bar;
+                if (barPos >= 4.0f && barPos < 8.0f) inDrop++;
+                if (barPos >= 8.0f && barPos < 12.0f) inBreak++;
+                if (barPos < 8.0f) {
+                    float e = fmodf(t, period); if (e > period / 2) e -= period;
+                    total++; if (fabsf(e) < 0.06f) onGrid++;
+                }
+            }
+            printf("      beats on the kick grid: %d/%d; bars 4-7: %d beats, breakdown bars 8-11: %d\n", onGrid, total, inDrop, inBreak);
+            check(total > 0 && onGrid >= total * 8 / 10, "beats land on the kick (within 60 ms)");
+            check(inBreak < inDrop * 3 / 4, "beats thin out when the kick drops out");
+        }
+
+        // Deterministic: the same clock gives the same features.
+        Audio::Simulator s1, s2;
+        s1.advanceTo(5000); s2.advanceTo(2000); s2.advanceTo(5000);
+        Audio::Simulator s3; s3.advanceTo(5000);
+        const auto &f1 = s1.features(), &f3 = s3.features();
+        check(memcmp(f1.bands, f3.bands, sizeof(f1.bands)) == 0 && f1.volume == f3.volume && f1.beats == f3.beats,
+              "the simulator is deterministic");
+        check(s2.features().active, "the simulator follows a clock that moves forward");
     }
 
     printf("\n%s (%d failure%s)\n", failures ? "FAILED" : "all passed", failures, failures == 1 ? "" : "s");
