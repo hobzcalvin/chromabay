@@ -1,7 +1,7 @@
 {
-  "version": "1.2.7-audio",
-  "downloadUrl": "https://chromabay.app/x/audio/live-update-1.2.7-audio.zip",
-  "buildDate": "2026-11-20T06:13:13Z",
-  "commitHash": "ae38fc570b7e4ba2ae3db267855495114838d960",
-  "commitMessage": "Audio: capture both I2S slots (fixes silent mic on ESP32); diagnostics fit a BLE read"
+  "version": "1.2.8-audio",
+  "downloadUrl": "https://chromabay.app/x/audio/live-update-1.2.8-audio.zip",
+  "buildDate": "2026-11-20T06:32:55Z",
+  "commitHash": "fb1c6da446172760d77afb00ddcbea7add555d23",
+  "commitMessage": "Audio tab: live tuning with sliders, plain names, noise-floor calibration"
 }
