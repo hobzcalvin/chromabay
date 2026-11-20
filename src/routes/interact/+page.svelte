@@ -10,6 +10,7 @@ import { interactiveParameters } from '$lib/stores/interactiveStore';
 import { findColorGroups, hexToHueSat, hueSatToHex } from '$lib/color';
 import { modulators, getModulator, setModulator, SHAPES, type ModField } from '$lib/stores/modulatorStore';
 import { exitCycle } from '$lib/stores/cycleStore';
+import { displayPatternName, liveUsesAudio, withAudioMark } from '$lib/patternAudio';
 import { connectedDevices } from '$lib/stores/deviceStore';
 import { deviceLayouts, syncDeviceLayout, shapeSize, type DeviceLayoutRecord } from '$lib/stores/deviceLayoutStore';
 import { previewChoice } from '$lib/stores/interactiveStore';
@@ -330,6 +331,10 @@ import { get } from 'svelte/store';
   // as selecting on the Patterns page (loads into the flow store + syncs to devices);
   // the knobs above regenerate reactively for the new pattern.
   $: currentPatternName = $currentPattern?.meta?.name ?? '';
+  // Shown with 🎤 when the pattern reacts to sound, judged on what is loaded right now.
+  $: currentShownName = withAudioMark(currentPatternName, liveUsesAudio(
+    $flowNodes.map((n) => String(n.data?.type ?? '')),
+    [...$modulators.values()].flatMap((m) => [...m.values()].map((c) => c.shape))));
   let switching = false;
   async function switchPattern(dir: number) {
     if (switching) return;
@@ -435,7 +440,7 @@ import { get } from 'svelte/store';
 {#if $patterns.length > 0}
   <div class="pattern-switcher">
     <button class="switch-btn" onclick={() => switchPattern(-1)} disabled={$patterns.length < 2} aria-label="Previous pattern">‹</button>
-    <button class="switch-name" onclick={() => (menu = 'pattern')} aria-label="Choose a pattern">🌈 {currentPatternName}</button>
+    <button class="switch-name" onclick={() => (menu = 'pattern')} aria-label="Choose a pattern">🌈 {currentShownName}</button>
     <button class="switch-btn" onclick={() => switchPattern(1)} disabled={$patterns.length < 2} aria-label="Next pattern">›</button>
   </div>
 {/if}
@@ -464,7 +469,7 @@ import { get } from 'svelte/store';
       {#if menu === 'pattern'}
         {#each $patterns as p}
           <button role="option" aria-selected={p.meta?.name === currentPatternName} class:current={p.meta?.name === currentPatternName}
-            onclick={() => pickPattern(p)}>🌈 {p.meta?.name}</button>
+            onclick={() => pickPattern(p)}>🌈 {displayPatternName(p, '')}</button>
         {/each}
       {:else}
         {#each previewOptions as opt, i}

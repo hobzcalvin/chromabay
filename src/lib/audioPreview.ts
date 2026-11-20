@@ -119,6 +119,4 @@ export async function togglePreviewMic(): Promise<void> {
 }
 
 /** Does a pattern use audio at all (an Audio node or an audio-driven automation)? */
-export function usesAudio(nodeTypes: string[], modShapes: number[]): boolean {
-  return nodeTypes.includes('audio') || modShapes.some((s) => s >= 6);
-}
+export { liveUsesAudio as usesAudio } from './patternAudio';

@@ -17,6 +17,9 @@
   import { authUser } from '$lib/stores/authStore';
   import { get } from 'svelte/store';
   import AddNodeModal from './AddNodeModal.svelte';
+  import { flowNodes } from '$lib/flowStore';
+  import { modulators } from '$lib/stores/modulatorStore';
+  import { liveUsesAudio, withAudioMark } from '$lib/patternAudio';
   
   // Props for Add Node functionality (NODE_TYPES removed - using store instead)
   let { showAddNodeDropdown = $bindable(false), addNodeDropdownRef = $bindable(), handleAddNode } = $props();
@@ -68,6 +71,10 @@
   currentPatternName.subscribe(name => {
     patternName = name;
   });
+  // Shown with 🎤 while the pattern reacts to sound; follows edits as they happen.
+  const shownName = $derived(withAudioMark(patternName, liveUsesAudio(
+    $flowNodes.map((n) => String(n.data?.type ?? '')),
+    [...$modulators.values()].flatMap((m) => [...m.values()].map((c) => c.shape)))));
   
   // Close dropdown when clicking outside
   function handleOutsideClick(event: MouseEvent) {
@@ -229,7 +236,7 @@
 
 <div class="pattern-actions">
   <div class="pattern-name">
-    Pattern: <strong>{patternName}</strong>
+    Pattern: <strong>{shownName}</strong>
   </div>
   
   <div class="buttons-container">

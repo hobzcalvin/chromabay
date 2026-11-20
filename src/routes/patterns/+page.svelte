@@ -3,6 +3,7 @@
   import { goto } from '$app/navigation';
   import { base } from '$app/paths';
   import { patterns, loadPatterns, switchToPattern, currentPatternName, createEmptyPattern, saveAsPattern, patternNameExists, suggestPatternName, importLibraryPattern, forkToLibrary } from '$lib/stores/patternsStore';
+  import { displayPatternName, withAudioMark, patternUsesAudio } from '$lib/patternAudio';
   import PatternPreview from '$lib/components/PatternPreview.svelte';
   import type { SerializedPattern } from '$lib/patternSerializer';
   import { deletePatternOnAllDevices, sendSinglePatternToDevice, deletePatternOnDevice, clearDeviceLibrary } from '$lib/ble';
@@ -474,6 +475,7 @@
     <div class="patterns-grid" class:dimmed={$cycleEnabled} data-tour-target="pattern-list">
       {#each patternsList as pattern (pattern.meta?.id ?? pattern.meta?.name)}
         {@const patternName = pattern.meta?.name || 'Unnamed'}
+        {@const shownName = displayPatternName(pattern)}
         {@const isCurrentPattern = patternName === currentName}
         {@const swipeState = swipeStates[patternName]}
         
@@ -496,7 +498,7 @@
             </div>
             
             <div class="pattern-details">
-              <h3 class="pattern-name">{patternName}</h3>
+              <h3 class="pattern-name">{shownName}</h3>
             </div>
             
             <div class="action-buttons">
@@ -579,7 +581,7 @@
       {#each newFromDevices as p (p.meta?.name)}
         <div class="simple-row">
           <PatternPreview pattern={p} size={44} />
-          <span class="simple-name">{p.meta?.name || 'Unnamed'}</span>
+          <span class="simple-name">{displayPatternName(p)}</span>
           <button class="import-btn" onclick={() => handleImportDevicePattern(p)}>Import</button>
         </div>
       {/each}
@@ -607,7 +609,7 @@
               {@const nm = p.meta?.name ?? ''}
               <div class="simple-row">
                 <PatternPreview pattern={myByName.get(nm) ?? p} size={44} />
-                <span class="simple-name">{nm || 'Unnamed'}</span>
+                <span class="simple-name">{withAudioMark(nm || 'Unnamed', patternUsesAudio(p))}</span>
                 {#if nm && !myNames.has(nm)}
                   <button class="import-btn" onclick={() => handleImportDevicePattern(p)}>Import</button>
                 {/if}
@@ -651,7 +653,7 @@
         {@const st = galleryState(g)}
         <div class="simple-row" class:dim={galleryLoading}>
           <PatternPreview pattern={g.blob} size={44} />
-          <span class="simple-name">{g.name}<span class="by">{st === 'mine' ? ' · yours' : g.handle ? ` · by ${g.handle}` : ''}</span></span>
+          <span class="simple-name">{withAudioMark(g.name, patternUsesAudio(g.blob))}<span class="by">{st === 'mine' ? ' · yours' : g.handle ? ` · by ${g.handle}` : ''}</span></span>
           <span class="upvotes" title="Upvotes (importing a pattern upvotes it)">▲ {g.upvote_count}</span>
           {#if st === 'mine'}
             <button class="mini-btn" disabled={galleryBusy[g.id]} onclick={() => handleUnpublish(g)} title="Remove from the gallery" aria-label="Unpublish">🗑</button>
