@@ -1,7 +1,7 @@
 {
-  "version": "1.2.8-audio",
-  "downloadUrl": "https://chromabay.app/x/audio/live-update-1.2.8-audio.zip",
-  "buildDate": "2026-11-20T06:32:55Z",
-  "commitHash": "fb1c6da446172760d77afb00ddcbea7add555d23",
-  "commitMessage": "Audio tab: live tuning with sliders, plain names, noise-floor calibration"
+  "version": "1.2.9-audio",
+  "downloadUrl": "https://chromabay.app/x/audio/live-update-1.2.9-audio.zip",
+  "buildDate": "2026-11-20T06:55:38Z",
+  "commitHash": "1775da8f5c0dd0accc3a8368b35bd52d978053fc",
+  "commitMessage": "Audio preview: synthesized music through the real analyzer, not drawn curves"
 }
