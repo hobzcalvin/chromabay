@@ -1,7 +1,7 @@
 {
-  "version": "1.2.2-audio",
-  "downloadUrl": "https://chromabay.app/x/audio/live-update-1.2.2-audio.zip",
-  "buildDate": "2026-11-15T08:03:31Z",
-  "commitHash": "944b299e6e711b0320693f8e002205d04eb54643",
-  "commitMessage": "Merge main (experimental channels now on main) into the audio channel"
+  "version": "1.2.7-audio",
+  "downloadUrl": "https://chromabay.app/x/audio/live-update-1.2.7-audio.zip",
+  "buildDate": "2026-11-20T06:13:13Z",
+  "commitHash": "ae38fc570b7e4ba2ae3db267855495114838d960",
+  "commitMessage": "Audio: capture both I2S slots (fixes silent mic on ESP32); diagnostics fit a BLE read"
 }
