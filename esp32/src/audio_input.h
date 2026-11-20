@@ -80,6 +80,20 @@ inline bool pdmSupported() {
 #endif
 }
 
+// The SPI flash (and on some S3 modules, PSRAM) bus. Routing I2S onto these takes the flash
+// away from the CPU and crashes the board, so they are refused whatever the app sends.
+inline bool isFlashPin(int p) {
+#if CONFIG_IDF_TARGET_ESP32
+    return p >= 6 && p <= 11;
+#elif CONFIG_IDF_TARGET_ESP32S3
+    return p >= 26 && p <= 32;
+#elif CONFIG_IDF_TARGET_ESP32C3
+    return p >= 12 && p <= 17;
+#else
+    return false;
+#endif
+}
+
 inline bool typeSupported(uint8_t t) {
     return t == MIC_I2S || t == MIC_SPH0645 || t == MIC_I2S_MCLK || t == MIC_SIMULATED ||
            (t == MIC_PDM && pdmSupported());
@@ -103,6 +117,7 @@ inline portMUX_TYPE g_mux = portMUX_INITIALIZER_UNLOCKED;
 inline char g_status[48] = "off";
 inline volatile uint32_t g_blocks = 0;        // analysed blocks, for "is the mic delivering?"
 inline volatile float g_rawPeak = 0.0f;       // peak |sample| of the last read, before gain
+inline volatile float g_level = 0.0f;        // input level in Squelch units (Analyzer::level)
 inline volatile int8_t g_slot = -1;           // which I2S slot carries the mic: 0 left, 1 right, -1 not yet known
 inline char g_baseStatus[24] = "";            // "listening (I2S)" etc.; the slot is appended once known
 
@@ -176,6 +191,7 @@ inline void audioTask(void*) {
         g_rawPeak = peak;
         g_analyzer->cfg = g_settings.cfg; // cheap copy; picks up live gain/squelch edits
         if (g_analyzer->push(samples, n) > 0) {
+            g_level = g_analyzer->level();
             portENTER_CRITICAL(&g_mux);
             g_latest = g_analyzer->features();
             g_fresh = true;
@@ -218,6 +234,13 @@ inline bool start(const Settings& s) {
     }
     const bool pdm = s.type == MIC_PDM;
     if (s.sd < 0 || s.ws < 0 || (!pdm && s.sck < 0)) { setStatus("set the mic pins"); return false; }
+    for (int p : { (int)s.sd, (int)s.ws, pdm ? -1 : (int)s.sck, s.type == MIC_I2S_MCLK ? (int)s.mclk : -1 }) {
+        if (p >= 0 && (isFlashPin(p) || !GPIO_IS_VALID_GPIO(p))) {
+            char m[48]; snprintf(m, sizeof(m), "GPIO %d can't be used (flash bus)", p);
+            setStatus(m);
+            return false;
+        }
+    }
 
     g_analyzer = new (std::nothrow) Audio::Analyzer(SAMPLE_RATE);
     if (!g_analyzer) { setStatus("not enough memory"); return false; }

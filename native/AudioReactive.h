@@ -147,6 +147,10 @@ public:
 
     const Features& features() const { return _out; }
 
+    /** Loudness of the latest block in the units Squelch is compared against (gain applied,
+     *  before AGC and the gate), so a UI can show the noise floor next to the input. */
+    float level() const { return _level; }
+
 private:
     float _sr = 22050.0f, _frameHz = 86.0f;
     float _ring[N];
@@ -164,6 +168,7 @@ private:
     float _dc = 0.0f;
     float _agcMul = 1.0f, _agcEnv = 0.0f;
     float _vol = 0.0f;
+    float _level = 0.0f;
     float _beatEnv = 0.0f, _sinceBeat = 1000.0f; // seconds since last beat
     float _phase = 0.0f, _bpm = 0.0f;
     int _framesSinceTempo = 0;
@@ -212,6 +217,7 @@ private:
         float gainMul = (float)(cfg.gain ? cfg.gain : 1) / 40.0f;
         float level = rms * 2048.0f * gainMul;              // ~-25 dBFS music at unity ≈ 115
         bool gated = level < (float)cfg.squelch;
+        _level = level;
 
         // --- AGC: steer the loudness envelope toward a target. Presets differ in speed. ---
         if (cfg.agc != AGC_OFF && !gated) {

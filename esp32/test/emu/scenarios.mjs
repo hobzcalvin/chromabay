@@ -578,9 +578,13 @@ export const scenarios = [
         .write(3.1, B, [200]).write(3.2, P, '17')
         .write(3.4, A, msgpackEncode({ en: 1, type: 1, sd: 17, ws: 5, sck: 6 }))
         .readLong(3.7, A).readLong(3.75, I)
+        .write(3.76, A, msgpackEncode({ sd: 27 })).readLong(3.78, A) // S3 flash bus
         .write(3.8, A, msgpackEncode({ type: 250, gain: 90 }));
       pushPattern(sc, T_SIM, h, onePattern('EmuAudio', 'audio', { mode: 4 }), false);
-      sc.readLong(4.4, A).reboot(REBOOT).connect(RECONNECT).mtu(RECONNECT + 0.05, 517).readLong(RECONNECT + 0.3, A);
+      // A slider drag: several live patches, no restart; the last value must reach flash.
+      sc.readLong(4.4, A);
+      for (let i = 0; i < 5; i++) sc.write(5.0 + i * 0.12, A, msgpackEncode({ gain: 100 + i * 5 }));
+      sc.readLong(5.7, A).reboot(REBOOT).connect(RECONNECT).mtu(RECONNECT + 0.05, 517).readLong(RECONNECT + 0.3, A);
       const run = await runEmu({ name: this.name, images: build(S3), ble: true, board: 'atech14', script: sc, seconds: RECONNECT + 0.8 });
       checkHealthy(run, { expectedResets: 1 });
 
@@ -590,7 +594,11 @@ export const scenarios = [
       check(clash.en === 1 && clash.sd === 17 && clash.run === 0 && /GPIO 17 is used/.test(clash.status),
         () => `a mic on the button's GPIO should be refused with a reason: ${JSON.stringify(clash)}`, run);
 
+      const flash = json(run, oneRead(run, A, 3.78), 'audio config (flash pin)');
+      check(flash.run === 0 && /GPIO 27 can't be used/.test(flash.status), () => `a mic on the flash bus should be refused: ${JSON.stringify(flash)}`, run);
+
       const sim = json(run, oneRead(run, A, 4.4), 'audio config (simulated)');
+      check(typeof sim.lvl === 'number', () => `audio config should report the input level: ${JSON.stringify(sim)}`, run);
       check(sim.type === 250 && sim.run === 1 && sim.status === 'simulated' && sim.gain === 90 && sim.bands.length === 16,
         () => `simulated input not running: ${JSON.stringify(sim)}`, run);
 
@@ -606,8 +614,13 @@ export const scenarios = [
       const meanGap = gaps.reduce((a, g) => a + g, 0) / (gaps.length || 1);
       check(gaps.length >= 3 && Math.abs(meanGap - 0.5) < 0.08, () => `beat peaks at ${peaks.map((t) => t.toFixed(2)).join(', ')} (mean gap ${meanGap.toFixed(3)} s, want 0.5)`, run);
 
+      const live = json(run, oneRead(run, A, 5.7), 'audio config after live gain changes');
+      check(live.gain === 120 && live.run === 1 && live.status === 'simulated', () => `live gain changes: ${JSON.stringify(live)}`, run);
+      const starts = run.console(0).filter((l) => l.startsWith('[Audio] simulated (type')).length;
+      check(starts === 1, `capture started ${starts} times in the first boot; live gain changes should not restart it`, run);
+
       const after = json(run, oneRead(run, A, RECONNECT + 0.3), 'audio config after reboot');
-      check(after.en === 1 && after.type === 250 && after.sd === 17 && after.gain === 90 && after.run === 1,
+      check(after.en === 1 && after.type === 250 && after.sd === 27 && after.gain === 120 && after.run === 1,
         () => `audio settings after reboot: ${JSON.stringify(after)}`, run);
     },
   },

@@ -2967,6 +2967,7 @@ void processCommConfig() {
 // ===================================================================================
 // Audio input (AUDIO_CONFIG)
 // ===================================================================================
+static uint32_t audioSaveDue = 0; // millis() at which live-tuned settings go to flash; 0 = nothing pending
 static uint8_t* audioCfgBuf = nullptr;
 static size_t audioCfgLen = 0;
 static volatile bool newAudioCfgAvailable = false;
@@ -2988,6 +2989,13 @@ static int audioPinConflict(const AudioInput::Settings& a) {
     return -1;
 }
 
+// Survives a crash-reboot (not a power cycle): set while capture is starting, cleared once it
+// has run for a few seconds. Found still set at boot, the last start crashed the board, so
+// this boot skips the mic instead of crashing again forever.
+static RTC_NOINIT_ATTR uint32_t gAudioStarting;
+static const uint32_t AUDIO_STARTING_MAGIC = 0xA0D10CA5;
+static uint32_t gAudioStartedAt = 0;
+
 static void startAudio(const AudioInput::Settings& a) {
     int clash = audioPinConflict(a);
     if (clash >= 0) {
@@ -2999,6 +3007,22 @@ static void startAudio(const AudioInput::Settings& a) {
         SentryReporting::logWarn("audio: %s", msg);
         return;
     }
+    if (gAudioStarting == AUDIO_STARTING_MAGIC && esp_reset_reason() != ESP_RST_POWERON && esp_reset_reason() != ESP_RST_SW) {
+        gAudioStarting = 0;
+        // Turned off and saved, so it stays off until someone changes the settings; the
+        // status says why.
+        AudioInput::Settings off = a;
+        off.enabled = false;
+        AudioInput::save(off);
+        AudioInput::stop();
+        AudioInput::g_settings = off;
+        AudioInput::setStatus("turned off: it crashed while starting");
+        SentryReporting::logError("audio: skipped, the last start crashed (reset %d)", (int)esp_reset_reason());
+        DiagLog::note("audio skipped after crash");
+        return;
+    }
+    gAudioStarting = a.enabled ? AUDIO_STARTING_MAGIC : 0;
+    gAudioStartedAt = millis();
     bool ok = AudioInput::start(a);
     Serial.printf("[Audio] %s (type %u, sd %d ws %d sck %d)\n", AudioInput::g_status, a.type, a.sd, a.ws, a.sck);
     DiagLog::note("audio %s", ok ? "on" : AudioInput::g_status);
@@ -3009,6 +3033,11 @@ static void startAudio(const AudioInput::Settings& a) {
 // The mic's status also changes on its own (it locks onto a slot, or finds no signal): note
 // each change on the loop task, for problem reports and Sentry.
 static void watchAudioStatus() {
+    if (gAudioStarting == AUDIO_STARTING_MAGIC && millis() - gAudioStartedAt > 5000) gAudioStarting = 0;
+    if (audioSaveDue && (int32_t)(millis() - audioSaveDue) >= 0) {
+        audioSaveDue = 0;
+        AudioInput::save(AudioInput::g_settings);
+    }
     static char last[48] = "";
     if (!AudioInput::g_settings.enabled || strncmp(last, AudioInput::g_status, sizeof(last)) == 0) return;
     strncpy(last, AudioInput::g_status, sizeof(last) - 1);
@@ -3029,9 +3058,10 @@ static String audioJson() {
              a.cfg.squelch, a.cfg.gain, a.cfg.agc, a.cfg.limiter ? 1 : 0, a.cfg.riseMs, a.cfg.fallMs, a.cfg.scale);
     j += b;
     j += "\"status\":\"" + String(AudioInput::g_status) + "\",";
-    snprintf(b, sizeof(b), "\"run\":%d,\"pdm\":%d,\"blocks\":%u,\"rawpk\":%.4f,",
+    snprintf(b, sizeof(b), "\"run\":%d,\"pdm\":%d,\"blocks\":%u,\"rawpk\":%.4f,\"lvl\":%.1f,",
              (AudioInput::g_running || Audio::g_source == Audio::SOURCE_SIMULATED) ? 1 : 0,
-             AudioInput::pdmSupported() ? 1 : 0, (unsigned)AudioInput::g_blocks, AudioInput::g_rawPeak);
+             AudioInput::pdmSupported() ? 1 : 0, (unsigned)AudioInput::g_blocks, AudioInput::g_rawPeak,
+             (double)AudioInput::g_level);
     j += b;
     snprintf(b, sizeof(b), "\"vol\":%.3f,\"bass\":%.3f,\"mid\":%.3f,\"tre\":%.3f,\"beat\":%.3f,\"bpm\":%.1f,\"hz\":%.0f,",
              f.volume, f.bass, f.mid, f.treble, f.beat, f.bpm, f.peakHz);
@@ -3112,9 +3142,17 @@ static void processAudioConfig() {
     }
     mpack_tree_destroy(&tree);
     free(buf);
-    AudioInput::save(a);
-    if (restart || !AudioInput::g_settings.enabled) startAudio(a);
-    else AudioInput::g_settings.cfg = a.cfg; // gain/squelch/AGC/dynamics apply live
+    if (restart || !AudioInput::g_settings.enabled) {
+        AudioInput::save(a);
+        audioSaveDue = 0;
+        startAudio(a);
+    } else {
+        // Gain/squelch/AGC/dynamics apply live. The app sends these while a slider is being
+        // dragged, so the flash write waits until the changes stop (see watchAudioStatus).
+        AudioInput::g_settings.cfg = a.cfg;
+        audioSaveDue = millis() + 1500;
+        if (!audioSaveDue) audioSaveDue = 1;
+    }
 }
 
 // COMM_CONFIG BLE characteristic: read returns settings JSON; write stages an msgpack patch.

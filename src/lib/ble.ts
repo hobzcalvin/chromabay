@@ -168,6 +168,7 @@ export interface AudioStatus extends AudioSettings {
   pdm: number;      // 1 = this chip can record a PDM mic
   blocks: number;   // analysis blocks so far (rising = the mic is delivering)
   rawpk: number;    // peak |sample| of the last read, before gain (0..1)
+  lvl?: number;     // input level in Squelch units (gain applied, before AGC and the gate)
   vol: number; bass: number; mid: number; tre: number; beat: number; bpm: number; hz: number;
   bands: number[];  // 16 bands, 0..100
 }

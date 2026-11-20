@@ -15,10 +15,23 @@ too, but only so you can see what a pattern does while you edit it.
 | Analog, ES7243, ES8388 | | Not supported yet. Imported WLED settings for them are kept, with the mic off. |
 | No mic | **Simulated** | A synthetic 120 bpm groove, for trying audio patterns on real LEDs without a mic. |
 
-Set it up under **Devices → (device) → Audio**. The tab has a live volume meter, a beat light
-and a 16-band spectrum, so gain and squelch can be tuned by ear. The fields match WLED's
-AudioReactive usermod (Squelch, Gain, AGC, Limiter rise/fall, Frequency scale) with the same
-ranges, and converting a WLED device brings its mic settings over automatically.
+Set it up under **Devices → (device) → Audio**. Everything applies as you change it; there is
+no Save button (the device writes to flash once the changes stop, so dragging a slider doesn't
+wear it). The tab shows the input level with the noise floor marked, the volume, a beat light
+and a 16-band spectrum, so it can be tuned by ear:
+
+| In the app | WLED's name | What it does |
+|---|---|---|
+| Sensitivity | Gain | How much the mic is amplified. Up until loud music fills the Volume bar. |
+| Noise floor | Squelch | Quieter than this counts as silence. **Set from 3 s of silence** measures the room and sets it just above. |
+| Auto level | AGC | Off, or Normal / Vivid / Lazy: follows the room getting louder or quieter, at different speeds. |
+| Advanced → Smooth the volume, Rise, Fall | Limiter, rise, fall | How fast the volume jumps up and falls back. |
+| Advanced → Band response | Frequency scale | How the spectrum bars react to level. |
+
+Pins are picked from the GPIOs the chip has; the flash bus is left out (the firmware refuses
+it too, since routing I2S there crashes the board). If starting the mic ever crashes the board,
+the next boot turns the mic off and the tab says so. Converting a WLED device brings its mic
+settings over automatically.
 
 A mic pin that is already an LED data/clock pin or the button pin is refused, and the status
 line says which pin clashes. If the mic delivers nothing but zeros for a couple of seconds, the

@@ -255,7 +255,7 @@
           <p class="hint">Uses your phone's time zone. On power loss it forgets the time and the schedule pauses until the app connects (or automatically on Wi-Fi). "Off" means brightness 0 — turn brightness up any time to override until the next scheduled change.</p>
         {/if}
       {:else if tab === 'audio'}
-        <AudioSettings {deviceId} />
+        <AudioSettings {deviceId} chip={deviceInfo?.chip} />
       {:else}
         <label class="field row">
           <span>Sleep after (min, 0 = never)</span>
