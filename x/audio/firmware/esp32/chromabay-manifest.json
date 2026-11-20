@@ -1,6 +1,6 @@
 {
   "name": "ChromaBay",
-  "version": "fwv0.1.9-audio",
+  "version": "fwv0.1.10-audio",
   "new_install_prompt_erase": true,
-  "builds": [ { "chipFamily": "ESP32", "parts": [ { "path": "https://chromabay.app/x/audio/firmware/esp32/fwv0.1.9-audio/esp32/chromabay-factory.bin", "offset": 0 } ] },{ "chipFamily": "ESP32-S3", "parts": [ { "path": "https://chromabay.app/x/audio/firmware/esp32/fwv0.1.9-audio/esp32s3/chromabay-factory.bin", "offset": 0 } ] },{ "chipFamily": "ESP32-C3", "parts": [ { "path": "https://chromabay.app/x/audio/firmware/esp32/fwv0.1.9-audio/esp32c3/chromabay-factory.bin", "offset": 0 } ] } ]
+  "builds": [ { "chipFamily": "ESP32", "parts": [ { "path": "https://chromabay.app/x/audio/firmware/esp32/fwv0.1.10-audio/esp32/chromabay-factory.bin", "offset": 0 } ] },{ "chipFamily": "ESP32-S3", "parts": [ { "path": "https://chromabay.app/x/audio/firmware/esp32/fwv0.1.10-audio/esp32s3/chromabay-factory.bin", "offset": 0 } ] },{ "chipFamily": "ESP32-C3", "parts": [ { "path": "https://chromabay.app/x/audio/firmware/esp32/fwv0.1.10-audio/esp32c3/chromabay-factory.bin", "offset": 0 } ] } ]
 }

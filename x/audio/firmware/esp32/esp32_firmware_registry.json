@@ -1,5 +1,65 @@
 [
   {
+    "version": "fwv0.1.10-audio",
+    "chip": "esp32c3",
+    "wifi": true,
+    "size": 1578560,
+    "hardwareVersion": "hwv0.0.1",
+    "path": "x/audio/firmware/esp32/fwv0.1.10-audio/esp32c3/firmware.bin",
+    "signaturePath": "x/audio/firmware/esp32/fwv0.1.10-audio/esp32c3/firmware.sig",
+    "date": "2026-11-20T12:22:20Z"
+  },
+  {
+    "version": "fwv0.1.10-audio",
+    "chip": "esp32c3",
+    "wifi": false,
+    "size": 1126416,
+    "hardwareVersion": "hwv0.0.1",
+    "path": "x/audio/firmware/esp32/fwv0.1.10-audio/esp32c3/firmware-nowifi.bin",
+    "signaturePath": "x/audio/firmware/esp32/fwv0.1.10-audio/esp32c3/firmware-nowifi.sig",
+    "date": "2026-11-20T12:22:20Z"
+  },
+  {
+    "version": "fwv0.1.10-audio",
+    "chip": "esp32s3",
+    "wifi": true,
+    "size": 1420864,
+    "hardwareVersion": "hwv0.0.1",
+    "path": "x/audio/firmware/esp32/fwv0.1.10-audio/esp32s3/firmware.bin",
+    "signaturePath": "x/audio/firmware/esp32/fwv0.1.10-audio/esp32s3/firmware.sig",
+    "date": "2026-11-20T12:22:20Z"
+  },
+  {
+    "version": "fwv0.1.10-audio",
+    "chip": "esp32s3",
+    "wifi": false,
+    "size": 1014176,
+    "hardwareVersion": "hwv0.0.1",
+    "path": "x/audio/firmware/esp32/fwv0.1.10-audio/esp32s3/firmware-nowifi.bin",
+    "signaturePath": "x/audio/firmware/esp32/fwv0.1.10-audio/esp32s3/firmware-nowifi.sig",
+    "date": "2026-11-20T12:22:20Z"
+  },
+  {
+    "version": "fwv0.1.10-audio",
+    "chip": "esp32",
+    "wifi": true,
+    "size": 1554272,
+    "hardwareVersion": "hwv0.0.1",
+    "path": "x/audio/firmware/esp32/fwv0.1.10-audio/esp32/firmware.bin",
+    "signaturePath": "x/audio/firmware/esp32/fwv0.1.10-audio/esp32/firmware.sig",
+    "date": "2026-11-20T12:22:20Z"
+  },
+  {
+    "version": "fwv0.1.10-audio",
+    "chip": "esp32",
+    "wifi": false,
+    "size": 1122304,
+    "hardwareVersion": "hwv0.0.1",
+    "path": "x/audio/firmware/esp32/fwv0.1.10-audio/esp32/firmware-nowifi.bin",
+    "signaturePath": "x/audio/firmware/esp32/fwv0.1.10-audio/esp32/firmware-nowifi.sig",
+    "date": "2026-11-20T12:22:20Z"
+  },
+  {
     "version": "fwv0.1.9-audio",
     "chip": "esp32c3",
     "wifi": true,
@@ -118,65 +178,5 @@
     "path": "x/audio/firmware/esp32/fwv0.1.8-audio/esp32/firmware-nowifi.bin",
     "signaturePath": "x/audio/firmware/esp32/fwv0.1.8-audio/esp32/firmware-nowifi.sig",
     "date": "2026-11-20T06:37:14Z"
-  },
-  {
-    "version": "fwv0.1.7-audio",
-    "chip": "esp32c3",
-    "wifi": true,
-    "size": 1573264,
-    "hardwareVersion": "hwv0.0.1",
-    "path": "x/audio/firmware/esp32/fwv0.1.7-audio/esp32c3/firmware.bin",
-    "signaturePath": "x/audio/firmware/esp32/fwv0.1.7-audio/esp32c3/firmware.sig",
-    "date": "2026-11-20T06:17:39Z"
-  },
-  {
-    "version": "fwv0.1.7-audio",
-    "chip": "esp32c3",
-    "wifi": false,
-    "size": 1121312,
-    "hardwareVersion": "hwv0.0.1",
-    "path": "x/audio/firmware/esp32/fwv0.1.7-audio/esp32c3/firmware-nowifi.bin",
-    "signaturePath": "x/audio/firmware/esp32/fwv0.1.7-audio/esp32c3/firmware-nowifi.sig",
-    "date": "2026-11-20T06:17:39Z"
-  },
-  {
-    "version": "fwv0.1.7-audio",
-    "chip": "esp32s3",
-    "wifi": true,
-    "size": 1417248,
-    "hardwareVersion": "hwv0.0.1",
-    "path": "x/audio/firmware/esp32/fwv0.1.7-audio/esp32s3/firmware.bin",
-    "signaturePath": "x/audio/firmware/esp32/fwv0.1.7-audio/esp32s3/firmware.sig",
-    "date": "2026-11-20T06:17:39Z"
-  },
-  {
-    "version": "fwv0.1.7-audio",
-    "chip": "esp32s3",
-    "wifi": false,
-    "size": 1010592,
-    "hardwareVersion": "hwv0.0.1",
-    "path": "x/audio/firmware/esp32/fwv0.1.7-audio/esp32s3/firmware-nowifi.bin",
-    "signaturePath": "x/audio/firmware/esp32/fwv0.1.7-audio/esp32s3/firmware-nowifi.sig",
-    "date": "2026-11-20T06:17:39Z"
-  },
-  {
-    "version": "fwv0.1.7-audio",
-    "chip": "esp32",
-    "wifi": true,
-    "size": 1550832,
-    "hardwareVersion": "hwv0.0.1",
-    "path": "x/audio/firmware/esp32/fwv0.1.7-audio/esp32/firmware.bin",
-    "signaturePath": "x/audio/firmware/esp32/fwv0.1.7-audio/esp32/firmware.sig",
-    "date": "2026-11-20T06:17:39Z"
-  },
-  {
-    "version": "fwv0.1.7-audio",
-    "chip": "esp32",
-    "wifi": false,
-    "size": 1118752,
-    "hardwareVersion": "hwv0.0.1",
-    "path": "x/audio/firmware/esp32/fwv0.1.7-audio/esp32/firmware-nowifi.bin",
-    "signaturePath": "x/audio/firmware/esp32/fwv0.1.7-audio/esp32/firmware-nowifi.sig",
-    "date": "2026-11-20T06:17:39Z"
   }
 ]
