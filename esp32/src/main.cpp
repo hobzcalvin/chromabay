@@ -863,6 +863,29 @@ static void blankAllStrips() {
     ledMgr.blank();
 }
 
+// An update has started: hand back the render buffers and turn the LEDs off for its duration.
+// The buffers are the largest contiguous allocation the firmware holds — exactly the currency
+// an update is short of on a big installation — and are dead weight until the reboot. loop()
+// takes them back if the update fails.
+//
+// LOOP TASK ONLY. The update itself starts on the BLE host task, which can preempt render();
+// freeing the lanes from there is a use-after-free (Sentry CHROMABAY-FW-A).
+static void releaseRenderForOta() {
+    if (patternRenderer) {
+        const uint32_t freed = patternRenderer->bufferBytes();
+        if (freed) {
+            patternRenderer->releaseBuffers();
+            Serial.printf("OTA: released %u bytes of render buffers "
+                          "(free %u, largest block %u)\n",
+                          (unsigned)freed, (unsigned)ESP.getFreeHeap(),
+                          (unsigned)heap_caps_get_largest_free_block(
+                              MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+        }
+    }
+    // Save power and keep the strip quiet while flash is being written.
+    blankAllStrips();
+}
+
 // Hand a fully-reassembled pattern msgpack buffer to the render loop. Takes ownership of
 // `full`. Safe to call from either task — the queue is under patternMux.
 void stageCompletePattern(uint8_t* full, size_t fullLen) {
@@ -1229,31 +1252,16 @@ static void onOtaDataWrite(const uint8_t* data, size_t len, Endpoints::Link& lin
             }
             ota_in_progress = true;
 
-            // Hand back the render buffers for the duration of the update. Rendering is
-            // already suspended (ota_in_progress gates it in loop()), so these are pure dead
-            // weight from here until the reboot — and they are the largest contiguous
-            // allocation the firmware holds, which is exactly the currency an update is short
-            // of on a big installation. loop() takes them back if the update fails.
-            if (patternRenderer) {
-                const uint32_t freed = patternRenderer->bufferBytes();
-                if (freed) {
-                    patternRenderer->releaseBuffers();
-                    Serial.printf("OTA: released %u bytes of render buffers "
-                                  "(free %u, largest block %u)\n",
-                                  (unsigned)freed, (unsigned)ESP.getFreeHeap(),
-                                  (unsigned)heap_caps_get_largest_free_block(
-                                      MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
-                }
-            }
+            // Releasing the render buffers and blanking the LEDs both happen in loop()
+            // (releaseRenderForOta), NOT here. On a BLE boot this callback runs on the NimBLE
+            // host task, which preempts the loop task wherever it happens to be — including
+            // mid-render(). Freeing the lanes here let the interrupted render() finish by
+            // writing into freed heap, and ledMgr.show() from here raced the loop's own
+            // show(). The corruption surfaced later as a StoreAccessFault inside the host
+            // task's own FreeRTOS queue bookkeeping (Sentry CHROMABAY-FW-A). Setting
+            // ota_in_progress is enough: loop() stops rendering on its next pass and gives
+            // the buffers back from the only task that ever touches them.
 
-            // Turn off LEDs during OTA to save power and avoid interference
-            if (ledMgr.getNumStrips() > 0 && ledMgr.getStrip(0)) {
-                for(int i = 0; i < ledMgr.getStrip(0)->getLength(); i++) { 
-                    ledMgr.setPixelColor(0, i, CRGB::Black); 
-                }
-                ledMgr.show();
-            }
-            
             // Logged because this number is the whole story: it used to be 1300 ms, and
             // anything above a second means the link is being asked to survive a stall
             // again.
@@ -3981,6 +3989,13 @@ void loop() {
     // of them is tidy; a single condition cannot be forgotten by a future one. (The success
     // path never reaches this — it reboots.) Outside the Wi-Fi guard: a Bluetooth update
     // releases the buffers too, and no-Wi-Fi builds must get them back just the same.
+    //
+    // The release is here too, for the mirror-image reason: an update starts on the BLE host
+    // task, which must never free buffers the loop task may be halfway through rendering into.
+    // Only this task renders, so only this task frees them.
+    if ((ota_in_progress || ota_finalizing) && patternRenderer && patternRenderer->buffersReady()) {
+        releaseRenderForOta();
+    }
     if (!ota_in_progress && !ota_finalizing && patternRenderer && !patternRenderer->buffersReady()) {
         patternRenderer->reacquireBuffers();
         Serial.printf("OTA over: render buffers reacquired (%s)\n",
