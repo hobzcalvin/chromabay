@@ -1,7 +1,7 @@
 {
-  "version": "1.2.9-audio",
-  "downloadUrl": "https://chromabay.app/x/audio/live-update-1.2.9-audio.zip",
-  "buildDate": "2026-11-20T06:55:38Z",
-  "commitHash": "1775da8f5c0dd0accc3a8368b35bd52d978053fc",
-  "commitMessage": "Audio preview: synthesized music through the real analyzer, not drawn curves"
+  "version": "1.2.10-audio",
+  "downloadUrl": "https://chromabay.app/x/audio/live-update-1.2.10-audio.zip",
+  "buildDate": "2026-11-20T12:18:39Z",
+  "commitHash": "1a38be4e32a0f77785dbdf0f9a263c443ae793bb",
+  "commitMessage": "Show 🎤 before the name of any pattern that uses audio input"
 }
